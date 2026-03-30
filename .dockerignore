@@ -1,0 +1,29 @@
+# Local/editor artifacts
+.DS_Store
+.Rhistory
+.Rproj.user/
+.claude/
+.codex_backups/
+.qodo/
+*.Rproj
+
+# Git metadata
+.git/
+.gitignore
+
+# Secrets — never bake into the image
+.env.local
+
+# Documentation (not needed at runtime)
+DOCKER_DEPLOY.md
+README.md
+LICENSE
+
+# Runtime/generated artifacts
+cache/
+
+# Large biological datasets are mounted as volumes in docker-compose.
+# Remove these lines only if you want a very large self-contained image.
+annotations/
+genomes/
+go_annotations/

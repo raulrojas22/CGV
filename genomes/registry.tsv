@@ -1,0 +1,26 @@
+organism	taxid	fasta	aliases
+GCF 000001215 4 Release 6 plus ISO1 MT genomic		GCF_000001215.4_Release_6_plus_ISO1_MT_genomic.2bit	
+GCF 000001405 40 GRCh38 p14 genomic		GCF_000001405.40_GRCh38.p14_genomic.2bit	
+GCF 000001635 27 GRCm39 genomic		GCF_000001635.27_GRCm39_genomic.2bit	
+GCF 000001735 4 TAIR10 1 genomic		GCF_000001735.4_TAIR10.1_genomic.2bit	
+GCF 000002985 6 WBcel235 genomic		GCF_000002985.6_WBcel235_genomic.2bit	
+GCF 000003025 6 Sscrofa11 1 genomic		GCF_000003025.6_Sscrofa11.1_genomic.2bit	
+GCF 000143535 2 ASM14353v4 genomic		GCF_000143535.2_ASM14353v4_genomic.2bit	
+GCF 000146045 2 R64 genomic		GCF_000146045.2_R64_genomic.2bit	
+GCF 000182925 2 NC12 genomic		GCF_000182925.2_NC12_genomic.2bit	
+GCF 000182965 3 ASM18296v3 genomic		GCF_000182965.3_ASM18296v3_genomic.2bit	
+GCF 000184155 1 FraVesHawaii 1 0 genomic		GCF_000184155.1_FraVesHawaii_1.0_genomic.2bit	
+GCF 000499845 2 P vulgaris v2 0 genomic		GCF_000499845.2_P._vulgaris_v2.0_genomic.2bit	
+GCF 011100685 1 UU Cfam GSD 1 0 genomic		GCF_011100685.1_UU_Cfam_GSD_1.0_genomic.2bit	
+GCF 017654675 1 Xenopus laevis v10 1 genomic		GCF_017654675.1_Xenopus_laevis_v10.1_genomic.2bit	
+GCF 018294505 1 IWGSC CS RefSeq v2 1 genomic		GCF_018294505.1_IWGSC_CS_RefSeq_v2.1_genomic.2bit	
+GCF 022682495 2 HLdesRot8A 1 genomic		GCF_022682495.2_HLdesRot8A.1_genomic.2bit	
+GCF 028858775 2 NHGRI mPanTro3-v2 0 pri genomic		GCF_028858775.2_NHGRI_mPanTro3-v2.0_pri_genomic.2bit	
+GCF 030704535 1 ASM3070453v1 genomic		GCF_030704535.1_ASM3070453v1_genomic.2bit	
+GCF 034140825 1 ASM3414082v1 genomic		GCF_034140825.1_ASM3414082v1_genomic.2bit	
+GCF 036512215 1 SLM r2 1 genomic		GCF_036512215.1_SLM_r2.1_genomic.2bit	
+GCF 041296265 1 TB-T2T genomic		GCF_041296265.1_TB-T2T_genomic.2bit	
+GCF 042453785 1 GDT2T hap1 genomic		GCF_042453785.1_GDT2T_hap1_genomic.2bit	
+GCF 049306965 1 GRCz12tu genomic		GCF_049306965.1_GRCz12tu_genomic.2bit	
+GCF 902167145 1 Zm-B73-REFERENCE-NAM-5 0 genomic		GCF_902167145.1_Zm-B73-REFERENCE-NAM-5.0_genomic.2bit	
+Oryza sativa Indica Group	39946	Oryza_indica.ASM465v1.dna.toplevel.2bit	indica|long-grained rice|oryza|Oryza indica ASM465v1 dna toplevel|Oryza sativa ssp. indica|osativa|rice

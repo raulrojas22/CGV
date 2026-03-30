@@ -1,0 +1,29 @@
+{
+  "title": "CGV: Comparative Gene Viewer",
+  "version": "1.0.0",
+  "upload_type": "software",
+  "description": "Comparative Gene Viewer (CGV) is an interactive R/Shiny web application for comparative gene visualization and functional analysis across species.",
+  "access_right": "open",
+  "license": "mit",
+  "creators": [
+    {
+      "name": "Rojas-Espinoza, Raul",
+      "affiliation": "University of Talca, Chile"
+    },
+    {
+      "name": "Riedelsberger, Janin",
+      "affiliation": "University of Talca, Chile"
+    },
+    {
+      "name": "Riadi, Gonzalo",
+      "affiliation": "University of Talca, Chile"
+    }
+  ],
+  "keywords": [
+    "comparative genomics",
+    "bioinformatics",
+    "shiny",
+    "gene ontology",
+    "gene visualization"
+  ]
+}

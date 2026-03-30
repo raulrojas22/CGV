@@ -1,0 +1,13 @@
+#:lav
+d {
+"minimal fixture"
+}
+s {
+"ref_seq"
+"qry_seq+"
+}
+a {
+s 4200
+l 10 15 69 74 94.5
+l 120 130 179 189 88.0
+}
