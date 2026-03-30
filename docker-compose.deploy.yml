@@ -1,0 +1,33 @@
+services:
+  cgv:
+    container_name: cgv
+    image: ${CGV_IMAGE:-cgv:latest}
+    env_file:
+      - .env
+      - path: .env.local
+        required: false
+    restart: unless-stopped
+    ports:
+      - "${CGV_PORT:-3838}:3838"
+    environment:
+      APP_HOST: "0.0.0.0"
+      APP_PORT: "3838"
+      APP_DEBUG_LOGS: "${APP_DEBUG_LOGS:-0}"
+      APP_PERF_TIMING: "${APP_PERF_TIMING:-0}"
+      APP_FUTURE_MODE: "${APP_FUTURE_MODE:-sequential}"
+      APP_FUTURE_WORKERS: "${APP_FUTURE_WORKERS:-2}"
+      APP_HOMO_INITIAL_VISIBLE: "${APP_HOMO_INITIAL_VISIBLE:-1}"
+      APP_ORTHO_INITIAL_VISIBLE: "${APP_ORTHO_INITIAL_VISIBLE:-1}"
+      APP_ORTHO_ALIGNED_FAST: "${APP_ORTHO_ALIGNED_FAST:-1}"
+      APP_ORTHO_ALIGNED_KMER_K: "${APP_ORTHO_ALIGNED_KMER_K:-8}"
+      APP_PREWARM_ON_START: "${APP_PREWARM_ON_START:-1}"
+      APP_PREWARM_CLEAN: "${APP_PREWARM_CLEAN:-0}"
+      APP_PREWARM_BLOCK_START: "${APP_PREWARM_BLOCK_START:-1}"
+      FEEDBACK_RESEND_API_KEY: "${FEEDBACK_RESEND_API_KEY:-}"
+      FEEDBACK_TO_EMAIL: "${FEEDBACK_TO_EMAIL:-}"
+      FEEDBACK_FROM_EMAIL: "${FEEDBACK_FROM_EMAIL:-onboarding@resend.dev}"
+    volumes:
+      - ${CGV_ANNOTATIONS_DIR:-./annotations}:/app/annotations:ro
+      - ${CGV_GENOMES_DIR:-./genomes}:/app/genomes:ro
+      - ${CGV_GO_ANNOTATIONS_DIR:-./go_annotations}:/app/go_annotations:ro
+      - ${CGV_CACHE_DIR:-./cache}:/app/cache

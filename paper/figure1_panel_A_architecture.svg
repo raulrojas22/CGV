@@ -1,0 +1,263 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 500" width="1200" height="500" font-family="Helvetica, Arial, sans-serif">
+  <defs>
+    <!-- Arrow marker -->
+    <marker id="arrow" viewBox="0 0 10 6" refX="10" refY="3" markerWidth="10" markerHeight="6" orient="auto-start-auto">
+      <path d="M 0 0 L 10 3 L 0 6 Z" fill="#5B7B9A"/>
+    </marker>
+    <marker id="arrow-dark" viewBox="0 0 10 6" refX="10" refY="3" markerWidth="10" markerHeight="6" orient="auto-start-auto">
+      <path d="M 0 0 L 10 3 L 0 6 Z" fill="#3A5A7A"/>
+    </marker>
+    <!-- Subtle shadow filter -->
+    <filter id="shadow" x="-2%" y="-2%" width="104%" height="104%">
+      <feDropShadow dx="1" dy="1" stdDeviation="2" flood-opacity="0.1"/>
+    </filter>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1200" height="500" fill="#FFFFFF"/>
+
+  <!-- ============================================ -->
+  <!-- SECTION 1: DATA SOURCES (Left)               -->
+  <!-- ============================================ -->
+
+  <!-- Section label -->
+  <text x="135" y="32" font-size="14" font-weight="bold" fill="#2C3E50" text-anchor="middle" letter-spacing="1.5">DATA SOURCES</text>
+  <line x1="55" y1="40" x2="215" y2="40" stroke="#BDC3C7" stroke-width="1"/>
+
+  <!-- Local Files Box -->
+  <rect x="30" y="55" width="210" height="185" rx="10" fill="#EBF5FB" stroke="#85C1E9" stroke-width="1.5" filter="url(#shadow)"/>
+  <text x="135" y="80" font-size="12" font-weight="bold" fill="#2471A3" text-anchor="middle">Local Indexed Files</text>
+
+  <!-- 2bit icon -->
+  <rect x="50" y="95" width="170" height="38" rx="6" fill="#D4E6F1" stroke="#85C1E9" stroke-width="1"/>
+  <rect x="58" y="101" width="26" height="26" rx="4" fill="#2471A3"/>
+  <text x="71" y="119" font-size="10" font-weight="bold" fill="#FFFFFF" text-anchor="middle">2b</text>
+  <text x="100" y="112" font-size="11" fill="#2C3E50">2bit Genome Sequences</text>
+  <text x="100" y="125" font-size="9" fill="#7F8C8D">(rtracklayer, random access)</text>
+
+  <!-- GFF3/Tabix icon -->
+  <rect x="50" y="143" width="170" height="38" rx="6" fill="#D4E6F1" stroke="#85C1E9" stroke-width="1"/>
+  <rect x="58" y="149" width="26" height="26" rx="4" fill="#2471A3"/>
+  <text x="71" y="165" font-size="8" font-weight="bold" fill="#FFFFFF" text-anchor="middle">Tbx</text>
+  <text x="100" y="160" font-size="11" fill="#2C3E50">GFF3 + Tabix Index</text>
+  <text x="100" y="173" font-size="9" fill="#7F8C8D">(bgzip, sub-second queries)</text>
+
+  <!-- GO/GAF data -->
+  <rect x="50" y="191" width="170" height="38" rx="6" fill="#D4E6F1" stroke="#85C1E9" stroke-width="1"/>
+  <rect x="58" y="197" width="26" height="26" rx="4" fill="#2471A3"/>
+  <text x="71" y="214" font-size="9" font-weight="bold" fill="#FFFFFF" text-anchor="middle">GO</text>
+  <text x="100" y="208" font-size="11" fill="#2C3E50">GAF / OBO Files</text>
+  <text x="100" y="221" font-size="9" fill="#7F8C8D">(24 organisms, local GO)</text>
+
+  <!-- External APIs Box -->
+  <rect x="30" y="260" width="210" height="210" rx="10" fill="#FEF9E7" stroke="#F9E79F" stroke-width="1.5" filter="url(#shadow)"/>
+  <text x="135" y="285" font-size="12" font-weight="bold" fill="#B7950B" text-anchor="middle">External REST APIs</text>
+
+  <!-- Cloud icon -->
+  <path d="M 120,305 C 110,295 95,295 90,305 C 80,300 70,308 75,318 C 68,320 68,332 78,332 L 162,332 C 172,332 172,320 165,318 C 170,308 160,300 150,305 C 145,295 130,295 120,305 Z" fill="#FCF3CF" stroke="#F9E79F" stroke-width="1"/>
+
+  <!-- API list -->
+  <rect x="55" y="342" width="80" height="24" rx="5" fill="#F9E79F" stroke="#D4AC0D" stroke-width="1"/>
+  <text x="95" y="358" font-size="10" font-weight="bold" fill="#7D6608" text-anchor="middle">NCBI</text>
+
+  <rect x="145" y="342" width="80" height="24" rx="5" fill="#F9E79F" stroke="#D4AC0D" stroke-width="1"/>
+  <text x="185" y="358" font-size="10" font-weight="bold" fill="#7D6608" text-anchor="middle">Ensembl</text>
+
+  <rect x="55" y="374" width="80" height="24" rx="5" fill="#F9E79F" stroke="#D4AC0D" stroke-width="1"/>
+  <text x="95" y="390" font-size="10" font-weight="bold" fill="#7D6608" text-anchor="middle">UniProt</text>
+
+  <rect x="145" y="374" width="80" height="24" rx="5" fill="#F9E79F" stroke="#D4AC0D" stroke-width="1"/>
+  <text x="185" y="390" font-size="10" font-weight="bold" fill="#7D6608" text-anchor="middle">MyGene.info</text>
+
+  <rect x="55" y="406" width="80" height="24" rx="5" fill="#F9E79F" stroke="#D4AC0D" stroke-width="1"/>
+  <text x="95" y="422" font-size="10" font-weight="bold" fill="#7D6608" text-anchor="middle">STRING</text>
+
+  <rect x="145" y="406" width="80" height="24" rx="5" fill="#F9E79F" stroke="#D4AC0D" stroke-width="1"/>
+  <text x="185" y="422" font-size="10" font-weight="bold" fill="#7D6608" text-anchor="middle">NCBI Datasets</text>
+
+  <!-- Organisms badge -->
+  <rect x="65" y="440" width="140" height="22" rx="11" fill="#2471A3" stroke="none"/>
+  <text x="135" y="455" font-size="10" font-weight="bold" fill="#FFFFFF" text-anchor="middle">25 preloaded organisms</text>
+
+  <!-- ============================================ -->
+  <!-- ARROWS: Data Sources -> Processing Core      -->
+  <!-- ============================================ -->
+
+  <!-- Arrow from local files -->
+  <line x1="240" y1="150" x2="370" y2="210" stroke="#5B7B9A" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="295" y="168" font-size="9" fill="#5B7B9A" transform="rotate(12, 295, 168)">indexed data</text>
+
+  <!-- Arrow from APIs -->
+  <line x1="240" y1="370" x2="370" y2="290" stroke="#5B7B9A" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="290" y="348" font-size="9" fill="#5B7B9A" transform="rotate(-14, 290, 348)">REST queries</text>
+
+  <!-- ============================================ -->
+  <!-- SECTION 2: PROCESSING CORE (Center)          -->
+  <!-- ============================================ -->
+
+  <!-- Section label -->
+  <text x="530" y="32" font-size="14" font-weight="bold" fill="#2C3E50" text-anchor="middle" letter-spacing="1.5">ASYNCHRONOUS PROCESSING CORE</text>
+  <line x1="380" y1="40" x2="680" y2="40" stroke="#BDC3C7" stroke-width="1"/>
+
+  <!-- Main processing box -->
+  <rect x="375" y="55" width="310" height="400" rx="12" fill="#F4F6F7" stroke="#5B7B9A" stroke-width="2" filter="url(#shadow)"/>
+
+  <!-- R/Shiny badge -->
+  <rect x="470" y="65" width="120" height="26" rx="13" fill="#2C3E50" stroke="none"/>
+  <text x="530" y="83" font-size="11" font-weight="bold" fill="#FFFFFF" text-anchor="middle">R / Shiny Server</text>
+
+  <!-- Sub-module 1: Alias Resolution -->
+  <rect x="395" y="105" width="270" height="60" rx="8" fill="#E8DAEF" stroke="#AF7AC5" stroke-width="1.5"/>
+  <text x="530" y="125" font-size="11" font-weight="bold" fill="#6C3483" text-anchor="middle">Multi-API Alias Resolution</text>
+  <text x="530" y="142" font-size="9" fill="#7D3C98" text-anchor="middle">Simultaneous query to 4 databases</text>
+  <text x="530" y="155" font-size="9" fill="#7D3C98" text-anchor="middle">Scoring algorithm | False positive mitigation</text>
+
+  <!-- Sub-module 2: Data Engine -->
+  <rect x="395" y="178" width="270" height="60" rx="8" fill="#D5F5E3" stroke="#58D68D" stroke-width="1.5"/>
+  <text x="530" y="198" font-size="11" font-weight="bold" fill="#1E8449" text-anchor="middle">Data Parsing Engine</text>
+  <text x="530" y="215" font-size="9" fill="#27AE60" text-anchor="middle">2bit random access | Tabix region queries</text>
+  <text x="530" y="228" font-size="9" fill="#27AE60" text-anchor="middle">Multi-tier cache (GFF, gene index, autocomplete)</text>
+
+  <!-- Sub-module 3: LASTZ -->
+  <rect x="395" y="251" width="270" height="50" rx="8" fill="#FDEBD0" stroke="#E59866" stroke-width="1.5"/>
+  <text x="530" y="271" font-size="11" font-weight="bold" fill="#CA6F1E" text-anchor="middle">LASTZ Alignment Engine</text>
+  <text x="530" y="288" font-size="9" fill="#D68910" text-anchor="middle">Local pairwise alignment | Configurable identity threshold</text>
+
+  <!-- Sub-module 4: Metrics -->
+  <rect x="395" y="314" width="270" height="50" rx="8" fill="#D6EAF8" stroke="#5DADE2" stroke-width="1.5"/>
+  <text x="530" y="334" font-size="11" font-weight="bold" fill="#2471A3" text-anchor="middle">Structural Metrics Computation</text>
+  <text x="530" y="351" font-size="9" fill="#2E86C1" text-anchor="middle">GC% | CDS/UTR ratios | Exon/intron counts | Lengths</text>
+
+  <!-- Sub-module 5: Async -->
+  <rect x="395" y="377" width="270" height="55" rx="8" fill="#FADBD8" stroke="#EC7063" stroke-width="1.5"/>
+  <text x="530" y="397" font-size="11" font-weight="bold" fill="#C0392B" text-anchor="middle">Async Framework</text>
+  <text x="530" y="414" font-size="9" fill="#E74C3C" text-anchor="middle">future + promises + furrr</text>
+  <text x="530" y="427" font-size="9" fill="#E74C3C" text-anchor="middle">Non-blocking UI | Multisession workers</text>
+
+  <!-- ============================================ -->
+  <!-- ARROWS: Processing Core -> Frontend          -->
+  <!-- ============================================ -->
+
+  <line x1="685" y1="210" x2="810" y2="150" stroke="#5B7B9A" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="740" y="168" font-size="9" fill="#5B7B9A" transform="rotate(-14, 740, 168)">gene models</text>
+
+  <line x1="685" y1="280" x2="810" y2="280" stroke="#5B7B9A" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="748" y="272" font-size="9" fill="#5B7B9A">analytics</text>
+
+  <line x1="685" y1="350" x2="810" y2="400" stroke="#5B7B9A" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="735" y="392" font-size="9" fill="#5B7B9A" transform="rotate(12, 735, 392)">functional data</text>
+
+  <!-- ============================================ -->
+  <!-- SECTION 3: INTERACTIVE FRONTEND (Right)      -->
+  <!-- ============================================ -->
+
+  <!-- Section label -->
+  <text x="985" y="32" font-size="14" font-weight="bold" fill="#2C3E50" text-anchor="middle" letter-spacing="1.5">INTERACTIVE FRONTEND</text>
+  <line x1="870" y1="40" x2="1100" y2="40" stroke="#BDC3C7" stroke-width="1"/>
+
+  <!-- Visualization Box -->
+  <rect x="815" y="55" width="355" height="130" rx="10" fill="#EBF5FB" stroke="#85C1E9" stroke-width="1.5" filter="url(#shadow)"/>
+  <text x="993" y="78" font-size="12" font-weight="bold" fill="#2471A3" text-anchor="middle">Gene Structure Visualization</text>
+  <text x="993" y="95" font-size="10" fill="#5B7B9A" text-anchor="middle">ggplot2 + ggiraph (interactive SVG)</text>
+
+  <!-- 5 mode badges -->
+  <rect x="830" y="108" width="80" height="20" rx="4" fill="#AED6F1" stroke="#5DADE2" stroke-width="0.5"/>
+  <text x="870" y="122" font-size="8" fill="#21618C" text-anchor="middle">Compact</text>
+
+  <rect x="916" y="108" width="80" height="20" rx="4" fill="#AED6F1" stroke="#5DADE2" stroke-width="0.5"/>
+  <text x="956" y="122" font-size="8" fill="#21618C" text-anchor="middle">Detailed</text>
+
+  <rect x="1002" y="108" width="80" height="20" rx="4" fill="#AED6F1" stroke="#5DADE2" stroke-width="0.5"/>
+  <text x="1042" y="122" font-size="8" fill="#21618C" text-anchor="middle">Comp. Aligned</text>
+
+  <rect x="1088" y="108" width="72" height="20" rx="4" fill="#AED6F1" stroke="#5DADE2" stroke-width="0.5"/>
+  <text x="1124" y="122" font-size="8" fill="#21618C" text-anchor="middle">MultiPIP</text>
+
+  <rect x="830" y="134" width="80" height="20" rx="4" fill="#AED6F1" stroke="#5DADE2" stroke-width="0.5"/>
+  <text x="870" y="148" font-size="8" fill="#21618C" text-anchor="middle">LASTZ Blocks</text>
+
+  <rect x="916" y="134" width="160" height="20" rx="4" fill="#D5F5E3" stroke="#58D68D" stroke-width="0.5"/>
+  <text x="996" y="148" font-size="8" fill="#1E8449" text-anchor="middle">Lazy loading (IntersectionObserver)</text>
+
+  <rect x="1082" y="134" width="78" height="20" rx="4" fill="#D5F5E3" stroke="#58D68D" stroke-width="0.5"/>
+  <text x="1121" y="148" font-size="8" fill="#1E8449" text-anchor="middle">SVG Export</text>
+
+  <!-- Analytics Box -->
+  <rect x="815" y="200" width="355" height="105" rx="10" fill="#F4ECF7" stroke="#AF7AC5" stroke-width="1.5" filter="url(#shadow)"/>
+  <text x="993" y="222" font-size="12" font-weight="bold" fill="#6C3483" text-anchor="middle">Analytical Suite (8 chart types)</text>
+
+  <!-- Chart type badges -->
+  <rect x="830" y="234" width="78" height="18" rx="4" fill="#E8DAEF" stroke="#AF7AC5" stroke-width="0.5"/>
+  <text x="869" y="247" font-size="7.5" fill="#6C3483" text-anchor="middle">Architecture</text>
+
+  <rect x="914" y="234" width="68" height="18" rx="4" fill="#E8DAEF" stroke="#AF7AC5" stroke-width="0.5"/>
+  <text x="948" y="247" font-size="7.5" fill="#6C3483" text-anchor="middle">Exon/Intron</text>
+
+  <rect x="988" y="234" width="78" height="18" rx="4" fill="#E8DAEF" stroke="#AF7AC5" stroke-width="0.5"/>
+  <text x="1027" y="247" font-size="7.5" fill="#6C3483" text-anchor="middle">Composition</text>
+
+  <rect x="1072" y="234" width="88" height="18" rx="4" fill="#E8DAEF" stroke="#AF7AC5" stroke-width="0.5"/>
+  <text x="1116" y="247" font-size="7.5" fill="#6C3483" text-anchor="middle">Genomic Context</text>
+
+  <rect x="830" y="258" width="68" height="18" rx="4" fill="#E8DAEF" stroke="#AF7AC5" stroke-width="0.5"/>
+  <text x="864" y="271" font-size="7.5" fill="#6C3483" text-anchor="middle">Violin Plot</text>
+
+  <rect x="904" y="258" width="62" height="18" rx="4" fill="#E8DAEF" stroke="#AF7AC5" stroke-width="0.5"/>
+  <text x="935" y="271" font-size="7.5" fill="#6C3483" text-anchor="middle">Scatter</text>
+
+  <rect x="972" y="258" width="62" height="18" rx="4" fill="#E8DAEF" stroke="#AF7AC5" stroke-width="0.5"/>
+  <text x="1003" y="271" font-size="7.5" fill="#6C3483" text-anchor="middle">Heatmap</text>
+
+  <rect x="1040" y="258" width="68" height="18" rx="4" fill="#E8DAEF" stroke="#AF7AC5" stroke-width="0.5"/>
+  <text x="1074" y="271" font-size="7.5" fill="#6C3483" text-anchor="middle">Radar Chart</text>
+
+  <rect x="1114" y="258" width="46" height="18" rx="4" fill="#D5F5E3" stroke="#58D68D" stroke-width="0.5"/>
+  <text x="1137" y="271" font-size="7.5" fill="#1E8449" text-anchor="middle">11+ sorts</text>
+
+  <!-- Functional Hub Box -->
+  <rect x="815" y="320" width="355" height="145" rx="10" fill="#FEF9E7" stroke="#F9E79F" stroke-width="1.5" filter="url(#shadow)"/>
+  <text x="993" y="343" font-size="12" font-weight="bold" fill="#B7950B" text-anchor="middle">Unified Functional Hub</text>
+
+  <!-- STRING -->
+  <rect x="830" y="355" width="160" height="40" rx="6" fill="#FCF3CF" stroke="#F9E79F" stroke-width="1"/>
+  <rect x="838" y="361" width="22" height="22" rx="4" fill="#D4AC0D"/>
+  <text x="849" y="376" font-size="8" font-weight="bold" fill="#FFFFFF" text-anchor="middle">PPI</text>
+  <text x="870" y="371" font-size="10" fill="#7D6608">STRING Networks</text>
+  <text x="870" y="384" font-size="8" fill="#9A7D0A">(visNetwork, interactive)</text>
+
+  <!-- GO -->
+  <rect x="1000" y="355" width="160" height="40" rx="6" fill="#FCF3CF" stroke="#F9E79F" stroke-width="1"/>
+  <rect x="1008" y="361" width="22" height="22" rx="4" fill="#D4AC0D"/>
+  <text x="1019" y="376" font-size="8" font-weight="bold" fill="#FFFFFF" text-anchor="middle">GO</text>
+  <text x="1040" y="371" font-size="10" fill="#7D6608">Gene Ontology</text>
+  <text x="1040" y="384" font-size="8" fill="#9A7D0A">(BP, MF, CC — 24 orgs)</text>
+
+  <!-- Promoter -->
+  <rect x="830" y="403" width="160" height="40" rx="6" fill="#FCF3CF" stroke="#F9E79F" stroke-width="1"/>
+  <rect x="838" y="409" width="22" height="22" rx="4" fill="#D4AC0D"/>
+  <text x="849" y="424" font-size="7" font-weight="bold" fill="#FFFFFF" text-anchor="middle">Pro</text>
+  <text x="870" y="419" font-size="10" fill="#7D6608">Promoter Extraction</text>
+  <text x="870" y="432" font-size="8" fill="#9A7D0A">(strand-aware, FASTA)</text>
+
+  <!-- Session -->
+  <rect x="1000" y="403" width="160" height="40" rx="6" fill="#FCF3CF" stroke="#F9E79F" stroke-width="1"/>
+  <rect x="1008" y="409" width="22" height="22" rx="4" fill="#D4AC0D"/>
+  <text x="1019" y="424" font-size="7" font-weight="bold" fill="#FFFFFF" text-anchor="middle">Ses</text>
+  <text x="1040" y="419" font-size="10" fill="#7D6608">Session Snapshots</text>
+  <text x="1040" y="432" font-size="8" fill="#9A7D0A">(save/restore, JSON)</text>
+
+  <!-- ============================================ -->
+  <!-- BOTTOM: User badge                           -->
+  <!-- ============================================ -->
+
+  <rect x="880" y="472" width="200" height="24" rx="12" fill="#2C3E50" stroke="none"/>
+  <text x="980" y="488" font-size="10" font-weight="bold" fill="#FFFFFF" text-anchor="middle">Web Browser (no install required)</text>
+
+  <!-- ============================================ -->
+  <!-- DOCKER badge bottom-left                     -->
+  <!-- ============================================ -->
+  <rect x="395" y="462" width="270" height="24" rx="12" fill="#5B7B9A" stroke="none"/>
+  <text x="530" y="478" font-size="10" font-weight="bold" fill="#FFFFFF" text-anchor="middle">Docker (rocker/r-ver:4.5) | Multisession Workers</text>
+
+</svg>

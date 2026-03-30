@@ -1,0 +1,37 @@
+# macOS / editors
+.DS_Store
+.Rhistory
+.Rproj.user/
+.claude/
+.codex_backups/
+.qodo/
+*.Rproj
+
+# Secrets / local env
+.env
+.env.local
+.Renviron
+
+# Runtime / generated artifacts
+cache/*
+!cache/.gitkeep
+
+# Large biological datasets live outside Git history.
+# Keep only lightweight documentation and registries versioned.
+annotations/*
+!annotations/README.md
+!annotations/registry.tsv
+
+genomes/*
+!genomes/README.md
+!genomes/registry.tsv
+
+go_annotations/*
+!go_annotations/README.md
+!go_annotations/registry.tsv
+
+go_annotations/raw/*
+
+# Local download scratch space
+ncbi_downloads/*
+!ncbi_downloads/.gitkeep

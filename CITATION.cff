@@ -1,0 +1,33 @@
+cff-version: 1.2.0
+title: "CGV: Comparative Gene Viewer"
+message: "If you use CGV in your research, please cite the software using this metadata and the archived release DOI once available."
+type: software
+version: 1.0.0
+date-released: 2026-03-29
+license: MIT
+url: "https://cgvapp.com"
+repository-code: "https://github.com/raulrojas22/CGV"
+abstract: >-
+  CGV (Comparative Gene Viewer) is an interactive R/Shiny web application for
+  comparative gene visualization and functional analysis across species. It
+  combines local indexed genomes, annotations, and Gene Ontology resources with
+  live public API queries to support homologous and orthologous exploration,
+  structural comparison, analytics, sequence extraction, and functional context
+  in a single web interface.
+keywords:
+  - comparative genomics
+  - gene visualization
+  - shiny
+  - gene ontology
+  - bioinformatics
+authors:
+  - family-names: "Rojas-Espinoza"
+    given-names: "Raul"
+    email: "raul.rojas@utalca.cl"
+    affiliation: "Center for Bioinformatics, Simulation and Modeling (CBSM), University of Talca, Chile; JaninLab, University of Talca, Chile"
+  - family-names: "Riedelsberger"
+    given-names: "Janin"
+    affiliation: "Center for Bioinformatics, Simulation and Modeling (CBSM), University of Talca, Chile; JaninLab, University of Talca, Chile"
+  - family-names: "Riadi"
+    given-names: "Gonzalo"
+    affiliation: "Center for Bioinformatics, Simulation and Modeling (CBSM), University of Talca, Chile; Mobilomics / RiadiLab, University of Talca, Chile"
