@@ -144,14 +144,34 @@ if (/execFile\([^\n]*["']unzip["']/.test(mainJs)) {
 
 const windowsLockPath = path.join(desktopRoot, "runtime-windows-lock.json");
 const windowsLock = JSON.parse(fs.readFileSync(windowsLockPath, "utf8"));
-if (windowsLock.platform !== "win32-x64" || windowsLock.r?.version !== "4.4.3" || windowsLock.bioconductorVersion !== "3.20") {
-  throw new Error("Windows runtime lock must pin win32-x64, R 4.4.3, and Bioconductor 3.20.");
+if (
+  windowsLock.platform !== "win32-x64" ||
+  windowsLock.r?.version !== "4.4.3" ||
+  windowsLock.rtools44?.version !== "6459" ||
+  windowsLock.rtools44?.bundle !== "base" ||
+  windowsLock.bioconductorVersion !== "3.20"
+) {
+  throw new Error("Windows runtime lock must pin win32-x64, R 4.4.3, Rtools44 6459 base, and Bioconductor 3.20.");
 }
-const lockedArtifacts = [windowsLock.r, windowsLock.lastz, windowsLock.mmanWin32];
+const lockedArtifacts = [windowsLock.r, windowsLock.rtools44, windowsLock.lastz, windowsLock.mmanWin32];
 for (const artifact of lockedArtifacts) {
   if (!/^https:\/\//.test(artifact?.url || "") || !/^[a-f0-9]{64}$/.test(artifact?.sha256 || "")) {
     throw new Error("Windows runtime artifacts must have HTTPS URLs and SHA-256 hashes.");
   }
+}
+if (!/^https:\/\/cloud\.r-project\.org\/bin\/windows\/Rtools\/rtools44\/files\/rtools44-toolchain-libs-base-6459\.tar\.zst$/.test(windowsLock.rtools44.url)) {
+  throw new Error("Windows runtime must use the official locked Rtools44 base toolchain.");
+}
+const windowsRuntimeBuilderPath = path.join(desktopRoot, "scripts", "build-runtime-windows-x64.ps1");
+const windowsRtoolsVerifierPath = path.join(desktopRoot, "scripts", "verify-windows-rtools.R");
+const windowsRuntimeBuilder = fs.readFileSync(windowsRuntimeBuilderPath, "utf8");
+if (
+  !fs.existsSync(windowsRtoolsVerifierPath) ||
+  !windowsRuntimeBuilder.includes("R_CUSTOM_TOOLS_SOFT") ||
+  !windowsRuntimeBuilder.includes("R_CUSTOM_TOOLS_PATH") ||
+  !windowsRuntimeBuilder.includes("verify-windows-rtools.R")
+) {
+  throw new Error("Windows runtime build must isolate and verify the locked Rtools44 toolchain.");
 }
 if (!/^\d{4}-\d{2}-\d{2}$/.test(windowsLock.cranRepository?.snapshotDate || "") || !/^https:\/\//.test(windowsLock.cranRepository?.url || "") || !/^[a-f0-9]{64}$/.test(windowsLock.cranRepository?.windowsR44IndexSha256 || "")) {
   throw new Error("Windows CRAN snapshot and binary index hash must be pinned.");

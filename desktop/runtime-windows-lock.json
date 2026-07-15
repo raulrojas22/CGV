@@ -6,6 +6,12 @@
     "url": "https://cran.r-project.org/bin/windows/base/old/4.4.3/R-4.4.3-win.exe",
     "sha256": "7eddfbab527aa3dc784ef165d9393ea85d3b93810e37fcf24b9c20087e2bbd29"
   },
+  "rtools44": {
+    "version": "6459",
+    "bundle": "base",
+    "url": "https://cloud.r-project.org/bin/windows/Rtools/rtools44/files/rtools44-toolchain-libs-base-6459.tar.zst",
+    "sha256": "46c1055c0221b6bc1a19314209a6ef6912b3d4f3432d46797be31c5d1ae6d9c4"
+  },
   "cranRepository": {
     "snapshotDate": "2026-07-13",
     "url": "https://packagemanager.posit.co/cran/2026-07-13",
