@@ -1,4 +1,10 @@
-options(repos = c(CRAN = "https://cloud.r-project.org"))
+cran_repository <- trimws(Sys.getenv("CGV_CRAN_REPOSITORY", "https://cloud.r-project.org"))
+options(repos = c(CRAN = cran_repository))
+
+package_type <- trimws(Sys.getenv("CGV_R_PACKAGE_TYPE", ""))
+if (nzchar(package_type)) options(pkgType = package_type)
+
+bioconductor_version <- trimws(Sys.getenv("CGV_BIOCONDUCTOR_VERSION", ""))
 
 cran_packages <- c(
   "shiny",
@@ -28,7 +34,9 @@ cran_packages <- c(
   "DT",
   "sass",
   "data.table",
-  "processx"
+  "processx",
+  "DBI",
+  "RSQLite"
 )
 
 bioc_packages <- c(
@@ -37,7 +45,8 @@ bioc_packages <- c(
   "GenomicRanges",
   "IRanges",
   "GenomeInfoDb",
-  "rtracklayer"
+  "rtracklayer",
+  "biomaRt"
 )
 
 optional_bioc_packages <- c("pwalign")
@@ -73,6 +82,10 @@ install_missing_cran <- function(pkgs, max_attempts = 3L) {
 install_missing_bioc <- function(pkgs, max_attempts = 3L, strict = TRUE) {
   if (!requireNamespace("BiocManager", quietly = TRUE)) {
     install.packages("BiocManager", Ncpus = recommended_ncpus())
+  }
+
+  if (nzchar(bioconductor_version) && !identical(as.character(BiocManager::version()), bioconductor_version)) {
+    BiocManager::install(version = bioconductor_version, ask = FALSE, update = FALSE)
   }
 
   remaining <- pkgs[!vapply(pkgs, requireNamespace, logical(1), quietly = TRUE)]

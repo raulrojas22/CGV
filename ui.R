@@ -203,6 +203,8 @@ analytics_corr_tip_html <- paste0(
   "<div class='ci-tip'>Diagonal cells are always 1.00. bp metrics are log&#8321;&#8320;-transformed before correlation. Requires &ge;3 genes.</div>"
 )
 
+source("R/ui_desktop_downloads.R", local = TRUE)
+
 fluidPage(
   theme = theme_custom,
   tagList(
@@ -214,6 +216,7 @@ fluidPage(
       tags$meta(`http-equiv` = "Pragma", content = "no-cache"),
       tags$meta(`http-equiv` = "Expires", content = "0"),
       tags$title("CGV | Comparative Gene Viewer"),
+      tags$link(rel = "stylesheet", href = versioned_asset_path("css/cgv_desktop_downloads.css")),
       tags$script(src = "https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"),
       tags$script(HTML(sprintf("
         window.__cgvAppVersion = %s;
@@ -1643,9 +1646,10 @@ fluidPage(
       tags$script(src = versioned_asset_path("js/summary_context_layout.js")),
       tags$script(src = versioned_asset_path("js/ncbi_search.js")),
       tags$script(src = versioned_asset_path("js/mobile_enhancements.js"), defer = NA),
+      tags$script(src = versioned_asset_path("js/cgv_desktop_downloads.js"), defer = NA),
       tags$script(HTML("
       (function () {
-        var validTargets = ['home', 'homologous', 'orthologous', 'settings', 'help', 'feedback'];
+        var validTargets = ['home', 'homologous', 'orthologous', 'desktop-app', 'settings', 'help', 'feedback'];
         var suggestionState = { items: [], activeIndex: -1 };
         var collapsedSuggestionState = { items: [], activeIndex: -1 };
         var suggestionObserver = null;
@@ -3828,6 +3832,16 @@ fluidPage(
         tags$button(type = "button", class = "app-nav-btn", `data-target` = "settings", title = "Settings", icon("cog"), span("Settings")),
         tags$button(type = "button", class = "app-nav-btn", `data-target` = "help", title = "Help", icon("question-circle"), span("Help")),
         tags$button(type = "button", class = "app-nav-btn", `data-target` = "feedback", title = "Feedback", icon("comment-dots"), span("Feedback")),
+        tags$button(
+          type = "button",
+          class = "app-nav-btn app-nav-btn-desktop",
+          `data-target` = "desktop-app",
+          `data-tooltip` = "CGV Desktop downloads",
+          `aria-label` = "CGV Desktop downloads",
+          title = "CGV Desktop downloads",
+          icon("laptop"),
+          span("CGV Desktop")
+        ),
         div(class = "app-nav-separator"),
         div(
           class = "app-nav-actions",
@@ -4959,6 +4973,11 @@ fluidPage(
               )
             )
           )
+        ),
+        tabPanel(
+          title = "CGV Desktop",
+          value = "desktop-app",
+          cgv_desktop_downloads_page()
         ),
         tabPanel(
           title = "Multi-Gene Search",

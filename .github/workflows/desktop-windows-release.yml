@@ -1,0 +1,216 @@
+name: CGV Desktop Windows signed release
+
+on:
+  workflow_dispatch:
+    inputs:
+      create_release_draft:
+        description: Upload the verified signed payload to a draft release in CGV-Desktop-Releases
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: cgv-desktop-windows-release
+  cancel-in-progress: false
+
+jobs:
+  build-sign-and-stage:
+    name: Build, SignPath approval, verify, and stage
+    if: github.repository == 'raulrojas22/CGV'
+    runs-on: windows-2022
+    timeout-minutes: 300
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: "false"
+      RELEASE_REPOSITORY: raulrojas22/CGV-Desktop-Releases
+
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - name: Validate release tag and version
+        id: release
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          if ("${{ github.ref_type }}" -ne "tag") {
+            throw "Run the signed release workflow from an immutable desktop-vX.Y.Z tag."
+          }
+          $Version = node -p "require('./desktop/package.json').version"
+          $ExpectedTag = "desktop-v$Version"
+          if ("${{ github.ref_name }}" -ne $ExpectedTag) {
+            throw "Source tag must be $ExpectedTag; received ${{ github.ref_name }}."
+          }
+          "version=$Version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "release_tag=v$Version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "installer=CGV-Desktop-$Version-Windows-x64-Setup.exe" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: Set up MinGW64 for native LASTZ
+        uses: msys2/setup-msys2@66cd2cce69caa17b53920067426061ca1de3a884 # v2.32.0
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            diffutils
+            make
+            sed
+            tar
+            mingw-w64-x86_64-gcc
+
+      - name: Install Electron dependencies
+        working-directory: desktop
+        run: npm ci
+
+      - name: Run Node tests
+        working-directory: desktop
+        run: npm test
+
+      - name: Build locked Windows scientific runtime
+        working-directory: desktop
+        shell: powershell
+        run: npm run runtime:win
+
+      - name: Prepare locked common GO assets and release guardrails
+        working-directory: desktop
+        run: |
+          npm run prepare:go
+          npm run verify:config
+
+      - name: Build unsigned offline NSIS installer
+        working-directory: desktop
+        run: npm run build:win
+
+      - name: Smoke-test unsigned installer
+        shell: powershell
+        run: |
+          $Installer = Get-Item "desktop/dist/${{ steps.release.outputs.installer }}"
+          & "desktop/scripts/smoke-windows-installer.ps1" -InstallerPath $Installer.FullName
+
+      - name: Upload unsigned installer for SignPath origin verification
+        id: upload-unsigned-installer
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: cgv-desktop-windows-unsigned-${{ github.run_id }}-${{ github.run_attempt }}
+          path: desktop/dist/${{ steps.release.outputs.installer }}
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Submit signing request to SignPath
+        id: signpath
+        uses: signpath/github-action-submit-signing-request@b9d91eadd323de506c0c81cf0c7fe7438f3360fd # v2
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
+          artifact-configuration-slug: ${{ vars.SIGNPATH_ARTIFACT_CONFIGURATION_SLUG }}
+          github-artifact-id: ${{ steps.upload-unsigned-installer.outputs.artifact-id }}
+          wait-for-completion: true
+          wait-for-completion-timeout-in-seconds: 10800
+          output-artifact-directory: desktop/dist/signpath-signed
+          parameters: |
+            version: ${{ toJSON(steps.release.outputs.version) }}
+
+      - name: Verify signed installer and refresh updater metadata
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          $ExpectedName = "${{ steps.release.outputs.installer }}"
+          $SignedInstaller = Get-ChildItem "desktop/dist/signpath-signed" -Recurse -File -Filter $ExpectedName | Select-Object -First 1
+          if (-not $SignedInstaller) { throw "SignPath did not return $ExpectedName." }
+
+          $Signature = Get-AuthenticodeSignature -FilePath $SignedInstaller.FullName
+          if ($Signature.Status -ne "Valid" -or -not $Signature.SignerCertificate) {
+            throw "Signed installer has invalid Authenticode status: $($Signature.Status)."
+          }
+          if (-not $Signature.SignerCertificate.Subject.Contains("CN=SignPath Foundation")) {
+            throw "Unexpected Authenticode signer: $($Signature.SignerCertificate.Subject)."
+          }
+
+          Copy-Item $SignedInstaller.FullName "desktop/dist/$ExpectedName" -Force
+          node desktop/scripts/refresh-signed-windows-update.js "desktop/dist/$ExpectedName" "desktop/dist/latest.yml"
+
+      - name: Smoke-test signed installer
+        shell: powershell
+        run: |
+          $Installer = Get-Item "desktop/dist/${{ steps.release.outputs.installer }}"
+          & "desktop/scripts/smoke-windows-installer.ps1" -InstallerPath $Installer.FullName
+
+      - name: Generate release checksum
+        shell: powershell
+        run: |
+          $Installer = Get-Item "desktop/dist/${{ steps.release.outputs.installer }}"
+          $Hash = (Get-FileHash -Algorithm SHA256 -Path $Installer.FullName).Hash.ToLowerInvariant()
+          "$Hash  $($Installer.Name)" | Set-Content "desktop/dist/SHA256SUMS.txt" -Encoding ascii
+
+      - name: Upload verified signed release payload
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: cgv-desktop-windows-signed-${{ steps.release.outputs.version }}
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            desktop/dist/${{ steps.release.outputs.installer }}
+            desktop/dist/${{ steps.release.outputs.installer }}.blockmap
+            desktop/dist/latest.yml
+            desktop/dist/SHA256SUMS.txt
+
+      - name: Create or update draft release in the download repository
+        if: ${{ inputs.create_release_draft }}
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ secrets.CGV_DESKTOP_RELEASE_TOKEN }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          if ([string]::IsNullOrWhiteSpace($env:GH_TOKEN)) {
+            throw "CGV_DESKTOP_RELEASE_TOKEN is required to create a release draft."
+          }
+          $Tag = "${{ steps.release.outputs.release_tag }}"
+          $Version = "${{ steps.release.outputs.version }}"
+          $Notes = @"
+          CGV Desktop $Version for Windows x64.
+
+          Source revision: https://github.com/${{ github.repository }}/commit/${{ github.sha }}
+          Source tag: https://github.com/${{ github.repository }}/tree/${{ github.ref_name }}
+          SignPath request: ${{ steps.signpath.outputs.signing-request-web-url }}
+
+          This release remains a draft until the signed installer, updater metadata, checksum, installation, and release notes receive final review.
+          "@
+          $Notes | Set-Content "$env:RUNNER_TEMP/release-notes.md" -Encoding utf8
+
+          $ExistingDraft = gh release view $Tag --repo $env:RELEASE_REPOSITORY --json isDraft --jq '.isDraft' 2>$null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $Tag --repo $env:RELEASE_REPOSITORY --draft --title "CGV Desktop $Version" --notes-file "$env:RUNNER_TEMP/release-notes.md"
+          } elseif ($ExistingDraft -ne "true") {
+            throw "Release $Tag is already public; this workflow may update draft releases only."
+          }
+          gh release upload $Tag --repo $env:RELEASE_REPOSITORY --clobber `
+            "desktop/dist/${{ steps.release.outputs.installer }}" `
+            "desktop/dist/${{ steps.release.outputs.installer }}.blockmap" `
+            "desktop/dist/latest.yml" `
+            "desktop/dist/SHA256SUMS.txt"
+
+      - name: Write signing summary
+        if: always()
+        shell: powershell
+        run: |
+          @"
+          ## CGV Desktop Windows signing
+
+          - Source: `${{ github.sha }}`
+          - Version: `${{ steps.release.outputs.version }}`
+          - SignPath request: ${{ steps.signpath.outputs.signing-request-web-url }}
+          - Draft release requested: `${{ inputs.create_release_draft }}`
+          "@ | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8

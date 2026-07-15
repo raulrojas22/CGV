@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<artifact-configuration xmlns="http://signpath.io/artifact-configuration/v1">
+  <parameters>
+    <parameter name="version" required="true" />
+  </parameters>
+  <zip-file>
+    <pe-file
+      path="CGV-Desktop-${version}-Windows-x64-Setup.exe"
+      product-name="CGV Desktop"
+      product-version="${version}"
+      file-version="${version}"
+      company-name="Raul Rojas">
+      <authenticode-sign
+        description="CGV Desktop"
+        description-url="https://cgv.mobilomics.org" />
+    </pe-file>
+  </zip-file>
+</artifact-configuration>

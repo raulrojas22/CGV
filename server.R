@@ -9570,7 +9570,7 @@ function(input, output, session) {
     observeEvent(input$app_nav_click,
         {
             target <- as.character(input$app_nav_click %||% "")
-            if (!target %in% c("home", "homologous", "orthologous", "settings", "help", "feedback")) {
+            if (!target %in% c("home", "homologous", "orthologous", "desktop-app", "settings", "help", "feedback")) {
                 return(invisible(NULL))
             }
             updateTabsetPanel(session, "navtabs", selected = target)

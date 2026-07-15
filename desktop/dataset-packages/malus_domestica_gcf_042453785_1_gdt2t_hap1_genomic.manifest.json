@@ -1,0 +1,15 @@
+{
+  "id": "malus_domestica_gcf_042453785_1_gdt2t_hap1_genomic",
+  "label": "Malus domestica",
+  "speciesId": "malus_domestica_gcf_042453785_1_gdt2t_hap1_genomic",
+  "version": "2026.09",
+  "description": "Malus domestica CGV Desktop dataset package.",
+  "downloadable": true,
+  "sizeBytes": 208240761,
+  "package": {
+    "fileName": "malus_domestica_gcf_042453785_1_gdt2t_hap1_genomic-2026.09.zip",
+    "url": "malus_domestica_gcf_042453785_1_gdt2t_hap1_genomic-2026.09.zip",
+    "sha256": "768a99e3a238f2c383f52650bebcd77d1425e1acc12c55ba09d9e60d1dc43da5",
+    "sizeBytes": 208240761
+  }
+}

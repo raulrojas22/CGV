@@ -405,7 +405,7 @@ init_session_snapshot_domain <- function(
         shinyjs::runjs(sprintf("setTimeout(function(){ if (typeof applyTheme === 'function') { applyTheme(%s); } }, 20);", theme_json))
 
         nav_target <- tolower(trimws(as.character(state$navtab %||% preferred)))
-        if (!nav_target %in% c("home", "homologous", "orthologous", "settings", "help", "feedback")) nav_target <- preferred
+        if (!nav_target %in% c("home", "homologous", "orthologous", "desktop-app", "settings", "help", "feedback")) nav_target <- preferred
         updateTabsetPanel(session, "navtabs", selected = nav_target)
 
         searchStatusHomologous_rv(as.character(state$search_status_homo %||% "Ready."))

@@ -1,0 +1,15 @@
+{
+  "id": "botrytis_cinerea_b05_10_gcf_000143535_2_asm14353v4_genomic",
+  "label": "Botrytis cinerea B05.10",
+  "speciesId": "botrytis_cinerea_b05_10_gcf_000143535_2_asm14353v4_genomic",
+  "version": "2026.09",
+  "description": "Botrytis cinerea B05.10 CGV Desktop dataset package.",
+  "downloadable": true,
+  "sizeBytes": 20420169,
+  "package": {
+    "fileName": "botrytis_cinerea_b05_10_gcf_000143535_2_asm14353v4_genomic-2026.09.zip",
+    "url": "botrytis_cinerea_b05_10_gcf_000143535_2_asm14353v4_genomic-2026.09.zip",
+    "sha256": "4fff0c1ac7b8fc96cfe2a3bcbba3d1a91bd0b67dba9c2d13da5a2837e28161c2",
+    "sizeBytes": 20420169
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "id": "homo_sapiens_gcf_000001405_40_grch38_p14_genomic",
+  "label": "Homo sapiens",
+  "speciesId": "homo_sapiens_gcf_000001405_40_grch38_p14_genomic",
+  "version": "2026.09",
+  "description": "Homo sapiens CGV Desktop dataset package.",
+  "downloadable": true,
+  "sizeBytes": 955461959,
+  "package": {
+    "fileName": "homo_sapiens_gcf_000001405_40_grch38_p14_genomic-2026.09.zip",
+    "url": "homo_sapiens_gcf_000001405_40_grch38_p14_genomic-2026.09.zip",
+    "sha256": "8767b66816f0184e80c8682c2ce3597a0a31fb377aa6f2331710011b4f46431b",
+    "sizeBytes": 955461959
+  }
+}

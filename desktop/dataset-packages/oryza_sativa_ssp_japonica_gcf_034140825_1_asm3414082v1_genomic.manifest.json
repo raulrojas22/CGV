@@ -1,0 +1,15 @@
+{
+  "id": "oryza_sativa_ssp_japonica_gcf_034140825_1_asm3414082v1_genomic",
+  "label": "Oryza sativa ssp. japonica",
+  "speciesId": "oryza_sativa_ssp_japonica_gcf_034140825_1_asm3414082v1_genomic",
+  "version": "2026.09",
+  "description": "Oryza sativa ssp. japonica CGV Desktop dataset package.",
+  "downloadable": true,
+  "sizeBytes": 141319598,
+  "package": {
+    "fileName": "oryza_sativa_ssp_japonica_gcf_034140825_1_asm3414082v1_genomic-2026.09.zip",
+    "url": "oryza_sativa_ssp_japonica_gcf_034140825_1_asm3414082v1_genomic-2026.09.zip",
+    "sha256": "aefa762a95c639c1b07028469a33894625216b793841693ba778e262ac6f4193",
+    "sizeBytes": 141319598
+  }
+}
