@@ -1,0 +1,476 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CGV Desktop</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --font: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      --paper: #f8fcfa;
+      --paper-soft: #edf8f4;
+      --ink: #2c3e50;
+      --ink-soft: #607485;
+      --green: #18bc9c;
+      --green-deep: #11967e;
+      --green-soft: #74ddca;
+      font-family: var(--font);
+      background: var(--paper);
+      color: var(--ink);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      min-height: 100%;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      overflow: hidden;
+      background:
+        radial-gradient(circle at 50% 42%, rgba(24, 188, 156, 0.16), transparent 28%),
+        radial-gradient(circle at 50% 57%, rgba(44, 62, 80, 0.07), transparent 32%),
+        linear-gradient(145deg, #ffffff 0%, var(--paper) 46%, var(--paper-soft) 100%);
+      font-family: var(--font);
+    }
+
+    body::before,
+    body::after {
+      content: "";
+      position: fixed;
+      pointer-events: none;
+      border-radius: 999px;
+    }
+
+    body::before {
+      inset: auto auto -18vh -12vw;
+      width: min(44vw, 520px);
+      aspect-ratio: 1;
+      background: rgba(24, 188, 156, 0.09);
+      filter: blur(36px);
+    }
+
+    body::after {
+      inset: -22vh -16vw auto auto;
+      width: min(46vw, 560px);
+      aspect-ratio: 1;
+      background: rgba(44, 62, 80, 0.055);
+      filter: blur(42px);
+    }
+
+    main {
+      position: relative;
+      z-index: 1;
+      display: grid;
+      place-content: center;
+      place-items: center;
+      min-height: 100vh;
+      gap: clamp(22px, 4.2vh, 40px);
+      width: min(760px, calc(100vw - 48px));
+      margin: 0 auto;
+      padding: clamp(40px, 8vh, 86px) 0;
+      text-align: center;
+    }
+
+    .brand {
+      display: grid;
+      place-items: center;
+      gap: clamp(18px, 3.8vh, 34px);
+    }
+
+    .dna-stage {
+      position: relative;
+      display: grid;
+      place-items: center;
+      width: clamp(210px, 28vw, 330px);
+      aspect-ratio: 1;
+      border-radius: 48px;
+      isolation: isolate;
+    }
+
+    .dna-stage::before {
+      content: "";
+      position: absolute;
+      inset: 18%;
+      border-radius: 50%;
+      background:
+        radial-gradient(circle, rgba(255, 255, 255, 0.95), rgba(255, 255, 255, 0.18) 58%, transparent 70%);
+      box-shadow:
+        0 34px 76px rgba(19, 55, 72, 0.13),
+        inset 0 0 0 1px rgba(255, 255, 255, 0.65);
+      transform: translateY(8px);
+      z-index: -2;
+    }
+
+    .dna-stage::after {
+      content: "";
+      position: absolute;
+      width: 62%;
+      height: 13%;
+      bottom: 16%;
+      border-radius: 50%;
+      background: rgba(44, 62, 80, 0.12);
+      filter: blur(18px);
+      transform: scaleX(0.86);
+      z-index: -3;
+      animation: dnaShadow 2600ms ease-in-out infinite alternate;
+    }
+
+    .dna-orbit {
+      position: absolute;
+      inset: 12%;
+      border-radius: 50%;
+      border: 1px solid rgba(24, 188, 156, 0.14);
+      background:
+        linear-gradient(135deg, rgba(255, 255, 255, 0.5), rgba(255, 255, 255, 0)),
+        radial-gradient(circle at 50% 12%, rgba(24, 188, 156, 0.16), transparent 46%);
+      box-shadow: inset 0 0 42px rgba(24, 188, 156, 0.08);
+      animation: orbitBreath 3200ms ease-in-out infinite alternate;
+    }
+
+    .dna-helix {
+      position: relative;
+      width: clamp(128px, 15vw, 174px);
+      height: clamp(210px, 25vw, 278px);
+      transform-style: preserve-3d;
+      perspective: 900px;
+    }
+
+    .dna-core {
+      position: absolute;
+      inset: 0;
+      transform-style: preserve-3d;
+      animation: helixSpin 3600ms cubic-bezier(0.45, 0, 0.55, 1) infinite;
+    }
+
+    .dna-rung {
+      --spread: 58px;
+      --depth: 0px;
+      --node-front: 1;
+      --node-back: 0.72;
+      position: absolute;
+      top: calc(var(--i) * 6.25%);
+      left: 50%;
+      width: calc(var(--spread) * 2);
+      height: 14px;
+      transform: translate3d(-50%, -50%, var(--depth));
+      transform-style: preserve-3d;
+    }
+
+    .dna-rung::before {
+      content: "";
+      position: absolute;
+      top: 50%;
+      left: 9px;
+      right: 9px;
+      height: 3px;
+      border-radius: 999px;
+      background: linear-gradient(90deg, rgba(44, 62, 80, 0.2), rgba(24, 188, 156, 0.38));
+      box-shadow: 0 1px 4px rgba(44, 62, 80, 0.12);
+      transform: translateY(-50%);
+    }
+
+    .dna-node {
+      position: absolute;
+      top: 50%;
+      width: 15px;
+      height: 15px;
+      border-radius: 50%;
+      transform: translateY(-50%) scale(var(--scale));
+      box-shadow:
+        inset 0 -2px 3px rgba(0, 0, 0, 0.12),
+        0 8px 18px rgba(19, 55, 72, 0.18);
+    }
+
+    .dna-node--green {
+      left: 0;
+      --scale: var(--node-front);
+      background: radial-gradient(circle at 36% 30%, #b7f4e8, var(--green-soft) 30%, var(--green) 72%, var(--green-deep));
+      box-shadow:
+        inset 0 -2px 3px rgba(0, 0, 0, 0.13),
+        0 0 18px rgba(24, 188, 156, 0.32),
+        0 8px 18px rgba(19, 55, 72, 0.16);
+    }
+
+    .dna-node--ink {
+      right: 0;
+      --scale: var(--node-back);
+      background: radial-gradient(circle at 36% 30%, #8aa0af, #41596b 38%, var(--ink) 78%, #1d2d3b);
+    }
+
+    .dna-rung:nth-child(1) { --i: 0; --spread: 20px; --depth: -28px; --node-front: 0.72; --node-back: 1; }
+    .dna-rung:nth-child(2) { --i: 1; --spread: 40px; --depth: -12px; --node-front: 0.84; --node-back: 0.9; }
+    .dna-rung:nth-child(3) { --i: 2; --spread: 62px; --depth: 10px; --node-front: 1; --node-back: 0.72; }
+    .dna-rung:nth-child(4) { --i: 3; --spread: 70px; --depth: 24px; --node-front: 1.08; --node-back: 0.66; }
+    .dna-rung:nth-child(5) { --i: 4; --spread: 58px; --depth: 16px; --node-front: 1; --node-back: 0.72; }
+    .dna-rung:nth-child(6) { --i: 5; --spread: 34px; --depth: -4px; --node-front: 0.84; --node-back: 0.92; }
+    .dna-rung:nth-child(7) { --i: 6; --spread: 18px; --depth: -26px; --node-front: 0.72; --node-back: 1; }
+    .dna-rung:nth-child(8) { --i: 7; --spread: 36px; --depth: -10px; --node-front: 0.84; --node-back: 0.92; }
+    .dna-rung:nth-child(9) { --i: 8; --spread: 60px; --depth: 12px; --node-front: 1; --node-back: 0.72; }
+    .dna-rung:nth-child(10) { --i: 9; --spread: 70px; --depth: 24px; --node-front: 1.08; --node-back: 0.66; }
+    .dna-rung:nth-child(11) { --i: 10; --spread: 56px; --depth: 14px; --node-front: 1; --node-back: 0.74; }
+    .dna-rung:nth-child(12) { --i: 11; --spread: 32px; --depth: -6px; --node-front: 0.84; --node-back: 0.92; }
+    .dna-rung:nth-child(13) { --i: 12; --spread: 18px; --depth: -26px; --node-front: 0.72; --node-back: 1; }
+    .dna-rung:nth-child(14) { --i: 13; --spread: 38px; --depth: -12px; --node-front: 0.86; --node-back: 0.9; }
+    .dna-rung:nth-child(15) { --i: 14; --spread: 62px; --depth: 10px; --node-front: 1; --node-back: 0.72; }
+    .dna-rung:nth-child(16) { --i: 15; --spread: 70px; --depth: 24px; --node-front: 1.08; --node-back: 0.66; }
+    .dna-rung:nth-child(17) { --i: 16; --spread: 22px; --depth: -28px; --node-front: 0.72; --node-back: 1; }
+
+    .wordmark {
+      display: grid;
+      justify-items: center;
+      gap: 8px;
+    }
+
+    h1 {
+      margin: 0;
+      color: var(--ink);
+      font-size: clamp(34px, 4.6vw, 44px);
+      font-weight: 850;
+      line-height: 1;
+      letter-spacing: 0.04em;
+    }
+
+    .subtitle {
+      margin: 0;
+      color: var(--green-deep);
+      font-size: clamp(12px, 1.55vw, 14px);
+      font-weight: 800;
+      line-height: 1;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+    }
+
+    .status {
+      display: grid;
+      justify-items: center;
+      gap: 16px;
+      width: min(420px, 84vw);
+      color: var(--ink-soft);
+    }
+
+    #message {
+      min-height: 1.45em;
+      margin: 0;
+      color: var(--ink-soft);
+      font-size: clamp(14px, 1.6vw, 17px);
+      font-weight: 720;
+      line-height: 1.45;
+    }
+
+    .loader {
+      position: relative;
+      width: min(300px, 68vw);
+      height: 4px;
+      overflow: hidden;
+      border-radius: 999px;
+      background: rgba(44, 62, 80, 0.1);
+      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.7);
+    }
+
+    .loader::before {
+      content: "";
+      position: absolute;
+      inset: 0 auto 0 0;
+      width: 38%;
+      border-radius: inherit;
+      background: linear-gradient(90deg, transparent, var(--green), var(--green-soft), transparent);
+      box-shadow: 0 0 16px rgba(24, 188, 156, 0.48);
+      animation: progressSweep 1550ms ease-in-out infinite;
+    }
+
+    .storage-action {
+      display: none;
+      appearance: none;
+      border: 0;
+      border-radius: 999px;
+      padding: 11px 20px;
+      color: #fff;
+      background: var(--green-deep);
+      font: inherit;
+      font-size: 14px;
+      font-weight: 760;
+      cursor: pointer;
+      box-shadow: 0 10px 24px rgba(17, 150, 126, 0.2);
+    }
+
+    .storage-action:hover,
+    .storage-action:focus-visible {
+      background: #0d7f6b;
+    }
+
+    .storage-action[disabled] {
+      cursor: wait;
+      opacity: 0.65;
+    }
+
+    @keyframes helixSpin {
+      0% {
+        transform: rotateY(-18deg) rotateX(6deg);
+      }
+      50% {
+        transform: rotateY(18deg) rotateX(6deg);
+      }
+      100% {
+        transform: rotateY(-18deg) rotateX(6deg);
+      }
+    }
+
+    @keyframes orbitBreath {
+      from {
+        opacity: 0.72;
+        transform: scale(0.96);
+      }
+      to {
+        opacity: 1;
+        transform: scale(1.03);
+      }
+    }
+
+    @keyframes dnaShadow {
+      from {
+        opacity: 0.48;
+        transform: scaleX(0.78);
+      }
+      to {
+        opacity: 0.72;
+        transform: scaleX(1);
+      }
+    }
+
+    @keyframes progressSweep {
+      0% {
+        transform: translateX(-110%);
+      }
+      100% {
+        transform: translateX(270%);
+      }
+    }
+
+    @media (max-height: 760px) {
+      main {
+        gap: 20px;
+        padding: 28px 0;
+      }
+
+      .brand {
+        gap: 18px;
+      }
+
+      .dna-stage {
+        width: clamp(190px, 25vw, 270px);
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .dna-core,
+      .dna-orbit,
+      .dna-stage::after,
+      .loader::before {
+        animation: none;
+      }
+
+      .dna-core {
+        transform: rotateY(-18deg) rotateX(6deg);
+      }
+
+      .loader::before {
+        transform: translateX(92%);
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <article class="brand" aria-label="CGV Desktop is loading">
+      <div class="dna-stage" aria-hidden="true">
+        <div class="dna-orbit"></div>
+        <div class="dna-helix">
+          <div class="dna-core">
+            <div class="dna-rung"><span class="dna-node dna-node--green"></span><span class="dna-node dna-node--ink"></span></div>
+            <div class="dna-rung"><span class="dna-node dna-node--green"></span><span class="dna-node dna-node--ink"></span></div>
+            <div class="dna-rung"><span class="dna-node dna-node--green"></span><span class="dna-node dna-node--ink"></span></div>
+            <div class="dna-rung"><span class="dna-node dna-node--green"></span><span class="dna-node dna-node--ink"></span></div>
+            <div class="dna-rung"><span class="dna-node dna-node--green"></span><span class="dna-node dna-node--ink"></span></div>
+            <div class="dna-rung"><span class="dna-node dna-node--green"></span><span class="dna-node dna-node--ink"></span></div>
+            <div class="dna-rung"><span class="dna-node dna-node--green"></span><span class="dna-node dna-node--ink"></span></div>
+            <div class="dna-rung"><span class="dna-node dna-node--green"></span><span class="dna-node dna-node--ink"></span></div>
+            <div class="dna-rung"><span class="dna-node dna-node--green"></span><span class="dna-node dna-node--ink"></span></div>
+            <div class="dna-rung"><span class="dna-node dna-node--green"></span><span class="dna-node dna-node--ink"></span></div>
+            <div class="dna-rung"><span class="dna-node dna-node--green"></span><span class="dna-node dna-node--ink"></span></div>
+            <div class="dna-rung"><span class="dna-node dna-node--green"></span><span class="dna-node dna-node--ink"></span></div>
+            <div class="dna-rung"><span class="dna-node dna-node--green"></span><span class="dna-node dna-node--ink"></span></div>
+            <div class="dna-rung"><span class="dna-node dna-node--green"></span><span class="dna-node dna-node--ink"></span></div>
+            <div class="dna-rung"><span class="dna-node dna-node--green"></span><span class="dna-node dna-node--ink"></span></div>
+            <div class="dna-rung"><span class="dna-node dna-node--green"></span><span class="dna-node dna-node--ink"></span></div>
+            <div class="dna-rung"><span class="dna-node dna-node--green"></span><span class="dna-node dna-node--ink"></span></div>
+          </div>
+        </div>
+      </div>
+      <div class="wordmark">
+        <h1>CGV</h1>
+        <p class="subtitle">Desktop</p>
+      </div>
+    </article>
+    <section class="status" aria-live="polite">
+      <p id="message">Loading CGV Desktop...</p>
+      <div class="loader" aria-hidden="true"></div>
+      <button class="storage-action" id="choose-storage" type="button">Choose data folder</button>
+    </section>
+  </main>
+  <script>
+    const message = document.getElementById("message");
+    const chooseStorage = document.getElementById("choose-storage");
+    const desktopApi = window.cgvDesktop;
+
+    const setMessage = (text) => {
+      const clean = String(text || "").trim();
+      if (clean) message.textContent = clean;
+    };
+
+    if (desktopApi) {
+      desktopApi.onStatus((payload) => {
+        if (payload.phase !== "log") setMessage(payload.message);
+        chooseStorage.style.display = payload.phase === "storage-required" ? "inline-flex" : "none";
+      });
+
+      chooseStorage.addEventListener("click", async () => {
+        chooseStorage.disabled = true;
+        try {
+          const result = await desktopApi.chooseStorageRoot();
+          if (!result.ok && !result.canceled) setMessage(result.message || "Unable to use that folder.");
+        } catch (error) {
+          setMessage(error.message || "Unable to use that folder.");
+        } finally {
+          chooseStorage.disabled = false;
+        }
+      });
+
+      desktopApi.onDownloadProgress((payload) => {
+        if (payload.phase === "extracting") {
+          setMessage("Installing dataset...");
+          return;
+        }
+        if (payload.skipped) return;
+        if (payload.path) {
+          const pct = payload.percent == null ? "" : ` ${Math.round(payload.percent * 100)}%`;
+          setMessage(`Downloading dataset${pct}`);
+        }
+      });
+
+      desktopApi.onUpdateStatus((payload) => {
+        if (payload.phase === "downloaded") setMessage("Update ready. Restarting soon...");
+        if (payload.phase === "downloading" && payload.percent != null) {
+          setMessage(`Downloading update ${payload.percent}%`);
+        }
+      });
+    }
+  </script>
+</body>
+</html>

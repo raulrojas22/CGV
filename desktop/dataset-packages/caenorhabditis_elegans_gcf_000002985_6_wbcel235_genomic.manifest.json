@@ -1,0 +1,15 @@
+{
+  "id": "caenorhabditis_elegans_gcf_000002985_6_wbcel235_genomic",
+  "label": "Caenorhabditis elegans",
+  "speciesId": "caenorhabditis_elegans_gcf_000002985_6_wbcel235_genomic",
+  "version": "2026.09",
+  "description": "Caenorhabditis elegans CGV Desktop dataset package.",
+  "downloadable": true,
+  "sizeBytes": 74736428,
+  "package": {
+    "fileName": "caenorhabditis_elegans_gcf_000002985_6_wbcel235_genomic-2026.09.zip",
+    "url": "caenorhabditis_elegans_gcf_000002985_6_wbcel235_genomic-2026.09.zip",
+    "sha256": "9db63961201783cbd959860a4748031af9a472cba6ffff1b698bd5471218c24d",
+    "sizeBytes": 74736428
+  }
+}

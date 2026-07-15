@@ -1,0 +1,5 @@
+{
+  "version": 1,
+  "catalogUrl": "https://your-nas.example/cgv/datasets/catalog.json",
+  "datasets": []
+}

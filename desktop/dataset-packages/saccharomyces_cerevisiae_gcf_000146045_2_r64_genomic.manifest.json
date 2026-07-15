@@ -1,0 +1,15 @@
+{
+  "id": "saccharomyces_cerevisiae_gcf_000146045_2_r64_genomic",
+  "label": "Saccharomyces cerevisiae",
+  "speciesId": "saccharomyces_cerevisiae_gcf_000146045_2_r64_genomic",
+  "version": "2026.09",
+  "description": "Saccharomyces cerevisiae CGV Desktop dataset package.",
+  "downloadable": true,
+  "sizeBytes": 13862732,
+  "package": {
+    "fileName": "saccharomyces_cerevisiae_gcf_000146045_2_r64_genomic-2026.09.zip",
+    "url": "saccharomyces_cerevisiae_gcf_000146045_2_r64_genomic-2026.09.zip",
+    "sha256": "02f9c795f02d2382830aa42bdd000f84c0038a5f075e9cfd0997d41be8109df7",
+    "sizeBytes": 13862732
+  }
+}

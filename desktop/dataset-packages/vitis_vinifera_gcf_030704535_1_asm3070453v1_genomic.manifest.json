@@ -1,0 +1,15 @@
+{
+  "id": "vitis_vinifera_gcf_030704535_1_asm3070453v1_genomic",
+  "label": "Vitis vinifera",
+  "speciesId": "vitis_vinifera_gcf_030704535_1_asm3070453v1_genomic",
+  "version": "2026.09",
+  "description": "Vitis vinifera CGV Desktop dataset package.",
+  "downloadable": true,
+  "sizeBytes": 157667445,
+  "package": {
+    "fileName": "vitis_vinifera_gcf_030704535_1_asm3070453v1_genomic-2026.09.zip",
+    "url": "vitis_vinifera_gcf_030704535_1_asm3070453v1_genomic-2026.09.zip",
+    "sha256": "0086656f62b41ab0e6745667dcf6ccbb9375da9a9e76ca329a9b4db98a94fb5b",
+    "sizeBytes": 157667445
+  }
+}

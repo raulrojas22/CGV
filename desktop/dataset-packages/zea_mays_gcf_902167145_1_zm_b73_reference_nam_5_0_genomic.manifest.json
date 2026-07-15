@@ -1,0 +1,15 @@
+{
+  "id": "zea_mays_gcf_902167145_1_zm_b73_reference_nam_5_0_genomic",
+  "label": "Zea mays",
+  "speciesId": "zea_mays_gcf_902167145_1_zm_b73_reference_nam_5_0_genomic",
+  "version": "2026.09",
+  "description": "Zea mays CGV Desktop dataset package.",
+  "downloadable": true,
+  "sizeBytes": 602897948,
+  "package": {
+    "fileName": "zea_mays_gcf_902167145_1_zm_b73_reference_nam_5_0_genomic-2026.09.zip",
+    "url": "zea_mays_gcf_902167145_1_zm_b73_reference_nam_5_0_genomic-2026.09.zip",
+    "sha256": "3a0378b39c63820380f1af40b73f36f416de52c8e59375fbfc7c816e0065db06",
+    "sizeBytes": 602897948
+  }
+}

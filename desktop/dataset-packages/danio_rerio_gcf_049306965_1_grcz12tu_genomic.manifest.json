@@ -1,0 +1,15 @@
+{
+  "id": "danio_rerio_gcf_049306965_1_grcz12tu_genomic",
+  "label": "Danio rerio",
+  "speciesId": "danio_rerio_gcf_049306965_1_grcz12tu_genomic",
+  "version": "2026.09",
+  "description": "Danio rerio CGV Desktop dataset package.",
+  "downloadable": true,
+  "sizeBytes": 477934731,
+  "package": {
+    "fileName": "danio_rerio_gcf_049306965_1_grcz12tu_genomic-2026.09.zip",
+    "url": "danio_rerio_gcf_049306965_1_grcz12tu_genomic-2026.09.zip",
+    "sha256": "907bc17fd3b6bd4a7e37ddc30e06b7226f47417b95b7a2ac216747f0876c6691",
+    "sizeBytes": 477934731
+  }
+}

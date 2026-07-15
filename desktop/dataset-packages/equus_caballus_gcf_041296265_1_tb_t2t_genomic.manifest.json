@@ -1,0 +1,15 @@
+{
+  "id": "equus_caballus_gcf_041296265_1_tb_t2t_genomic",
+  "label": "Equus caballus",
+  "speciesId": "equus_caballus_gcf_041296265_1_tb_t2t_genomic",
+  "version": "2026.09",
+  "description": "Equus caballus CGV Desktop dataset package.",
+  "downloadable": true,
+  "sizeBytes": 742354096,
+  "package": {
+    "fileName": "equus_caballus_gcf_041296265_1_tb_t2t_genomic-2026.09.zip",
+    "url": "equus_caballus_gcf_041296265_1_tb_t2t_genomic-2026.09.zip",
+    "sha256": "182c92be75c5520ccc89134a30ec7554a9b10bd1a5d7ea9c390c586257a6d906",
+    "sizeBytes": 742354096
+  }
+}

@@ -1,0 +1,167 @@
+{
+  "name": "cgv-desktop",
+  "version": "0.1.1",
+  "description": "CGV Desktop wrapper for running the Shiny app locally with portable data roots.",
+  "main": "src/main.js",
+  "author": {
+    "name": "Raul Rojas",
+    "email": "raulrojas22@users.noreply.github.com"
+  },
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/raulrojas22/CGV"
+  },
+  "homepage": "https://cgv.mobilomics.org",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test test/*.test.js",
+    "prepare:lite": "node scripts/prepare-lite-data.js",
+    "prepare:go": "node scripts/prepare-common-go.js",
+    "build": "npm run prepare:lite && npm run prepare:go && npm run verify:config && npm run verify && electron-builder && npm run fix:mac-update-manifest",
+    "build:mac": "npm run prepare:lite && npm run prepare:go && npm run verify:config && npm run verify && electron-builder --mac && npm run fix:mac-update-manifest",
+    "build:linux": "npm run prepare:lite && npm run prepare:go && npm run verify:config && npm run verify && electron-builder --linux",
+    "runtime:win": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-runtime-windows-x64.ps1",
+    "build:win": "npm run prepare:lite && npm run prepare:go && npm run verify:config && npm run verify && electron-builder --win nsis --x64",
+    "build:store": "npm run prepare:lite && npm run prepare:go && npm run verify:config && npm run verify && electron-builder --config electron-builder.store.js --win appx --x64",
+    "refresh:win-update": "node scripts/refresh-signed-windows-update.js",
+    "fix:mac-update-manifest": "node scripts/fix-mac-update-manifest.js",
+    "verify": "node scripts/verify-desktop-runtime.js",
+    "verify:config": "node scripts/verify-desktop-package-config.js",
+    "dataset:package": "node scripts/build-dataset-package.js",
+    "dataset:catalog": "node scripts/build-catalog.js"
+  },
+  "devDependencies": {
+    "electron": "42.6.1",
+    "electron-builder": "26.11.1",
+    "js-yaml": "4.3.0",
+    "yazl": "3.3.1"
+  },
+  "build": {
+    "appId": "org.cgv.desktop",
+    "productName": "CGV Desktop",
+    "icon": "build/icon",
+    "afterPack": "scripts/trim-packaged-runtime.js",
+    "asar": true,
+    "files": [
+      "src/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../",
+        "to": "app",
+        "filter": [
+          "global.R",
+          "ui.R",
+          "server.R",
+          "custom.scss",
+          "gene_search_lib.R",
+          "R/**",
+          "scripts/*.R",
+          "www/**",
+          "!www/screencasts.orig/**",
+          "docker/run-app.sh",
+          "!desktop/resources/bundled-data/**",
+          "!desktop/resources/demo-data/**"
+        ]
+      },
+      {
+        "from": "resources/common-go",
+        "to": "app/go_annotations",
+        "filter": [
+          "go-basic.obo",
+          "go_term_map.rds",
+          "manifest.json"
+        ]
+      },
+      {
+        "from": "resources/bin",
+        "to": "bin",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "resources/r",
+        "to": "runtime",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "data-manifest.json",
+        "to": "data-manifest.json"
+      },
+      {
+        "from": "catalog.json",
+        "to": "catalog.json"
+      },
+      {
+        "from": "legal",
+        "to": "legal",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "Science",
+      "artifactName": "CGV-Desktop-${version}-Linux-${arch}.${ext}"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "../www/icons/DNA.ico",
+      "requestedExecutionLevel": "asInvoker",
+      "signExecutable": false,
+      "verifyUpdateCodeSignature": true,
+      "signtoolOptions": {
+        "publisherName": "SignPath Foundation"
+      }
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowElevation": false,
+      "packElevateHelper": false,
+      "license": "../LICENSE",
+      "include": "build/installer.nsh",
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "deleteAppDataOnUninstall": false,
+      "runAfterFinish": true,
+      "artifactName": "CGV-Desktop-${version}-Windows-${arch}-Setup.${ext}"
+    },
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "identity": null,
+      "category": "public.app-category.education",
+      "artifactName": "CGV-Desktop-${version}-macOS-${arch}.${ext}"
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "raulrojas22",
+      "repo": "CGV-Desktop-Releases",
+      "releaseType": "draft"
+    }
+  },
+  "dependencies": {
+    "electron-updater": "6.8.5",
+    "yauzl": "3.4.0"
+  }
+}
