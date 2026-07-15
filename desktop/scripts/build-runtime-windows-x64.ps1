@@ -19,6 +19,21 @@ if ($Lock.platform -ne "win32-x64") { throw "Unexpected runtime platform: $($Loc
 $RuntimeRoot = Join-Path $DesktopDir "resources\r\win32-x64"
 $DownloadRoot = Join-Path ([System.IO.Path]::GetTempPath()) "cgv-desktop-runtime-downloads"
 New-Item -ItemType Directory -Force -Path $DownloadRoot | Out-Null
+$MsysRoot = if ($env:CGV_MSYS2_ROOT) { $env:CGV_MSYS2_ROOT } else { "C:\msys64" }
+$Bash = Join-Path $MsysRoot "usr\bin\bash.exe"
+$Pacman = Join-Path $MsysRoot "usr\bin\pacman.exe"
+if (-not (Test-Path $Bash)) {
+  throw "MSYS2 was not found at $MsysRoot. Set CGV_MSYS2_ROOT or install MSYS2 with MinGW64 GCC and make."
+}
+if (-not (Test-Path $Pacman)) { throw "MSYS2 pacman was not found at $Pacman." }
+
+function Convert-ToMsysPath([string]$WindowsPath) {
+  $Full = [System.IO.Path]::GetFullPath($WindowsPath).Replace("\", "/")
+  if ($Full -match '^([A-Za-z]):(.*)$') {
+    return "/$($Matches[1].ToLowerInvariant())$($Matches[2])"
+  }
+  return $Full
+}
 
 function Get-VerifiedDownload {
   param([string]$Url, [string]$Sha256, [string]$FileName)
@@ -35,6 +50,7 @@ function Get-VerifiedDownload {
 }
 
 $RInstaller = Get-VerifiedDownload $Lock.r.url $Lock.r.sha256 "R-$($Lock.r.version)-win.exe"
+$RtoolsArchive = Get-VerifiedDownload $Lock.rtools44.url $Lock.rtools44.sha256 "rtools44-toolchain-libs-$($Lock.rtools44.bundle)-$($Lock.rtools44.version).tar.zst"
 $LastzArchive = Get-VerifiedDownload $Lock.lastz.url $Lock.lastz.sha256 "lastz-$($Lock.lastz.version).tar.gz"
 $MmanPackage = Get-VerifiedDownload $Lock.mmanWin32.url $Lock.mmanWin32.sha256 "mingw-w64-x86_64-mman-win32-$($Lock.mmanWin32.version)-any.pkg.tar.zst"
 $CranIndexUrl = "$($Lock.cranRepository.url)/bin/windows/contrib/4.4/PACKAGES.gz"
@@ -63,29 +79,30 @@ $RscriptCandidates = @(
 $Rscript = $RscriptCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
 if (-not $Rscript) { throw "Rscript.exe was not installed under $RuntimeRoot." }
 
+$RtoolsExtractRoot = Join-Path $DownloadRoot "rtools44-$($Lock.rtools44.version)-$($Lock.rtools44.bundle)"
+Remove-Item -Recurse -Force $RtoolsExtractRoot -ErrorAction SilentlyContinue
+New-Item -ItemType Directory -Force -Path $RtoolsExtractRoot | Out-Null
+$RtoolsArchiveMsys = Convert-ToMsysPath $RtoolsArchive
+$RtoolsExtractRootMsys = Convert-ToMsysPath $RtoolsExtractRoot
+& $Bash -lc "/usr/bin/tar --zstd -xf '$RtoolsArchiveMsys' -C '$RtoolsExtractRootMsys'"
+if ($LASTEXITCODE -ne 0) { throw "Locked Rtools44 toolchain extraction failed." }
+
+$RtoolsSoft = Join-Path $RtoolsExtractRoot "x86_64-w64-mingw32.static.posix"
+$RtoolsBin = Join-Path $RtoolsSoft "bin"
+$MsysUsrBin = Join-Path $MsysRoot "usr\bin"
+$env:R_CUSTOM_TOOLS_SOFT = $RtoolsSoft.Replace("\", "/")
+$env:R_CUSTOM_TOOLS_PATH = "$($RtoolsBin.Replace("\", "/"));$($MsysUsrBin.Replace("\", "/"))"
 $env:R_LIBS_USER = ""
 $env:R_LIBS_SITE = ""
 $env:CGV_R_PACKAGE_TYPE = "both"
 $env:CGV_CRAN_REPOSITORY = [string]$Lock.cranRepository.url
 $env:CGV_BIOCONDUCTOR_VERSION = [string]$Lock.bioconductorVersion
+& $Rscript (Join-Path $PSScriptRoot "verify-windows-rtools.R") $RtoolsSoft $MsysRoot ([string]$Lock.rtools44.version)
+if ($LASTEXITCODE -ne 0) { throw "Rtools44 isolation verification failed." }
 $InstallPackages = (Join-Path $RepoDir "docker\install_packages.R").Replace("\", "/").Replace("'", "\\'")
 & $Rscript -e ".libPaths(.Library); source('$InstallPackages')"
 if ($LASTEXITCODE -ne 0) { throw "R package installation failed." }
 
-$MsysRoot = if ($env:CGV_MSYS2_ROOT) { $env:CGV_MSYS2_ROOT } else { "C:\msys64" }
-$Bash = Join-Path $MsysRoot "usr\bin\bash.exe"
-if (-not (Test-Path $Bash)) {
-  throw "MSYS2 was not found at $MsysRoot. Set CGV_MSYS2_ROOT or install MSYS2 with MinGW64 GCC and make."
-}
-function Convert-ToMsysPath([string]$WindowsPath) {
-  $Full = [System.IO.Path]::GetFullPath($WindowsPath).Replace("\", "/")
-  if ($Full -match '^([A-Za-z]):(.*)$') {
-    return "/$($Matches[1].ToLowerInvariant())$($Matches[2])"
-  }
-  return $Full
-}
-$Pacman = Join-Path $MsysRoot "usr\bin\pacman.exe"
-if (-not (Test-Path $Pacman)) { throw "MSYS2 pacman was not found at $Pacman." }
 $MmanInput = Convert-ToMsysPath $MmanPackage
 & $Pacman -U --noconfirm $MmanInput
 if ($LASTEXITCODE -ne 0) { throw "Locked mman-win32 package installation failed." }
