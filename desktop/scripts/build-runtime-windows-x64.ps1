@@ -38,19 +38,46 @@ function Convert-ToMsysPath([string]$WindowsPath) {
 function Get-VerifiedDownload {
   param([string]$Url, [string]$Sha256, [string]$FileName)
   $Target = Join-Path $DownloadRoot $FileName
-  if (-not (Test-Path $Target)) {
-    Invoke-WebRequest -Uri $Url -OutFile $Target
-  }
-  $Actual = (Get-FileHash -Algorithm SHA256 $Target).Hash.ToLowerInvariant()
-  if ($Actual -ne $Sha256.ToLowerInvariant()) {
+  $Expected = $Sha256.ToLowerInvariant()
+
+  if (Test-Path $Target) {
+    $Actual = (Get-FileHash -Algorithm SHA256 $Target).Hash.ToLowerInvariant()
+    if ($Actual -eq $Expected) {
+      Write-Host "Using verified cached download: $FileName"
+      return $Target
+    }
+    Write-Warning "Discarding cached download with an invalid SHA-256: $FileName"
     Remove-Item -Force $Target -ErrorAction SilentlyContinue
-    throw "SHA-256 mismatch for $FileName. Expected $Sha256, found $Actual."
   }
-  return $Target
+
+  $MaxAttempts = 3
+  for ($Attempt = 1; $Attempt -le $MaxAttempts; $Attempt++) {
+    Write-Host "Downloading $FileName (attempt $Attempt/$MaxAttempts) from $Url"
+    try {
+      Invoke-WebRequest -UseBasicParsing -Uri $Url -OutFile $Target
+      $Actual = (Get-FileHash -Algorithm SHA256 $Target).Hash.ToLowerInvariant()
+      if ($Actual -ne $Expected) {
+        throw [System.IO.InvalidDataException]::new(
+          "SHA-256 mismatch. Expected $Expected, found $Actual."
+        )
+      }
+      return $Target
+    } catch {
+      $Failure = $_.Exception.Message
+      Remove-Item -Force $Target -ErrorAction SilentlyContinue
+      if ($Attempt -eq $MaxAttempts) {
+        throw ("Download failed for {0} from {1} after {2} attempts: {3}" -f $FileName, $Url, $MaxAttempts, $Failure)
+      }
+      Write-Warning ("Download attempt {0}/{1} failed for {2}: {3}" -f $Attempt, $MaxAttempts, $FileName, $Failure)
+      Start-Sleep -Seconds (5 * $Attempt)
+    }
+  }
+
+  throw "Unreachable download state for $FileName."
 }
 
 $RInstaller = Get-VerifiedDownload $Lock.r.url $Lock.r.sha256 "R-$($Lock.r.version)-win.exe"
-$RtoolsArchive = Get-VerifiedDownload $Lock.rtools44.url $Lock.rtools44.sha256 "rtools44-toolchain-libs-$($Lock.rtools44.bundle)-$($Lock.rtools44.version).tar.zst"
+$RtoolsInstaller = Get-VerifiedDownload $Lock.rtools44.url $Lock.rtools44.sha256 "rtools44-$($Lock.rtools44.version).exe"
 $LastzArchive = Get-VerifiedDownload $Lock.lastz.url $Lock.lastz.sha256 "lastz-$($Lock.lastz.version).tar.gz"
 $MmanPackage = Get-VerifiedDownload $Lock.mmanWin32.url $Lock.mmanWin32.sha256 "mingw-w64-x86_64-mman-win32-$($Lock.mmanWin32.version)-any.pkg.tar.zst"
 $CranIndexUrl = "$($Lock.cranRepository.url)/bin/windows/contrib/4.4/PACKAGES.gz"
@@ -79,25 +106,30 @@ $RscriptCandidates = @(
 $Rscript = $RscriptCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
 if (-not $Rscript) { throw "Rscript.exe was not installed under $RuntimeRoot." }
 
-$RtoolsExtractRoot = Join-Path $DownloadRoot "rtools44-$($Lock.rtools44.version)-$($Lock.rtools44.bundle)"
-Remove-Item -Recurse -Force $RtoolsExtractRoot -ErrorAction SilentlyContinue
-New-Item -ItemType Directory -Force -Path $RtoolsExtractRoot | Out-Null
-$RtoolsArchiveMsys = Convert-ToMsysPath $RtoolsArchive
-$RtoolsExtractRootMsys = Convert-ToMsysPath $RtoolsExtractRoot
-& $Bash -lc "/usr/bin/tar --zstd -xf '$RtoolsArchiveMsys' -C '$RtoolsExtractRootMsys'"
-if ($LASTEXITCODE -ne 0) { throw "Locked Rtools44 toolchain extraction failed." }
+$RtoolsInstallRoot = Join-Path ([System.IO.Path]::GetTempPath()) "cgv-rtools44-$($Lock.rtools44.version)"
+Remove-Item -Recurse -Force $RtoolsInstallRoot -ErrorAction SilentlyContinue
+$RtoolsInstallArgs = @(
+  "/VERYSILENT",
+  "/SUPPRESSMSGBOXES",
+  "/NORESTART",
+  "/SP-",
+  "/MERGETASKS=!recordversion,!createStartMenu",
+  "/DIR=`"$RtoolsInstallRoot`""
+)
+$RtoolsInstall = Start-Process -FilePath $RtoolsInstaller -ArgumentList $RtoolsInstallArgs -Wait -PassThru
+if ($RtoolsInstall.ExitCode -ne 0) { throw "Rtools44 installer failed with exit code $($RtoolsInstall.ExitCode)." }
 
-$RtoolsSoft = Join-Path $RtoolsExtractRoot "x86_64-w64-mingw32.static.posix"
+$RtoolsSoft = Join-Path $RtoolsInstallRoot "x86_64-w64-mingw32.static.posix"
 $RtoolsBin = Join-Path $RtoolsSoft "bin"
-$MsysUsrBin = Join-Path $MsysRoot "usr\bin"
+$RtoolsUsrBin = Join-Path $RtoolsInstallRoot "usr\bin"
 $env:R_CUSTOM_TOOLS_SOFT = $RtoolsSoft.Replace("\", "/")
-$env:R_CUSTOM_TOOLS_PATH = "$($RtoolsBin.Replace("\", "/"));$($MsysUsrBin.Replace("\", "/"))"
+$env:R_CUSTOM_TOOLS_PATH = "$($RtoolsBin.Replace("\", "/"));$($RtoolsUsrBin.Replace("\", "/"))"
 $env:R_LIBS_USER = ""
 $env:R_LIBS_SITE = ""
 $env:CGV_R_PACKAGE_TYPE = "both"
 $env:CGV_CRAN_REPOSITORY = [string]$Lock.cranRepository.url
 $env:CGV_BIOCONDUCTOR_VERSION = [string]$Lock.bioconductorVersion
-& $Rscript (Join-Path $PSScriptRoot "verify-windows-rtools.R") $RtoolsSoft $MsysRoot ([string]$Lock.rtools44.version)
+& $Rscript (Join-Path $PSScriptRoot "verify-windows-rtools.R") $RtoolsSoft $RtoolsInstallRoot ([string]$Lock.rtools44.toolchainVersion)
 if ($LASTEXITCODE -ne 0) { throw "Rtools44 isolation verification failed." }
 $InstallPackages = (Join-Path $RepoDir "docker\install_packages.R").Replace("\", "/").Replace("'", "\\'")
 & $Rscript -e ".libPaths(.Library); source('$InstallPackages')"
