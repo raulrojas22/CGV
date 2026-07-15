@@ -1,0 +1,15 @@
+{
+  "id": "oryza_sativa_indica_group_oryza_indica_asm465v1_62",
+  "label": "Oryza sativa Indica Group",
+  "speciesId": "oryza_sativa_indica_group_oryza_indica_asm465v1_62",
+  "version": "2026.09",
+  "description": "Oryza sativa Indica Group CGV Desktop dataset package.",
+  "downloadable": true,
+  "sizeBytes": 114547063,
+  "package": {
+    "fileName": "oryza_sativa_indica_group_oryza_indica_asm465v1_62-2026.09.zip",
+    "url": "oryza_sativa_indica_group_oryza_indica_asm465v1_62-2026.09.zip",
+    "sha256": "58fa68fbf8433486f4a183f5932b1b0b4d046c422c1b87e8dca48822f321d726",
+    "sizeBytes": 114547063
+  }
+}

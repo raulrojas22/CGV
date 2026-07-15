@@ -1,0 +1,15 @@
+{
+  "id": "sus_scrofa_gcf_000003025_6_sscrofa11_1_genomic",
+  "label": "Sus scrofa",
+  "speciesId": "sus_scrofa_gcf_000003025_6_sscrofa11_1_genomic",
+  "version": "2026.09",
+  "description": "Sus scrofa CGV Desktop dataset package.",
+  "downloadable": true,
+  "sizeBytes": 705971685,
+  "package": {
+    "fileName": "sus_scrofa_gcf_000003025_6_sscrofa11_1_genomic-2026.09.zip",
+    "url": "sus_scrofa_gcf_000003025_6_sscrofa11_1_genomic-2026.09.zip",
+    "sha256": "359fdcc2e3ac977aecf715432523d151ea5eaa40dd1cb7be5baff9d0af34f5ac",
+    "sizeBytes": 705971685
+  }
+}

@@ -1,0 +1,135 @@
+name: CGV Desktop Windows x64 beta
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_store_package:
+        description: Also build the Microsoft Store AppX fallback
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  windows-beta:
+    name: Runtime, NSIS, and smoke test
+    runs-on: windows-2022
+    timeout-minutes: 120
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: "false"
+      WINDOWS_BETA_ARTIFACT_PASSWORD: ${{ secrets.WINDOWS_BETA_ARTIFACT_PASSWORD }}
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - name: Set up MinGW64 for native LASTZ
+        uses: msys2/setup-msys2@66cd2cce69caa17b53920067426061ca1de3a884 # v2.32.0
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            diffutils
+            make
+            sed
+            tar
+            mingw-w64-x86_64-gcc
+
+      - name: Install Electron dependencies
+        working-directory: desktop
+        run: npm ci
+
+      - name: Run Node tests
+        working-directory: desktop
+        run: npm test
+
+      - name: Build locked Windows scientific runtime
+        working-directory: desktop
+        shell: powershell
+        run: npm run runtime:win
+
+      - name: Prepare locked common GO assets and package guardrails
+        working-directory: desktop
+        run: |
+          npm run prepare:go
+          npm run verify:config
+
+      - name: Build offline NSIS installer
+        working-directory: desktop
+        run: npm run build:win
+
+      - name: Smoke-test install, startup, localhost, shutdown, and uninstall
+        shell: powershell
+        run: |
+          $Installer = Get-ChildItem "desktop/dist/*-Windows-x64-Setup.exe" | Select-Object -First 1
+          if (-not $Installer) { throw "Windows setup executable was not produced." }
+          & "desktop/scripts/smoke-windows-installer.ps1" -InstallerPath $Installer.FullName
+
+      - name: Encrypt private beta payload
+        shell: powershell
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_BETA_ARTIFACT_PASSWORD)) {
+            throw "Repository secret WINDOWS_BETA_ARTIFACT_PASSWORD is required. Raw unsigned installers are never uploaded."
+          }
+          $SevenZip = Join-Path $env:ProgramFiles "7-Zip\7z.exe"
+          if (-not (Test-Path $SevenZip)) { throw "7-Zip was not found on the Windows runner." }
+          $Files = @(
+            (Get-ChildItem "desktop/dist/*-Windows-x64-Setup.exe" | Select-Object -First 1).FullName,
+            (Get-ChildItem "desktop/dist/*.blockmap" | Select-Object -First 1).FullName,
+            (Resolve-Path "desktop/dist/latest.yml").Path,
+            (Resolve-Path "desktop/resources/r/win32-x64/cgv-runtime-manifest.json").Path
+          )
+          $Archive = "desktop/dist/CGV-Desktop-Windows-x64-private-beta.7z"
+          & $SevenZip a -t7z "-p$env:WINDOWS_BETA_ARTIFACT_PASSWORD" -mhe=on $Archive $Files
+          if ($LASTEXITCODE -ne 0 -or -not (Test-Path $Archive)) { throw "Private beta encryption failed." }
+
+      - name: Upload private Windows beta artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: CGV-Desktop-Windows-x64-beta-${{ github.run_number }}
+          if-no-files-found: error
+          retention-days: 14
+          path: desktop/dist/CGV-Desktop-Windows-x64-private-beta.7z
+
+      - name: Build Microsoft Store fallback
+        if: ${{ inputs.build_store_package }}
+        working-directory: desktop
+        env:
+          WINDOWS_STORE_IDENTITY_NAME: ${{ vars.WINDOWS_STORE_IDENTITY_NAME }}
+          WINDOWS_STORE_PUBLISHER: ${{ vars.WINDOWS_STORE_PUBLISHER }}
+          WINDOWS_STORE_PUBLISHER_DISPLAY_NAME: ${{ vars.WINDOWS_STORE_PUBLISHER_DISPLAY_NAME }}
+        run: npm run build:store
+
+      - name: Encrypt Microsoft Store fallback
+        if: ${{ inputs.build_store_package }}
+        shell: powershell
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_BETA_ARTIFACT_PASSWORD)) {
+            throw "Repository secret WINDOWS_BETA_ARTIFACT_PASSWORD is required."
+          }
+          $SevenZip = Join-Path $env:ProgramFiles "7-Zip\7z.exe"
+          $Appx = (Get-ChildItem "desktop/dist/*-Windows-x64-Store.appx" | Select-Object -First 1).FullName
+          if (-not $Appx) { throw "Microsoft Store AppX was not produced." }
+          $Archive = "desktop/dist/CGV-Desktop-Windows-x64-Store-private.7z"
+          & $SevenZip a -t7z "-p$env:WINDOWS_BETA_ARTIFACT_PASSWORD" -mhe=on $Archive $Appx
+          if ($LASTEXITCODE -ne 0 -or -not (Test-Path $Archive)) { throw "Store package encryption failed." }
+
+      - name: Upload encrypted Microsoft Store fallback
+        if: ${{ inputs.build_store_package }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: CGV-Desktop-Windows-x64-Store-${{ github.run_number }}
+          if-no-files-found: error
+          retention-days: 14
+          path: desktop/dist/CGV-Desktop-Windows-x64-Store-private.7z

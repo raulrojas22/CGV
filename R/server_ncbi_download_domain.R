@@ -514,7 +514,10 @@ ncbi_postprocess_files <- function(download_result, progress_callback = NULL) {
     accession <- download_result$accession
     processed <- list(accession = accession, acc_dir = acc_dir)
 
-    use_samtools <- ncbi_has_samtools() || ncbi_has_bgzip()
+    # The Unix command path also needs gunzip, grep, sort, bgzip, and tabix.
+    # Native Windows builds intentionally use the complete Rsamtools fallback.
+    use_samtools <- .Platform$OS.type != "windows" &&
+        (ncbi_has_samtools() || ncbi_has_bgzip())
 
     # ── Process GFF → bgzip + tabix ──────────────────────────────
     if (!is.null(download_result$gff_raw)) {

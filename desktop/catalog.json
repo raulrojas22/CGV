@@ -1,0 +1,381 @@
+{
+  "version": 1,
+  "source": "oracle-object-storage",
+  "datasets": [
+    {
+      "id": "arabidopsis_thaliana_gcf_000001735_4_tair10_1_genomic",
+      "label": "Arabidopsis thaliana",
+      "speciesId": "arabidopsis_thaliana_gcf_000001735_4_tair10_1_genomic",
+      "version": "2026.09",
+      "description": "Arabidopsis thaliana — download and install for CGV Desktop.",
+      "downloadable": true,
+      "sizeBytes": 116173186,
+      "package": {
+        "fileName": "arabidopsis_thaliana_gcf_000001735_4_tair10_1_genomic-2026.09.zip",
+        "url": "arabidopsis_thaliana_gcf_000001735_4_tair10_1_genomic-2026.09.zip",
+        "sha256": "85a28fac55da064d2386b7480a0e510182ae653d72048d4240ff07aab58f3256",
+        "sizeBytes": 116173186
+      }
+    },
+    {
+      "id": "botrytis_cinerea_b05_10_gcf_000143535_2_asm14353v4_genomic",
+      "label": "Botrytis cinerea B05.10",
+      "speciesId": "botrytis_cinerea_b05_10_gcf_000143535_2_asm14353v4_genomic",
+      "version": "2026.09",
+      "description": "Botrytis cinerea B05.10 — download and install for CGV Desktop.",
+      "downloadable": true,
+      "sizeBytes": 20420169,
+      "package": {
+        "fileName": "botrytis_cinerea_b05_10_gcf_000143535_2_asm14353v4_genomic-2026.09.zip",
+        "url": "botrytis_cinerea_b05_10_gcf_000143535_2_asm14353v4_genomic-2026.09.zip",
+        "sha256": "4fff0c1ac7b8fc96cfe2a3bcbba3d1a91bd0b67dba9c2d13da5a2837e28161c2",
+        "sizeBytes": 20420169
+      }
+    },
+    {
+      "id": "caenorhabditis_elegans_gcf_000002985_6_wbcel235_genomic",
+      "label": "Caenorhabditis elegans",
+      "speciesId": "caenorhabditis_elegans_gcf_000002985_6_wbcel235_genomic",
+      "version": "2026.09",
+      "description": "Caenorhabditis elegans — download and install for CGV Desktop.",
+      "downloadable": true,
+      "sizeBytes": 74736428,
+      "package": {
+        "fileName": "caenorhabditis_elegans_gcf_000002985_6_wbcel235_genomic-2026.09.zip",
+        "url": "caenorhabditis_elegans_gcf_000002985_6_wbcel235_genomic-2026.09.zip",
+        "sha256": "9db63961201783cbd959860a4748031af9a472cba6ffff1b698bd5471218c24d",
+        "sizeBytes": 74736428
+      }
+    },
+    {
+      "id": "candida_albicans_gcf_000182965_3_asm18296v3_genomic",
+      "label": "Candida albicans",
+      "speciesId": "candida_albicans_gcf_000182965_3_asm18296v3_genomic",
+      "version": "2026.09",
+      "description": "Candida albicans — download and install for CGV Desktop.",
+      "downloadable": true,
+      "sizeBytes": 18227910,
+      "package": {
+        "fileName": "candida_albicans_gcf_000182965_3_asm18296v3_genomic-2026.09.zip",
+        "url": "candida_albicans_gcf_000182965_3_asm18296v3_genomic-2026.09.zip",
+        "sha256": "aafb1fb7720f361559ba3818326ef3a16661ae72cb28cfb49e0912e8a7c83b5e",
+        "sizeBytes": 18227910
+      }
+    },
+    {
+      "id": "canis_lupus_familiaris_gcf_011100685_1_uu_cfam_gsd_1_0_genomic",
+      "label": "Canis lupus familiaris",
+      "speciesId": "canis_lupus_familiaris_gcf_011100685_1_uu_cfam_gsd_1_0_genomic",
+      "version": "2026.09",
+      "description": "Canis lupus familiaris — download and install for CGV Desktop.",
+      "downloadable": true,
+      "sizeBytes": 731551625,
+      "package": {
+        "fileName": "canis_lupus_familiaris_gcf_011100685_1_uu_cfam_gsd_1_0_genomic-2026.09.zip",
+        "url": "canis_lupus_familiaris_gcf_011100685_1_uu_cfam_gsd_1_0_genomic-2026.09.zip",
+        "sha256": "5f245236592d97764f82558666792d883e26e4e6db41adaf50a185a2ed53d975",
+        "sizeBytes": 731551625
+      }
+    },
+    {
+      "id": "danio_rerio_gcf_049306965_1_grcz12tu_genomic",
+      "label": "Danio rerio",
+      "speciesId": "danio_rerio_gcf_049306965_1_grcz12tu_genomic",
+      "version": "2026.09",
+      "description": "Danio rerio — download and install for CGV Desktop.",
+      "downloadable": true,
+      "sizeBytes": 477934731,
+      "package": {
+        "fileName": "danio_rerio_gcf_049306965_1_grcz12tu_genomic-2026.09.zip",
+        "url": "danio_rerio_gcf_049306965_1_grcz12tu_genomic-2026.09.zip",
+        "sha256": "907bc17fd3b6bd4a7e37ddc30e06b7226f47417b95b7a2ac216747f0876c6691",
+        "sizeBytes": 477934731
+      }
+    },
+    {
+      "id": "desmodus_rotundus_gcf_022682495_2_hldesrot8a_1_genomic",
+      "label": "Desmodus rotundus",
+      "speciesId": "desmodus_rotundus_gcf_022682495_2_hldesrot8a_1_genomic",
+      "version": "2026.09",
+      "description": "Desmodus rotundus — download and install for CGV Desktop.",
+      "downloadable": true,
+      "sizeBytes": 571993323,
+      "package": {
+        "fileName": "desmodus_rotundus_gcf_022682495_2_hldesrot8a_1_genomic-2026.09.zip",
+        "url": "desmodus_rotundus_gcf_022682495_2_hldesrot8a_1_genomic-2026.09.zip",
+        "sha256": "bda928e10a01892a2a5fb7cdad8a09ec00de9565b536210b523410112979214a",
+        "sizeBytes": 571993323
+      }
+    },
+    {
+      "id": "drosophila_melanogaster_gcf_000001215_4_release_6_plus_iso1_mt_genomic",
+      "label": "Drosophila melanogaster",
+      "speciesId": "drosophila_melanogaster_gcf_000001215_4_release_6_plus_iso1_mt_genomic",
+      "version": "2026.09",
+      "description": "Drosophila melanogaster — download and install for CGV Desktop.",
+      "downloadable": true,
+      "sizeBytes": 61809668,
+      "package": {
+        "fileName": "drosophila_melanogaster_gcf_000001215_4_release_6_plus_iso1_mt_genomic-2026.09.zip",
+        "url": "drosophila_melanogaster_gcf_000001215_4_release_6_plus_iso1_mt_genomic-2026.09.zip",
+        "sha256": "92ab2fe0e5143459a7d0083adf7b9db8a7acd407d1da5b9c1278f73e41091e8c",
+        "sizeBytes": 61809668
+      }
+    },
+    {
+      "id": "equus_caballus_gcf_041296265_1_tb_t2t_genomic",
+      "label": "Equus caballus",
+      "speciesId": "equus_caballus_gcf_041296265_1_tb_t2t_genomic",
+      "version": "2026.09",
+      "description": "Equus caballus — download and install for CGV Desktop.",
+      "downloadable": true,
+      "sizeBytes": 742354096,
+      "package": {
+        "fileName": "equus_caballus_gcf_041296265_1_tb_t2t_genomic-2026.09.zip",
+        "url": "equus_caballus_gcf_041296265_1_tb_t2t_genomic-2026.09.zip",
+        "sha256": "182c92be75c5520ccc89134a30ec7554a9b10bd1a5d7ea9c390c586257a6d906",
+        "sizeBytes": 742354096
+      }
+    },
+    {
+      "id": "fragaria_vesca_subsp_vesca_gcf_000184155_1_fraveshawaii_1_0_genomic",
+      "label": "Fragaria vesca subsp. vesca",
+      "speciesId": "fragaria_vesca_subsp_vesca_gcf_000184155_1_fraveshawaii_1_0_genomic",
+      "version": "2026.09",
+      "description": "Fragaria vesca subsp. vesca — download and install for CGV Desktop.",
+      "downloadable": true,
+      "sizeBytes": 59541267,
+      "package": {
+        "fileName": "fragaria_vesca_subsp_vesca_gcf_000184155_1_fraveshawaii_1_0_genomic-2026.09.zip",
+        "url": "fragaria_vesca_subsp_vesca_gcf_000184155_1_fraveshawaii_1_0_genomic-2026.09.zip",
+        "sha256": "395d2af22321fd03b944a483328017a9c61be795bb4d86304ebce797e0ba0849",
+        "sizeBytes": 59541267
+      }
+    },
+    {
+      "id": "homo_sapiens_gcf_000001405_40_grch38_p14_genomic",
+      "label": "Homo sapiens",
+      "speciesId": "homo_sapiens_gcf_000001405_40_grch38_p14_genomic",
+      "version": "2026.09",
+      "description": "Homo sapiens — download and install for CGV Desktop.",
+      "downloadable": true,
+      "sizeBytes": 955461959,
+      "package": {
+        "fileName": "homo_sapiens_gcf_000001405_40_grch38_p14_genomic-2026.09.zip",
+        "url": "homo_sapiens_gcf_000001405_40_grch38_p14_genomic-2026.09.zip",
+        "sha256": "8767b66816f0184e80c8682c2ce3597a0a31fb377aa6f2331710011b4f46431b",
+        "sizeBytes": 955461959
+      }
+    },
+    {
+      "id": "malus_domestica_gcf_042453785_1_gdt2t_hap1_genomic",
+      "label": "Malus domestica",
+      "speciesId": "malus_domestica_gcf_042453785_1_gdt2t_hap1_genomic",
+      "version": "2026.09",
+      "description": "Malus domestica — download and install for CGV Desktop.",
+      "downloadable": true,
+      "sizeBytes": 208240761,
+      "package": {
+        "fileName": "malus_domestica_gcf_042453785_1_gdt2t_hap1_genomic-2026.09.zip",
+        "url": "malus_domestica_gcf_042453785_1_gdt2t_hap1_genomic-2026.09.zip",
+        "sha256": "768a99e3a238f2c383f52650bebcd77d1425e1acc12c55ba09d9e60d1dc43da5",
+        "sizeBytes": 208240761
+      }
+    },
+    {
+      "id": "mus_musculus_gcf_000001635_27_grcm39_genomic",
+      "label": "Mus musculus",
+      "speciesId": "mus_musculus_gcf_000001635_27_grcm39_genomic",
+      "version": "2026.09",
+      "description": "Mus musculus — download and install for CGV Desktop.",
+      "downloadable": true,
+      "sizeBytes": 837610801,
+      "package": {
+        "fileName": "mus_musculus_gcf_000001635_27_grcm39_genomic-2026.09.zip",
+        "url": "mus_musculus_gcf_000001635_27_grcm39_genomic-2026.09.zip",
+        "sha256": "59877e07346a720feb254f69bc18491ff92aea94e89cd50d9668c094726e0fbc",
+        "sizeBytes": 837610801
+      }
+    },
+    {
+      "id": "neurospora_crassa_gcf_000182925_2_nc12_genomic",
+      "label": "Neurospora crassa",
+      "speciesId": "neurospora_crassa_gcf_000182925_2_nc12_genomic",
+      "version": "2026.09",
+      "description": "Neurospora crassa — download and install for CGV Desktop.",
+      "downloadable": true,
+      "sizeBytes": 18867847,
+      "package": {
+        "fileName": "neurospora_crassa_gcf_000182925_2_nc12_genomic-2026.09.zip",
+        "url": "neurospora_crassa_gcf_000182925_2_nc12_genomic-2026.09.zip",
+        "sha256": "f43625372ba95bc60b6465b2b566edd3c7cf1626a7fbdbfe3ffc6e289bfe5b61",
+        "sizeBytes": 18867847
+      }
+    },
+    {
+      "id": "oryza_sativa_indica_group_oryza_indica_asm465v1_62",
+      "label": "Oryza sativa Indica Group",
+      "speciesId": "oryza_sativa_indica_group_oryza_indica_asm465v1_62",
+      "version": "2026.09",
+      "description": "Oryza sativa Indica Group — download and install for CGV Desktop.",
+      "downloadable": true,
+      "sizeBytes": 114547063,
+      "package": {
+        "fileName": "oryza_sativa_indica_group_oryza_indica_asm465v1_62-2026.09.zip",
+        "url": "oryza_sativa_indica_group_oryza_indica_asm465v1_62-2026.09.zip",
+        "sha256": "58fa68fbf8433486f4a183f5932b1b0b4d046c422c1b87e8dca48822f321d726",
+        "sizeBytes": 114547063
+      }
+    },
+    {
+      "id": "oryza_sativa_ssp_japonica_gcf_034140825_1_asm3414082v1_genomic",
+      "label": "Oryza sativa ssp. japonica",
+      "speciesId": "oryza_sativa_ssp_japonica_gcf_034140825_1_asm3414082v1_genomic",
+      "version": "2026.09",
+      "description": "Oryza sativa ssp. japonica — download and install for CGV Desktop.",
+      "downloadable": true,
+      "sizeBytes": 141319598,
+      "package": {
+        "fileName": "oryza_sativa_ssp_japonica_gcf_034140825_1_asm3414082v1_genomic-2026.09.zip",
+        "url": "oryza_sativa_ssp_japonica_gcf_034140825_1_asm3414082v1_genomic-2026.09.zip",
+        "sha256": "aefa762a95c639c1b07028469a33894625216b793841693ba778e262ac6f4193",
+        "sizeBytes": 141319598
+      }
+    },
+    {
+      "id": "pan_troglodytes_gcf_028858775_2_nhgri_mpantro3_v2_0_pri_genomic",
+      "label": "Pan troglodytes",
+      "speciesId": "pan_troglodytes_gcf_028858775_2_nhgri_mpantro3_v2_0_pri_genomic",
+      "version": "2026.09",
+      "description": "Pan troglodytes — download and install for CGV Desktop.",
+      "downloadable": true,
+      "sizeBytes": 861215645,
+      "package": {
+        "fileName": "pan_troglodytes_gcf_028858775_2_nhgri_mpantro3_v2_0_pri_genomic-2026.09.zip",
+        "url": "pan_troglodytes_gcf_028858775_2_nhgri_mpantro3_v2_0_pri_genomic-2026.09.zip",
+        "sha256": "46581a59b48f7a4a30d8b5d8d3f5970fcf30ea7366f56c5741f3197ffe9715ac",
+        "sizeBytes": 861215645
+      }
+    },
+    {
+      "id": "phaseolus_vulgaris_gcf_000499845_2_p_vulgaris_v2_0_genomic",
+      "label": "Phaseolus vulgaris",
+      "speciesId": "phaseolus_vulgaris_gcf_000499845_2_p_vulgaris_v2_0_genomic",
+      "version": "2026.09",
+      "description": "Phaseolus vulgaris — download and install for CGV Desktop.",
+      "downloadable": true,
+      "sizeBytes": 166166983,
+      "package": {
+        "fileName": "phaseolus_vulgaris_gcf_000499845_2_p_vulgaris_v2_0_genomic-2026.09.zip",
+        "url": "phaseolus_vulgaris_gcf_000499845_2_p_vulgaris_v2_0_genomic-2026.09.zip",
+        "sha256": "cb867a10781525add54d0c463cc04da40d4dc764816be8a67958e5e7d4898668",
+        "sizeBytes": 166166983
+      }
+    },
+    {
+      "id": "saccharomyces_cerevisiae_gcf_000146045_2_r64_genomic",
+      "label": "Saccharomyces cerevisiae",
+      "speciesId": "saccharomyces_cerevisiae_gcf_000146045_2_r64_genomic",
+      "version": "2026.09",
+      "description": "Saccharomyces cerevisiae — download and install for CGV Desktop.",
+      "downloadable": true,
+      "sizeBytes": 13862732,
+      "package": {
+        "fileName": "saccharomyces_cerevisiae_gcf_000146045_2_r64_genomic-2026.09.zip",
+        "url": "saccharomyces_cerevisiae_gcf_000146045_2_r64_genomic-2026.09.zip",
+        "sha256": "02f9c795f02d2382830aa42bdd000f84c0038a5f075e9cfd0997d41be8109df7",
+        "sizeBytes": 13862732
+      }
+    },
+    {
+      "id": "solanum_lycopersicum_gcf_036512215_1_slm_r2_1_genomic",
+      "label": "Solanum lycopersicum",
+      "speciesId": "solanum_lycopersicum_gcf_036512215_1_slm_r2_1_genomic",
+      "version": "2026.09",
+      "description": "Solanum lycopersicum — download and install for CGV Desktop.",
+      "downloadable": true,
+      "sizeBytes": 239843133,
+      "package": {
+        "fileName": "solanum_lycopersicum_gcf_036512215_1_slm_r2_1_genomic-2026.09.zip",
+        "url": "solanum_lycopersicum_gcf_036512215_1_slm_r2_1_genomic-2026.09.zip",
+        "sha256": "47a3143815d5fd230e1e61919e8894ffefcfe6b486610c6c77c36d88761e2d9c",
+        "sizeBytes": 239843133
+      }
+    },
+    {
+      "id": "sus_scrofa_gcf_000003025_6_sscrofa11_1_genomic",
+      "label": "Sus scrofa",
+      "speciesId": "sus_scrofa_gcf_000003025_6_sscrofa11_1_genomic",
+      "version": "2026.09",
+      "description": "Sus scrofa — download and install for CGV Desktop.",
+      "downloadable": true,
+      "sizeBytes": 705971685,
+      "package": {
+        "fileName": "sus_scrofa_gcf_000003025_6_sscrofa11_1_genomic-2026.09.zip",
+        "url": "sus_scrofa_gcf_000003025_6_sscrofa11_1_genomic-2026.09.zip",
+        "sha256": "359fdcc2e3ac977aecf715432523d151ea5eaa40dd1cb7be5baff9d0af34f5ac",
+        "sizeBytes": 705971685
+      }
+    },
+    {
+      "id": "brachypodium_distachyon_gcf_000005505_3_brachypodium_distachyon_v3_0_genomic",
+      "label": "Brachypodium distachyon",
+      "speciesId": "brachypodium_distachyon_gcf_000005505_3_brachypodium_distachyon_v3_0_genomic",
+      "version": "2026.09",
+      "description": "Brachypodium distachyon — download and install for CGV Desktop.",
+      "downloadable": true,
+      "sizeBytes": 101514209,
+      "package": {
+        "fileName": "brachypodium_distachyon_gcf_000005505_3_brachypodium_distachyon_v3_0_genomic-2026.09.zip",
+        "url": "brachypodium_distachyon_gcf_000005505_3_brachypodium_distachyon_v3_0_genomic-2026.09.zip",
+        "sha256": "5689d7d91190dd00b14894952df12a73fbfaeec08ba3933a45ccbc34dced49ae",
+        "sizeBytes": 101514209
+      }
+    },
+    {
+      "id": "vitis_vinifera_gcf_030704535_1_asm3070453v1_genomic",
+      "label": "Vitis vinifera",
+      "speciesId": "vitis_vinifera_gcf_030704535_1_asm3070453v1_genomic",
+      "version": "2026.09",
+      "description": "Vitis vinifera — download and install for CGV Desktop.",
+      "downloadable": true,
+      "sizeBytes": 157667445,
+      "package": {
+        "fileName": "vitis_vinifera_gcf_030704535_1_asm3070453v1_genomic-2026.09.zip",
+        "url": "vitis_vinifera_gcf_030704535_1_asm3070453v1_genomic-2026.09.zip",
+        "sha256": "0086656f62b41ab0e6745667dcf6ccbb9375da9a9e76ca329a9b4db98a94fb5b",
+        "sizeBytes": 157667445
+      }
+    },
+    {
+      "id": "xenopus_laevis_gcf_017654675_1_xenopus_laevis_v10_1_genomic",
+      "label": "Xenopus laevis",
+      "speciesId": "xenopus_laevis_gcf_017654675_1_xenopus_laevis_v10_1_genomic",
+      "version": "2026.09",
+      "description": "Xenopus laevis — download and install for CGV Desktop.",
+      "downloadable": true,
+      "sizeBytes": 795685145,
+      "package": {
+        "fileName": "xenopus_laevis_gcf_017654675_1_xenopus_laevis_v10_1_genomic-2026.09.zip",
+        "url": "xenopus_laevis_gcf_017654675_1_xenopus_laevis_v10_1_genomic-2026.09.zip",
+        "sha256": "2b3556c3d5cd8bffc9c0f6d6544fb2329353e3575a4b1639765d7f316c8263ee",
+        "sizeBytes": 795685145
+      }
+    },
+    {
+      "id": "zea_mays_gcf_902167145_1_zm_b73_reference_nam_5_0_genomic",
+      "label": "Zea mays",
+      "speciesId": "zea_mays_gcf_902167145_1_zm_b73_reference_nam_5_0_genomic",
+      "version": "2026.09",
+      "description": "Zea mays — download and install for CGV Desktop.",
+      "downloadable": true,
+      "sizeBytes": 602897948,
+      "package": {
+        "fileName": "zea_mays_gcf_902167145_1_zm_b73_reference_nam_5_0_genomic-2026.09.zip",
+        "url": "zea_mays_gcf_902167145_1_zm_b73_reference_nam_5_0_genomic-2026.09.zip",
+        "sha256": "3a0378b39c63820380f1af40b73f36f416de52c8e59375fbfc7c816e0065db06",
+        "sizeBytes": 602897948
+      }
+    }
+  ]
+}

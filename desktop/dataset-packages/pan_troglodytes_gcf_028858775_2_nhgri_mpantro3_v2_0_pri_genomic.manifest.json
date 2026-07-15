@@ -1,0 +1,15 @@
+{
+  "id": "pan_troglodytes_gcf_028858775_2_nhgri_mpantro3_v2_0_pri_genomic",
+  "label": "Pan troglodytes",
+  "speciesId": "pan_troglodytes_gcf_028858775_2_nhgri_mpantro3_v2_0_pri_genomic",
+  "version": "2026.09",
+  "description": "Pan troglodytes CGV Desktop dataset package.",
+  "downloadable": true,
+  "sizeBytes": 861215645,
+  "package": {
+    "fileName": "pan_troglodytes_gcf_028858775_2_nhgri_mpantro3_v2_0_pri_genomic-2026.09.zip",
+    "url": "pan_troglodytes_gcf_028858775_2_nhgri_mpantro3_v2_0_pri_genomic-2026.09.zip",
+    "sha256": "46581a59b48f7a4a30d8b5d8d3f5970fcf30ea7366f56c5741f3197ffe9715ac",
+    "sizeBytes": 861215645
+  }
+}

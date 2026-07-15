@@ -1,0 +1,15 @@
+{
+  "id": "drosophila_melanogaster_gcf_000001215_4_release_6_plus_iso1_mt_genomic",
+  "label": "Drosophila melanogaster",
+  "speciesId": "drosophila_melanogaster_gcf_000001215_4_release_6_plus_iso1_mt_genomic",
+  "version": "2026.09",
+  "description": "Drosophila melanogaster CGV Desktop dataset package.",
+  "downloadable": true,
+  "sizeBytes": 61809668,
+  "package": {
+    "fileName": "drosophila_melanogaster_gcf_000001215_4_release_6_plus_iso1_mt_genomic-2026.09.zip",
+    "url": "drosophila_melanogaster_gcf_000001215_4_release_6_plus_iso1_mt_genomic-2026.09.zip",
+    "sha256": "92ab2fe0e5143459a7d0083adf7b9db8a7acd407d1da5b9c1278f73e41091e8c",
+    "sizeBytes": 61809668
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "id": "arabidopsis_thaliana_gcf_000001735_4_tair10_1_genomic",
+  "label": "Arabidopsis thaliana",
+  "speciesId": "arabidopsis_thaliana_gcf_000001735_4_tair10_1_genomic",
+  "version": "2026.09",
+  "description": "Arabidopsis thaliana CGV Desktop dataset package.",
+  "downloadable": true,
+  "sizeBytes": 116173186,
+  "package": {
+    "fileName": "arabidopsis_thaliana_gcf_000001735_4_tair10_1_genomic-2026.09.zip",
+    "url": "arabidopsis_thaliana_gcf_000001735_4_tair10_1_genomic-2026.09.zip",
+    "sha256": "85a28fac55da064d2386b7480a0e510182ae653d72048d4240ff07aab58f3256",
+    "sizeBytes": 116173186
+  }
+}

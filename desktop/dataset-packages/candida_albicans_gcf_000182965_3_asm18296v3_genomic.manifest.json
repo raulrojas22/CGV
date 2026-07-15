@@ -1,0 +1,15 @@
+{
+  "id": "candida_albicans_gcf_000182965_3_asm18296v3_genomic",
+  "label": "Candida albicans",
+  "speciesId": "candida_albicans_gcf_000182965_3_asm18296v3_genomic",
+  "version": "2026.09",
+  "description": "Candida albicans CGV Desktop dataset package.",
+  "downloadable": true,
+  "sizeBytes": 18227910,
+  "package": {
+    "fileName": "candida_albicans_gcf_000182965_3_asm18296v3_genomic-2026.09.zip",
+    "url": "candida_albicans_gcf_000182965_3_asm18296v3_genomic-2026.09.zip",
+    "sha256": "aafb1fb7720f361559ba3818326ef3a16661ae72cb28cfb49e0912e8a7c83b5e",
+    "sizeBytes": 18227910
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "id": "desmodus_rotundus_gcf_022682495_2_hldesrot8a_1_genomic",
+  "label": "Desmodus rotundus",
+  "speciesId": "desmodus_rotundus_gcf_022682495_2_hldesrot8a_1_genomic",
+  "version": "2026.09",
+  "description": "Desmodus rotundus CGV Desktop dataset package.",
+  "downloadable": true,
+  "sizeBytes": 571993323,
+  "package": {
+    "fileName": "desmodus_rotundus_gcf_022682495_2_hldesrot8a_1_genomic-2026.09.zip",
+    "url": "desmodus_rotundus_gcf_022682495_2_hldesrot8a_1_genomic-2026.09.zip",
+    "sha256": "bda928e10a01892a2a5fb7cdad8a09ec00de9565b536210b523410112979214a",
+    "sizeBytes": 571993323
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "id": "fragaria_vesca_subsp_vesca_gcf_000184155_1_fraveshawaii_1_0_genomic",
+  "label": "Fragaria vesca subsp. vesca",
+  "speciesId": "fragaria_vesca_subsp_vesca_gcf_000184155_1_fraveshawaii_1_0_genomic",
+  "version": "2026.09",
+  "description": "Fragaria vesca subsp. vesca CGV Desktop dataset package.",
+  "downloadable": true,
+  "sizeBytes": 59541267,
+  "package": {
+    "fileName": "fragaria_vesca_subsp_vesca_gcf_000184155_1_fraveshawaii_1_0_genomic-2026.09.zip",
+    "url": "fragaria_vesca_subsp_vesca_gcf_000184155_1_fraveshawaii_1_0_genomic-2026.09.zip",
+    "sha256": "395d2af22321fd03b944a483328017a9c61be795bb4d86304ebce797e0ba0849",
+    "sizeBytes": 59541267
+  }
+}

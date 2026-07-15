@@ -35,3 +35,22 @@ go_annotations/raw/*
 # Local download scratch space
 ncbi_downloads/*
 !ncbi_downloads/.gitkeep
+
+# Desktop Electron app
+desktop/node_modules/
+desktop/dist/
+desktop/resources/r/
+desktop/resources/bin/
+desktop/resources/common-go/
+desktop/resources/demo-data/
+desktop/resources/bundled-data/
+desktop/dataset-packages/work/
+desktop/dataset-packages/*.zip
+desktop/dataset-packages/*.dmg
+desktop/dataset-packages/*.pkg
+desktop/dataset-packages/*.AppImage
+desktop/dataset-packages/*.exe
+
+# Keep lightweight desktop package metadata versioned.
+!desktop/dataset-packages/*.manifest.json
+!desktop/dataset-packages/catalog.json
