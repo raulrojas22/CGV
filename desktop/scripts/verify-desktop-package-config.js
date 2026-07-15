@@ -170,6 +170,8 @@ if (
   !fs.existsSync(windowsRtoolsVerifierPath) ||
   !windowsRuntimeBuilder.includes("R_CUSTOM_TOOLS_SOFT") ||
   !windowsRuntimeBuilder.includes("R_CUSTOM_TOOLS_PATH") ||
+  !windowsRuntimeBuilder.includes("MsysMake") ||
+  !windowsRuntimeBuilder.includes("MsysGcc") ||
   !windowsRuntimeBuilder.includes("/MERGETASKS=!recordversion,!createStartMenu") ||
   !windowsRuntimeBuilder.includes("verify-windows-rtools.R")
 ) {
@@ -210,11 +212,23 @@ if (
 ) {
   throw new Error("Windows beta workflow must pin actions, prepare locked GO assets, and encrypt unsigned artifacts with a repository secret.");
 }
+if (
+  !windowsWorkflow.includes("id: msys2") ||
+  !windowsWorkflow.includes("CGV_MSYS2_ROOT: ${{ steps.msys2.outputs.msys2-location }}")
+) {
+  throw new Error("Windows beta workflow must pass the setup-msys2 installation root to the scientific runtime builder.");
+}
 const signedWorkflowPath = path.join(repoRoot, ".github", "workflows", "desktop-windows-release.yml");
 if (!fs.existsSync(signedWorkflowPath)) throw new Error("Missing SignPath Windows release workflow.");
 const signedWorkflow = fs.readFileSync(signedWorkflowPath, "utf8");
 if (/uses:\s+[^\s]+@v\d+/i.test(signedWorkflow)) {
   throw new Error("Every action in the signed Windows release workflow must be pinned to an immutable commit SHA.");
+}
+if (
+  !signedWorkflow.includes("id: msys2") ||
+  !signedWorkflow.includes("CGV_MSYS2_ROOT: ${{ steps.msys2.outputs.msys2-location }}")
+) {
+  throw new Error("Windows workflows must pass the setup-msys2 installation root to the scientific runtime builder.");
 }
 for (const requiredFragment of [
   "signpath/github-action-submit-signing-request@b9d91eadd323de506c0c81cf0c7fe7438f3360fd",

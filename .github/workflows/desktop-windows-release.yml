@@ -58,6 +58,7 @@ jobs:
           "installer=CGV-Desktop-$Version-Windows-x64-Setup.exe" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
       - name: Set up MinGW64 for native LASTZ
+        id: msys2
         uses: msys2/setup-msys2@66cd2cce69caa17b53920067426061ca1de3a884 # v2.32.0
         with:
           msystem: MINGW64
@@ -80,6 +81,8 @@ jobs:
       - name: Build locked Windows scientific runtime
         working-directory: desktop
         shell: powershell
+        env:
+          CGV_MSYS2_ROOT: ${{ steps.msys2.outputs.msys2-location }}
         run: npm run runtime:win
 
       - name: Prepare locked common GO assets and release guardrails

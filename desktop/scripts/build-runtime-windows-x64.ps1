@@ -22,10 +22,14 @@ New-Item -ItemType Directory -Force -Path $DownloadRoot | Out-Null
 $MsysRoot = if ($env:CGV_MSYS2_ROOT) { $env:CGV_MSYS2_ROOT } else { "C:\msys64" }
 $Bash = Join-Path $MsysRoot "usr\bin\bash.exe"
 $Pacman = Join-Path $MsysRoot "usr\bin\pacman.exe"
+$MsysMake = Join-Path $MsysRoot "usr\bin\make.exe"
+$MsysGcc = Join-Path $MsysRoot "mingw64\bin\gcc.exe"
 if (-not (Test-Path $Bash)) {
   throw "MSYS2 was not found at $MsysRoot. Set CGV_MSYS2_ROOT or install MSYS2 with MinGW64 GCC and make."
 }
 if (-not (Test-Path $Pacman)) { throw "MSYS2 pacman was not found at $Pacman." }
+if (-not (Test-Path $MsysMake)) { throw "MSYS2 make was not found at $MsysMake." }
+if (-not (Test-Path $MsysGcc)) { throw "MSYS2 MinGW64 GCC was not found at $MsysGcc." }
 
 function Convert-ToMsysPath([string]$WindowsPath) {
   $Full = [System.IO.Path]::GetFullPath($WindowsPath).Replace("\", "/")
