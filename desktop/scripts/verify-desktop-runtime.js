@@ -155,7 +155,15 @@ function run(command, args, options = {}) {
     ...spawnOptions
   });
   if (!acceptedStatuses.includes(result.status)) {
-    throw new Error(`${command} ${args.join(" ")} failed\n${result.stdout || ""}${result.stderr || ""}`);
+    const commandLine = [command, ...args].map((value) => JSON.stringify(value)).join(" ");
+    const diagnostics = [
+      `status=${result.status === null ? "null" : result.status}`,
+      `signal=${result.signal || "none"}`
+    ];
+    if (result.error) diagnostics.push(`process_error=${result.error.stack || result.error.message || result.error}`);
+    if (result.stdout) diagnostics.push(`stdout:\n${result.stdout}`);
+    if (result.stderr) diagnostics.push(`stderr:\n${result.stderr}`);
+    throw new Error(`${commandLine} failed\n${diagnostics.join("\n")}`);
   }
   return `${result.stdout || ""}${result.stderr || ""}`.trim();
 }
@@ -207,21 +215,27 @@ try {
   fs.rmSync(lastzTestRoot, { recursive: true, force: true });
 }
 
-const packageCheck = `
-missing <- c(${requiredPackages.map((pkg) => JSON.stringify(pkg)).join(", ")})
-missing <- missing[!vapply(missing, requireNamespace, logical(1), quietly = TRUE)]
-if (length(missing)) stop("Missing R packages: ", paste(missing, collapse = ", "))
-cat("R packages ok\\n")
-`;
-console.log(run(rscript, ["-e", packageCheck]));
+const packageCheckRoot = fs.mkdtempSync(path.join(os.tmpdir(), "CGV R package á verify-"));
+const packageCheckScript = path.join(packageCheckRoot, "verify package.R");
+fs.copyFileSync(path.join(__dirname, "verify-r-package.R"), packageCheckScript);
 
-const optionalCheck = `
-optional <- c(${optionalPackages.map((pkg) => JSON.stringify(pkg)).join(", ")})
-missing <- optional[!vapply(optional, requireNamespace, logical(1), quietly = TRUE)]
-if (length(missing)) cat("Optional R packages missing: ", paste(missing, collapse = ", "), "\\n", sep = "")
-`;
-const optionalResult = run(rscript, ["-e", optionalCheck]);
-if (optionalResult) console.log(optionalResult);
+try {
+  for (const packageName of requiredPackages) {
+    console.log(run(rscript, [packageCheckScript, packageName, "required"]));
+  }
+  console.log(`Required R packages ok: ${requiredPackages.length}`);
+
+  for (const packageName of optionalPackages) {
+    const optionalResult = run(
+      rscript,
+      [packageCheckScript, packageName, "optional"],
+      { acceptedStatuses: [0, 10] }
+    );
+    if (optionalResult) console.log(optionalResult);
+  }
+} finally {
+  fs.rmSync(packageCheckRoot, { recursive: true, force: true });
+}
 
 const manifestPath = path.join(desktopRoot, "data-manifest.json");
 if (!fs.existsSync(manifestPath)) {
