@@ -147,11 +147,12 @@ const windowsLock = JSON.parse(fs.readFileSync(windowsLockPath, "utf8"));
 if (
   windowsLock.platform !== "win32-x64" ||
   windowsLock.r?.version !== "4.4.3" ||
-  windowsLock.rtools44?.version !== "6459" ||
-  windowsLock.rtools44?.bundle !== "base" ||
+  windowsLock.rtools44?.version !== "6459-6401" ||
+  windowsLock.rtools44?.toolchainVersion !== "6459" ||
+  windowsLock.rtools44?.distribution !== "installer" ||
   windowsLock.bioconductorVersion !== "3.20"
 ) {
-  throw new Error("Windows runtime lock must pin win32-x64, R 4.4.3, Rtools44 6459 base, and Bioconductor 3.20.");
+  throw new Error("Windows runtime lock must pin win32-x64, R 4.4.3, Rtools44 6459-6401 with toolchain 6459, and Bioconductor 3.20.");
 }
 const lockedArtifacts = [windowsLock.r, windowsLock.rtools44, windowsLock.lastz, windowsLock.mmanWin32];
 for (const artifact of lockedArtifacts) {
@@ -159,8 +160,8 @@ for (const artifact of lockedArtifacts) {
     throw new Error("Windows runtime artifacts must have HTTPS URLs and SHA-256 hashes.");
   }
 }
-if (!/^https:\/\/cloud\.r-project\.org\/bin\/windows\/Rtools\/rtools44\/files\/rtools44-toolchain-libs-base-6459\.tar\.zst$/.test(windowsLock.rtools44.url)) {
-  throw new Error("Windows runtime must use the official locked Rtools44 base toolchain.");
+if (!/^https:\/\/github\.com\/r-hub\/rtools44\/releases\/download\/6459-6401\/rtools44\.exe$/.test(windowsLock.rtools44.url)) {
+  throw new Error("Windows runtime must use the fixed, checksum-locked Rtools44 installer mirror.");
 }
 const windowsRuntimeBuilderPath = path.join(desktopRoot, "scripts", "build-runtime-windows-x64.ps1");
 const windowsRtoolsVerifierPath = path.join(desktopRoot, "scripts", "verify-windows-rtools.R");
@@ -169,6 +170,7 @@ if (
   !fs.existsSync(windowsRtoolsVerifierPath) ||
   !windowsRuntimeBuilder.includes("R_CUSTOM_TOOLS_SOFT") ||
   !windowsRuntimeBuilder.includes("R_CUSTOM_TOOLS_PATH") ||
+  !windowsRuntimeBuilder.includes("/MERGETASKS=!recordversion,!createStartMenu") ||
   !windowsRuntimeBuilder.includes("verify-windows-rtools.R")
 ) {
   throw new Error("Windows runtime build must isolate and verify the locked Rtools44 toolchain.");
