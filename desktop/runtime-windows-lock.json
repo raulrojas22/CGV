@@ -61,7 +61,7 @@
   },
   "mmanWin32": {
     "version": "r31.fedbdbf-1",
-    "url": "https://mirror.msys2.org/mingw/mingw64/mingw-w64-x86_64-mman-win32-r31.fedbdbf-1-any.pkg.tar.zst",
+    "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-mman-win32-r31.fedbdbf-1-any.pkg.tar.zst",
     "sha256": "4c262a85d2a8bac81f3cb25530dce74d545a97bec89d2a7442ec1b2786c69fce"
   },
   "packages": {
