@@ -100,6 +100,11 @@ for (const buildScript of ["build", "build:mac", "build:linux", "build:win", "bu
     throw new Error(`${buildScript} must prepare locked common GO assets.`);
   }
 }
+for (const windowsBuildScript of ["build:win", "build:store"]) {
+  if (!/(?:^|\s)--publish(?:\s+|=)never(?:\s|$)/.test(String(packageJson.scripts?.[windowsBuildScript] || ""))) {
+    throw new Error(`${windowsBuildScript} must disable electron-builder implicit CI publishing.`);
+  }
+}
 if (!mainJs.includes("autoUpdater.checkForUpdatesAndNotify()") || !mainJs.includes("isDirectWindowsBuild")) {
   throw new Error("Direct Windows builds must check the electron-builder update feed automatically.");
 }
