@@ -72,7 +72,7 @@ jobs:
         working-directory: desktop
         run: npm run build:win
 
-      - name: Smoke-test install, startup, localhost, shutdown, and uninstall
+      - name: Smoke-test install, startup, live reinstall, localhost, shutdown, and uninstall
         shell: powershell
         run: |
           $Installer = Get-ChildItem "desktop/dist/*-Windows-x64-Setup.exe" | Select-Object -First 1

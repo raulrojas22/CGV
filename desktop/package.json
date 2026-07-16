@@ -1,6 +1,6 @@
 {
   "name": "cgv-desktop",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "CGV Desktop wrapper for running the Shiny app locally with portable data roots.",
   "main": "src/main.js",
   "author": {
@@ -137,6 +137,7 @@
       "packElevateHelper": false,
       "license": "../LICENSE",
       "include": "build/installer.nsh",
+      "preCompressedFileExtensions": [],
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,

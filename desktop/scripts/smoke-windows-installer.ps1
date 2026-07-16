@@ -13,6 +13,62 @@ $StorageRoot = Join-Path $env:RUNNER_TEMP "CGV Storage á CI"
 $LogPath = Join-Path $UserDataDir "logs\startup.log"
 $SettingsPath = Join-Path $UserDataDir "desktop-settings.json"
 $MarkerPath = Join-Path $StorageRoot "data\preserve-after-uninstall.txt"
+$ExpectedVideoPath = Join-Path $InstallDir "resources\app\www\CTV_Animated.mp4"
+$LiteralInstallDir = Join-Path $InstallDir '$INSTDIR'
+
+function Install-CgvDesktop {
+  $Installer = Start-Process -FilePath $InstallerPath -ArgumentList "/S" -Wait -PassThru
+  if ($Installer.ExitCode -ne 0) { throw "NSIS installer failed with exit code $($Installer.ExitCode)." }
+}
+
+function Assert-InstalledLayout {
+  $AppPath = Join-Path $InstallDir "CGV Desktop.exe"
+  if (-not (Test-Path $AppPath)) { throw "Installed application not found: $AppPath" }
+  if (-not (Test-Path $ExpectedVideoPath)) { throw "Pre-compressed Home video was not installed at its canonical path: $ExpectedVideoPath" }
+  if (Test-Path $LiteralInstallDir) { throw "NSIS created an invalid literal `$INSTDIR directory: $LiteralInstallDir" }
+  return $AppPath
+}
+
+function Start-CgvDesktopAndWait {
+  param([string]$AppPath)
+
+  Remove-Item -Force $LogPath -ErrorAction SilentlyContinue
+  $AppProcess = Start-Process -FilePath $AppPath -PassThru
+  $Deadline = (Get-Date).AddMinutes(5)
+  $ReadyUrl = ""
+  while ((Get-Date) -lt $Deadline) {
+    if ($AppProcess.HasExited) {
+      $Log = if (Test-Path $LogPath) { Get-Content $LogPath -Raw } else { "no startup log" }
+      throw "CGV Desktop exited before becoming ready.`n$Log"
+    }
+    if (Test-Path $LogPath) {
+      $Log = Get-Content $LogPath -Raw
+      $Match = [regex]::Match($Log, "CGV is ready at (http://127\.0\.0\.1:\d+)")
+      if ($Match.Success) {
+        $ReadyUrl = $Match.Groups[1].Value
+        break
+      }
+    }
+    Start-Sleep -Seconds 2
+  }
+  if (-not $ReadyUrl) {
+    $Log = if (Test-Path $LogPath) { Get-Content $LogPath -Raw } else { "no startup log" }
+    throw "Timed out waiting for CGV is ready.`n$Log"
+  }
+
+  $Response = Invoke-WebRequest -Uri $ReadyUrl -UseBasicParsing -TimeoutSec 30
+  if ($Response.StatusCode -ne 200) { throw "CGV localhost returned HTTP $($Response.StatusCode)." }
+  return @{ Process = $AppProcess; ReadyUrl = $ReadyUrl }
+}
+
+function Get-BundledRProcesses {
+  return Get-CimInstance Win32_Process | Where-Object {
+    $_.Name -match '^R(script|term)?\.exe$' -and (
+    ($_.ExecutablePath -and $_.ExecutablePath.StartsWith($InstallDir, [System.StringComparison]::OrdinalIgnoreCase)) -or
+    ($_.CommandLine -and $_.CommandLine.Contains("win32-x64"))
+    )
+  }
+}
 
 Remove-Item -Recurse -Force $InstallDir, $UserDataDir, $StorageRoot -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force -Path (Split-Path $SettingsPath), (Split-Path $MarkerPath) | Out-Null
@@ -20,51 +76,35 @@ $SettingsJson = @{ schemaVersion = 1; storageRoot = $StorageRoot } | ConvertTo-J
 [System.IO.File]::WriteAllText($SettingsPath, $SettingsJson, [System.Text.UTF8Encoding]::new($false))
 "CGV data must survive uninstall" | Set-Content -Path $MarkerPath -Encoding utf8
 
-$Installer = Start-Process -FilePath $InstallerPath -ArgumentList "/S" -Wait -PassThru
-if ($Installer.ExitCode -ne 0) { throw "NSIS installer failed with exit code $($Installer.ExitCode)." }
+Install-CgvDesktop
+$AppPath = Assert-InstalledLayout
+$FirstRun = Start-CgvDesktopAndWait -AppPath $AppPath
 
-$AppPath = Join-Path $InstallDir "CGV Desktop.exe"
-if (-not (Test-Path $AppPath)) { throw "Installed application not found: $AppPath" }
-
-$AppProcess = Start-Process -FilePath $AppPath -PassThru
-$Deadline = (Get-Date).AddMinutes(5)
-$ReadyUrl = ""
-while ((Get-Date) -lt $Deadline) {
-  if ($AppProcess.HasExited) {
-    $Log = if (Test-Path $LogPath) { Get-Content $LogPath -Raw } else { "no startup log" }
-    throw "CGV Desktop exited before becoming ready.`n$Log"
-  }
-  if (Test-Path $LogPath) {
-    $Log = Get-Content $LogPath -Raw
-    $Match = [regex]::Match($Log, "CGV is ready at (http://127\.0\.0\.1:\d+)")
-    if ($Match.Success) {
-      $ReadyUrl = $Match.Groups[1].Value
-      break
-    }
-  }
-  Start-Sleep -Seconds 2
+# Reinstall while CGV and its bundled R child are active. NSIS must close both,
+# replace pre-compressed assets, and keep the selected data location intact.
+Install-CgvDesktop
+if (-not $FirstRun.Process.WaitForExit(30000)) {
+  Stop-Process -Id $FirstRun.Process.Id -Force -ErrorAction SilentlyContinue
+  throw "NSIS did not close the running CGV Desktop process during reinstall."
 }
-if (-not $ReadyUrl) {
-  $Log = if (Test-Path $LogPath) { Get-Content $LogPath -Raw } else { "no startup log" }
-  throw "Timed out waiting for CGV is ready.`n$Log"
+Start-Sleep -Seconds 3
+$BundledR = Get-BundledRProcesses
+if ($BundledR) {
+  $BundledR | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+  throw "Bundled R process remained after NSIS reinstalled CGV Desktop."
 }
 
-$Response = Invoke-WebRequest -Uri $ReadyUrl -UseBasicParsing -TimeoutSec 30
-if ($Response.StatusCode -ne 200) { throw "CGV localhost returned HTTP $($Response.StatusCode)." }
+$AppPath = Assert-InstalledLayout
+if (-not (Test-Path $MarkerPath)) { throw "Reinstall removed the selected CGV data folder." }
+$SecondRun = Start-CgvDesktopAndWait -AppPath $AppPath
 
-if (-not $AppProcess.CloseMainWindow()) { throw "CGV Desktop did not accept a normal window-close request." }
-if (-not $AppProcess.WaitForExit(30000)) {
-  Stop-Process -Id $AppProcess.Id -Force -ErrorAction SilentlyContinue
+if (-not $SecondRun.Process.CloseMainWindow()) { throw "CGV Desktop did not accept a normal window-close request." }
+if (-not $SecondRun.Process.WaitForExit(30000)) {
+  Stop-Process -Id $SecondRun.Process.Id -Force -ErrorAction SilentlyContinue
   throw "CGV Desktop did not exit after its window was closed."
 }
 Start-Sleep -Seconds 3
-
-$BundledR = Get-CimInstance Win32_Process | Where-Object {
-  $_.Name -match '^R(script|term)?\.exe$' -and (
-  ($_.ExecutablePath -and $_.ExecutablePath.StartsWith($InstallDir, [System.StringComparison]::OrdinalIgnoreCase)) -or
-  ($_.CommandLine -and $_.CommandLine.Contains("win32-x64"))
-  )
-}
+$BundledR = Get-BundledRProcesses
 if ($BundledR) {
   $BundledR | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
   throw "Bundled R process remained after CGV Desktop closed."
@@ -76,4 +116,4 @@ $Uninstaller = Start-Process -FilePath $UninstallerPath -ArgumentList "/S" -Wait
 if ($Uninstaller.ExitCode -ne 0) { throw "NSIS uninstaller failed with exit code $($Uninstaller.ExitCode)." }
 if (-not (Test-Path $MarkerPath)) { throw "Uninstall removed the selected CGV data folder." }
 
-Write-Host "windows-installer-smoke-ok url=$ReadyUrl storage=$StorageRoot"
+Write-Host "windows-installer-smoke-ok firstUrl=$($FirstRun.ReadyUrl) secondUrl=$($SecondRun.ReadyUrl) storage=$StorageRoot"

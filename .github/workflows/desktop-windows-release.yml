@@ -95,7 +95,7 @@ jobs:
         working-directory: desktop
         run: npm run build:win
 
-      - name: Smoke-test unsigned installer
+      - name: Smoke-test unsigned installer and live reinstall
         shell: powershell
         run: |
           $Installer = Get-Item "desktop/dist/${{ steps.release.outputs.installer }}"
@@ -145,7 +145,7 @@ jobs:
           Copy-Item $SignedInstaller.FullName "desktop/dist/$ExpectedName" -Force
           node desktop/scripts/refresh-signed-windows-update.js "desktop/dist/$ExpectedName" "desktop/dist/latest.yml"
 
-      - name: Smoke-test signed installer
+      - name: Smoke-test signed installer and live reinstall
         shell: powershell
         run: |
           $Installer = Get-Item "desktop/dist/${{ steps.release.outputs.installer }}"

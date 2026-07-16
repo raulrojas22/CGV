@@ -8,6 +8,8 @@ const path = require("path");
 const { execFile, spawn, spawnSync } = require("child_process");
 const { downloadFile, sha256File, throwIfCanceled } = require("./download-file");
 const { extractZipArchive, validateZipArchive } = require("./secure-zip");
+const { readinessProbeUrl, waitForHttp } = require("./http-readiness");
+const { buildStorageProbeExpression, recommendedStorageRoot } = require("./storage-probe");
 const {
   bundledRuntimeResourceParts,
   executableNames,
@@ -271,38 +273,94 @@ function configuredStorageRoot() {
   return readDesktopSettings().storageRoot || "";
 }
 
-async function promptForStorageRoot() {
+async function validateStorageRootWithR(storageRoot) {
+  if (process.platform !== "win32" || !app.isPackaged) return;
+  const runtimeRoot = bundledRuntimeRoot();
+  const rscript = findRscript(runtimeRoot);
+  if (!path.isAbsolute(rscript) || !isExecutable(rscript)) {
+    throw new Error(`The bundled Rscript executable is unavailable: ${rscript}`);
+  }
+  try {
+    await runFile(rscript, [
+      "--vanilla",
+      "-e",
+      buildStorageProbeExpression(storageRoot)
+    ], { timeout: 30000 });
+    logStartupLine("electron", `R storage probe passed: ${storageRoot}`);
+  } catch (error) {
+    const rawMessage = String(error.message || "Unknown Windows write error");
+    const failureMarker = " failed: ";
+    const detail = rawMessage.includes(failureMarker)
+      ? rawMessage.slice(rawMessage.indexOf(failureMarker) + failureMarker.length).trim()
+      : rawMessage;
+    const wrapped = new Error(`Rscript could not create its temporary validation file. ${detail}`);
+    wrapped.code = "CGV_STORAGE_R_PROBE_FAILED";
+    throw wrapped;
+  }
+}
+
+async function showStorageProbeError(storageRoot, error) {
+  const recommended = recommendedStorageRoot(app.getPath("userData"));
+  const isRProbeFailure = error && error.code === "CGV_STORAGE_R_PROBE_FAILED";
+  await dialog.showMessageBox(mainWindow || undefined, {
+    type: "error",
+    title: "CGV Desktop cannot use this folder",
+    message: isRProbeFailure
+      ? "The bundled R runtime cannot write to the selected folder."
+      : "Choose a folder where your Windows account can create and update files.",
+    detail: isRProbeFailure
+      ? `Windows Controlled folder access may be blocking Rscript.exe. Choose another folder; the recommended location is:\n${recommended}\n\nSelected folder:\n${storageRoot}\n\n${error.message}`
+      : error.message
+  });
+}
+
+async function promptForStorageRoot({ useRecommendedDefault = false } = {}) {
   const current = configuredStorageRoot();
+  const recommended = recommendedStorageRoot(app.getPath("userData"));
+  try { fs.mkdirSync(recommended, { recursive: true }); } catch (_) {}
   const result = await dialog.showOpenDialog(mainWindow || undefined, {
     title: "Choose where CGV Desktop stores genomes and caches",
     buttonLabel: "Use this folder",
-    defaultPath: current || path.join(app.getPath("home"), "CGV Desktop Data"),
+    defaultPath: !useRecommendedDefault && current ? current : recommended,
     properties: ["openDirectory", "createDirectory"]
   });
   if (result.canceled || !result.filePaths[0]) return null;
+  const selectedRoot = path.resolve(result.filePaths[0]);
   try {
-    const selectedRoot = path.resolve(result.filePaths[0]);
     fs.mkdirSync(path.join(selectedRoot, "data"), { recursive: true });
     fs.mkdirSync(path.join(selectedRoot, "cache"), { recursive: true });
     fs.accessSync(selectedRoot, fs.constants.W_OK);
+    await validateStorageRootWithR(selectedRoot);
     return writeDesktopSettings(selectedRoot);
   } catch (error) {
-    await dialog.showMessageBox(mainWindow || undefined, {
-      type: "error",
-      title: "CGV Desktop cannot use this folder",
-      message: "Choose a folder where your Windows account can create and update files.",
-      detail: error.message
-    });
+    await showStorageProbeError(selectedRoot, error);
     return null;
   }
 }
 
 async function ensureStorageConfigured() {
+  const current = configuredStorageRoot();
+  if (process.platform === "win32" && app.isPackaged && current) {
+    try {
+      await validateStorageRootWithR(current);
+      return true;
+    } catch (error) {
+      logStartupLine("electron:error", `Configured storage failed the R probe: ${error.message}`);
+      await showStorageProbeError(current, error);
+      const replacement = await promptForStorageRoot({ useRecommendedDefault: true });
+      if (replacement) return true;
+      sendStatus({
+        phase: "storage-required",
+        message: "Choose a folder that the bundled R runtime can update before starting CGV Desktop."
+      });
+      return false;
+    }
+  }
   const needsSelection = needsInitialStorageSelection({
     platform: process.platform,
     isPackaged: app.isPackaged,
     env: process.env,
-    storageRoot: configuredStorageRoot()
+    storageRoot: current
   });
   if (!needsSelection) return true;
   const selected = await promptForStorageRoot();
@@ -497,42 +555,13 @@ function getFreePort() {
   });
 }
 
-function waitForHttp(url, timeoutMs = 120000) {
-  const started = Date.now();
-  return new Promise((resolve, reject) => {
-    const tick = () => {
-      const req = http.get(url, (res) => {
-        res.resume();
-        if ([200, 301, 302, 303, 307, 308].includes(res.statusCode)) {
-          resolve();
-        } else {
-          retry();
-        }
-      });
-      req.on("error", retry);
-      req.setTimeout(2500, () => {
-        req.destroy();
-        retry();
-      });
-    };
-    const retry = () => {
-      if (Date.now() - started > timeoutMs) {
-        reject(new Error(`Timed out waiting for ${url}`));
-      } else {
-        setTimeout(tick, 1000);
-      }
-    };
-    tick();
-  });
-}
-
 function recentOutputMessage(lines) {
   const recent = (lines || []).filter(Boolean).slice(-12);
   if (!recent.length) return "";
   return ` Recent R output: ${recent.join(" | ")}`;
 }
 
-function waitForShinyReady(url, childProcess, getRecentOutput, timeoutMs = 120000) {
+function waitForShinyReady(url, childProcess, getRecentOutput, timeoutMs = 240000) {
   return new Promise((resolve, reject) => {
     let settled = false;
     const finish = (callback, value) => {
@@ -541,8 +570,21 @@ function waitForShinyReady(url, childProcess, getRecentOutput, timeoutMs = 12000
       callback(value);
     };
 
-    waitForHttp(url, timeoutMs).then(
-      () => finish(resolve),
+    const probeUrl = readinessProbeUrl(url);
+    waitForHttp(probeUrl, {
+      timeoutMs,
+      requestTimeoutMs: 15000,
+      retryDelayMs: 1000,
+      onRetry: ({ attempt, elapsedMs, reason }) => {
+        if (attempt === 1 || attempt % 10 === 0) {
+          logStartupLine("electron", `Waiting for Shiny health check (${Math.round(elapsedMs / 1000)}s): ${reason}`);
+        }
+      }
+    }).then(
+      (result) => {
+        logStartupLine("electron", `Shiny health check passed after ${result.elapsedMs} ms: ${probeUrl}`);
+        finish(resolve);
+      },
       (error) => {
         const detail = recentOutputMessage(getRecentOutput());
         finish(reject, new Error(`${error.message}.${detail}`));
@@ -1028,9 +1070,14 @@ async function readManifestWithState() {
   };
 }
 
-function runFile(command, args) {
+function runFile(command, args, options = {}) {
   return new Promise((resolve, reject) => {
-    execFile(command, args, { encoding: "utf8", maxBuffer: 1024 * 1024 * 20, windowsHide: true }, (error, stdout, stderr) => {
+    execFile(command, args, {
+      encoding: "utf8",
+      maxBuffer: 1024 * 1024 * 20,
+      windowsHide: true,
+      ...options
+    }, (error, stdout, stderr) => {
       if (error) {
         reject(new Error(`${command} ${args.join(" ")} failed: ${stderr || stdout || error.message}`));
         return;

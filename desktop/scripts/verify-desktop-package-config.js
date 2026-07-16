@@ -120,6 +120,9 @@ if (win.requestedExecutionLevel !== "asInvoker" || nsis.oneClick !== false || ns
 if (nsis.allowToChangeInstallationDirectory !== true || nsis.deleteAppDataOnUninstall !== false) {
   throw new Error("Windows NSIS must allow an install-directory choice and preserve app data on uninstall.");
 }
+if (!Array.isArray(nsis.preCompressedFileExtensions) || nsis.preCompressedFileExtensions.length !== 0) {
+  throw new Error("Windows NSIS must keep pre-compressed assets inside the main archive to prevent literal $INSTDIR output paths.");
+}
 if (!String(nsis.artifactName || "").includes("Windows-${arch}-Setup")) {
   throw new Error("Windows NSIS artifact name must be stable and architecture-specific.");
 }
