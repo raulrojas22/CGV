@@ -143,6 +143,13 @@ const nsisInclude = fs.readFileSync(path.join(desktopRoot, "build", "installer.n
 if (!/StrCpy\s+\$isForceCurrentInstall\s+"1"/.test(nsisInclude)) {
   throw new Error("Windows NSIS custom install mode must force current-user installation.");
 }
+if (
+  !/!macro\s+customCheckAppRunning/.test(nsisInclude) ||
+  !/taskkill[^\r\n]*\/T\s+\/F/i.test(nsisInclude) ||
+  !/\$\$_\.ExecutablePath/.test(nsisInclude)
+) {
+  throw new Error("Windows NSIS must close the complete Electron/R process tree and clean only orphaned processes under the CGV install directory.");
+}
 if (!mainJs.includes('host=\'127.0.0.1\'')) {
   throw new Error("Desktop Shiny must listen on 127.0.0.1 only.");
 }
