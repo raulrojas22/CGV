@@ -181,9 +181,10 @@ if (!/StrCpy\s+\$isForceCurrentInstall\s+"1"/.test(nsisInclude)) {
 if (
   !/!macro\s+customCheckAppRunning/.test(nsisInclude) ||
   !/taskkill[^\r\n]*\/T\s+\/F/i.test(nsisInclude) ||
+  !/\$\$attempt\s+-lt\s+4/.test(nsisInclude) ||
   !/\$\$_\.ExecutablePath/.test(nsisInclude)
 ) {
-  throw new Error("Windows NSIS must close the complete Electron/R process tree and clean only orphaned processes under the CGV install directory.");
+  throw new Error("Windows NSIS must close the complete Electron/R process tree and retry cleanup only under the CGV install directory.");
 }
 if (!mainJs.includes('host=\'127.0.0.1\'')) {
   throw new Error("Desktop Shiny must listen on 127.0.0.1 only.");
@@ -202,7 +203,9 @@ if (
 for (const requiredFragment of [
   "CGV renderer loaded at",
   "app-source-manifest.json",
-  "CGV recovered automatically at"
+  "CGV recovered automatically at",
+  "Wait-ForNoBundledRProcesses",
+  "Format-BundledRProcesses"
 ]) {
   if (!windowsSmokeTest.includes(requiredFragment)) {
     throw new Error(`Windows smoke test is missing a current-source/recovery assertion: ${requiredFragment}`);

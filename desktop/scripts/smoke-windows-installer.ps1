@@ -98,6 +98,28 @@ function Get-BundledRProcesses {
   }
 }
 
+function Wait-ForNoBundledRProcesses {
+  param([int]$TimeoutSeconds = 15)
+
+  $Deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+  $Remaining = @()
+  do {
+    $Remaining = @(Get-BundledRProcesses)
+    if ($Remaining.Count -eq 0) { return }
+    Start-Sleep -Milliseconds 500
+  } while ((Get-Date) -lt $Deadline)
+
+  return $Remaining
+}
+
+function Format-BundledRProcesses {
+  param([object[]]$Processes)
+
+  return (($Processes | ForEach-Object {
+    "pid=$($_.ProcessId) parent=$($_.ParentProcessId) path=$($_.ExecutablePath) command=$($_.CommandLine)"
+  }) -join "`n")
+}
+
 function Wait-ForAutomaticRecovery {
   param(
     [System.Diagnostics.Process]$AppProcess
@@ -149,11 +171,11 @@ if (-not $FirstRun.Process.WaitForExit(30000)) {
   Stop-Process -Id $FirstRun.Process.Id -Force -ErrorAction SilentlyContinue
   throw "NSIS did not close the running CGV Desktop process during reinstall."
 }
-Start-Sleep -Seconds 3
-$BundledR = Get-BundledRProcesses
+$BundledR = @(Wait-ForNoBundledRProcesses)
 if ($BundledR) {
+  $ProcessDetails = Format-BundledRProcesses -Processes $BundledR
   $BundledR | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
-  throw "Bundled R process remained after NSIS reinstalled CGV Desktop."
+  throw "Bundled R process remained after NSIS reinstalled CGV Desktop.`n$ProcessDetails"
 }
 
 $AppPath = Assert-InstalledLayout
@@ -165,11 +187,11 @@ if (-not $SecondRun.Process.WaitForExit(30000)) {
   Stop-Process -Id $SecondRun.Process.Id -Force -ErrorAction SilentlyContinue
   throw "CGV Desktop did not exit after its window was closed."
 }
-Start-Sleep -Seconds 3
-$BundledR = Get-BundledRProcesses
+$BundledR = @(Wait-ForNoBundledRProcesses)
 if ($BundledR) {
+  $ProcessDetails = Format-BundledRProcesses -Processes $BundledR
   $BundledR | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
-  throw "Bundled R process remained after CGV Desktop closed."
+  throw "Bundled R process remained after CGV Desktop closed.`n$ProcessDetails"
 }
 
 $UninstallerPath = Join-Path $InstallDir "Uninstall CGV Desktop.exe"
