@@ -11,6 +11,10 @@ const { extractZipArchive, validateZipArchive } = require("./secure-zip");
 const { readinessProbeUrl, waitForHttp } = require("./http-readiness");
 const { buildStorageProbeExpression, recommendedStorageRoot } = require("./storage-probe");
 const {
+  normalizeAnnotationCacheDirectory,
+  portableAnnotationCacheFilename
+} = require("./annotation-cache-paths");
+const {
   bundledRuntimeResourceParts,
   executableNames,
   isUsableExecutable,
@@ -473,7 +477,8 @@ function migrateAnnotationIndexCache(sourceCacheDir, cacheRoot, options = {}) {
   let alreadyPresent = 0;
   for (const file of rdsFiles) {
     const sourcePath = path.join(sourceCacheDir, file);
-    const targetPath = path.join(targetCacheDir, file);
+    const portableFile = portableAnnotationCacheFilename(file, { force: true });
+    const targetPath = path.join(targetCacheDir, portableFile);
     if (!fs.existsSync(targetPath)) {
       fs.copyFileSync(sourcePath, targetPath);
       migrated += 1;
@@ -737,6 +742,13 @@ async function startShiny() {
   seedBundledData(dataRoot);
   seedDemoData(dataRoot);
   seedBundledCache(cacheRoot);
+  const repairedCache = normalizeAnnotationCacheDirectory(path.join(cacheRoot, "annotation_index"));
+  if (repairedCache.compacted > 0 || repairedCache.duplicatesRemoved > 0) {
+    logStartupLine(
+      "electron",
+      `Repaired ${repairedCache.compacted + repairedCache.duplicatesRemoved} long annotation cache path(s).`
+    );
+  }
 
   const runtimeRoot = await prepareRuntime();
   const port = Number(process.env.APP_PORT || await getFreePort());
@@ -1114,12 +1126,30 @@ function runFile(command, args, options = {}) {
       ...options
     }, (error, stdout, stderr) => {
       if (error) {
-        reject(new Error(`${command} ${args.join(" ")} failed: ${stderr || stdout || error.message}`));
+        const detail = String(stderr || stdout || error.message || "Unknown process error").trim();
+        const exitState = error.signal
+          ? `signal=${error.signal}`
+          : `exit=${String(error.code ?? "unknown")}`;
+        const wrapped = new Error(`${path.basename(command)} failed: ${detail} (${exitState})`);
+        wrapped.code = error.code;
+        wrapped.signal = error.signal;
+        reject(wrapped);
         return;
       }
       resolve({ stdout, stderr });
     });
   });
+}
+
+async function runRScriptText(rscript, rCode, options = {}) {
+  const scriptRoot = fs.mkdtempSync(path.join(os.tmpdir(), "cgv-r-script-"));
+  const scriptPath = path.join(scriptRoot, "script.R");
+  try {
+    fs.writeFileSync(scriptPath, rCode, "utf8");
+    return await runFile(rscript, ["--vanilla", scriptPath], options);
+  } finally {
+    fs.rmSync(scriptRoot, { recursive: true, force: true });
+  }
 }
 
 function readTsvRows(filePath) {
@@ -1243,22 +1273,40 @@ async function warmDatasetAfterInstall(dataset, dataRoot, cacheRoot) {
       library(purrr)
       library(stringr)
     })
+    warm_progress <- function(message) {
+      cat(sprintf("[warm] %s\\n", message), file=stderr())
+      flush(stderr())
+    }
     source(${JSON.stringify(path.join(root, "R", "utils.R"))})
     source(${JSON.stringify(path.join(root, "R", "server_go_domain.R"))})
     alias_file <- ${JSON.stringify(aliasSqlitePath)}
     if (file.exists(alias_file)) {
-      source(${JSON.stringify(path.join(root, "R", "alias_resolution.R"))})
-      alias_ok <- isTRUE(warm_alias_index(${JSON.stringify(speciesId)}, base_dir=${JSON.stringify(root)}))
-      if (!isTRUE(alias_ok)) {
-        stop("alias index warmup failed for ${speciesId}", call. = FALSE)
+      warm_progress("validating alias index")
+      if (!requireNamespace("DBI", quietly=TRUE) || !requireNamespace("RSQLite", quietly=TRUE)) {
+        stop("DBI and RSQLite are required to validate the alias index", call. = FALSE)
       }
-      cat("alias index ready\\n")
+      alias_con <- NULL
+      alias_ok <- tryCatch({
+        alias_con <- DBI::dbConnect(RSQLite::SQLite(), alias_file)
+        alias_probe <- DBI::dbGetQuery(alias_con, "SELECT 1 FROM alias_index LIMIT 1")
+        is.data.frame(alias_probe) && nrow(alias_probe) == 1L
+      }, error = function(e) {
+        warm_progress(sprintf("alias validation error: %s", e$message))
+        FALSE
+      }, finally = {
+        if (!is.null(alias_con)) try(DBI::dbDisconnect(alias_con), silent=TRUE)
+      })
+      if (!isTRUE(alias_ok)) {
+        stop("alias index validation failed for ${speciesId}", call. = FALSE)
+      }
+      warm_progress("alias index ready")
     }
     ann_path <- ${JSON.stringify(annotationPath)}
     if (nzchar(ann_path) && file.exists(ann_path)) {
+      warm_progress("preparing annotation cache")
       existing_cache <- find_existing_gff_disk_index_path(ann_path, cache_kind="gene_light", base_dir=${JSON.stringify(root)})
       if (nzchar(existing_cache) && file.exists(existing_cache)) {
-        cat("annotation cache already present\\n")
+        warm_progress("portable annotation cache found")
         idx <- load_gff_index_from_disk(ann_path, cache_kind="gene_light", base_dir=${JSON.stringify(root)})
       } else {
         invisible(capture.output({
@@ -1267,10 +1315,22 @@ async function warmDatasetAfterInstall(dataset, dataRoot, cacheRoot) {
         if (is.null(idx)) {
           stop("annotation cache precompute returned NULL", call. = FALSE)
         }
-        cat("annotation cache regenerated\\n")
+        warm_progress("annotation cache regenerated")
       }
       if (is.null(idx)) {
         idx <- precompute_annotation_index_cache(ann_path, base_dir=${JSON.stringify(root)})
+      }
+      if (!is.list(idx) || !is.data.frame(idx$genes_df)) {
+        stop("annotation cache is unreadable or incomplete", call. = FALSE)
+      }
+      canonical_cache <- get_gff_disk_index_path(ann_path, cache_kind="gene_light", base_dir=${JSON.stringify(root)})
+      if (!file.exists(canonical_cache) && !isTRUE(save_gff_index_to_disk(
+        ann_path,
+        slim_gff_gene_light_index(idx),
+        cache_kind="gene_light",
+        base_dir=${JSON.stringify(root)}
+      ))) {
+        stop("portable annotation cache could not be rebased", call. = FALSE)
       }
       autocomplete_cache <- ensure_gff_autocomplete_cache(
         ann_path,
@@ -1280,11 +1340,11 @@ async function warmDatasetAfterInstall(dataset, dataRoot, cacheRoot) {
       if (is.null(autocomplete_cache)) {
         stop("autocomplete sidecar preparation failed", call. = FALSE)
       }
-      cat("autocomplete sidecar ready\\n")
+      warm_progress("autocomplete sidecar ready")
       if (!isTRUE(slim_gff_gene_light_index_file(ann_path, base_dir=${JSON.stringify(root)}))) {
         stop("annotation cache slimming failed", call. = FALSE)
       }
-      cat("annotation cache slimmed\\n")
+      warm_progress("annotation cache ready")
     }
     go_registry_path <- file.path(${JSON.stringify(dataRoot)}, "go_annotations", "registry.tsv")
     if (file.exists(go_registry_path)) {
@@ -1310,14 +1370,15 @@ async function warmDatasetAfterInstall(dataset, dataRoot, cacheRoot) {
         if (!isTRUE(valid_index) && file.exists(gaf_path)) {
           cache_index <- go_index_cache_path(gaf_path, base_dir=${JSON.stringify(root)})
           build_go_gaf_index(gaf_path, cache_index, force=FALSE)
-          cat("GO index generated in cache\\n")
+          warm_progress("GO index generated in cache")
         } else if (isTRUE(valid_index)) {
-          cat("GO index ready\\n")
+          warm_progress("GO index ready")
         }
       }
     }
+    warm_progress("dataset ready")
   `;
-  return runFile(rscript, ["-e", rCode]);
+  return runRScriptText(rscript, rCode, { timeout: 10 * 60 * 1000 });
 }
 
 function stopShinyProcess() {

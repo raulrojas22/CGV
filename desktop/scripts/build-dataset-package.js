@@ -2,6 +2,7 @@ const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 const { spawnSync } = require("child_process");
+const { normalizeAnnotationCacheDirectory } = require("../src/annotation-cache-paths");
 
 const repoRoot = path.resolve(__dirname, "..", "..");
 const desktopRoot = path.resolve(__dirname, "..");
@@ -257,6 +258,11 @@ if (annotationPath) {
     `;
     const result = spawnSync(rscript, ["-e", rCode], { encoding: "utf8", stdio: "inherit" });
     if (result.status === 0) {
+      const cacheDir = path.join(stageRoot, "cache", "annotation_index");
+      const normalized = normalizeAnnotationCacheDirectory(cacheDir, { force: true });
+      if (normalized.compacted > 0 || normalized.duplicatesRemoved > 0) {
+        console.log(`Annotation cache filenames compacted (${normalized.compacted + normalized.duplicatesRemoved} file(s)).`);
+      }
       const cacheFiles = annotationCacheFiles(stageRoot);
       if (cacheFiles.length > 0) {
         console.log(`Annotation index cache generated (${cacheFiles.length} file(s)).`);

@@ -4699,23 +4699,27 @@ function(input, output, session) {
             }
             annotations_ready <- length(ann) == 0L || all(vapply(ann, annotation_is_warmed, logical(1)))
             genomes_ready <- length(existing_genomes) == 0L || all(vapply(existing_genomes, genome_is_warmed, logical(1)))
-            ready <- isTRUE(annotations_ready)
-            state$ready(ready)
+            preload_ready <- isTRUE(annotations_ready)
+            # `ready` is the search gate, not a claim that every optional
+            # preload succeeded. Always release it so a failed cache warmup
+            # cannot leave a queued gene search waiting forever.
+            state$ready(TRUE)
             app_perf_mark(
                 prep_perf,
-                sprintf("complete ready=%s annotations=%d genomes=%d", ready, length(ann), length(existing_genomes)),
+                sprintf("complete ready=%s annotations=%d genomes=%d", preload_ready, length(ann), length(existing_genomes)),
                 "ORG_FAST"
             )
-            if (ready) {
+            if (preload_ready) {
                 if (is.function(on_complete)) {
                     tryCatch(on_complete(), error = function(e) NULL)
                 }
             } else {
-                msg <- "Search indexes could not be prepared. Re-select the organism or disable fast organism sync."
+                msg <- "Search index preload was incomplete; continuing with a direct search. The first result may take longer."
                 state$status(msg)
-                emit_popup_status(state$context, msg, tone = "error", clear = TRUE)
+                emit_popup_status(state$context, msg, tone = "warning", clear = TRUE)
+                app_debug_log("[Cache] ", state$context, ": preload failed; released queued search gate.")
             }
-            invisible(ready)
+            invisible(preload_ready)
         }
 
         run_next <- NULL

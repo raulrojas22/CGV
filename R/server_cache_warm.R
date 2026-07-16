@@ -108,12 +108,23 @@ init_cache_warm_domain <- function(append_status_fn = NULL) {
         }
         warmed_ok <- FALSE
         elapsed <- system.time({
-            idx <- tryCatch(build_gff_gene_light_index(p), error = function(e) NULL)
+            idx <- tryCatch(
+                build_gff_gene_light_index(p),
+                error = function(e) {
+                    if (exists("app_debug_log", mode = "function")) {
+                        app_debug_log("[Cache] Annotation warm failed for ", basename(p), ": ", e$message)
+                    }
+                    NULL
+                }
+            )
             if (!is.null(idx) && is.list(idx) && !is.null(idx$genes_df)) {
-                tryCatch(
+                saved_to_disk <- tryCatch(
                     save_gff_index_to_disk(p, idx, cache_kind = "gene_light", base_dir = "."),
                     error = function(e) FALSE
                 )
+                if (!isTRUE(saved_to_disk) && exists("app_debug_log", mode = "function")) {
+                    app_debug_log("[Cache] Annotation index could not be persisted for ", basename(p), ".")
+                }
                 genes_tbl <- tryCatch(
                     get_genes_table_from_annotation(p),
                     error = function(e) NULL

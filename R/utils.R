@@ -1139,6 +1139,7 @@ find_existing_gff_disk_index_path <- function(file_path, cache_kind = "gene_ligh
         known_annotation_basenames = basename(as.character(file_path %||% ""))
     )
     candidates <- files[file_families == target_family]
+    candidates <- candidates[file.exists(candidates)]
     if (length(candidates) == 0L) {
         return("")
     }
@@ -1161,7 +1162,7 @@ load_gff_index_from_disk <- function(file_path, cache_kind = "gene_light", base_
 
     expected_path <- get_gff_disk_index_path(file_path, cache_kind = cache_kind, base_dir = base_dir)
     if (nzchar(expected_path) && !identical(cpath, expected_path) && !file.exists(expected_path)) {
-        try(saveRDS(idx_obj, expected_path, compress = "gzip"), silent = TRUE)
+        try(atomic_save_rds(idx_obj, expected_path, compress = "gzip"), silent = TRUE)
     }
     idx_obj
 }
@@ -1244,15 +1245,19 @@ build_gff_autocomplete_cache <- function(file_path, idx, max_suggestions = 20000
     )
 }
 
-validate_gff_autocomplete_cache <- function(cache_obj, file_path) {
-    p <- as.character(file_path %||% "")
-    expected_key <- if (nzchar(p) && file.exists(p)) gff_cache_key(p) else ""
+validate_gff_autocomplete_cache_structure <- function(cache_obj) {
     is.list(cache_obj) &&
         identical(suppressWarnings(as.integer(cache_obj$version %||% NA_integer_)), .gff_autocomplete_cache_version) &&
-        identical(as.character(cache_obj$annotation_key %||% ""), expected_key) &&
         is.character(cache_obj$display) &&
         is.character(cache_obj$keys) &&
         length(cache_obj$display) == length(cache_obj$keys)
+}
+
+validate_gff_autocomplete_cache <- function(cache_obj, file_path) {
+    p <- as.character(file_path %||% "")
+    expected_key <- if (nzchar(p) && file.exists(p)) gff_cache_key(p) else ""
+    validate_gff_autocomplete_cache_structure(cache_obj) &&
+        identical(as.character(cache_obj$annotation_key %||% ""), expected_key)
 }
 
 load_gff_autocomplete_cache <- function(file_path, base_dir = ".") {
@@ -1275,7 +1280,17 @@ load_gff_autocomplete_cache <- function(file_path, base_dir = ".") {
         NULL
     }
     if (!validate_gff_autocomplete_cache(cache_obj, p)) {
-        return(NULL)
+        if (!validate_gff_autocomplete_cache_structure(cache_obj)) {
+            return(NULL)
+        }
+        # Dataset packages are built in a staging directory. Their sidecar is
+        # still valid after installation, but its embedded path key must be
+        # rebound to the installed annotation before Windows can use it.
+        cache_obj$annotation_key <- gff_cache_key(p)
+        saved <- save_gff_index_to_disk(p, cache_obj, cache_kind = "autocomplete", base_dir = base_dir)
+        if (!isTRUE(saved)) {
+            return(NULL)
+        }
     }
     assign(key, cache_obj, envir = .gff_autocomplete_cache_validation)
     cache_obj

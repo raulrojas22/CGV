@@ -8,6 +8,9 @@ const packageJsonPath = path.join(desktopRoot, "package.json");
 const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, "utf8"));
 const mainJsPath = path.join(desktopRoot, "src", "main.js");
 const mainJs = fs.readFileSync(mainJsPath, "utf8");
+const annotationCachePathsJs = fs.readFileSync(path.join(desktopRoot, "src", "annotation-cache-paths.js"), "utf8");
+const datasetPackageBuilderJs = fs.readFileSync(path.join(desktopRoot, "scripts", "build-dataset-package.js"), "utf8");
+const serverSource = fs.readFileSync(path.join(repoRoot, "server.R"), "utf8");
 const downloadJsPath = path.join(repoRoot, "www", "js", "cgv_desktop_downloads.js");
 const downloadUiPath = path.join(repoRoot, "R", "ui_desktop_downloads.R");
 
@@ -192,6 +195,23 @@ if (
 }
 if (!mainJs.includes('host=\'127.0.0.1\'')) {
   throw new Error("Desktop Shiny must listen on 127.0.0.1 only.");
+}
+if (
+  !mainJs.includes("normalizeAnnotationCacheDirectory") ||
+  !mainJs.includes("portableAnnotationCacheFilename(file, { force: true })") ||
+  !mainJs.includes('runFile(rscript, ["--vanilla", scriptPath]') ||
+  mainJs.includes('runFile(rscript, ["-e", rCode]') ||
+  !annotationCachePathsJs.includes("dataset_packages_work_") ||
+  !datasetPackageBuilderJs.includes("normalizeAnnotationCacheDirectory(cacheDir, { force: true })")
+) {
+  throw new Error("Desktop dataset caches must use portable Windows-safe filenames and a temporary R warmup script.");
+}
+if (
+  !serverSource.includes("Always release it so a failed cache warmup") ||
+  !serverSource.includes("state$ready(TRUE)") ||
+  !serverSource.includes("continuing with a direct search")
+) {
+  throw new Error("A failed cache preload must release queued gene searches instead of waiting forever.");
 }
 const preloadJs = fs.readFileSync(path.join(desktopRoot, "src", "preload.js"), "utf8");
 const keepaliveJs = fs.readFileSync(path.join(repoRoot, "www", "js", "keepalive.js"), "utf8");
