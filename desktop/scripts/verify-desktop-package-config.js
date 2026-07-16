@@ -183,7 +183,9 @@ if (
   !/taskkill[^\r\n]*\/T\s+\/F/i.test(nsisInclude) ||
   !/\$\$attempt\s+-lt\s+4/.test(nsisInclude) ||
   !/resources\\runtime/.test(nsisInclude) ||
+  !/runtimeRootForward\s*=\s*\$\$runtimeRoot\.Replace/.test(nsisInclude) ||
   !/\$\$_\.CommandLine\.IndexOf\(\$\$runtimeRoot/.test(nsisInclude) ||
+  !/\$\$_\.CommandLine\.IndexOf\(\$\$runtimeRootForward/.test(nsisInclude) ||
   !/\$\$_\.ExecutablePath/.test(nsisInclude)
 ) {
   throw new Error("Windows NSIS must close the complete Electron/R process tree and retry cleanup only under the CGV install directory.");

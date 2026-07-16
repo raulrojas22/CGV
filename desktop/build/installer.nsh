@@ -14,8 +14,10 @@
   Sleep 1000
 
   ; Also remove an orphaned bundled process left by an earlier abnormal exit.
-  ; The path guard ensures unrelated R installations are never touched.
-  nsExec::ExecToLog `"$PowerShellPath" -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "$$root = '$INSTDIR'; $$runtimeRoot = Join-Path $$root 'resources\runtime'; for ($$attempt = 0; $$attempt -lt 4; $$attempt++) { Get-CimInstance -ClassName Win32_Process | Where-Object { ($$_.ExecutablePath -and $$_.ExecutablePath.StartsWith($$root, [System.StringComparison]::OrdinalIgnoreCase)) -or (('R.exe','Rscript.exe','Rterm.exe') -contains $$_.Name -and $$_.CommandLine -and $$_.CommandLine.IndexOf($$runtimeRoot, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) } | ForEach-Object { Stop-Process -Id $$_.ProcessId -Force -ErrorAction SilentlyContinue }; Start-Sleep -Milliseconds 500 }"`
+  ; R/parallelly may expose its executable as an 8.3 path while placing the
+  ; long runtime path in CommandLine with forward slashes. Match both slash
+  ; forms of the exact CGV runtime root so unrelated R installations are safe.
+  nsExec::ExecToLog `"$PowerShellPath" -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "$$root = '$INSTDIR'; $$runtimeRoot = Join-Path $$root 'resources\runtime'; $$runtimeRootForward = $$runtimeRoot.Replace('\','/'); for ($$attempt = 0; $$attempt -lt 4; $$attempt++) { Get-CimInstance -ClassName Win32_Process | Where-Object { ($$_.ExecutablePath -and $$_.ExecutablePath.StartsWith($$root, [System.StringComparison]::OrdinalIgnoreCase)) -or (('R.exe','Rscript.exe','Rterm.exe') -contains $$_.Name -and $$_.CommandLine -and ($$_.CommandLine.IndexOf($$runtimeRoot, [System.StringComparison]::OrdinalIgnoreCase) -ge 0 -or $$_.CommandLine.IndexOf($$runtimeRootForward, [System.StringComparison]::OrdinalIgnoreCase) -ge 0)) } | ForEach-Object { Stop-Process -Id $$_.ProcessId -Force -ErrorAction SilentlyContinue }; Start-Sleep -Milliseconds 500 }"`
   Pop $0
   Sleep 1000
 !macroend
