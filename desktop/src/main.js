@@ -1396,7 +1396,10 @@ async function startShinyAndLoad() {
   if (shinyStartPromise) return shinyStartPromise;
   shinyStartPromise = (async () => {
     const url = await startShiny();
-    if (mainWindow && !mainWindow.isDestroyed()) await mainWindow.loadURL(url);
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      await mainWindow.loadURL(url);
+      logStartupLine("electron", `CGV renderer loaded at ${url}`);
+    }
     return url;
   })();
   try {

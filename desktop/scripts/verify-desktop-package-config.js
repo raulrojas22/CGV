@@ -190,12 +190,23 @@ if (!mainJs.includes('host=\'127.0.0.1\'')) {
 }
 const preloadJs = fs.readFileSync(path.join(desktopRoot, "src", "preload.js"), "utf8");
 const keepaliveJs = fs.readFileSync(path.join(repoRoot, "www", "js", "keepalive.js"), "utf8");
+const windowsSmokeTest = fs.readFileSync(path.join(desktopRoot, "scripts", "smoke-windows-installer.ps1"), "utf8");
 if (
   !mainJs.includes('ipcMain.handle("cgv:recover-analysis"') ||
+  !mainJs.includes("CGV renderer loaded at") ||
   !preloadJs.includes('recoverAnalysis: () => ipcRenderer.invoke("cgv:recover-analysis")') ||
   !keepaliveJs.includes("scheduleDesktopRecovery")
 ) {
   throw new Error("CGV Desktop must recover a disconnected local Shiny session without repeated manual page reloads.");
+}
+for (const requiredFragment of [
+  "CGV renderer loaded at",
+  "app-source-manifest.json",
+  "CGV recovered automatically at"
+]) {
+  if (!windowsSmokeTest.includes(requiredFragment)) {
+    throw new Error(`Windows smoke test is missing a current-source/recovery assertion: ${requiredFragment}`);
+  }
 }
 if (/execFile\([^\n]*["']unzip["']/.test(mainJs)) {
   throw new Error("Desktop dataset extraction must not invoke an external unzip command.");

@@ -71,7 +71,7 @@ function Start-CgvDesktopAndWait {
     }
     if (Test-Path $LogPath) {
       $Log = Get-Content $LogPath -Raw
-      $Match = [regex]::Match($Log, "CGV is ready at (http://127\.0\.0\.1:\d+)")
+      $Match = [regex]::Match($Log, "CGV renderer loaded at (http://127\.0\.0\.1:\d+)")
       if ($Match.Success) {
         $ReadyUrl = $Match.Groups[1].Value
         break
@@ -81,7 +81,7 @@ function Start-CgvDesktopAndWait {
   }
   if (-not $ReadyUrl) {
     $Log = if (Test-Path $LogPath) { Get-Content $LogPath -Raw } else { "no startup log" }
-    throw "Timed out waiting for CGV is ready.`n$Log"
+    throw "Timed out waiting for the CGV renderer to finish loading.`n$Log"
   }
 
   $Response = Invoke-WebRequest -Uri $ReadyUrl -UseBasicParsing -TimeoutSec 30
