@@ -25,6 +25,7 @@ jobs:
     timeout-minutes: 300
     env:
       CSC_IDENTITY_AUTO_DISCOVERY: "false"
+      CGV_DESKTOP_SOURCE_REVISION: ${{ github.sha }}
       RELEASE_REPOSITORY: raulrojas22/CGV-Desktop-Releases
 
     steps:
@@ -88,6 +89,7 @@ jobs:
       - name: Prepare locked common GO assets and release guardrails
         working-directory: desktop
         run: |
+          npm run prepare:source
           npm run prepare:go
           npm run verify:config
 

@@ -12,20 +12,178 @@ UNIPROT_REST <- "https://rest.uniprot.org/uniprotkb/search"
 
 # Caché en memoria para evitar repetir búsquedas de red idénticas
 .alias_memory_cache <- new.env(parent = emptyenv())
-.alias_memory_cache_version <- "v3"
+.alias_memory_cache_version <- "v4"
 .alias_memory_cache_max_entries <- 120L
+.alias_memory_cache_ttl_sec <- 7200
+.alias_disk_cache_max_entries <- 240L
+.alias_disk_cache_ttl_sec <- 2592000
 .alias_memory_cache_access_order <- character(0)
 
+# Organism-to-taxid cache: avoids repeated NCBI taxonomy HTTP lookups.
+.taxid_cache <- new.env(parent = emptyenv())
+.taxid_registry_loaded <- FALSE
+
+resolve_taxid_local <- function(organism) {
+    org_key <- tolower(trimws(as.character(organism %||% "")))
+    if (!nzchar(org_key)) return(NULL)
+    if (exists(org_key, envir = .taxid_cache, inherits = FALSE)) {
+        return(get(org_key, envir = .taxid_cache, inherits = FALSE))
+    }
+    registry_path <- file.path("annotations", "registry.tsv")
+    if (!file.exists(registry_path)) {
+        assign(org_key, NA_character_, envir = .taxid_cache)
+        return(NULL)
+    }
+    if (!isTRUE(.taxid_registry_loaded)) {
+        tryCatch({
+            reg <- utils::read.delim(registry_path, sep = "\t", header = TRUE,
+                                     stringsAsFactors = FALSE, comment.char = "",
+                                     quote = "", check.names = FALSE)
+            for (i in seq_len(nrow(reg))) {
+                org_name <- tolower(trimws(as.character(reg$organism[i] %||% "")))
+                tx_val <- suppressWarnings(as.integer(reg$taxid[i]))
+                if (nzchar(org_name) && is.finite(tx_val) && !is.na(tx_val)) {
+                    assign(org_name, tx_val, envir = .taxid_cache)
+                }
+            }
+            .taxid_registry_loaded <<- TRUE
+        }, error = function(e) NULL)
+    }
+    cached <- get0(org_key, envir = .taxid_cache, inherits = FALSE, ifnotfound = NA_integer_)
+    if (is.null(cached) || identical(cached, NA_integer_)) NULL else as.integer(cached)
+}
+
+.alias_timeout_mygene <- 3L
+.alias_timeout_ncbi <- 5L
+.alias_timeout_uniprot <- 3L
+.alias_timeout_ensembl <- 4L
+get_alias_timeout_mygene <- function() {
+    raw <- suppressWarnings(as.integer(Sys.getenv("APP_ALIAS_TIMEOUT_MYGENE", as.character(.alias_timeout_mygene))))
+    if (!is.finite(raw) || is.na(raw) || raw < 1L) .alias_timeout_mygene else raw
+}
+get_alias_timeout_ncbi <- function() {
+    raw <- suppressWarnings(as.integer(Sys.getenv("APP_ALIAS_TIMEOUT_NCBI", as.character(.alias_timeout_ncbi))))
+    if (!is.finite(raw) || is.na(raw) || raw < 1L) .alias_timeout_ncbi else raw
+}
+get_alias_timeout_uniprot <- function() {
+    raw <- suppressWarnings(as.integer(Sys.getenv("APP_ALIAS_TIMEOUT_UNIPROT", as.character(.alias_timeout_uniprot))))
+    if (!is.finite(raw) || is.na(raw) || raw < 1L) .alias_timeout_uniprot else raw
+}
+get_alias_timeout_ensembl <- function() {
+    raw <- suppressWarnings(as.integer(Sys.getenv("APP_ALIAS_TIMEOUT_ENSEMBL", as.character(.alias_timeout_ensembl))))
+    if (!is.finite(raw) || is.na(raw) || raw < 1L) .alias_timeout_ensembl else raw
+}
+
+get_alias_memory_cache_max_entries <- function() {
+    raw <- suppressWarnings(as.integer(Sys.getenv("APP_ALIAS_MEMORY_CACHE_MAX_ENTRIES", as.character(.alias_memory_cache_max_entries))))
+    if (!is.finite(raw) || is.na(raw) || raw < 1L) {
+        return(.alias_memory_cache_max_entries)
+    }
+    raw
+}
+
+get_alias_memory_cache_ttl_sec <- function() {
+    raw <- suppressWarnings(as.numeric(Sys.getenv("APP_ALIAS_MEMORY_CACHE_TTL_SEC", as.character(.alias_memory_cache_ttl_sec))))
+    if (!is.finite(raw) || is.na(raw) || raw <= 0) {
+        return(.alias_memory_cache_ttl_sec)
+    }
+    raw
+}
+
+get_alias_disk_cache_max_entries <- function() {
+    raw <- suppressWarnings(as.integer(Sys.getenv("APP_ALIAS_DISK_CACHE_MAX_ENTRIES", as.character(.alias_disk_cache_max_entries))))
+    if (!is.finite(raw) || is.na(raw) || raw < 1L) {
+        return(.alias_disk_cache_max_entries)
+    }
+    raw
+}
+
+get_alias_disk_cache_ttl_sec <- function() {
+    raw <- suppressWarnings(as.numeric(Sys.getenv("APP_ALIAS_DISK_CACHE_TTL_SEC", as.character(.alias_disk_cache_ttl_sec))))
+    if (!is.finite(raw) || is.na(raw) || raw <= 0) {
+        return(.alias_disk_cache_ttl_sec)
+    }
+    raw
+}
+
+get_alias_disk_cache_dir <- function() {
+    raw <- trimws(as.character(Sys.getenv("APP_ALIAS_DISK_CACHE_DIR", "") %||% ""))
+    if (!nzchar(raw)) {
+        cache_root <- trimws(as.character(Sys.getenv("CGV_CACHE_DIR", Sys.getenv("APP_CACHE_ROOT", "")) %||% ""))
+        raw <- if (nzchar(cache_root)) file.path(cache_root, "external_alias") else file.path("cache", "external_alias")
+    }
+    normalizePath(raw, winslash = "/", mustWork = FALSE)
+}
+
+alias_disk_cache_path <- function(key) {
+    safe_key <- gsub("[^A-Za-z0-9._-]+", "_", as.character(key %||% ""))
+    file.path(get_alias_disk_cache_dir(), paste0(safe_key, ".rds"))
+}
+
+prune_alias_disk_cache <- function() {
+    cdir <- get_alias_disk_cache_dir()
+    if (!dir.exists(cdir)) {
+        return(invisible(NULL))
+    }
+    files <- list.files(cdir, pattern = "\\.rds$", full.names = TRUE)
+    max_entries <- get_alias_disk_cache_max_entries()
+    if (length(files) <= max_entries) {
+        return(invisible(NULL))
+    }
+    info <- file.info(files)
+    ord <- order(as.numeric(info$mtime), na.last = TRUE)
+    drop <- files[ord[seq_len(length(files) - max_entries)]]
+    unlink(drop, force = TRUE)
+    invisible(NULL)
+}
+
+get_alias_disk_cache_value <- function(key) {
+    cpath <- alias_disk_cache_path(key)
+    if (!file.exists(cpath)) {
+        return(NULL)
+    }
+    entry <- tryCatch(readRDS(cpath), error = function(e) NULL)
+    if (!is.list(entry) || is.null(entry$value)) {
+        unlink(cpath, force = TRUE)
+        return(NULL)
+    }
+    saved_at <- suppressWarnings(as.numeric(entry$saved_at %||% NA_real_))
+    ttl_sec <- get_alias_disk_cache_ttl_sec()
+    if (!is.finite(saved_at) || !is.finite(ttl_sec) || (as.numeric(Sys.time()) - saved_at) > ttl_sec) {
+        unlink(cpath, force = TRUE)
+        return(NULL)
+    }
+    try(Sys.setFileTime(cpath, Sys.time()), silent = TRUE)
+    entry$value
+}
+
+set_alias_disk_cache_value <- function(key, value) {
+    cdir <- get_alias_disk_cache_dir()
+    if (!dir.exists(cdir)) {
+        dir.create(cdir, recursive = TRUE, showWarnings = FALSE)
+    }
+    cpath <- alias_disk_cache_path(key)
+    ok <- tryCatch({
+        saveRDS(list(value = value, saved_at = as.numeric(Sys.time())), cpath, compress = "gzip")
+        TRUE
+    }, error = function(e) FALSE)
+    if (isTRUE(ok)) {
+        prune_alias_disk_cache()
+    }
+    invisible(ok)
+}
+
 trim_alias_memory_cache <- function() {
+    max_entries <- get_alias_memory_cache_max_entries()
     n <- length(.alias_memory_cache_access_order)
-    if (n <= .alias_memory_cache_max_entries) return(invisible(NULL))
-    to_remove <- head(.alias_memory_cache_access_order, n - .alias_memory_cache_max_entries)
+    if (n <= max_entries) return(invisible(NULL))
+    to_remove <- head(.alias_memory_cache_access_order, n - max_entries)
     for (k in to_remove) {
         if (exists(k, envir = .alias_memory_cache, inherits = FALSE)) {
             rm(list = k, envir = .alias_memory_cache)
         }
     }
-    .alias_memory_cache_access_order <<- tail(.alias_memory_cache_access_order, .alias_memory_cache_max_entries)
+    .alias_memory_cache_access_order <<- tail(.alias_memory_cache_access_order, max_entries)
     invisible(NULL)
 }
 
@@ -35,6 +193,43 @@ touch_alias_cache_key <- function(key) {
         key
     )
     invisible(NULL)
+}
+
+get_alias_cache_value <- function(key) {
+    if (!exists(key, envir = .alias_memory_cache, inherits = FALSE)) {
+        disk_value <- get_alias_disk_cache_value(key)
+        if (!is.null(disk_value)) {
+            set_alias_cache_value(key, disk_value)
+            return(disk_value)
+        }
+        return(NULL)
+    }
+    entry <- get(key, envir = .alias_memory_cache, inherits = FALSE)
+    if (is.list(entry) && !is.null(entry$value)) {
+        saved_at <- suppressWarnings(as.numeric(entry$saved_at %||% NA_real_))
+        ttl_sec <- get_alias_memory_cache_ttl_sec()
+        if (is.finite(saved_at) && is.finite(ttl_sec) && (as.numeric(Sys.time()) - saved_at) <= ttl_sec) {
+            touch_alias_cache_key(key)
+            return(entry$value)
+        }
+        rm(list = key, envir = .alias_memory_cache)
+        .alias_memory_cache_access_order <<- .alias_memory_cache_access_order[.alias_memory_cache_access_order != key]
+        return(NULL)
+    }
+    # Backward compatibility for cache entries created before TTL metadata existed.
+    touch_alias_cache_key(key)
+    entry
+}
+
+set_alias_cache_value <- function(key, value) {
+    assign(
+        key,
+        list(value = value, saved_at = as.numeric(Sys.time())),
+        envir = .alias_memory_cache
+    )
+    touch_alias_cache_key(key)
+    trim_alias_memory_cache()
+    invisible(value)
 }
 
 # ------------------------------------------------------------------------------
@@ -60,12 +255,39 @@ expand_gene_queries <- function(q) {
     return(unique(variants))
 }
 
-build_gene_query_plan <- function(q) {
+should_expand_os_variants <- function(q, organism = NULL, taxid = NULL) {
+    q_txt <- trimws(as.character(q %||% ""))
+    if (!nzchar(q_txt)) {
+        return(FALSE)
+    }
+    q_comp <- tolower(gsub("[^a-z0-9]+", "", q_txt))
+    if (grepl("^locos\\d{2}g\\d{5,}$", q_comp) || grepl("^os\\d{2}g\\d{5,}$", q_comp)) {
+        return(TRUE)
+    }
+    org_txt <- tolower(trimws(as.character(organism %||% "")))
+    tx_txt <- trimws(as.character(taxid %||% ""))
+    rice_taxids <- c("4530", "39946", "39947", "4528", "4529", "4533", "4536")
+    nzchar(org_txt) && grepl("oryza|rice|japonica|indica", org_txt) ||
+        nzchar(tx_txt) && tx_txt %in% rice_taxids
+}
+
+build_gene_query_plan <- function(q, organism = NULL, taxid = NULL) {
     q_txt <- trimws(as.character(q %||% ""))
     if (!nzchar(q_txt)) {
         return(list(primary = character(0), relaxed = character(0)))
     }
-    expanded <- expand_gene_queries(q_txt)
+    expanded <- if (should_expand_os_variants(q_txt, organism = organism, taxid = taxid)) {
+        expand_gene_queries(q_txt)
+    } else {
+        local_expanded <- c(q_txt)
+        if (stringr::str_detect(q_txt, ";")) {
+            local_expanded <- c(local_expanded, stringr::str_replace(q_txt, ";", c(".", "-", " ", "")))
+        }
+        if (stringr::str_detect(q_txt, "\\.")) {
+            local_expanded <- c(local_expanded, stringr::str_replace(q_txt, "\\.", c(";", "-", " ", "")))
+        }
+        unique(local_expanded)
+    }
     primary <- unique(c(
         q_txt,
         if (stringr::str_detect(q_txt, ";")) c(stringr::str_replace_all(q_txt, ";", "."), stringr::str_replace_all(q_txt, ";", "-")) else character(0),
@@ -192,9 +414,17 @@ pick_best_scored_values <- function(candidates, score_fn, min_score = 8, strong_
     list(value = NULL, score = -Inf, strong = FALSE)
 }
 
+get_safe_get_json_max_tries <- function() {
+    raw <- suppressWarnings(as.integer(Sys.getenv("APP_ALIAS_MAX_RETRIES", "2")))
+    if (!is.finite(raw) || is.na(raw) || raw < 1L) 2L else raw
+}
+get_safe_get_json_max_seconds <- function() {
+    raw <- suppressWarnings(as.numeric(Sys.getenv("APP_ALIAS_RETRY_BUDGET_SEC", "2")))
+    if (!is.finite(raw) || is.na(raw) || raw <= 0) 2 else raw
+}
 safe_get_json <- function(req, timeout_sec = 10) {
     tryCatch({
-        resp <- httr2::req_perform(httr2::req_retry(httr2::req_timeout(req, timeout_sec), max_tries = 4, max_seconds = 5))
+        resp <- httr2::req_perform(httr2::req_retry(httr2::req_timeout(req, timeout_sec), max_tries = get_safe_get_json_max_tries(), max_seconds = get_safe_get_json_max_seconds()))
         httr2::resp_body_json(resp)
     }, error = function(e) {
         return(NULL)
@@ -233,9 +463,10 @@ is_stable_gene_identifier <- function(x) {
         v) || grepl("^os\\d{2}g\\d{5,}$", v) || grepl("^ens[a-z]{0,6}g\\d+$", v)
 }
 
-build_query_score_context <- function(query_gene) {
+build_query_score_context <- function(query_gene, organism = NULL, taxid = NULL) {
     q_txt <- as.character(query_gene %||% "")
-    q_vars <- expand_gene_queries(q_txt)
+    q_plan <- build_gene_query_plan(q_txt, organism = organism, taxid = taxid)
+    q_vars <- unique(c(q_plan$primary, q_plan$relaxed))
     q_comp <- unique(vapply(q_vars, compact_match_token, character(1)))
     q_comp <- q_comp[nzchar(q_comp)]
     list(
@@ -301,9 +532,9 @@ score_alias_set <- function(values, query_gene) {
 # ------------------------------------------------------------------------------
 
 query_mygene <- function(gene, taxid) {
-    query_ctx <- build_query_score_context(gene)
+    query_ctx <- build_query_score_context(gene, taxid = taxid)
     mg_url <- "https://mygene.info/v3/query"
-    query_plan <- build_gene_query_plan(gene)
+    query_plan <- build_gene_query_plan(gene, taxid = taxid)
     best_aliases <- character(0)
     best_score <- -Inf
     for (variants in Filter(length, list(query_plan$primary, query_plan$relaxed))) {
@@ -317,7 +548,7 @@ query_mygene <- function(gene, taxid) {
                 fields = "symbol,name,alias,other_names",
                 size = 20
             )
-            res <- safe_get_json(req, timeout_sec = 5)
+            res <- safe_get_json(req, timeout_sec = get_alias_timeout_mygene())
             if (is.null(res$hits) || length(res$hits) == 0) {
                 next
             }
@@ -359,25 +590,33 @@ query_mygene <- function(gene, taxid) {
 }
 
 query_ncbi <- function(gene, taxid) {
-    query_ctx <- build_query_score_context(gene)
-    query_plan <- build_gene_query_plan(gene)
+    query_ctx <- build_query_score_context(gene, taxid = taxid)
+    query_plan <- build_gene_query_plan(gene, taxid = taxid)
     best_aliases <- character(0)
     best_score <- -Inf
+    primary_found_anything <- FALSE
     for (variants in Filter(length, list(query_plan$primary, query_plan$relaxed))) {
+        # Early exit: if all primary variants returned zero NCBI IDs, skip
+        # relaxed variants — they are looser forms of the same gene name and
+        # won't produce results for a non-existent gene.
+        if (!primary_found_anything && !identical(variants, query_plan$primary)) {
+            break
+        }
         phase_best_aliases <- character(0)
         phase_best_score <- -Inf
         for (v in variants) {
             term <- sprintf("(%s[All Fields]) AND txid%s[Organism:exp]", v, taxid)
             req <- httr2::req_url_query(httr2::request(paste0(NCBI_EUTILS, "esearch.fcgi")), db = "gene", term = term, retmode = "json")
-            res <- safe_get_json(req, timeout_sec = 8)
+            res <- safe_get_json(req, timeout_sec = get_alias_timeout_ncbi())
             ids <- if (!is.null(res$esearchresult$idlist) && length(res$esearchresult$idlist) > 0) unlist(res$esearchresult$idlist) else character(0)
             if (length(ids) == 0) {
                 next
             }
+            primary_found_anything <- TRUE
 
             ids <- ids[seq_len(min(length(ids), 10))]
             req_sum <- httr2::req_url_query(httr2::request(paste0(NCBI_EUTILS, "esummary.fcgi")), db = "gene", id = paste(ids, collapse = ","), retmode = "json")
-            doc <- safe_get_json(req_sum, timeout_sec = 8)
+            doc <- safe_get_json(req_sum, timeout_sec = get_alias_timeout_ncbi())
             if (is.null(doc$result)) {
                 next
             }
@@ -443,8 +682,8 @@ query_ncbi <- function(gene, taxid) {
 }
 
 query_uniprot <- function(gene, taxid) {
-    query_ctx <- build_query_score_context(gene)
-    query_plan <- build_gene_query_plan(gene)
+    query_ctx <- build_query_score_context(gene, taxid = taxid)
+    query_plan <- build_gene_query_plan(gene, taxid = taxid)
     best_aliases <- character(0)
     best_score <- -Inf
     for (variants in Filter(length, list(query_plan$primary, query_plan$relaxed))) {
@@ -453,7 +692,7 @@ query_uniprot <- function(gene, taxid) {
         for (v in variants) {
             q_str <- sprintf("(gene:\"%s\") AND (organism_id:%s)", v, taxid)
             req <- httr2::req_url_query(httr2::request(UNIPROT_REST), query = q_str, format = "json", size = 20, fields = "accession,gene_names")
-            res <- safe_get_json(req, timeout_sec = 5)
+            res <- safe_get_json(req, timeout_sec = get_alias_timeout_uniprot())
             if (is.null(res$results) || length(res$results) == 0) {
                 next
             }
@@ -555,20 +794,20 @@ query_ensembl_with_species <- function(gene, species_name) {
     if (is.null(species_name)) {
         return(character(0))
     }
-    query_ctx <- build_query_score_context(gene)
+    query_ctx <- build_query_score_context(gene, organism = species_name)
 
     # Build list of species to try: primary + related species fallback Many
     # subspecies share gene symbols only under the main species in Ensembl
     related_species_map <- list(oryza_indica = c("oryza_sativa", "oryza_rufipogon"),
         oryza_sativa = c("oryza_indica", "oryza_rufipogon"), oryza_rufipogon = c("oryza_sativa",
-            "oryza_indica"), triticum_dicoccoides = c("triticum_aestivum"), triticum_turgidum = c("triticum_aestivum"),
+            "oryza_indica"),
         mus_spretus = c("mus_musculus"), mus_caroli = c("mus_musculus"), pan_paniscus = c("pan_troglodytes",
             "homo_sapiens"), pan_troglodytes = c("pan_paniscus", "homo_sapiens"),
         bos_indicus = c("bos_taurus"))
     species_to_try <- unique(c(species_name, related_species_map[[species_name]] %||%
         character(0)))
 
-    query_plan <- build_gene_query_plan(gene)
+    query_plan <- build_gene_query_plan(gene, organism = species_name)
     query_stages <- list(
         list(
             species = species_to_try[seq_len(1L)],
@@ -603,12 +842,12 @@ query_ensembl_with_species <- function(gene, species_name) {
             httr2::req_url_query(httr2::request(paste(ENSEMBL_REST, "lookup/id", id, sep = "/")), expand = 1),
             Accept = "application/json"
         )
-        meta <- safe_get_json(req_id)
+        meta <- safe_get_json(req_id, timeout_sec = get_alias_timeout_ensembl())
         req_xref <- httr2::req_headers(
             httr2::req_url_query(httr2::request(paste(ENSEMBL_REST, "xrefs/id", id, sep = "/")), all_levels = 1),
             Accept = "application/json"
         )
-        xrefs <- safe_get_json(req_xref)
+        xrefs <- safe_get_json(req_xref, timeout_sec = get_alias_timeout_ensembl())
         result <- collect_ensembl_aliases(id, meta = meta, xrefs = xrefs)
         assign(id, result, envir = resolved_id_cache)
         result
@@ -616,7 +855,15 @@ query_ensembl_with_species <- function(gene, species_name) {
 
     best_aliases <- character(0)
     best_score <- -Inf
-    for (stage in query_stages) {
+    stage1_found_anything <- FALSE
+    for (stage_idx in seq_along(query_stages)) {
+        stage <- query_stages[[stage_idx]]
+        # Early exit: if Stage 1 (primary species, symbol endpoint) found
+        # absolutely nothing, skip Stages 2-3 — escalating endpoints and species
+        # won't make a non-existent gene appear.
+        if (stage_idx > 1L && !stage1_found_anything) {
+            break
+        }
         species_stage <- unique(as.character(stage$species %||% character(0)))
         variants_stage <- unique(as.character(stage$variants %||% character(0)))
         endpoints_stage <- unique(as.character(stage$endpoints %||% character(0)))
@@ -630,7 +877,7 @@ query_ensembl_with_species <- function(gene, species_name) {
                 for (v in variants_stage) {
                     url <- paste(ENSEMBL_REST, "xrefs", endpoint, sp, v, sep = "/")
                     req <- httr2::req_headers(httr2::request(url), Accept = "application/json")
-                    res <- safe_get_json(req, timeout_sec = 6)
+                    res <- safe_get_json(req, timeout_sec = get_alias_timeout_ensembl())
                     if (!is.list(res)) {
                         next
                     }
@@ -638,6 +885,7 @@ query_ensembl_with_species <- function(gene, species_name) {
                     if (length(genes) == 0) {
                         next
                     }
+                    if (stage_idx == 1L) stage1_found_anything <- TRUE
                     gene_pick <- collect_top_scored_matches(
                         genes,
                         function(g) score_alias_set(c(g$display_id, g$description, g$db_display_name, g$id), query_ctx)
@@ -736,12 +984,25 @@ get_gene_aliases <- function(gene, taxid = NULL, organism = NULL, ensembl_specie
     cache_key <- paste(.alias_memory_cache_version, gene, taxid %||% "NA",
         organism %||% "NA", ensembl_species %||% "NA",
         paste(sort(sources), collapse = ","), sep = "|")
+    source_cache_key <- function(src) {
+        paste(.alias_memory_cache_version, "source", as.character(src %||% ""),
+            gene, taxid %||% "NA", organism %||% "NA", ensembl_species %||% "NA", sep = "|")
+    }
+    make_source_result <- function(src, aliases, ok = TRUE, error = "", elapsed_ms = 0, cache_hit = FALSE) {
+        list(
+            source = as.character(src),
+            aliases = as.character(aliases %||% character(0)),
+            error = as.character(error %||% ""),
+            ok = isTRUE(ok),
+            elapsed_ms = suppressWarnings(as.numeric(elapsed_ms %||% 0)),
+            cache_hit = isTRUE(cache_hit)
+        )
+    }
 
     # NUEVO: Si ya lo busc\303\263 antes en esta sesi\303\263n, lo devuelve al
     # instante (0.001 segundos)
-    if (exists(cache_key, envir = .alias_memory_cache, inherits = FALSE)) {
-        cached_aliases <- get(cache_key, envir = .alias_memory_cache, inherits = FALSE)
-        touch_alias_cache_key(cache_key)
+    cached_aliases <- get_alias_cache_value(cache_key)
+    if (!is.null(cached_aliases)) {
         app_perf_mark(lookup_perf, sprintf("cache hit aliases=%d", as.integer(length(cached_aliases %||% character(0)))), "EXT_ALIAS")
         emit_status("\u2022 External stage: Aliases loaded from cache.")
         return(cached_aliases)
@@ -774,14 +1035,17 @@ get_gene_aliases <- function(gene, taxid = NULL, organism = NULL, ensembl_specie
         if (is.null(organism)) {
             return(with_lookup_meta(character(0), skipped = TRUE, skip_reason = "organism_missing"))
         }
-        tryCatch({
-            req <- httr2::req_url_query(httr2::request(paste0(NCBI_EUTILS, "esearch.fcgi")), db = "taxonomy", term = organism, retmode = "json")
-            res <- safe_get_json(req)
-            if (!is.null(res$esearchresult$idlist) && length(res$esearchresult$idlist) >
-                0) {
-                taxid <- unlist(res$esearchresult$idlist)[[1]]
-            }
-        }, error = function(e) NULL)
+        taxid <- resolve_taxid_local(organism)
+        if (is.null(taxid)) {
+            tryCatch({
+                req <- httr2::req_url_query(httr2::request(paste0(NCBI_EUTILS, "esearch.fcgi")), db = "taxonomy", term = organism, retmode = "json")
+                res <- safe_get_json(req, timeout_sec = get_alias_timeout_ncbi())
+                if (!is.null(res$esearchresult$idlist) && length(res$esearchresult$idlist) >
+                    0) {
+                    taxid <- unlist(res$esearchresult$idlist)[[1]]
+                }
+            }, error = function(e) NULL)
+        }
         if (is.null(taxid)) {
             app_perf_mark(lookup_perf, "taxid unresolved", "EXT_ALIAS")
             return(with_lookup_meta(character(0), skipped = TRUE, skip_reason = "taxid_unresolved"))
@@ -810,6 +1074,17 @@ get_gene_aliases <- function(gene, taxid = NULL, organism = NULL, ensembl_specie
     }
 
     run_source_safe <- function(src, announce = FALSE) {
+        src_cache_key <- source_cache_key(src)
+        cached_source_aliases <- get_alias_cache_value(src_cache_key)
+        if (!is.null(cached_source_aliases)) {
+            app_perf_mark(
+                lookup_perf,
+                sprintf("source_cache_hit source=%s aliases=%d", as.character(src %||% ""), as.integer(length(cached_source_aliases %||% character(0)))),
+                "EXT_ALIAS"
+            )
+            return(make_source_result(src, cached_source_aliases, ok = TRUE, elapsed_ms = 0, cache_hit = TRUE))
+        }
+        app_perf_mark(lookup_perf, sprintf("source_cache_miss source=%s", as.character(src %||% "")), "EXT_ALIAS")
         src_perf <- app_perf_new_run(sprintf("EXT_ALIAS_%s", toupper(as.character(src %||% "SRC"))))
         t0 <- as.numeric(proc.time()[["elapsed"]])
         app_perf_mark(src_perf, sprintf("start source=%s", as.character(src %||% "")), "EXT_ALIAS")
@@ -822,13 +1097,10 @@ get_gene_aliases <- function(gene, taxid = NULL, organism = NULL, ensembl_specie
                     sprintf("done source=%s aliases=%d elapsed_ms=%.1f", as.character(src %||% ""), as.integer(length(aliases[!is.na(aliases)])), elapsed_ms),
                     "EXT_ALIAS"
                 )
-                list(
-                    source = as.character(src),
-                    aliases = aliases[!is.na(aliases)],
-                    error = "",
-                    ok = TRUE,
-                    elapsed_ms = elapsed_ms
-                )
+                aliases <- aliases[!is.na(aliases)]
+                set_alias_cache_value(src_cache_key, aliases)
+                set_alias_disk_cache_value(src_cache_key, aliases)
+                make_source_result(src, aliases, ok = TRUE, elapsed_ms = elapsed_ms, cache_hit = FALSE)
             },
             error = function(e) {
                 err_msg <- format_lookup_error_message(e, source = source_labels[[src]] %||% src)
@@ -837,13 +1109,7 @@ get_gene_aliases <- function(gene, taxid = NULL, organism = NULL, ensembl_specie
                 app_perf_mark(src_perf, sprintf("error source=%s elapsed_ms=%.1f msg=%s", as.character(src %||% ""), elapsed_ms, err_msg), "EXT_ALIAS")
                 emit_status(sprintf("\u2022 External DB %s failed; continuing with remaining sources.", as.character(source_labels[[src]] %||%
                     src)))
-                list(
-                    source = as.character(src),
-                    aliases = character(0),
-                    error = err_msg,
-                    ok = FALSE,
-                    elapsed_ms = elapsed_ms
-                )
+                make_source_result(src, character(0), ok = FALSE, error = err_msg, elapsed_ms = elapsed_ms, cache_hit = FALSE)
             }
         )
     }
@@ -868,8 +1134,27 @@ get_gene_aliases <- function(gene, taxid = NULL, organism = NULL, ensembl_specie
             "is_strong_alias_score", "flatten_condition_messages",
             "format_lookup_error_message", "source_labels", "gene", "taxid", "ensembl_species")
 
-        results <- tryCatch({
-            future_map(sources, function(src) {
+        cached_results <- list()
+        pending_sources <- character(0)
+        for (src in sources) {
+            cached_source_aliases <- get_alias_cache_value(source_cache_key(src))
+            if (!is.null(cached_source_aliases)) {
+                app_perf_mark(
+                    lookup_perf,
+                    sprintf("source_cache_hit source=%s aliases=%d", as.character(src %||% ""), as.integer(length(cached_source_aliases %||% character(0)))),
+                    "EXT_ALIAS"
+                )
+                cached_results[[src]] <- make_source_result(src, cached_source_aliases, ok = TRUE, elapsed_ms = 0, cache_hit = TRUE)
+            } else {
+                app_perf_mark(lookup_perf, sprintf("source_cache_miss source=%s", as.character(src %||% "")), "EXT_ALIAS")
+                pending_sources <- c(pending_sources, src)
+            }
+        }
+        fetched_results <- tryCatch({
+            if (!requireNamespace("furrr", quietly = TRUE)) {
+                stop("furrr not available")
+            }
+            furrr::future_map(pending_sources, function(src) {
                 t0 <- as.numeric(proc.time()[["elapsed"]])
                 tryCatch(
                     {
@@ -902,7 +1187,7 @@ get_gene_aliases <- function(gene, taxid = NULL, organism = NULL, ensembl_specie
                         )
                     }
                 )
-            }, .options = furrr_options(
+            }, .options = furrr::furrr_options(
                 seed = FALSE,
                 globals = needed_globals,
                 packages = c("httr2", "jsonlite", "stringr", "dplyr", "purrr")
@@ -913,9 +1198,21 @@ get_gene_aliases <- function(gene, taxid = NULL, organism = NULL, ensembl_specie
             app_perf_mark(lookup_perf, sprintf("parallel_fallback msg=%s", err_msg), "EXT_ALIAS")
             emit_status("\u2022 External DBs: Parallel run failed; retrying sequentially.")
             # Fallback secuencial
-            purrr::map(sources, function(src) {
+            purrr::map(pending_sources, function(src) {
                 run_source_safe(src, announce = TRUE)
             })
+        })
+        fetched_results <- fetched_results %||% list()
+        for (res in fetched_results) {
+            if (isTRUE((res %||% list())$ok)) {
+                aliases <- as.character(res$aliases %||% character(0))
+                set_alias_cache_value(source_cache_key(res$source), aliases)
+                set_alias_disk_cache_value(source_cache_key(res$source), aliases)
+            }
+        }
+        fetched_by_source <- stats::setNames(fetched_results, vapply(fetched_results, function(x) as.character(x$source %||% ""), character(1)))
+        results <- lapply(sources, function(src) {
+            cached_results[[src]] %||% fetched_by_source[[src]] %||% make_source_result(src, character(0), ok = FALSE, error = "source result missing")
         })
     } else {
         emit_status(sprintf("\u2022 External DBs: Running sequentially (%s).",
@@ -943,7 +1240,7 @@ get_gene_aliases <- function(gene, taxid = NULL, organism = NULL, ensembl_specie
         sprintf(
             "%s:%s aliases=%d elapsed_ms=%s",
             src,
-            ifelse(ok, "ok", "err"),
+            ifelse(isTRUE(x$cache_hit), "cache", ifelse(ok, "ok", "err")),
             as.integer(alias_n),
             ifelse(is.finite(elapsed_ms), sprintf("%.1f", elapsed_ms), "NA")
         )
@@ -1042,9 +1339,12 @@ get_gene_aliases <- function(gene, taxid = NULL, organism = NULL, ensembl_specie
         success_sources = success_sources_n,
         failed_sources = failed_sources_n
     )
-    assign(cache_key, resultado_final, envir = .alias_memory_cache)
-    touch_alias_cache_key(cache_key)
-    trim_alias_memory_cache()
+    if (length(source_errors) == 0) {
+        set_alias_cache_value(cache_key, resultado_final)
+        set_alias_disk_cache_value(cache_key, resultado_final)
+    } else {
+        app_perf_mark(lookup_perf, "cache skip source_errors_present", "EXT_ALIAS")
+    }
     app_perf_mark(
         lookup_perf,
         sprintf(

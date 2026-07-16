@@ -268,7 +268,7 @@
     var target = event.target;
     if (!target) return;
 
-    var infoBtn = target.closest ? target.closest('.footer-info-btn') : null;
+    var infoBtn = target.closest ? target.closest('.footer-info-btn, .metrics-info-btn') : null;
     if (infoBtn) {
       event.preventDefault();
       event.stopPropagation();

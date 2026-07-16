@@ -3,6 +3,7 @@
 args <- commandArgs(trailingOnly = TRUE)
 strict_mode <- "--strict" %in% args
 args <- args[args != "--strict"]
+`%||%` <- function(a, b) if (!is.null(a)) a else b
 
 if (length(args) < 1L) {
     cat("Usage: Rscript scripts/summarize_perf_log.R /path/to/app.log [--strict]\n")
@@ -20,30 +21,31 @@ if (length(lines) == 0L) {
 }
 
 all_perf <- lines[grepl("\\[PERF\\]\\[[^\\]]+\\]", lines, perl = TRUE)]
-keep <- grepl("\\[PERF\\]\\[(HOMO_MOD|ORTHO_MOD)\\]", lines, perl = TRUE)
-perf_lines <- lines[keep]
-if (length(perf_lines) == 0L) {
-    cat("No HOMO_MOD/ORTHO_MOD PERF lines found.\n")
-    if (length(all_perf) > 0L) {
-        extract_any_context <- function(x) {
-            m <- regexec("\\[PERF\\]\\[([^\\]]+)\\]", x, perl = TRUE)
-            out <- regmatches(x, m)
-            vapply(out, function(y) if (length(y) >= 2L) y[[2]] else NA_character_, character(1))
-        }
-        ctx <- unique(stats::na.omit(extract_any_context(all_perf)))
-        cat(sprintf("Found other PERF contexts: %s\n", paste(ctx, collapse = ", ")))
-        cat("This usually means module render logs were not triggered in that run.\n")
-    } else {
-        cat("No PERF lines found at all.\n")
-        cat("Run app with perf/debug flags and initial-visible defaults:\n")
-        cat("  APP_HOMO_INITIAL_VISIBLE=1 APP_ORTHO_INITIAL_VISIBLE=1 APP_PERF_TIMING=1 APP_DEBUG_LOGS=1 Rscript -e \"shiny::runApp('.', launch.browser=FALSE)\" 2>&1 | tee /tmp/fullapp_perf.log\n")
-    }
-    cat("Then execute a real search (e.g. TP53) in Homologous/Orthologous before re-running this script.\n")
+if (length(all_perf) == 0L) {
+    cat("No PERF lines found at all.\n")
     if (isTRUE(strict_mode)) {
         quit(status = 2L)
     }
     quit(status = 0L)
 }
+
+focus_metrics <- c(
+    "first_plot_ready_ms",
+    "total_plots_ready_ms",
+    "search_finish_ms",
+    "search_observer_total_ms",
+    "lookup_local_exact_ms",
+    "lookup_external_alias_ms",
+    "lookup_local_flex_ms",
+    "split_transcripts_ms",
+    "metrics_payload_build_ms",
+    "reactive_state_commit_ms",
+    "module_init_ms",
+    "sequence_prefetch_ms",
+    "neighbor_context_ms",
+    "create_gene_plot_ms",
+    "girafe_build_ms"
+)
 
 extract_context <- function(x) {
     m <- regexec("\\[PERF\\]\\[([^\\]]+)\\]", x, perl = TRUE)
@@ -51,62 +53,133 @@ extract_context <- function(x) {
     vapply(out, function(y) if (length(y) >= 2L) y[[2]] else NA_character_, character(1))
 }
 
-context <- extract_context(perf_lines)
-is_homo <- context == "HOMO_MOD"
-is_ortho <- context == "ORTHO_MOD"
-
-count_pattern <- function(pattern, idx) {
-    sum(grepl(pattern, perf_lines[idx], perl = TRUE))
-}
-
-summary_df <- data.frame(
-    module = c("HOMO_MOD", "ORTHO_MOD"),
-    render_start = c(count_pattern("render start", is_homo), count_pattern("render start", is_ortho)),
-    create_start = c(count_pattern("create_gene_plot start", is_homo), count_pattern("create_gene_plot start", is_ortho)),
-    create_done = c(count_pattern("create_gene_plot done", is_homo), count_pattern("create_gene_plot done", is_ortho)),
-    cache_hit = c(count_pattern("render cache hit", is_homo), count_pattern("render cache hit", is_ortho)),
-    cache_miss = c(count_pattern("render cache miss", is_homo), count_pattern("render cache miss", is_ortho)),
-    cache_disabled = c(count_pattern("render cache disabled", is_homo), count_pattern("render cache disabled", is_ortho)),
-    stringsAsFactors = FALSE
-)
-
-summary_df$cache_hit_rate <- ifelse(
-    (summary_df$cache_hit + summary_df$cache_miss) > 0,
-    round(summary_df$cache_hit / (summary_df$cache_hit + summary_df$cache_miss), 4),
-    NA_real_
-)
-
-extract_timing_values <- function(ctx, key) {
-    pat <- sprintf("^.*\\[PERF\\]\\[%s\\]\\[[^\\]]+\\].*%s=([0-9]+(?:\\.[0-9]+)?).*$", ctx, key)
-    vals <- as.numeric(sub(pat, "\\1", lines[grepl(pat, lines, perl = TRUE)], perl = TRUE))
-    vals[is.finite(vals)]
-}
-
-timing_stat <- function(vals) {
-    if (length(vals) == 0L) {
-        return(NA_real_)
+infer_search_mode <- function(context) {
+    ctx <- toupper(trimws(as.character(context %||% "")))
+    if (startsWith(ctx, "HOMO")) {
+        return("homologous")
     }
-    round(mean(vals), 1)
+    if (startsWith(ctx, "ORTHO")) {
+        return("orthologous")
+    }
+    NA_character_
 }
 
-homo_first <- extract_timing_values("HOMO_TIMING", "first_plot_ready_ms")
-homo_total <- extract_timing_values("HOMO_TIMING", "total_plots_ready_ms")
-homo_finish <- extract_timing_values("HOMO_TIMING", "search_finish_ms")
-ortho_first <- extract_timing_values("ORTHO_TIMING", "first_plot_ready_ms")
-ortho_total <- extract_timing_values("ORTHO_TIMING", "total_plots_ready_ms")
-ortho_finish <- extract_timing_values("ORTHO_TIMING", "search_finish_ms")
+infer_scenario <- function(path_txt) {
+    nm <- tolower(basename(path_txt %||% ""))
+    if (grepl("cold", nm, fixed = TRUE)) return("cold")
+    if (grepl("warm", nm, fixed = TRUE) || grepl("prewarm", nm, fixed = TRUE) || grepl("hot", nm, fixed = TRUE)) return("warm")
+    "default"
+}
 
-summary_df$first_plot_ms <- c(timing_stat(homo_first), timing_stat(ortho_first))
-summary_df$total_plots_ready_ms <- c(timing_stat(homo_total), timing_stat(ortho_total))
-summary_df$search_finish_ms <- c(timing_stat(homo_finish), timing_stat(ortho_finish))
-summary_df$timing_samples_first <- c(length(homo_first), length(ortho_first))
-summary_df$timing_samples_total <- c(length(homo_total), length(ortho_total))
+parse_metric_rows <- function(lines_vec, source_path) {
+    contexts <- extract_context(lines_vec)
+    scenario <- infer_scenario(source_path)
+    rows <- list()
+    row_idx <- 0L
+    for (i in seq_along(lines_vec)) {
+        ctx <- contexts[[i]]
+        search_mode <- infer_search_mode(ctx)
+        if (is.na(search_mode)) {
+            next
+        }
+        matches <- gregexpr("([A-Za-z][A-Za-z0-9_]+)=([0-9]+(?:\\.[0-9]+)?)", lines_vec[[i]], perl = TRUE)
+        captures <- regmatches(lines_vec[[i]], matches)[[1]]
+        if (length(captures) == 0L) {
+            next
+        }
+        for (capture in captures) {
+            parts <- strsplit(capture, "=", fixed = TRUE)[[1]]
+            metric <- as.character(parts[1] %||% "")
+            value <- suppressWarnings(as.numeric(parts[2] %||% NA_real_))
+            if (!metric %in% focus_metrics || !is.finite(value)) {
+                next
+            }
+            row_idx <- row_idx + 1L
+            rows[[row_idx]] <- data.frame(
+                mode = search_mode,
+                scenario = scenario,
+                context = as.character(ctx),
+                metric = metric,
+                value = value,
+                stringsAsFactors = FALSE
+            )
+        }
+    }
+    if (length(rows) == 0L) {
+        return(data.frame())
+    }
+    do.call(rbind, rows)
+}
 
-cat(sprintf("Log: %s\n\n", log_path))
-print(summary_df, row.names = FALSE)
+timing_rows <- parse_metric_rows(all_perf, log_path)
 
-cat("\nInterpretation tips:\n")
-cat("- Lower `create_start` with high `cache_hit` indicates fewer heavy recomputations.\n")
-cat("- `cache_hit_rate` near 1.0 means rerenders are mostly served from cache.\n")
-cat("- If `cache_disabled` > 0, corresponding cache flag was off in that run.\n")
-cat("- `first_plot_ms` and `total_plots_ready_ms` come from HOMO_TIMING/ORTHO_TIMING logs.\n")
+module_lines <- all_perf[grepl("\\[PERF\\]\\[(HOMO_MOD|ORTHO_MOD)\\]", all_perf, perl = TRUE)]
+module_context <- extract_context(module_lines)
+count_pattern <- function(pattern, idx) {
+    sum(grepl(pattern, module_lines[idx], perl = TRUE))
+}
+module_df <- if (length(module_lines) > 0L) {
+    data.frame(
+        module = c("HOMO_MOD", "ORTHO_MOD"),
+        render_start = c(count_pattern("render start", module_context == "HOMO_MOD"), count_pattern("render start", module_context == "ORTHO_MOD")),
+        create_start = c(count_pattern("create_gene_plot start", module_context == "HOMO_MOD"), count_pattern("create_gene_plot start", module_context == "ORTHO_MOD")),
+        create_done = c(count_pattern("create_gene_plot done", module_context == "HOMO_MOD"), count_pattern("create_gene_plot done", module_context == "ORTHO_MOD")),
+        cache_hit = c(count_pattern("render cache hit", module_context == "HOMO_MOD"), count_pattern("render cache hit", module_context == "ORTHO_MOD")),
+        cache_miss = c(count_pattern("render cache miss", module_context == "HOMO_MOD"), count_pattern("render cache miss", module_context == "ORTHO_MOD")),
+        cache_disabled = c(count_pattern("render cache disabled", module_context == "HOMO_MOD"), count_pattern("render cache disabled", module_context == "ORTHO_MOD")),
+        stringsAsFactors = FALSE
+    )
+} else {
+    data.frame()
+}
+
+cat(sprintf("Log: %s\n", log_path))
+cat(sprintf("Scenario inference: %s\n\n", infer_scenario(log_path)))
+
+if (nrow(module_df) > 0L) {
+    module_df$cache_hit_rate <- ifelse(
+        (module_df$cache_hit + module_df$cache_miss) > 0,
+        round(module_df$cache_hit / (module_df$cache_hit + module_df$cache_miss), 4),
+        NA_real_
+    )
+    cat("Module summary:\n")
+    print(module_df, row.names = FALSE)
+    cat("\n")
+}
+
+if (nrow(timing_rows) == 0L) {
+    cat("No numeric timing metrics from the focused PERF keys were found.\n")
+    if (isTRUE(strict_mode)) {
+        quit(status = 2L)
+    }
+    quit(status = 0L)
+}
+
+median_rows <- stats::aggregate(
+    timing_rows$value,
+    by = list(mode = timing_rows$mode, scenario = timing_rows$scenario, metric = timing_rows$metric),
+    FUN = function(x) round(stats::median(x, na.rm = TRUE), 1)
+)
+colnames(median_rows)[colnames(median_rows) == "x"] <- "median_ms"
+
+sample_rows <- stats::aggregate(
+    timing_rows$value,
+    by = list(mode = timing_rows$mode, scenario = timing_rows$scenario, metric = timing_rows$metric),
+    FUN = length
+)
+colnames(sample_rows)[colnames(sample_rows) == "x"] <- "samples"
+
+summary_long <- merge(median_rows, sample_rows, by = c("mode", "scenario", "metric"), all = TRUE, sort = FALSE)
+summary_wide <- reshape(
+    summary_long[, c("mode", "scenario", "metric", "median_ms"), drop = FALSE],
+    idvar = c("mode", "scenario"),
+    timevar = "metric",
+    direction = "wide"
+)
+colnames(summary_wide) <- sub("^median_ms\\.", "", colnames(summary_wide))
+
+cat("Timing medians by search mode and scenario:\n")
+print(summary_wide[order(summary_wide$mode, summary_wide$scenario), , drop = FALSE], row.names = FALSE)
+
+cat("\nTiming samples:\n")
+print(summary_long[order(summary_long$mode, summary_long$scenario, summary_long$metric), , drop = FALSE], row.names = FALSE)

@@ -1,5 +1,6 @@
 const fs = require("fs");
 const path = require("path");
+const { buildAppSourceManifest, outputPath: appSourceManifestPath } = require("./write-app-source-manifest");
 
 const desktopRoot = path.resolve(__dirname, "..");
 const repoRoot = path.resolve(desktopRoot, "..");
@@ -21,6 +22,7 @@ const publish = build.publish || {};
 const appResource = extraResources.find((entry) => entry && entry.to === "app");
 const filters = Array.isArray(appResource && appResource.filter) ? appResource.filter : [];
 const commonGoResource = extraResources.find((entry) => entry && entry.to === "app/go_annotations");
+const appSourceManifestResource = extraResources.find((entry) => entry && entry.to === "app/app-source-manifest.json");
 
 if (filters.includes("cache/annotation_index/**")) {
   throw new Error("The lite Desktop installer must not bundle repository annotation caches; each verified organism package supplies its own indexes.");
@@ -31,6 +33,9 @@ if (
   !["go-basic.obo", "go_term_map.rds", "manifest.json"].every((file) => commonGoResource.filter.includes(file))
 ) {
   throw new Error("Desktop must package the locked common GO resources prepared under resources/common-go.");
+}
+if (appSourceManifestResource?.from !== "resources/app-source-manifest.json") {
+  throw new Error("Desktop must package the generated application-source manifest beside the Shiny source.");
 }
 
 if (afterPack !== "scripts/trim-packaged-runtime.js") {
@@ -95,9 +100,39 @@ if (
 if (packageJson.scripts?.["prepare:go"] !== "node scripts/prepare-common-go.js") {
   throw new Error("Desktop must prepare the locked common GO assets before packaging.");
 }
+if (packageJson.scripts?.["prepare:source"] !== "node scripts/write-app-source-manifest.js") {
+  throw new Error("Desktop must generate an application-source manifest before packaging.");
+}
 for (const buildScript of ["build", "build:mac", "build:linux", "build:win", "build:store"]) {
   if (!String(packageJson.scripts?.[buildScript] || "").includes("npm run prepare:go")) {
     throw new Error(`${buildScript} must prepare locked common GO assets.`);
+  }
+  if (!String(packageJson.scripts?.[buildScript] || "").includes("npm run prepare:source")) {
+    throw new Error(`${buildScript} must identify the exact Shiny application source being packaged.`);
+  }
+}
+if (!fs.existsSync(appSourceManifestPath)) {
+  throw new Error("Missing generated app-source-manifest.json; run npm run prepare:source before package verification.");
+}
+const actualAppSourceManifest = JSON.parse(fs.readFileSync(appSourceManifestPath, "utf8"));
+const expectedAppSourceManifest = buildAppSourceManifest();
+if (
+  actualAppSourceManifest.schemaVersion !== 1 ||
+  actualAppSourceManifest.appVersion !== packageJson.version ||
+  JSON.stringify(actualAppSourceManifest.files) !== JSON.stringify(expectedAppSourceManifest.files)
+) {
+  throw new Error("Generated application-source manifest does not match the current Home, UI, server, and Desktop source files.");
+}
+const modernUiSource = fs.readFileSync(path.join(repoRoot, "ui.R"), "utf8");
+const modernHomeSource = fs.readFileSync(path.join(repoRoot, "www", "home_preview_cgv.html"), "utf8");
+for (const requiredFragment of ["app-optional-uploads-panel", "desktop-organism-modal", "cgv_desktop_downloads_page()", "Mixed sources"]) {
+  if (!modernUiSource.includes(requiredFragment)) {
+    throw new Error(`Desktop cannot package the obsolete Shiny UI; missing modern capability marker: ${requiredFragment}`);
+  }
+}
+for (const requiredFragment of ["Live gene suggestions", "transcript alignment", "25 installable reference organisms", "Explore CGV Desktop"]) {
+  if (!modernHomeSource.includes(requiredFragment)) {
+    throw new Error(`Desktop cannot package the obsolete Home; missing modern capability marker: ${requiredFragment}`);
   }
 }
 for (const windowsBuildScript of ["build:win", "build:store"]) {
@@ -152,6 +187,15 @@ if (
 }
 if (!mainJs.includes('host=\'127.0.0.1\'')) {
   throw new Error("Desktop Shiny must listen on 127.0.0.1 only.");
+}
+const preloadJs = fs.readFileSync(path.join(desktopRoot, "src", "preload.js"), "utf8");
+const keepaliveJs = fs.readFileSync(path.join(repoRoot, "www", "js", "keepalive.js"), "utf8");
+if (
+  !mainJs.includes('ipcMain.handle("cgv:recover-analysis"') ||
+  !preloadJs.includes('recoverAnalysis: () => ipcRenderer.invoke("cgv:recover-analysis")') ||
+  !keepaliveJs.includes("scheduleDesktopRecovery")
+) {
+  throw new Error("CGV Desktop must recover a disconnected local Shiny session without repeated manual page reloads.");
 }
 if (/execFile\([^\n]*["']unzip["']/.test(mainJs)) {
   throw new Error("Desktop dataset extraction must not invoke an external unzip command.");
@@ -223,6 +267,8 @@ if (
   !windowsWorkflow.includes("WINDOWS_BETA_ARTIFACT_PASSWORD") ||
   !windowsWorkflow.includes("-mhe=on") ||
   !windowsWorkflow.includes("npm run prepare:go") ||
+  !windowsWorkflow.includes("npm run prepare:source") ||
+  !windowsWorkflow.includes("CGV_DESKTOP_SOURCE_REVISION: ${{ github.sha }}") ||
   /uses:\s+[^\s]+@v\d+/i.test(windowsWorkflow)
 ) {
   throw new Error("Windows beta workflow must pin actions, prepare locked GO assets, and encrypt unsigned artifacts with a repository secret.");
@@ -251,6 +297,8 @@ for (const requiredFragment of [
   "CN=SignPath Foundation",
   "CGV_DESKTOP_RELEASE_TOKEN",
   "npm run prepare:go",
+  "npm run prepare:source",
+  "CGV_DESKTOP_SOURCE_REVISION: ${{ github.sha }}",
   "already public; this workflow may update draft releases only"
 ]) {
   if (!signedWorkflow.includes(requiredFragment)) {

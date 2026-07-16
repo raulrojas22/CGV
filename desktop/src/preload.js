@@ -9,6 +9,7 @@ contextBridge.exposeInMainWorld("cgvDesktop", {
   cancelDatasetDownload: (datasetId) => ipcRenderer.invoke("cgv:cancel-dataset-download", datasetId),
   removeInstalledOrganisms: () => ipcRenderer.invoke("cgv:remove-installed-organisms"),
   showStartupLog: () => ipcRenderer.invoke("cgv:show-startup-log"),
+  recoverAnalysis: () => ipcRenderer.invoke("cgv:recover-analysis"),
   onStatus: (callback) => {
     ipcRenderer.on("cgv:status", (_event, payload) => callback(payload));
   },

@@ -279,7 +279,8 @@
     });
   }
 
-  /* ── Boot ──────────────────────────────────────────────────────────────── */
+/* ── Boot ──────────────────────────────────────────────────────────────── */
+
   function boot() {
     initScrollReveal();
     initStaggerReveal();
@@ -287,22 +288,15 @@
     initParticles();
     initTypingEffect();
     initWorkflowProgress();
-  }
-
-  function bootHelp() {
-    initScrollReveal();
-    initStaggerReveal();
     initHelpFAQ();
   }
 
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", function () {
       boot();
-      bootHelp();
     });
   } else {
     boot();
-    bootHelp();
   }
 
   // Re-init when navigating back to home tab (Shiny)
@@ -310,9 +304,6 @@
     var t = evt && evt.target ? evt.target : null;
     if (t && t.closest('.app-nav-btn[data-target="home"]')) {
       setTimeout(boot, 180);
-    }
-    if (t && t.closest('.app-nav-btn[data-target="help"]')) {
-      setTimeout(bootHelp, 180);
     }
     if (t && t.closest('.app-nav-btn[data-target="feedback"]')) {
       setTimeout(function () {
@@ -323,7 +314,7 @@
   });
 
   // Re-init animations when Shiny renderUI injects dynamic home content
-  // (e.g. home_stats_strip, home_glance_section)
+  // (e.g. home_stats_strip)
   if (typeof Shiny !== "undefined" && Shiny.addCustomMessageHandler == null) {
     // fallback: use MutationObserver
   }

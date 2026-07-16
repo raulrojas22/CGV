@@ -5,6 +5,7 @@
 
   var rafId = null;
   var observer = null;
+  var observedTargets = [];
 
   function isVisible(el) {
     if (!el) return false;
@@ -19,30 +20,36 @@
     return style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0';
   }
 
-  function computeReservedTop(pane) {
-    if (!pane || !pane.style) return;
+  function measureReservedTop(pane) {
+    if (!pane || !pane.style) return null;
 
     if (window.matchMedia && window.matchMedia('(max-width: 980px)').matches) {
-      pane.style.removeProperty('--summary-context-reserved-top');
-      return;
+      return '';
     }
 
     var section = pane.querySelector('.summary-context-section');
     if (!section || !isVisible(section)) {
-      pane.style.setProperty('--summary-context-reserved-top', '16px');
-      return;
+      return '16px';
     }
 
     var sectionRect = section.getBoundingClientRect();
     var paneRect = pane.getBoundingClientRect();
     var reserve = Math.ceil(Math.max(16, (sectionRect.bottom - paneRect.top) + 12));
-    pane.style.setProperty('--summary-context-reserved-top', String(reserve) + 'px');
+    return String(reserve) + 'px';
   }
 
   function updateAllPanes() {
     var panes = document.querySelectorAll('.app-main-pane-search-results');
+    var measurements = [];
     for (var i = 0; i < panes.length; i += 1) {
-      computeReservedTop(panes[i]);
+      measurements.push({ pane: panes[i], value: measureReservedTop(panes[i]) });
+    }
+    for (var j = 0; j < measurements.length; j += 1) {
+      if (measurements[j].value === '') {
+        measurements[j].pane.style.removeProperty('--summary-context-reserved-top');
+      } else if (measurements[j].value !== null) {
+        measurements[j].pane.style.setProperty('--summary-context-reserved-top', measurements[j].value);
+      }
     }
   }
 
@@ -55,15 +62,29 @@
   }
 
   function bindObservers() {
-    if (observer || typeof MutationObserver !== 'function' || !document.body) return;
+    if (observer || typeof MutationObserver !== 'function') return;
+
+    observedTargets = [
+      document.getElementById('plot-container'),
+      document.getElementById('ortho-plot-container'),
+      document.getElementById('homo_context_section'),
+      document.getElementById('ortho_context_section')
+    ].filter(function (target) {
+      return !!(target && target.nodeType === 1);
+    });
+    if (observedTargets.length === 0) return;
 
     observer = new MutationObserver(function () {
       scheduleUpdate();
     });
 
-    observer.observe(document.body, {
-      childList: true,
-      subtree: true
+    observedTargets.forEach(function (target) {
+      try {
+        observer.observe(target, {
+          childList: true,
+          subtree: true
+        });
+      } catch (err) {}
     });
   }
 
@@ -74,7 +95,11 @@
     window.addEventListener('resize', scheduleUpdate, { passive: true });
     window.addEventListener('orientationchange', scheduleUpdate, { passive: true });
     document.addEventListener('shown.bs.tab', scheduleUpdate);
-    document.addEventListener('shiny:value', scheduleUpdate);
+    document.addEventListener('shiny:value', function (e) {
+      var target = e && e.target ? e.target : null;
+      if (!target || !target.closest) return;
+      if (target.closest('#plot-container, #ortho-plot-container, #homo_context_section, #ortho_context_section')) scheduleUpdate();
+    });
 
     // Extra passes after Shiny/UI paint bursts.
     window.setTimeout(scheduleUpdate, 0);
@@ -93,6 +118,7 @@
       if (observer) {
         observer.disconnect();
         observer = null;
+        observedTargets = [];
       }
       if (rafId !== null) {
         cancelAnimationFrame(rafId);

@@ -32,6 +32,12 @@ let datasetInstallQueue = Promise.resolve();
 const datasetInstallControllers = new Map();
 const cancelableDatasetInstalls = new Set();
 let shinyStartPromise = null;
+let automaticRecoveryTimer = null;
+let unexpectedStopTimes = [];
+
+const AUTOMATIC_RECOVERY_DELAY_MS = 1500;
+const AUTOMATIC_RECOVERY_WINDOW_MS = 2 * 60 * 1000;
+const MAX_AUTOMATIC_RECOVERIES = 2;
 
 // Increment when the bundled conda runtime changes. A new revision replaces
 // the user-local runtime on the next app launch.
@@ -64,6 +70,20 @@ function appRoot() {
   if (process.env.CGV_APP_ROOT) return process.env.CGV_APP_ROOT;
   if (app.isPackaged) return resourcePath("app");
   return path.resolve(__dirname, "..", "..");
+}
+
+function readAppSourceIdentity(root = appRoot()) {
+  const candidates = [
+    path.join(root, "app-source-manifest.json"),
+    path.join(__dirname, "..", "resources", "app-source-manifest.json")
+  ];
+  for (const candidate of candidates) {
+    try {
+      const manifest = JSON.parse(fs.readFileSync(candidate, "utf8"));
+      if (manifest && manifest.sourceRevision) return manifest;
+    } catch (_) {}
+  }
+  return null;
 }
 
 function findRscript(runtimeRoot = "") {
@@ -707,6 +727,7 @@ async function startShiny() {
   appendStartupLog(`\n--- CGV Desktop startup ${new Date().toISOString()} ---\n`);
   sendStatus({ phase: "starting", message: "Preparing CGV Desktop..." });
   const root = appRoot();
+  const sourceIdentity = readAppSourceIdentity(root);
   const dataRoot = defaultDataRoot();
   const cacheRoot = defaultCacheRoot();
   fs.mkdirSync(dataRoot, { recursive: true });
@@ -783,6 +804,14 @@ async function startShiny() {
 
   shinyUrl = `http://127.0.0.1:${port}`;
   logStartupLine("electron", `Starting CGV on ${shinyUrl}`);
+  if (sourceIdentity) {
+    logStartupLine(
+      "electron",
+      `Source: version=${sourceIdentity.appVersion || app.getVersion()} revision=${sourceIdentity.sourceRevision}`
+    );
+  } else {
+    logStartupLine("electron", "Source: application-source manifest unavailable");
+  }
   logStartupLine("electron", `Rscript: ${rscript}`);
   logStartupLine("electron", `Runtime: ${runtimeRoot}`);
   logStartupLine("electron", `Data: ${dataRoot}`);
@@ -792,6 +821,7 @@ async function startShiny() {
     message: "Preparing CGV Desktop..."
   });
 
+  const launchedAt = Date.now();
   shinyProcess = spawn(rscript, [
     "-e",
     `shiny::runApp(${JSON.stringify(root)}, host='127.0.0.1', port=as.integer(${port}), launch.browser=FALSE)`
@@ -823,14 +853,19 @@ async function startShiny() {
     logStartupLine("R stderr", message);
     sendStatus({ phase: "log", message });
   });
+  const launchedProcess = shinyProcess;
   shinyProcess.on("exit", (code, signal) => {
     const stoppedDuringStartup = Boolean(shinyStartPromise);
-    const message = `R/Shiny stopped (${code ?? signal})`;
+    const runtimeSeconds = Math.max(0, Math.round((Date.now() - launchedAt) / 1000));
+    const message = `R/Shiny stopped (${code ?? signal}) after ${runtimeSeconds}s`;
     logStartupLine("electron", message);
     sendStatus({ phase: "stopped", message });
-    shinyProcess = null;
+    if (shinyProcess === launchedProcess) {
+      shinyProcess = null;
+      shinyUrl = null;
+    }
     if (!appIsQuitting && !stoppedDuringStartup && mainWindow && !mainWindow.isDestroyed() && signal !== "SIGTERM") {
-      mainWindow.loadFile(path.join(__dirname, "launcher.html"));
+      scheduleAutomaticShinyRecovery(message);
     }
   });
   shinyProcess.on("error", (error) => {
@@ -1299,6 +1334,63 @@ function stopShinyProcess() {
   try { processToStop.kill(); } catch (_) {}
 }
 
+function clearAutomaticRecoveryTimer() {
+  if (automaticRecoveryTimer !== null) {
+    clearTimeout(automaticRecoveryTimer);
+    automaticRecoveryTimer = null;
+  }
+}
+
+function reserveAutomaticRecovery(now = Date.now()) {
+  unexpectedStopTimes = unexpectedStopTimes.filter((timestamp) => now - timestamp <= AUTOMATIC_RECOVERY_WINDOW_MS);
+  if (unexpectedStopTimes.length >= MAX_AUTOMATIC_RECOVERIES) return false;
+  unexpectedStopTimes.push(now);
+  return true;
+}
+
+function showRecoveryFailure(message) {
+  sendStatus({ phase: "error", message });
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.loadFile(path.join(__dirname, "launcher.html"));
+  }
+}
+
+function scheduleAutomaticShinyRecovery(reason) {
+  if (appIsQuitting || automaticRecoveryTimer !== null) return;
+  if (!reserveAutomaticRecovery()) {
+    const message = "CGV stopped repeatedly. Open the diagnostics log and restart the application.";
+    logStartupLine("electron:error", `${message} Last stop: ${reason}`);
+    showRecoveryFailure(message);
+    return;
+  }
+
+  logStartupLine("electron", `Scheduling automatic analysis recovery: ${reason}`);
+  sendStatus({ phase: "recovering", message: "Reconnecting to the local analysis session..." });
+  automaticRecoveryTimer = setTimeout(async () => {
+    automaticRecoveryTimer = null;
+    if (appIsQuitting) return;
+    try {
+      const url = await startShinyAndLoad();
+      logStartupLine("electron", `CGV recovered automatically at ${url}`);
+    } catch (error) {
+      const message = `Automatic analysis recovery failed: ${error.message}`;
+      logStartupLine("electron:error", message);
+      showRecoveryFailure(message);
+    }
+  }, AUTOMATIC_RECOVERY_DELAY_MS);
+}
+
+async function recoverAnalysisSession(reason = "renderer request") {
+  logStartupLine("electron", `Analysis recovery requested: ${reason}`);
+  if (shinyProcess && shinyUrl) {
+    if (mainWindow && !mainWindow.isDestroyed()) await mainWindow.loadURL(shinyUrl);
+    return shinyUrl;
+  }
+  const url = await startShinyAndLoad();
+  logStartupLine("electron", `CGV recovered after renderer request at ${url}`);
+  return url;
+}
+
 async function startShinyAndLoad() {
   if (shinyUrl && shinyProcess) return shinyUrl;
   if (shinyStartPromise) return shinyStartPromise;
@@ -1434,6 +1526,17 @@ ipcMain.handle("cgv:get-runtime", () => ({
   arch: process.arch,
   appVersion: app.getVersion()
 }));
+
+ipcMain.handle("cgv:recover-analysis", () => {
+  setTimeout(() => {
+    recoverAnalysisSession("disconnected Shiny renderer").catch((error) => {
+      const message = `Unable to reconnect the analysis session: ${error.message}`;
+      logStartupLine("electron:error", message);
+      showRecoveryFailure(message);
+    });
+  }, 0);
+  return { ok: true, scheduled: true };
+});
 
 ipcMain.handle("cgv:get-storage-settings", () => ({
   storageRoot: configuredStorageRoot(),
@@ -1617,12 +1720,14 @@ app.whenReady().then(createWindow);
 
 app.on("window-all-closed", () => {
   appIsQuitting = true;
+  clearAutomaticRecoveryTimer();
   stopShinyProcess();
   if (process.platform !== "darwin") app.quit();
 });
 
 app.on("before-quit", () => {
   appIsQuitting = true;
+  clearAutomaticRecoveryTimer();
   stopShinyProcess();
 });
 

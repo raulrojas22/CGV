@@ -35,6 +35,7 @@
   var LONG_SUSPEND_GAP_MS      = 15 * 60 * 1000;
   var BANNER_ID                = 'shiny-keepalive-banner';
   var DEFAULT_BANNER_MESSAGE   = 'Connection lost — the analysis session is disconnected.';
+  var DESKTOP_RECOVERY_MESSAGE = 'Connection interrupted — reconnecting to the local analysis session...';
   var LONG_SUSPEND_MESSAGE     = 'The computer was asleep too long. Reload the page to restore a healthy session.';
   var GIRAFE_OUTPUT_SELECTOR   =
     '[id^="plot_ortho_"].html-widget-output, ' +
@@ -53,6 +54,8 @@
   var lastPingAt     = 0;
   var lastRuntimeTickAt = Date.now();
   var publicNudgeTimer = null;
+  var desktopRecoveryTimer = null;
+  var pageIsUnloading = false;
 
   function markRuntimeTick() {
     lastRuntimeTickAt = Date.now();
@@ -102,6 +105,34 @@
     return isConnected;
   }
 
+  function isDesktopRuntime() {
+    return !!(window.cgvDesktop && typeof window.cgvDesktop.recoverAnalysis === 'function');
+  }
+
+  function clearDesktopRecoveryTimer() {
+    if (desktopRecoveryTimer !== null) {
+      clearTimeout(desktopRecoveryTimer);
+      desktopRecoveryTimer = null;
+    }
+  }
+
+  function scheduleDesktopRecovery() {
+    if (!isDesktopRuntime() || pageIsUnloading) return false;
+    clearDesktopRecoveryTimer();
+    desktopRecoveryTimer = setTimeout(function () {
+      desktopRecoveryTimer = null;
+      if (pageIsUnloading) return;
+      if (hasHealthyConnection()) {
+        markConnected();
+        return;
+      }
+      window.cgvDesktop.recoverAnalysis().catch(function () {
+        showBanner('Automatic reconnection failed. Use Reconnect to try again.');
+      });
+    }, RESUME_DELAY_MS);
+    return true;
+  }
+
   function markDisconnected(message) {
     isConnected = false;
     stopPing();
@@ -110,6 +141,7 @@
 
   function markConnected() {
     isConnected = true;
+    clearDesktopRecoveryTimer();
     hideBanner();
     startPing();
   }
@@ -147,12 +179,14 @@
     markRuntimeTick();
 
     if (suspendedTooLong) {
-      markDisconnected(LONG_SUSPEND_MESSAGE);
+      markDisconnected(isDesktopRuntime() ? DESKTOP_RECOVERY_MESSAGE : LONG_SUSPEND_MESSAGE);
+      scheduleDesktopRecovery();
       return;
     }
 
     if (!hasHealthyConnection()) {
-      markDisconnected();
+      markDisconnected(isDesktopRuntime() ? DESKTOP_RECOVERY_MESSAGE : undefined);
+      scheduleDesktopRecovery();
       return;
     }
 
@@ -194,9 +228,16 @@
       '<button id="' + BANNER_ID + '-reload" style="' +
         'background:#3a8fc7;color:#fff;border:none;border-radius:5px;' +
         'padding:5px 14px;font:inherit;cursor:pointer;white-space:nowrap' +
-      '">Reload page</button>';
+      '">' + (isDesktopRuntime() ? 'Reconnect' : 'Reload page') + '</button>';
     document.body.appendChild(banner);
     document.getElementById(BANNER_ID + '-reload').addEventListener('click', function () {
+      if (isDesktopRuntime()) {
+        clearDesktopRecoveryTimer();
+        window.cgvDesktop.recoverAnalysis().catch(function () {
+          window.location.reload();
+        });
+        return;
+      }
       window.location.reload();
     });
   }
@@ -257,6 +298,24 @@
     } catch (_e) {}
   }
 
+  // Scoped variant: only nudges SVGs inside the given element (e.g. the single
+  // output that just fired shiny:value). Avoids scanning ALL visible ggiraph
+  // outputs on every card render.
+  function nudgeGgiraphScope(rootEl) {
+    if (!rootEl || !rootEl.querySelectorAll) return;
+    try {
+      if (rootEl.offsetParent === null && rootEl.id !== document.body.id) return;
+      var svgs = rootEl.querySelectorAll('svg');
+      for (var j = 0; j < svgs.length; j++) {
+        try {
+          svgs[j].dispatchEvent(new MouseEvent('mouseout', {
+            bubbles: true, cancelable: false
+          }));
+        } catch (_ie) {}
+      }
+    } catch (_e) {}
+  }
+
   function scheduleGgiraphNudge(delayMs) {
     var delay = parseInt(delayMs, 10);
     if (!isFinite(delay) || delay < 0) delay = 220;
@@ -296,6 +355,25 @@
     if (!isFinite(count)) count = cards.length;
     var label = count === 1 ? 'transcript' : 'transcripts';
 
+    if (currentlyHidden) {
+      try {
+        if (typeof Shiny !== 'undefined' && Shiny.setInputValue) {
+          var ids = [];
+          for (var k = 0; k < cards.length; k++) {
+            var rawId = cards[k].id || '';
+            rawId = rawId.replace(/^homo-card-/, '').replace(/^ortho-card-/, '');
+            if (rawId) ids.push(rawId);
+          }
+          Shiny.setInputValue('isoform_expand_request', {
+            group: groupKey,
+            context: groupKey.indexOf('ortho--') === 0 ? 'orthologous' : 'homologous',
+            ids: ids,
+            nonce: Date.now()
+          }, { priority: 'event' });
+        }
+      } catch (_e0) {}
+    }
+
     for (var i = 0; i < cards.length; i++) {
       cards[i].style.display = currentlyHidden ? 'flex' : 'none';
     }
@@ -307,23 +385,27 @@
       // 2. Bind any newly visible Shiny outputs inside the expanded cards
       try {
         if (typeof Shiny !== 'undefined' && Shiny.bindAll) {
-          for (var j = 0; j < cards.length; j++) { Shiny.bindAll(cards[j]); }
+          setTimeout(function () {
+            for (var j = 0; j < cards.length; j++) { Shiny.bindAll(cards[j]); }
+          }, 120);
         }
       } catch (_e2) {}
       // 3. Nudge ggiraph so newly visible plots register their hover handlers
       try { if (typeof nudgeGgiraph === 'function') setTimeout(nudgeGgiraph, 300); } catch (_e3) {}
+      try { if (typeof nudgeGgiraph === 'function') setTimeout(nudgeGgiraph, 850); } catch (_e4) {}
     } else {
       btn.innerHTML = '&#x25BC; ' + count + ' ' + label;
     }
   };
-  var _girafe_repair_timer = null;
-  function scheduleGirafeRepair(delayMs) {
+  var _girafe_repair_timers = Object.create(null);
+  function scheduleGirafeRepair(delayMs, rootEl) {
     var delay = parseInt(delayMs, 10);
     if (!isFinite(delay) || delay < 0) delay = 900;
-    if (_girafe_repair_timer) clearTimeout(_girafe_repair_timer);
-    _girafe_repair_timer = setTimeout(function () {
-      _girafe_repair_timer = null;
-      repairBrokenGirafeOutputs();
+    var key = rootEl && rootEl.id ? String(rootEl.id) : '__global__';
+    if (_girafe_repair_timers[key]) clearTimeout(_girafe_repair_timers[key]);
+    _girafe_repair_timers[key] = setTimeout(function () {
+      delete _girafe_repair_timers[key];
+      repairBrokenGirafeOutputs(rootEl);
     }, delay);
   }
 
@@ -521,9 +603,13 @@
     return total;
   }
 
-  function repairBrokenGirafeOutputs() {
+  function repairBrokenGirafeOutputs(rootEl) {
     try {
-      var outputs = document.querySelectorAll(GIRAFE_OUTPUT_SELECTOR);
+      var root = rootEl && rootEl.querySelectorAll ? rootEl : document;
+      var outputs = [];
+      if (root.matches && root.matches(GIRAFE_OUTPUT_SELECTOR)) outputs.push(root);
+      var descendants = root.querySelectorAll(GIRAFE_OUTPUT_SELECTOR);
+      for (var d = 0; d < descendants.length; d++) outputs.push(descendants[d]);
       var brokenOutputIds = [];
       for (var i = 0; i < outputs.length; i++) {
         var output = outputs[i];
@@ -556,7 +642,8 @@
         }
       }
       if (brokenOutputIds.length > 0) {
-        nudgeGgiraph();
+        if (root === document) nudgeGgiraph();
+        else nudgeGgiraphScope(root);
         try { window.dispatchEvent(new Event('resize')); } catch (_e) {}
         scheduleDiagnosticsLog('soft-repair-nudge');
       }
@@ -601,11 +688,13 @@
       name.indexOf('plot_ortho_') !== -1 ||
       name.indexOf('plot_homo_')  !== -1
     ) {
+      // Nudge ONLY the output that just updated — avoids scanning every
+      // visible ggiraph output on each card render.
+      nudgeGgiraphScope(e.target);
       if (_girafe_nudge_timer) clearTimeout(_girafe_nudge_timer);
       _girafe_nudge_timer = setTimeout(function () {
         _girafe_nudge_timer = null;
-        scheduleGgiraphNudge(0);
-        scheduleGirafeRepair(950);
+        scheduleGirafeRepair(950, e.target);
         scheduleDiagnosticsLog('shiny-value:' + name);
       }, 180);
     }
@@ -727,6 +816,10 @@
     var mode = normalizeVisualMode(modeValue);
     return mode === 'aligned' || mode === 'pip_blocks' || mode === 'pip_multipip';
   }
+  function isSpecialHomoMode(modeValue) {
+    var mode = normalizeVisualMode(modeValue);
+    return mode === 'aligned' || mode === 'pip_blocks' || mode === 'pip_multipip';
+  }
   document.addEventListener('change', function (e) {
     var target = e && e.target ? e.target : null;
     var name = target && target.name ? String(target.name) : '';
@@ -738,12 +831,15 @@
       if (_mode_repair_t)  clearTimeout(_mode_repair_t);
       if (_mode_repair_t2) clearTimeout(_mode_repair_t2);
       flushOrphanedTooltips();
+      _brokenSeenCountByOutput = Object.create(null);
+      _diagExpectedByOutput = Object.create(null);
       _mode_nudge_t1 = setTimeout(function () { _mode_nudge_t1 = null; nudgeGgiraph(); }, 420);
       _mode_nudge_t2 = setTimeout(function () { _mode_nudge_t2 = null; nudgeGgiraph(); }, 1400);
       // Soft-repair pass — after all gene-card renders should have completed.
       // Detects plots still missing tooltip hosts and performs a safe recovery.
       _mode_repair_t = setTimeout(function () { _mode_repair_t = null; repairBrokenGirafeOutputs(); }, 2500);
-      if (name === 'ortho_visual_mode' && isSpecialOrthoMode(target && target.value)) {
+      if ((name === 'ortho_visual_mode' && isSpecialOrthoMode(target && target.value)) ||
+          (name === 'homo_visual_mode' && isSpecialHomoMode(target && target.value))) {
         _mode_nudge_t3 = setTimeout(function () {
           _mode_nudge_t3 = null;
           flushOrphanedTooltips();
@@ -778,7 +874,10 @@
   });
 
   window.addEventListener('focus', scheduleResumeRecovery, { passive: true });
-  window.addEventListener('pageshow', scheduleResumeRecovery, { passive: true });
+  window.addEventListener('pageshow', function () {
+    pageIsUnloading = false;
+    scheduleResumeRecovery();
+  }, { passive: true });
   window.addEventListener('online', scheduleResumeRecovery, { passive: true });
 
   /* ── Shiny connection events ─────────────────────────────────────────────── */
@@ -799,8 +898,17 @@
   });
 
   document.addEventListener('shiny:disconnected', function () {
+    if (pageIsUnloading) return;
     markRuntimeTick();
-    markDisconnected();
+    markDisconnected(isDesktopRuntime() ? DESKTOP_RECOVERY_MESSAGE : undefined);
+    scheduleDesktopRecovery();
+  });
+
+  window.addEventListener('beforeunload', function () {
+    pageIsUnloading = true;
+    clearResumeTimer();
+    clearDesktopRecoveryTimer();
+    stopPing();
   });
 
   installDiagMessageHandler();

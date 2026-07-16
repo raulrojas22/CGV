@@ -44,6 +44,25 @@
     });
   }
 
+  /* Allow keyboard selection for NCBI result cards rendered as divs */
+  function bindAssemblyCardKeyboard() {
+    $(document).on('keydown', '[data-ncbi-card-select="ortho"]', function (e) {
+      var isActivationKey = e.key === 'Enter' || e.key === ' ' || e.keyCode === 13 || e.keyCode === 32;
+      if (!isActivationKey) return;
+
+      var activeTag = (e.target && e.target.tagName ? e.target.tagName : '').toLowerCase();
+      if (activeTag === 'button' || activeTag === 'a' || activeTag === 'input' || activeTag === 'select' || activeTag === 'textarea') {
+        return;
+      }
+
+      e.preventDefault();
+      var accession = this.getAttribute('data-accession');
+      if (accession && window.Shiny) {
+        Shiny.setInputValue('ortho_ncbi_select', accession, { priority: 'event' });
+      }
+    });
+  }
+
   $(document).on('shiny:connected', function () {
 
     /* ── Custom message handlers for preloaded redirect ─────── */
@@ -70,6 +89,7 @@
     guardDownloadButton('homo_ncbi_download_btn');
     /* Orthologous */
     bindEnterSearch('ortho_ncbi_query', 'ortho_ncbi_search_btn');
+    bindAssemblyCardKeyboard();
     guardDownloadButton('ortho_ncbi_download_all_btn');
   });
 })();
