@@ -3,8 +3,8 @@ FROM rocker/r-ver:4.5
 LABEL org.opencontainers.image.title="CGV" \
       org.opencontainers.image.description="Comparative Genomics Viewer — interactive Shiny app for ortholog analysis, GO enrichment, and genome comparison" \
       org.opencontainers.image.version="1.0.0" \
-      org.opencontainers.image.authors="Rodrigo Rojas" \
-      org.opencontainers.image.source="https://github.com/rarojas/cgv" \
+      org.opencontainers.image.authors="Raul Rojas" \
+      org.opencontainers.image.source="https://github.com/raulrojas22/CGV" \
       org.opencontainers.image.licenses="MIT"
 
 ARG DEBIAN_FRONTEND=noninteractive
@@ -39,6 +39,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     lastz \
     samtools \
     tabix \
+    unzip \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -47,6 +48,7 @@ COPY docker/install_packages.R /tmp/install_packages.R
 RUN Rscript /tmp/install_packages.R && rm -f /tmp/install_packages.R
 
 COPY . /app
+RUN Rscript /app/docker/prepare-guide-media.R
 RUN chmod +x /app/docker/run-app.sh
 
 ENV APP_DIR=/app \

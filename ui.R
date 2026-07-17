@@ -81,6 +81,12 @@ guide_media_map <- stats::setNames(
   vapply(guide_media_files, function(file) guide_media_path(file.path("screencasts", file)), character(1)),
   guide_media_files
 )
+if (!nzchar(guide_media_map[["guide-cross-04-inspect-visualization.mp4"]])) {
+  # This step shares the detailed cross-species walkthrough until its dedicated
+  # recording is available; never leave a blank media panel in packaged builds.
+  guide_media_map[["guide-cross-04-inspect-visualization.mp4"]] <-
+    guide_media_map[["guide-cross-03b-detailed-visualization.mp4"]]
+}
 
 initial_summary_context_header <- function(search_mode_label = "Multi-Gene", gene_hint = "Genes: pending", align_detail = "Compare transcripts") {
   div(
@@ -1332,6 +1338,7 @@ fluidPage(
       tags$script(src = versioned_asset_path("js/export_svg.js")),
       tags$script(src = versioned_asset_path("js/string_theme.js")),
       tags$script(src = versioned_asset_path("js/status_popup.js")),
+      tags$script(src = versioned_asset_path("js/cross_scope_notice.js"), defer = NA),
       tags$script(src = versioned_asset_path("js/search_submit_feedback.js")),
       tags$script(src = versioned_asset_path("js/promoter_popup.js")),
       tags$script(src = versioned_asset_path("js/go_terms_popup.js")),
@@ -4064,7 +4071,10 @@ fluidPage(
           title = "CGV Desktop downloads",
           icon("laptop"),
           span("CGV Desktop")
-        ),
+        )
+      ),
+      div(
+        class = "app-sidebar-action-dock",
         div(class = "app-nav-separator"),
         div(
           class = "app-nav-actions",
@@ -4091,7 +4101,13 @@ fluidPage(
               div(id = "global-search-suggestions", class = "app-search-suggestions")
             )
           ),
-          # sidebar-batch-ui-group: hidden in orthologous mode (batch not allowed for ortho)
+          actionButton(
+            inputId = "global_search_go",
+            label = span("Generate visualization"),
+            icon = icon("search"),
+            class = "btn-primary app-action-btn app-sidebar-primary-btn"
+          ),
+          # sidebar-batch-ui-group: hidden outside Multi-Gene Search.
           div(
             id = "sidebar-batch-ui-group",
             div(
@@ -4122,12 +4138,6 @@ fluidPage(
               ),
               tags$input(id = "global_search_chip_payload", type = "hidden", value = "")
             )
-          ), # end sidebar-batch-ui-group
-          actionButton(
-            inputId = "global_search_go",
-            label = span("Generate visualization"),
-            icon = icon("search"),
-            class = "btn-primary app-action-btn app-sidebar-primary-btn"
           ),
           div(
             id = "global-search-batch-count",

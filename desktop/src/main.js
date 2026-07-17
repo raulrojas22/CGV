@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog, ipcMain, Menu, shell } = require("electron");
+const { app, BrowserWindow, dialog, ipcMain, Menu, screen, shell } = require("electron");
 const { autoUpdater } = require("electron-updater");
 const fs = require("fs");
 const http = require("http");
@@ -22,6 +22,7 @@ const {
   shouldInstallRuntimeLocally
 } = require("./runtime-platform");
 const { needsInitialStorageSelection, parseDesktopSettings } = require("./storage-settings");
+const { computeWindowBounds } = require("./window-layout");
 
 if (process.platform === "win32" && process.env.LOCALAPPDATA) {
   app.setPath("userData", path.join(process.env.LOCALAPPDATA, "CGV Desktop"));
@@ -1555,11 +1556,10 @@ function installApplicationMenu() {
 }
 
 async function createWindow() {
+  const primaryDisplay = screen.getPrimaryDisplay();
+  const windowBounds = computeWindowBounds(primaryDisplay && primaryDisplay.workAreaSize);
   mainWindow = new BrowserWindow({
-    width: 1320,
-    height: 900,
-    minWidth: 1100,
-    minHeight: 720,
+    ...windowBounds,
     title: "CGV Desktop",
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),

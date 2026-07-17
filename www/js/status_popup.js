@@ -260,6 +260,27 @@
     });
   }
 
+  function showImmediateLoading(context, headline, detail) {
+    var popup = document.getElementById('app-status-popup');
+    var loaderTextEl = document.getElementById('app-status-popup-loader-text');
+    var logEl = document.getElementById('app-status-popup-log');
+    if (!popup) return;
+    clearAutoCloseTimer();
+    if (!popup.classList.contains('loading')) {
+      resetPopupState(popup, logEl, loaderTextEl);
+      loadingStartedAt = new Date();
+    }
+    loadingContext = txt(context || 'Alignment');
+    if (loaderTextEl) {
+      loaderTextEl.innerHTML = escapeAndFormatHtml(headline || 'Preparing alignment') +
+        (detail ? '<br>' + escapeAndFormatHtml(detail) : '');
+    }
+    popup.classList.add('loading', 'tone-info');
+    popup.classList.remove('tone-success', 'tone-warning', 'tone-error');
+    setLoadingActive(true);
+    openPopup(popup, { manual: false });
+  }
+
   function renderLatestNotice(entry, logEl) {
     var target = logEl || document.getElementById('app-status-popup-log');
     if (!target || !entry) return;
@@ -439,10 +460,10 @@
 
     if (active) {
       clearAutoCloseTimer();
-      if (manualOpen) {
-        popup.classList.add('open');
-        syncPopupBounds(popup);
-      }
+      popup.classList.add('loading');
+      popup.classList.remove('tone-success', 'tone-warning', 'tone-error');
+      popup.classList.add('tone-info');
+      openPopup(popup, { manual: false });
       setLoadingActive(true);
       if (loadingTimer) clearInterval(loadingTimer);
       loadingTimer = setInterval(function () {
@@ -516,6 +537,22 @@
     }
     renderHistory();
     openPopup(popup, { manual: true });
+  });
+
+  // Open the live status panel immediately in the browser, before a
+  // potentially expensive synchronous Shiny alignment starts. The R layer
+  // remains authoritative for the final result and notification history.
+  $(document).on('change', 'input[name="homo_visual_mode"], input[name="ortho_visual_mode"]', function () {
+    if (String(this.value || '').toLowerCase() !== 'aligned') return;
+    showImmediateLoading('Synteny', 'Building comparative synteny', 'Aligning the currently selected tracks...');
+  });
+
+  $(document).on('click', '#homo_pip_run_alignments, #ortho_pip_run_alignments', function () {
+    showImmediateLoading('LASTZ Blocks', 'Running local LASTZ alignments', 'Comparing the selected locus windows...');
+  });
+
+  $(document).on('click', '#homo_multipip_run_alignments, #ortho_multipip_run_alignments', function () {
+    showImmediateLoading('MultiPIP', 'Running local MultiPIP alignments', 'Comparing the selected locus windows...');
   });
 
   function initPopupBounds() {

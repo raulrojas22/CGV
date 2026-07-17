@@ -721,6 +721,26 @@ body {
   overflow: visible;
 }
 
+.app-sidebar-action-dock {
+  flex: 0 0 auto;
+  min-height: 0;
+  max-height: 390px;
+  overflow-y: auto;
+  overflow-x: visible;
+  overscroll-behavior: contain;
+  padding: 0 12px 12px;
+  border-top: 1px solid var(--app-panel-border);
+  background: var(--app-surface);
+  scrollbar-width: thin;
+  scrollbar-color: rgba(120, 143, 163, 0.48) transparent;
+  position: relative;
+  z-index: 80;
+}
+
+.app-sidebar-action-dock .app-nav-separator {
+  margin-top: 0;
+}
+
 .app-nav-btn {
   width: 100%;
   border: 1px solid transparent;
@@ -1697,6 +1717,12 @@ body {
   overflow: visible;
   position: relative;
   z-index: 3200;
+}
+
+.app-shell.sidebar-collapsed .app-sidebar-action-dock {
+  overflow: visible;
+  max-height: none;
+  padding: 4px 6px 10px;
 }
 
 .app-shell.sidebar-collapsed .app-nav-actions .app-primary-search,
@@ -4088,6 +4114,11 @@ html[data-app-theme="dark"] .plot-card-footer .footer-base-pill {
     min-width: 0;
   }
 
+  .app-sidebar-action-dock {
+    max-height: none;
+    overflow: visible;
+  }
+
   .app-sidebar-scroll {
     max-height: none;
   }
@@ -4170,6 +4201,48 @@ html[data-app-theme="dark"] .plot-card-footer .footer-base-pill {
   .app-collapsed-search-toggle,
   .app-collapsed-search-panel {
     display: none !important;
+  }
+}
+
+@media (min-width: 961px) and (max-height: 780px) {
+  .app-sidebar-top {
+    padding-top: 10px;
+    padding-bottom: 8px;
+  }
+
+  .app-brand-logo {
+    width: 40px;
+    height: 40px;
+  }
+
+  .app-nav {
+    gap: 4px;
+    padding-top: 7px;
+    padding-bottom: 7px;
+  }
+
+  .app-nav-btn {
+    min-height: 40px;
+  }
+
+  .app-sidebar-action-dock {
+    max-height: 43vh;
+    padding-bottom: 8px;
+  }
+
+  .app-nav-actions {
+    gap: 6px;
+    padding-top: 6px;
+  }
+
+  .app-nav-actions .btn,
+  .app-sidebar-primary-btn,
+  .app-sidebar-clear-btn {
+    min-height: 42px !important;
+  }
+
+  .app-nav-actions-hint {
+    display: none;
   }
 }
 
@@ -5698,10 +5771,8 @@ html[data-app-theme="dark"] .plot-card-footer .footer-base-pill {
   grid-column: 1 / -1;
   width: 100%;
   min-width: 0;
-  display: flex;
-  align-items: flex-start;
-  gap: 9px;
-  padding: 8px 11px;
+  display: block;
+  padding: 0;
   border: 1px solid rgba(46, 134, 171, 0.22);
   border-radius: 9px;
   background: rgba(232, 246, 251, 0.72);
@@ -5713,15 +5784,51 @@ html[data-app-theme="dark"] .plot-card-footer .footer-base-pill {
   z-index: 1;
 }
 
-.summary-cross-species-scope-notice > .fa,
-.summary-cross-species-scope-notice > .fas {
+.summary-cross-species-scope-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  color: #31586c;
+  font-weight: 800;
+  list-style: none;
+  user-select: none;
+}
+
+.summary-cross-species-scope-summary::-webkit-details-marker {
+  display: none;
+}
+
+.summary-cross-species-scope-summary > .fa-info-circle,
+.summary-cross-species-scope-summary > .fas.fa-info-circle {
   flex: 0 0 auto;
-  margin-top: 2px;
   color: #2E86AB;
+}
+
+.summary-cross-species-scope-summary-hint {
+  margin-left: 2px;
+  color: #668493;
+  font-size: 10.5px;
+  font-weight: 650;
+}
+
+.summary-cross-species-scope-chevron {
+  margin-left: auto;
+  color: #5f8192;
+  font-size: 9px;
+  transition: transform 0.18s ease;
+}
+
+.summary-cross-species-scope-notice[open] .summary-cross-species-scope-chevron {
+  transform: rotate(180deg);
 }
 
 .summary-cross-species-scope-copy {
   min-width: 0;
+  padding: 2px 10px 9px 34px;
 }
 
 .summary-cross-species-scope-copy strong {
@@ -5981,7 +6088,6 @@ html[data-app-theme="dark"] .plot-card-footer .footer-base-pill {
 
   .summary-cross-species-scope-notice {
     font-size: 12px;
-    padding: 9px 10px;
   }
 
   .app-main-pane-search-results {
@@ -6369,8 +6475,17 @@ html[data-app-theme="dark"] .summary-cross-species-scope-notice {
   background: rgba(25, 67, 89, 0.58);
 }
 
-html[data-app-theme="dark"] .summary-cross-species-scope-notice > .fa,
-html[data-app-theme="dark"] .summary-cross-species-scope-notice > .fas {
+html[data-app-theme="dark"] .summary-cross-species-scope-summary {
+  color: #D8EDF7;
+}
+
+html[data-app-theme="dark"] .summary-cross-species-scope-summary-hint,
+html[data-app-theme="dark"] .summary-cross-species-scope-chevron {
+  color: #91B4C7;
+}
+
+html[data-app-theme="dark"] .summary-cross-species-scope-summary > .fa-info-circle,
+html[data-app-theme="dark"] .summary-cross-species-scope-summary > .fas.fa-info-circle {
   color: #7DD2EE;
 }
 

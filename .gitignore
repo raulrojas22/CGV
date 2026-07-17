@@ -45,6 +45,13 @@ desktop/resources/common-go/
 desktop/resources/app-source-manifest.json
 desktop/resources/demo-data/
 desktop/resources/bundled-data/
+desktop/resources/cgv-guide-media-*.zip
+desktop/resources/guide-media-staging/
+desktop/build/icon-new.icns
+
+# Versioned CGV Guide media is downloaded from the release lock at build time.
+www/screencasts/
+www/screencasts.orig/
 desktop/dataset-packages/work/
 desktop/dataset-packages/*.zip
 desktop/dataset-packages/*.dmg

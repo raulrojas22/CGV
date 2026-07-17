@@ -597,7 +597,7 @@ resolve_genome_fasta <- function(det_info = NULL, uploaded_fasta_path = NULL, ge
 .annotation_disk_cache_maintenance <- new.env(parent = emptyenv())
 .gff_autocomplete_cache_validation <- new.env(parent = emptyenv())
 .gff_index_cache_version <- "desc-clean-v2"
-.gff_autocomplete_cache_version <- 1L
+.gff_autocomplete_cache_version <- 2L
 
 .cache_meta_hidden_key <- ".__cache_meta__"
 
@@ -1225,13 +1225,24 @@ atomic_save_rds <- function(object, path, compress = "gzip") {
     isTRUE(ok)
 }
 
-build_gff_autocomplete_cache <- function(file_path, idx, max_suggestions = 20000L) {
+build_gff_autocomplete_cache <- function(file_path, idx, max_suggestions = 60000L) {
     p <- as.character(file_path %||% "")
     if (!nzchar(p) || !file.exists(p) || !is.list(idx) || !is.data.frame(idx$genes_df)) {
         return(NULL)
     }
     attrs <- as.character(idx$genes_df$attributes %||% rep("", nrow(idx$genes_df)))
-    display <- extract_partial_gene_display_names(attrs)
+    candidate_rows <- extract_partial_gene_candidate_rows(attrs)
+    display <- if (is.data.frame(candidate_rows) && nrow(candidate_rows) > 0L) {
+        # Put human-facing symbols, aliases and annotation-derived bridge tokens
+        # before opaque stable IDs. This prevents a fixed-size autocomplete
+        # sidecar from silently dropping names near the end of a large genome.
+        friendly <- candidate_rows$term_type %in% c(
+            "gene_name", "gene", "name", "alias", "gene_synonym", "description"
+        )
+        c(candidate_rows$gene_name[friendly], candidate_rows$gene_name[!friendly])
+    } else {
+        extract_partial_gene_display_names(attrs)
+    }
     display <- sanitize_autocomplete_choices(display, max_total = max_suggestions)
     keys <- as.character(normalize_partial_gene_query(display))
     keep <- !is.na(keys) & nzchar(keys)
@@ -2660,6 +2671,33 @@ search_gene_rows_via_bridge_descriptions <- function(attr_vec, gene_names) {
     which(hits)
 }
 
+is_safe_local_description_bridge_query <- function(query) {
+    value <- trimws(safe_url_decode(as.character(query %||% "")))
+    nzchar(value) && nchar(value) >= 3L && nchar(value) <= 40L &&
+        !grepl("\\s", value) && grepl("[A-Za-z]", value) && grepl("[0-9]", value)
+}
+
+has_unique_local_description_bridge <- function(file_path, query) {
+    if (!is_safe_local_description_bridge_query(query)) return(FALSE)
+    idx <- tryCatch(build_gff_gene_light_index(file_path), error = function(e) NULL)
+    if (is.null(idx) || !is.data.frame(idx$genes_df) || nrow(idx$genes_df) == 0L) return(FALSE)
+    attrs <- as.character(idx$genes_df$attributes %||% character(0))
+    rough_hits <- search_gene_rows_via_bridge_descriptions(attrs, query)
+    if (length(rough_hits) == 0L) return(FALSE)
+
+    # A word-boundary description search considers `HKT1` a substring of
+    # `HKT1;5`. Only accept rows whose extracted gene-like token is an exact
+    # normalized identity match. This keeps specific symbols such as HKT1;5
+    # portable without silently turning a family/subfamily query into one gene.
+    query_key <- normalize_partial_gene_query(query)
+    exact_hits <- rough_hits[vapply(rough_hits, function(i) {
+        tokens <- extract_bridge_gene_like_tokens_from_attr(attrs[[i]] %||% "")
+        token_keys <- normalize_partial_gene_query(tokens)
+        any(nzchar(token_keys) & token_keys == query_key)
+    }, logical(1))]
+    length(unique(exact_hits)) == 1L
+}
+
 escape_regex <- function(string) gsub("([.|()\\^{}+$*?]|\\[|\\])", "\\\\\\1", string)
 
 empty_gff_df <- function() {
@@ -3199,6 +3237,72 @@ extract_partial_gene_display_names <- function(attrs) {
     out
 }
 
+extract_partial_gene_candidate_rows <- function(attrs) {
+    attrs <- as.character(attrs %||% character(0))
+    if (length(attrs) == 0L) return(empty_partial_gene_suggestions_df())
+
+    rows <- lapply(seq_along(attrs), function(i) {
+        parsed <- parse_gff_attributes(attrs[[i]] %||% "")
+        if (length(parsed) == 0L) return(NULL)
+        first_value <- function(keys) {
+            vals <- unlist(parsed[intersect(keys, names(parsed))], use.names = FALSE)
+            vals <- trimws(safe_url_decode(as.character(vals %||% character(0))))
+            vals <- vals[!is.na(vals) & nzchar(vals)]
+            if (length(vals) == 0L) "" else vals[[1L]]
+        }
+        local_gene_id <- first_value(c("id", "gene_id", "locus_tag"))
+        local_symbol <- first_value(c("gene_name", "gene", "name", "locus_tag"))
+        key_order <- c("gene_name", "gene", "name", "alias", "gene_synonym", "locus_tag", "gene_id", "id")
+        direct <- lapply(intersect(key_order, names(parsed)), function(key) {
+            vals <- trimws(safe_url_decode(as.character(parsed[[key]] %||% character(0))))
+            if (key %in% c("alias", "gene_synonym")) {
+                vals <- trimws(unlist(strsplit(vals, "[,|]", perl = TRUE)))
+            }
+            vals <- vals[!is.na(vals) & nzchar(vals)]
+            if (length(vals) == 0L) return(NULL)
+            data.frame(gene_name = vals, term_type = key, stringsAsFactors = FALSE)
+        })
+        direct <- Filter(Negate(is.null), direct)
+        bridge <- extract_bridge_gene_like_tokens_from_attr(attrs[[i]])
+        bridge_rows <- if (length(bridge) > 0L) {
+            data.frame(gene_name = bridge, term_type = "description", stringsAsFactors = FALSE)
+        } else {
+            NULL
+        }
+        candidates <- c(direct, list(bridge_rows))
+        candidates <- Filter(Negate(is.null), candidates)
+        if (length(candidates) == 0L) return(NULL)
+        out <- do.call(rbind, candidates)
+        out$gene_name <- trimws(as.character(out$gene_name %||% ""))
+        keep <- nzchar(out$gene_name) & nchar(out$gene_name) <= 80L
+        out <- out[keep, , drop = FALSE]
+        if (nrow(out) == 0L) return(NULL)
+        out$local_gene_id <- local_gene_id
+        out$local_symbol <- local_symbol
+        out$source_db <- "GFF"
+        out$confidence <- ifelse(out$term_type == "description", "MEDIUM", "HIGH")
+        out$match_role <- ifelse(
+            out$term_type %in% c("gene_name", "gene", "name"), "official_symbol",
+            ifelse(out$term_type %in% c("alias", "gene_synonym"), "synonym",
+                ifelse(out$term_type %in% c("id", "gene_id", "locus_tag"), "stable_id", "other"))
+        )
+        out$requires_confirmation <- FALSE
+        out
+    })
+    rows <- Filter(function(x) is.data.frame(x) && nrow(x) > 0L, rows)
+    if (length(rows) == 0L) return(empty_partial_gene_suggestions_df())
+    out <- do.call(rbind, rows)
+    out$key <- paste(normalize_partial_gene_query(out$gene_name), out$local_gene_id, sep = "\r")
+    out <- out[nzchar(normalize_partial_gene_query(out$gene_name)) & !duplicated(out$key), , drop = FALSE]
+    out$key <- NULL
+    out$file_label <- ""
+    out$match_type <- ""
+    out$score <- NA_real_
+    out$source_count <- 1L
+    rownames(out) <- NULL
+    normalize_partial_gene_suggestions_df(out)
+}
+
 find_partial_gene_suggestions_from_choices <- function(choices, query, file_label = NULL,
                                                        max_suggestions = 10L,
                                                        min_query_chars = 2L) {
@@ -3280,14 +3384,28 @@ find_partial_gene_suggestions_in_index <- function(file_path, query, file_label 
         row_idx <- rel
     }
     attrs <- as.character(idx$genes_df$attributes[row_idx] %||% rep("", length(row_idx)))
-    choices <- extract_partial_gene_display_names(attrs)
-    find_partial_gene_suggestions_from_choices(
-        choices = choices,
-        query = query,
-        file_label = file_label %||% basename(p),
-        max_suggestions = max_suggestions,
-        min_query_chars = min_query_chars
-    )
+    out <- extract_partial_gene_candidate_rows(attrs)
+    if (!is.data.frame(out) || nrow(out) == 0L) return(empty_partial_gene_suggestions_df())
+    comp <- normalize_partial_gene_query(out$gene_name)
+    exact_hit <- comp == q_comp
+    prefix_hit <- !exact_hit & startsWith(comp, q_comp)
+    contains_hit <- !exact_hit & !prefix_hit & grepl(q_comp, comp, fixed = TRUE)
+    keep <- prefix_hit | contains_hit
+    if (!any(keep)) return(empty_partial_gene_suggestions_df())
+    out <- out[keep, , drop = FALSE]
+    out$file_label <- as.character(file_label %||% basename(p))
+    out$match_type <- ifelse(prefix_hit[keep], "prefix", "contains")
+    source_bonus <- ifelse(out$source_db == "GFF", 20, 0)
+    type_bonus <- ifelse(out$term_type %in% c("gene_name", "gene", "name", "alias", "gene_synonym", "description"), 10, 0)
+    out$score <- ifelse(prefix_hit[keep], 100, 60) + source_bonus + type_bonus -
+        pmax(0, nchar(comp[keep]) - nchar(q_comp))
+    out$key <- paste(normalize_partial_gene_query(out$gene_name), out$local_gene_id, sep = "\r")
+    out <- out[order(-out$score, nchar(out$gene_name), tolower(out$gene_name)), , drop = FALSE]
+    out <- out[!duplicated(out$key), , drop = FALSE]
+    out$key <- NULL
+    if (nrow(out) > max_suggestions) out <- out[seq_len(max_suggestions), , drop = FALSE]
+    rownames(out) <- NULL
+    normalize_partial_gene_suggestions_df(out)
 }
 
 find_partial_gene_alias_suggestions_sqlite <- function(annotation_paths, query, file_labels = NULL,
@@ -3477,7 +3595,13 @@ find_deterministic_partial_gene_suggestions <- function(annotation_paths, query,
             }
         }
         grouped <- do.call(rbind, lapply(split(all_rows, all_rows$aggregation_key), function(df) {
-            df <- df[order(-suppressWarnings(as.numeric(df$score %||% 0)), nchar(df$gene_name), tolower(df$gene_name)), , drop = FALSE]
+            display_preference <- grepl("[;.:_-]", as.character(df$gene_name %||% ""))
+            df <- df[order(
+                -suppressWarnings(as.numeric(df$score %||% 0)),
+                -as.integer(display_preference),
+                nchar(df$gene_name),
+                tolower(df$gene_name)
+            ), , drop = FALSE]
             best <- df[1, , drop = FALSE]
             labels_u <- unique(trimws(as.character(df$file_label %||% "")))
             labels_u <- labels_u[nzchar(labels_u)]
@@ -7211,6 +7335,33 @@ run_lookup_pipeline_pure <- function(file_path, input_gene, det_info = NULL, dia
         out$lookup_elapsed_ms <- app_perf_elapsed_ms(lookup_t0)
         out$lookup_stage <- "local_exact"
         return(out)
+    }
+
+    # Portable dataset packages intentionally keep their alias SQLite compact.
+    # Resolve a unique symbol embedded in the local GFF description before any
+    # external alias lookup so the same installed package behaves identically
+    # on Windows, macOS, Linux and the web server.
+    if (has_unique_local_description_bridge(file_path, input_gene)) {
+        res <- search_gene_in_file(
+            file_path,
+            input_gene,
+            show_diagnostics = FALSE,
+            match_mode = "exact",
+            return_meta = TRUE,
+            include_bridge_tokens = TRUE
+        )
+        if (!is.null(res$data) && nrow(res$data) > 0L) {
+            out <- attach_lookup_result_meta(
+                res,
+                query_candidates = query_candidates_used,
+                best_alias_used = input_gene,
+                input_gene = input_gene
+            )
+            out$external_lookup_had_errors <- FALSE
+            out$lookup_elapsed_ms <- app_perf_elapsed_ms(lookup_t0)
+            out$lookup_stage <- "local_description_bridge"
+            return(out)
+        }
     }
 
     det_resolved <- det_info

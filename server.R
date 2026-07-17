@@ -788,6 +788,8 @@ function(input, output, session) {
     orthoAnalyticsPhase3 <- reactiveVal(FALSE)
     homoAnalyticsExportNonce <- reactiveVal(0)
     orthoAnalyticsExportNonce <- reactiveVal(0)
+    homoSyntenyNoticePending <- reactiveVal(FALSE)
+    orthoSyntenyNoticePending <- reactiveVal(FALSE)
     selectedChartPlotId     <- reactiveVal(NULL)
     selectedChartContext    <- reactiveVal("homo")
     stringNetworkWidget     <- reactiveVal(NULL)
@@ -12443,7 +12445,7 @@ function(input, output, session) {
         popup_head <- trimws(as.character(popup_headline %||% ""))
         lookup_cache_key <- function(path, gene, organism = NULL, taxid = NULL, sources = character(0), mode = "default") {
             paste(
-                "partial-suggestions-v3",
+                "partial-suggestions-v4",
                 normalizePath(as.character(path %||% ""), winslash = "/", mustWork = FALSE),
                 tolower(trimws(as.character(gene %||% ""))),
                 tolower(trimws(as.character(organism %||% ""))),
@@ -12670,6 +12672,32 @@ function(input, output, session) {
             res <- attach_lookup_result_meta(res, query_candidates = query_candidates_used, best_alias_used = "", input_gene = input_gene)
             remember_lookup(cache_key_initial, res)
             return(res)
+        }
+
+        if (has_unique_local_description_bridge(file_path, input_gene)) {
+            bridge_t0 <- app_perf_now()
+            res <- search_gene_in_file(
+                file_path,
+                input_gene,
+                show_diagnostics = FALSE,
+                match_mode = "exact",
+                return_meta = TRUE,
+                include_bridge_tokens = TRUE
+            )
+            app_perf_mark_ms(lookup_perf, "lookup_local_description_bridge_ms", app_perf_elapsed_ms(bridge_t0), perf_context)
+            if (!is.null(res$data) && nrow(res$data) > 0L) {
+                push_progress(sprintf("\u2022 Unique local annotation match found for '%s'.", input_gene))
+                res <- attach_lookup_result_meta(
+                    res,
+                    query_candidates = query_candidates_used,
+                    best_alias_used = input_gene,
+                    input_gene = input_gene
+                )
+                res$external_lookup_had_errors <- FALSE
+                res$lookup_stage <- "local_description_bridge"
+                remember_lookup(cache_key_initial, res)
+                return(res)
+            }
         }
 
         partial_suggestions_for_query <- get_partial_suggestions_for_query(max_per_file = 20L, max_total = 20L)
@@ -20091,12 +20119,19 @@ function(input, output, session) {
         req(identical(tolower(trimws(as.character(input$homo_visual_mode %||% ""))), "pip_blocks"))
         shinyjs::disable("homo_pip_run_alignments")
         on.exit(shinyjs::enable("homo_pip_run_alignments"), add = TRUE)
+        set_popup_loading(TRUE, context = "LASTZ Blocks", text = "Comparing the selected transcript loci...")
+        on.exit(set_popup_loading(FALSE, context = "LASTZ Blocks"), add = TRUE)
         homoPipLocalAlignmentState(list(status = "running", runs = list(), contexts = homoLastzLocusContexts(input$homo_pip_span %||% "gene"), reference_id = homoCanonicalReferencePlotId(), query_ids = character(0), stamp = as.character(Sys.time())))
         state <- tryCatch(
             run_homo_local_lastz("blocks", span_mode = input$homo_pip_span %||% "gene"),
             error = function(e) list(status = "error", error = as.character(e$message %||% "unknown error"), runs = list(), contexts = list(), reference_id = homoCanonicalReferencePlotId(), query_ids = character(0), stamp = as.character(Sys.time()))
         )
         homoPipLocalAlignmentState(state)
+        if (identical(as.character(state$status %||% ""), "done")) {
+            emit_popup_status("LASTZ Blocks", "Local transcript alignments finished.", tone = "success", clear = TRUE)
+        } else {
+            emit_popup_status("LASTZ Blocks", sprintf("Alignment could not finish: %s", as.character(state$error %||% "no eligible transcript pair")), tone = "warning", clear = TRUE)
+        }
     }, ignoreInit = TRUE)
 
     observeEvent(input$homo_multipip_run_alignments, {
@@ -20104,12 +20139,19 @@ function(input, output, session) {
         req(identical(tolower(trimws(as.character(input$homo_visual_mode %||% ""))), "pip_multipip"))
         shinyjs::disable("homo_multipip_run_alignments")
         on.exit(shinyjs::enable("homo_multipip_run_alignments"), add = TRUE)
+        set_popup_loading(TRUE, context = "MultiPIP", text = "Comparing the selected transcript loci...")
+        on.exit(set_popup_loading(FALSE, context = "MultiPIP"), add = TRUE)
         homoMultipipLocalAlignmentState(list(status = "running", runs = list(), contexts = homoLastzLocusContexts(input$homo_multipip_span %||% "gene"), reference_id = homoCanonicalReferencePlotId(), query_ids = character(0), stamp = as.character(Sys.time())))
         state <- tryCatch(
             run_homo_local_lastz("multipip", span_mode = input$homo_multipip_span %||% "gene"),
             error = function(e) list(status = "error", error = as.character(e$message %||% "unknown error"), runs = list(), contexts = list(), reference_id = homoCanonicalReferencePlotId(), query_ids = character(0), stamp = as.character(Sys.time()))
         )
         homoMultipipLocalAlignmentState(state)
+        if (identical(as.character(state$status %||% ""), "done")) {
+            emit_popup_status("MultiPIP", "Local transcript alignments finished.", tone = "success", clear = TRUE)
+        } else {
+            emit_popup_status("MultiPIP", sprintf("Alignment could not finish: %s", as.character(state$error %||% "no eligible transcript pair")), tone = "warning", clear = TRUE)
+        }
     }, ignoreInit = TRUE)
 
     homo_reference_window_features <- function(ref_ctx) {
@@ -20677,6 +20719,20 @@ function(input, output, session) {
         req(identical(mode, "aligned"), cancelOutput = TRUE)
         ids <- as.character(homoAlignedPlotIds() %||% character(0))
         req(length(ids) > 1L, cancelOutput = TRUE)
+        finish_synteny_notice <- isTRUE(isolate(homoSyntenyNoticePending()))
+        if (finish_synteny_notice) {
+            on.exit({
+                homoSyntenyNoticePending(FALSE)
+                set_popup_loading(FALSE, context = "Synteny")
+                if (requireNamespace("later", quietly = TRUE)) {
+                    later::later(function() {
+                        emit_popup_status("Synteny", "Transcript synteny view is ready.", tone = "success", clear = TRUE)
+                    }, delay = 0.05)
+                } else {
+                    emit_popup_status("Synteny", "Transcript synteny view is ready.", tone = "success", clear = TRUE)
+                }
+            }, add = TRUE)
+        }
 
         aligned_mode <- tolower(trimws(as.character(input$homo_aligned_mode %||% "protein")))
         if (!aligned_mode %in% c("protein", "cds", "exon")) aligned_mode <- "protein"
@@ -23606,6 +23662,20 @@ function(input, output, session) {
         current_mode <- tolower(trimws(as.character(input$ortho_visual_mode %||% "compact")))
         if (identical(current_mode, "pip")) current_mode <- "pip_blocks"
         req(identical(current_mode, "aligned"), cancelOutput = TRUE)
+        finish_synteny_notice <- isTRUE(isolate(orthoSyntenyNoticePending()))
+        if (finish_synteny_notice) {
+            on.exit({
+                orthoSyntenyNoticePending(FALSE)
+                set_popup_loading(FALSE, context = "Synteny")
+                if (requireNamespace("later", quietly = TRUE)) {
+                    later::later(function() {
+                        emit_popup_status("Synteny", "Cross-species synteny view is ready.", tone = "success", clear = TRUE)
+                    }, delay = 0.05)
+                } else {
+                    emit_popup_status("Synteny", "Cross-species synteny view is ready.", tone = "success", clear = TRUE)
+                }
+            }, add = TRUE)
+        }
         aligned_perf <- app_perf_new_run("ORTHO_ALIGNED")
         app_perf_mark(aligned_perf, "render_enter", "ORTHO_ALIGNED")
         ids_all <- as.character(sortedPlotIdsOrthologous() %||% integer(0))
@@ -28348,9 +28418,17 @@ function(input, output, session) {
                 )
             ),
             if (isTRUE(show_cross_species_scope_notice)) {
-                div(
+                tags$details(
                     class = "summary-cross-species-scope-notice",
-                    icon("info-circle"),
+                    open = NA,
+                    `data-cross-scope-notice` = "true",
+                    tags$summary(
+                        class = "summary-cross-species-scope-summary",
+                        icon("info-circle"),
+                        span("Comparison scope"),
+                        span(class = "summary-cross-species-scope-summary-hint", "What this view includes"),
+                        icon("chevron-down", class = "summary-cross-species-scope-chevron")
+                    ),
                     div(
                         class = "summary-cross-species-scope-copy",
                         tags$strong("Comparison view — not a complete family inventory."),
@@ -28889,15 +28967,21 @@ function(input, output, session) {
         }
         if (mode %in% c("compact", "detailed")) {
             homoLastVisualMode(mode)
+        } else if (identical(mode, "aligned") && length(homoAlignedPlotIds()) > 1L) {
+            homoSyntenyNoticePending(TRUE)
+            set_popup_loading(TRUE, context = "Synteny", text = "Aligning the selected transcripts...")
         }
-    }, ignoreInit = FALSE)
+    }, ignoreInit = FALSE, priority = 100)
 
     observeEvent(input$ortho_visual_mode, {
         mode <- tolower(trimws(as.character(input$ortho_visual_mode %||% "compact")))
         if (mode %in% c("compact", "detailed")) {
             orthoLastVisualMode(mode)
+        } else if (identical(mode, "aligned") && length(primaryPlotIdsOrthologous()) >= 2L) {
+            orthoSyntenyNoticePending(TRUE)
+            set_popup_loading(TRUE, context = "Synteny", text = "Aligning the selected organism tracks...")
         }
-    }, ignoreInit = FALSE)
+    }, ignoreInit = FALSE, priority = 100)
 
     observeEvent(input$homo_header_mode_pick, {
         pick <- tolower(trimws(as.character(input$homo_header_mode_pick %||% "")))

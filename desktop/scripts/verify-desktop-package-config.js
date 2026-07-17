@@ -11,6 +11,8 @@ const mainJs = fs.readFileSync(mainJsPath, "utf8");
 const annotationCachePathsJs = fs.readFileSync(path.join(desktopRoot, "src", "annotation-cache-paths.js"), "utf8");
 const datasetPackageBuilderJs = fs.readFileSync(path.join(desktopRoot, "scripts", "build-dataset-package.js"), "utf8");
 const serverSource = fs.readFileSync(path.join(repoRoot, "server.R"), "utf8");
+const dockerfileSource = fs.readFileSync(path.join(repoRoot, "Dockerfile"), "utf8");
+const dockerGuidePreparePath = path.join(repoRoot, "docker", "prepare-guide-media.R");
 const downloadJsPath = path.join(repoRoot, "www", "js", "cgv_desktop_downloads.js");
 const downloadUiPath = path.join(repoRoot, "R", "ui_desktop_downloads.R");
 
@@ -106,13 +108,45 @@ if (packageJson.scripts?.["prepare:go"] !== "node scripts/prepare-common-go.js")
 if (packageJson.scripts?.["prepare:source"] !== "node scripts/write-app-source-manifest.js") {
   throw new Error("Desktop must generate an application-source manifest before packaging.");
 }
+if (packageJson.scripts?.["prepare:guide"] !== "node scripts/prepare-guide-media.js") {
+  throw new Error("Desktop must prepare the locked CGV Guide media bundle before packaging.");
+}
 for (const buildScript of ["build", "build:mac", "build:linux", "build:win", "build:store"]) {
+  if (!String(packageJson.scripts?.[buildScript] || "").includes("npm run prepare:guide")) {
+    throw new Error(`${buildScript} must prepare the locked CGV Guide media bundle.`);
+  }
   if (!String(packageJson.scripts?.[buildScript] || "").includes("npm run prepare:go")) {
     throw new Error(`${buildScript} must prepare locked common GO assets.`);
   }
   if (!String(packageJson.scripts?.[buildScript] || "").includes("npm run prepare:source")) {
     throw new Error(`${buildScript} must identify the exact Shiny application source being packaged.`);
   }
+}
+const guideMediaLockPath = path.join(desktopRoot, "guide-media-lock.json");
+const guideMediaPreparePath = path.join(desktopRoot, "scripts", "prepare-guide-media.js");
+if (!fs.existsSync(guideMediaLockPath) || !fs.existsSync(guideMediaPreparePath)) {
+  throw new Error("Missing locked CGV Guide media preparation files.");
+}
+const guideMediaLock = JSON.parse(fs.readFileSync(guideMediaLockPath, "utf8"));
+if (
+  guideMediaLock.version !== 1 ||
+  !/^https:\/\/github\.com\/raulrojas22\/CGV-Desktop-Releases\/releases\/download\/guide-media-v1\//.test(guideMediaLock.url || "") ||
+  !/^[a-f0-9]{64}$/.test(guideMediaLock.sha256 || "") ||
+  !Array.isArray(guideMediaLock.expectedFiles) ||
+  guideMediaLock.expectedFiles.length !== 35
+) {
+  throw new Error("CGV Guide media must be release-hosted, checksum-locked, and contain the 35 available walkthrough videos.");
+}
+if (!filters.includes("www/**")) {
+  throw new Error("Desktop packaging must include the prepared CGV Guide media under www.");
+}
+if (
+  !fs.existsSync(dockerGuidePreparePath) ||
+  !dockerfileSource.includes('org.opencontainers.image.authors="Raul Rojas"') ||
+  !dockerfileSource.includes('org.opencontainers.image.source="https://github.com/raulrojas22/CGV"') ||
+  !dockerfileSource.includes("Rscript /app/docker/prepare-guide-media.R")
+) {
+  throw new Error("Docker builds must use the correct CGV metadata and prepare the same locked Guide media bundle as Desktop.");
 }
 if (!fs.existsSync(appSourceManifestPath)) {
   throw new Error("Missing generated app-source-manifest.json; run npm run prepare:source before package verification.");
@@ -163,6 +197,28 @@ if (!Array.isArray(nsis.preCompressedFileExtensions) || nsis.preCompressedFileEx
 }
 if (!String(nsis.artifactName || "").includes("Windows-${arch}-Setup")) {
   throw new Error("Windows NSIS artifact name must be stable and architecture-specific.");
+}
+if (
+  JSON.stringify(nsis.installerLanguages) !== JSON.stringify(["en_US"]) ||
+  nsis.language !== "1033" ||
+  nsis.multiLanguageInstaller !== false ||
+  nsis.displayLanguageSelector !== false
+) {
+  throw new Error("Windows NSIS must use English consistently and must not inherit the host language.");
+}
+if (
+  win.icon !== "build/icon.ico" ||
+  nsis.installerIcon !== "build/icon.ico" ||
+  nsis.uninstallerIcon !== "build/icon.ico" ||
+  nsis.installerSidebar !== "build/installerSidebar.bmp" ||
+  nsis.installerHeader !== "build/installerHeader.bmp"
+) {
+  throw new Error("Windows must use the branded CGV application icon and lightweight installer artwork.");
+}
+for (const artwork of [win.icon, nsis.installerSidebar, nsis.installerHeader]) {
+  if (!fs.existsSync(path.resolve(desktopRoot, artwork))) {
+    throw new Error(`Missing Windows installer artwork: ${artwork}`);
+  }
 }
 if (
   win.signExecutable !== false ||
@@ -305,6 +361,7 @@ if (
   !windowsWorkflow.includes("WINDOWS_BETA_ARTIFACT_PASSWORD") ||
   !windowsWorkflow.includes("-mhe=on") ||
   !windowsWorkflow.includes("npm run prepare:go") ||
+  !windowsWorkflow.includes("npm run prepare:guide") ||
   !windowsWorkflow.includes("npm run prepare:source") ||
   !windowsWorkflow.includes("CGV_DESKTOP_SOURCE_REVISION: ${{ github.sha }}") ||
   /uses:\s+[^\s]+@v\d+/i.test(windowsWorkflow)
@@ -335,6 +392,7 @@ for (const requiredFragment of [
   "CN=SignPath Foundation",
   "CGV_DESKTOP_RELEASE_TOKEN",
   "npm run prepare:go",
+  "npm run prepare:guide",
   "npm run prepare:source",
   "CGV_DESKTOP_SOURCE_REVISION: ${{ github.sha }}",
   "already public; this workflow may update draft releases only"

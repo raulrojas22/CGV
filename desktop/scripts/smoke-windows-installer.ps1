@@ -27,6 +27,8 @@ function Assert-InstalledLayout {
   $AppPath = Join-Path $InstallDir "CGV Desktop.exe"
   if (-not (Test-Path $AppPath)) { throw "Installed application not found: $AppPath" }
   if (-not (Test-Path $ExpectedVideoPath)) { throw "Pre-compressed Home video was not installed at its canonical path: $ExpectedVideoPath" }
+  $GuideVideos = @(Get-ChildItem (Join-Path $InstalledAppRoot "www\screencasts\*.mp4") -File -ErrorAction SilentlyContinue)
+  if ($GuideVideos.Count -lt 35) { throw "CGV Guide media bundle is incomplete; found $($GuideVideos.Count) of 35 required videos." }
   if (-not (Test-Path $SourceManifestPath)) { throw "Application-source manifest was not installed: $SourceManifestPath" }
   if (Test-Path $LiteralInstallDir) { throw "NSIS created an invalid literal `$INSTDIR directory: $LiteralInstallDir" }
 

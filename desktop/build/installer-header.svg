@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="150" height="57" viewBox="0 0 150 57">
+  <rect width="150" height="57" fill="#f8fcfb"/>
+  <rect x="7" y="8" width="41" height="41" rx="11" fill="#1b4059"/>
+  <text x="27.5" y="33" text-anchor="middle" fill="#ffffff" font-family="Arial, Helvetica, sans-serif" font-size="13" font-weight="800">CGV</text>
+  <text x="56" y="28" fill="#173149" font-family="Arial, Helvetica, sans-serif" font-size="14" font-weight="800">CGV Desktop</text>
+  <text x="56" y="42" fill="#527083" font-family="Arial, Helvetica, sans-serif" font-size="7.5">Comparative Gene Viewer</text>
+</svg>

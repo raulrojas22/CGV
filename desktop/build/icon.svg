@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <rect x="54" y="54" width="916" height="916" rx="220" fill="#183149"/>
+  <path d="M760 54h-84L970 348v-84z" fill="#1fbfa3" opacity=".9"/>
+  <rect x="72" y="72" width="880" height="880" rx="204" fill="none" stroke="#55dcc1" stroke-width="8" opacity=".55"/>
+
+  <g fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M284 196 C462 260 460 440 284 548" stroke="#f5fffd" stroke-width="34"/>
+    <path d="M740 196 C562 260 564 440 740 548" stroke="#4edcc0" stroke-width="34"/>
+    <path d="M333 228h358M300 300h424M296 374h432M317 450h390M365 516h294" stroke="#d8f5ef" stroke-width="18" opacity=".9"/>
+  </g>
+
+  <path d="M230 616h564" stroke="#55dcc1" stroke-width="5" opacity=".5"/>
+  <text x="512" y="836" text-anchor="middle" fill="#ffffff" font-family="Arial, Helvetica, sans-serif" font-size="230" font-weight="700">CGV</text>
+</svg>

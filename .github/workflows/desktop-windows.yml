@@ -66,6 +66,7 @@ jobs:
       - name: Prepare locked common GO assets and package guardrails
         working-directory: desktop
         run: |
+          npm run prepare:guide
           npm run prepare:source
           npm run prepare:go
           npm run verify:config

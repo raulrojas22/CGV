@@ -6,7 +6,13 @@ suppressPackageStartupMessages({
   library(vroom)
 })
 
-workspace <- "/Users/rarojas/Documents/A_FULLAPP"
+script_arg <- grep("^--file=", commandArgs(trailingOnly = FALSE), value = TRUE)
+script_path <- if (length(script_arg) > 0L) {
+  normalizePath(sub("^--file=", "", script_arg[[1L]]), winslash = "/", mustWork = TRUE)
+} else {
+  normalizePath(file.path(getwd(), "scripts", "test_partial_gene_suggestions_smoke.R"), winslash = "/", mustWork = TRUE)
+}
+workspace <- normalizePath(file.path(dirname(script_path), ".."), winslash = "/", mustWork = TRUE)
 `%||%` <- function(x, y) if (is.null(x) || length(x) == 0) y else x
 
 source(file.path(workspace, "R", "alias_resolution.R"))
@@ -170,8 +176,13 @@ ortho_local_res <- run_orthologous_lookup_job_pure(ortho_local_job)
 assert_true(!identical(as.character((ortho_local_res$lookup %||% list())$lookup_stage), "partial_suggestions"),
             "Cross-species local lookup jobs should keep partial suggestions out of the fast path.")
 
-setwd(workspace)
-oryza_ann <- file.path(workspace, "annotations", "GCF_034140825.1_ASM3414082v1_genomic.gff.gz")
+fixture_root <- normalizePath(
+  Sys.getenv("CGV_TEST_DATA_ROOT", unset = workspace),
+  winslash = "/",
+  mustWork = TRUE
+)
+setwd(fixture_root)
+oryza_ann <- file.path(fixture_root, "annotations", "GCF_034140825.1_ASM3414082v1_genomic.gff.gz")
 oryza_species_id <- "oryza_sativa_ssp_japonica_gcf_034140825_1_asm3414082v1_genomic"
 oryza_expected_hkt <- c(
   "HKT1;1", "HKT1;3", "HKT1;4", "HKT2;1", "HKT2;3", "HKT2;4",
@@ -197,7 +208,7 @@ oryza_cold <- find_deterministic_partial_gene_suggestions(
   max_total = 20L,
   min_query_chars = 2L,
   include_alias_sql = TRUE,
-  base_dir = workspace
+  base_dir = fixture_root
 )
 missing_cold <- setdiff(oryza_expected_hkt, as.character(oryza_cold$gene_name %||% character(0)))
 assert_true(length(missing_cold) == 0L,
@@ -213,7 +224,7 @@ oryza_hot <- find_deterministic_partial_gene_suggestions(
   max_total = 20L,
   min_query_chars = 2L,
   include_alias_sql = TRUE,
-  base_dir = workspace
+  base_dir = fixture_root
 )
 missing_hot <- setdiff(oryza_expected_hkt, as.character(oryza_hot$gene_name %||% character(0)))
 assert_true(length(missing_hot) == 0L,
@@ -232,7 +243,7 @@ missing_lookup <- setdiff(oryza_expected_hkt, as.character(oryza_lookup$partial_
 assert_true(length(missing_lookup) == 0L,
             paste("Lookup-carried Oryza HKT suggestions are missing:", paste(missing_lookup, collapse = ", ")))
 
-indica_ann <- file.path(workspace, "annotations", "Oryza_indica.ASM465v1.62.gff3.gz")
+indica_ann <- file.path(fixture_root, "annotations", "Oryza_indica.ASM465v1.62.gff3.gz")
 indica_species_id <- "oryza_sativa_indica_group_oryza_indica_asm465v1_62"
 assert_true(file.exists(indica_ann), "Oryza indica Ensembl annotation fixture is required for alias suggestion regression.")
 indica_det <- list(
@@ -250,7 +261,7 @@ indica_suggestions <- find_deterministic_partial_gene_suggestions(
   max_total = 20L,
   min_query_chars = 2L,
   include_alias_sql = TRUE,
-  base_dir = workspace
+  base_dir = fixture_root
 )
 indica_hkt15 <- indica_suggestions[indica_suggestions$gene_name == "HKT1;5", , drop = FALSE]
 assert_true(nrow(indica_hkt15) == 1L &&
@@ -275,9 +286,12 @@ indica_hkt15_lookup <- run_lookup_pipeline_pure(
   enabled_external_sources = character(0),
   allow_partial_suggestions = FALSE
 )
-assert_true(identical(as.character(indica_hkt15_lookup$lookup_stage), "alias_index") &&
+assert_true(identical(as.character(indica_hkt15_lookup$lookup_stage), "local_description_bridge") &&
               identical(as.character(indica_hkt15_lookup$matched_gene_id), "gene:BGIOSGA001800"),
-            "Oryza indica local LOW/description HKT1;5 alias should resolve through the verified local bridge.")
+            "Oryza indica HKT1;5 should resolve through the unique local annotation-description bridge.")
+assert_true(isTRUE(has_unique_local_description_bridge(indica_ann, "HKT1;5")) &&
+              !isTRUE(has_unique_local_description_bridge(indica_ann, "HKT1")),
+            "The local description bridge must distinguish specific HKT1;5 from the ambiguous HKT1 subfamily query.")
 
 indica_hkt15_direct <- run_lookup_pipeline_pure(
   file_path = indica_ann,
