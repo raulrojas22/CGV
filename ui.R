@@ -16,6 +16,146 @@ analytics_chart_order_choices <- c(
   "Label (Z-A)" = "label_desc"
 )
 
+guide_media_path <- function(path) {
+  path <- as.character(path)
+  if (length(path) == 0 || is.na(path)) {
+    path <- ""
+  }
+  if (!nzchar(path)) {
+    return("")
+  }
+  full_path <- file.path("www", path)
+  if (file.exists(full_path)) {
+    info <- file.info(full_path)
+    mtime <- suppressWarnings(as.numeric(info$mtime))
+    size <- suppressWarnings(as.numeric(info$size))
+    video_version <- sprintf(
+      "%s-%s",
+      if (is.finite(mtime)) as.character(round(mtime)) else "0",
+      if (is.finite(size)) as.character(round(size)) else "0"
+    )
+    return(sprintf("%s?gv=%s", path, video_version))
+  }
+  ""
+}
+
+cgv_manual_path <- guide_media_path(file.path("docs", "CGV_User_Manual.pdf"))
+if (!nzchar(cgv_manual_path)) {
+  cgv_manual_path <- "docs/CGV_User_Manual.pdf"
+}
+
+guide_media_files <- c(
+  "guide-intro.mp4",
+  "guide-multigene-01a-preloaded-organism.mp4",
+  "guide-multigene-01b-ncbi-search.mp4",
+  "guide-multigene-01c-upload-files.mp4",
+  "guide-multigene-02a-add-one-gene.mp4",
+  "guide-multigene-02b-add-batch-genes.mp4",
+  "guide-multigene-03-generate-visualization.mp4",
+  "guide-multigene-04a-compact-visualization.mp4",
+  "guide-multigene-04b-detailed-visualization.mp4",
+  "guide-multigene-05-alignment-optional.mp4",
+  "guide-multigene-06a-export-figures.mp4",
+  "guide-multigene-06b-export-tables-results.mp4",
+  "guide-cross-01a-preloaded-organisms.mp4",
+  "guide-cross-01b-ncbi-search.mp4",
+  "guide-cross-01c-upload-files.mp4",
+  "guide-cross-01d-mixed-sources.mp4",
+  "guide-cross-02-search-gene.mp4",
+  "guide-cross-03-generate-visualization.mp4",
+  "guide-cross-03a-compact-visualization.mp4",
+  "guide-cross-03b-detailed-visualization.mp4",
+  "guide-cross-04-inspect-visualization.mp4",
+  "guide-cross-05a-comparative-synteny-align.mp4",
+  "guide-cross-05b-lastz-blocks.mp4",
+  "guide-cross-05c-multipip.mp4",
+  "guide-cross-06a-export-alignment-visual-figures.mp4",
+  "guide-common-01-review-analytics-charts.mp4",
+  "guide-common-02-review-tables-results.mp4",
+  "guide-common-03-visualize-transcript-variants.mp4",
+  "guide-common-04-inspect-gene-information.mp4",
+  "guide-common-05-download-promoter-sequences.mp4",
+  "guide-common-06-review-literature.mp4",
+  "guide-common-07-review-organism-assembly-info.mp4",
+  "guide-common-08-configure-external-alias-lookup.mp4",
+  "guide-common-09a-save-work-session.mp4",
+  "guide-common-09b-load-work-session.mp4",
+  "guide-common-10-clear-visualizations.mp4"
+)
+guide_media_map <- stats::setNames(
+  vapply(guide_media_files, function(file) guide_media_path(file.path("screencasts", file)), character(1)),
+  guide_media_files
+)
+
+initial_summary_context_header <- function(search_mode_label = "Multi-Gene", gene_hint = "Genes: pending", align_detail = "Compare transcripts") {
+  div(
+    class = "summary-context-card summary-context-card-inline summary-context-card-initial",
+    div(
+      class = "summary-context-title",
+      span(class = "summary-context-kicker", "Search type"),
+      span(class = "summary-context-mode", search_mode_label)
+    ),
+    div(
+      class = "summary-context-organisms",
+      span(class = "summary-context-empty", "Waiting for organisms")
+    ),
+    div(
+      class = "summary-context-actions",
+      span(class = "summary-context-gene-hint", gene_hint),
+      tags$button(
+        type = "button",
+        class = "app-notification-center-btn app-notification-center-toggle",
+        `aria-label` = "Open notification history",
+        `aria-expanded` = "false",
+        title = "Notification history",
+        icon("bell"),
+        span(class = "app-notification-center-badge", "0")
+      )
+    ),
+    div(
+      class = "summary-context-mode-slot",
+      div(
+        class = "summary-display-mode-control",
+        div(
+          class = "summary-display-mode-main",
+          tags$button(
+            type = "button",
+            class = "summary-display-mode-button summary-display-mode-button--visualize is-active",
+            `aria-pressed` = "true",
+            title = "Switch to visualization mode",
+            icon("eye"),
+            span(
+              class = "summary-display-mode-copy",
+              span(class = "summary-display-mode-label", "Visualize mode"),
+              span(class = "summary-display-mode-detail", "Explore gene models")
+            )
+          ),
+          tags$button(
+            type = "button",
+            class = "summary-display-mode-button summary-display-mode-button--align is-disabled",
+            `aria-pressed` = "false",
+            `aria-disabled` = "true",
+            disabled = NA,
+            title = "Available after loading data",
+            icon("project-diagram"),
+            span(
+              class = "summary-display-mode-copy",
+              span(class = "summary-display-mode-label", "Alignment mode"),
+              span(class = "summary-display-mode-detail", align_detail)
+            )
+          )
+        ),
+        div(
+          class = "summary-display-mode-subbar",
+          span(class = "summary-display-submode-label", "Visual detail"),
+          tags$button(type = "button", class = "summary-display-submode-button is-active", `aria-pressed` = "true", "Compact"),
+          tags$button(type = "button", class = "summary-display-submode-button", `aria-pressed` = "false", "Detailed")
+        )
+      )
+    )
+  )
+}
+
 analytics_arch_order_choices <- c(
   "Load order" = "load",
   "Gene length (longest first)" = "gene_len_desc",
@@ -76,6 +216,18 @@ analytics_exon_dist_order_choices <- c(
   "Exon count (low to high)" = "exon_asc",
   "Transcript length (longest first)" = "tx_len_desc",
   "Transcript length (shortest first)" = "tx_len_asc",
+  "Gene length (longest first)" = "gene_len_desc",
+  "Gene length (shortest first)" = "gene_len_asc",
+  "Label (A-Z)" = "label_asc",
+  "Label (Z-A)" = "label_desc"
+)
+
+analytics_intron_dist_order_choices <- c(
+  "Load order" = "load",
+  "Intron count (high to low)" = "intron_desc",
+  "Intron count (low to high)" = "intron_asc",
+  "Intronic bp (high to low)" = "intron_bp_desc",
+  "Intronic bp (low to high)" = "intron_bp_asc",
   "Gene length (longest first)" = "gene_len_desc",
   "Gene length (shortest first)" = "gene_len_asc",
   "Label (A-Z)" = "label_asc",
@@ -156,6 +308,529 @@ analytics_chart_toolbar <- function(container_id, filename, order_input_id, labe
   )
 }
 
+figure_studio_page <- function() {
+  div(
+    class = "content-wrapper app-main-pane figure-studio-page",
+    `data-figure-studio-version` = cgv_release_version,
+    div(
+      class = "figure-studio-header",
+      div(
+        class = "figure-studio-heading",
+        div(
+          class = "figure-studio-kicker",
+          icon("object-group"),
+          span("Publication workspace")
+        ),
+        h2("Figure Studio"),
+        p("Build a publication-ready figure one independent chart panel at a time.")
+      ),
+      div(
+        class = "figure-studio-header-actions",
+        tags$button(
+          id = "figure-studio-guide-toggle",
+          type = "button",
+          class = "figure-studio-btn figure-studio-btn-guide",
+          `data-figure-guide-open` = "true",
+          `data-figure-tooltip` = "Open the five-step Figure Studio guide",
+          `aria-controls` = "figure-studio-guide",
+          `aria-expanded` = "false",
+          icon("question-circle"),
+          span("How it works")
+        ),
+        tags$button(
+          id = "figure-studio-back",
+          type = "button",
+          class = "figure-studio-btn figure-studio-btn-secondary",
+          `data-figure-tooltip` = "Return to the CGV results without deleting this temporary draft",
+          icon("arrow-left"),
+          span("Back to results")
+        ),
+        tags$button(
+          id = "figure-studio-new",
+          type = "button",
+          class = "figure-studio-btn figure-studio-btn-secondary",
+          `data-figure-tooltip` = "Start a clean composition while preserving CGV results",
+          icon("file"),
+          span("New figure")
+        ),
+        span(
+          class = "figure-studio-tooltip-anchor",
+          `data-figure-tooltip` = "Undo the latest Figure Studio edit",
+          tags$button(
+            id = "figure-studio-undo",
+            type = "button",
+            class = "figure-studio-icon-btn",
+            title = "Undo",
+            `aria-label` = "Undo",
+            disabled = "disabled",
+            icon("undo")
+          )
+        ),
+        span(
+          class = "figure-studio-tooltip-anchor",
+          `data-figure-tooltip` = "Redo the latest undone edit",
+          tags$button(
+            id = "figure-studio-redo",
+            type = "button",
+            class = "figure-studio-icon-btn",
+            title = "Redo",
+            `aria-label` = "Redo",
+            disabled = "disabled",
+            icon("redo")
+          )
+        )
+      )
+    ),
+    div(
+      id = "figure-studio-guide",
+      class = "figure-studio-guide",
+      role = "region",
+      `aria-label` = "Figure Studio step-by-step guide",
+      hidden = "hidden",
+      div(
+        class = "figure-studio-guide-header",
+        div(
+          span(class = "figure-studio-pane-kicker", "Quick guide"),
+          h3("Build a figure in five steps")
+        ),
+        tags$button(
+          type = "button",
+          class = "figure-studio-icon-btn",
+          `data-figure-guide-close` = "true",
+          `aria-label` = "Close Figure Studio guide",
+          icon("times")
+        )
+      ),
+      tags$ol(
+        class = "figure-studio-guide-steps",
+        tags$li(
+          span(class = "figure-studio-guide-number", "1"),
+          div(strong("Choose the context"), span("Select Multi-Gene or Cross-Species results in the Panel library."))
+        ),
+        tags$li(
+          span(class = "figure-studio-guide-number", "2"),
+          div(strong("Add one chart per panel"), span("Open a category and use + Add for every chart you want in the figure."))
+        ),
+        tags$li(
+          span(class = "figure-studio-guide-number", "3"),
+          div(strong("Arrange and refine"), span("Select a panel to change its title, width, height, order, or visibility."))
+        ),
+        tags$li(
+          span(class = "figure-studio-guide-number", "4"),
+          div(strong("Check the final output"), span("Use Preview to inspect the exact publication composition before exporting."))
+        ),
+        tags$li(
+          span(class = "figure-studio-guide-number", "5"),
+          div(strong("Export or keep working later"), span("Download SVG/PNG. Save the CGV session if you want this draft restored later."))
+        )
+      )
+    ),
+    div(
+      class = "figure-studio-toolbar",
+      div(
+        class = "figure-studio-title-fields",
+        tags$label(
+          class = "figure-studio-field figure-studio-field-title",
+          span("Figure title"),
+          tags$input(
+            id = "figure-studio-title",
+            type = "text",
+            value = "CGV comparative analysis",
+            maxlength = "140",
+            placeholder = "Optional — leave blank for no figure title",
+            title = "Optional figure heading. Clear this field to export without a title.",
+            autocomplete = "off"
+          )
+        ),
+        tags$label(
+          class = "figure-studio-field figure-studio-field-subtitle",
+          span("Subtitle (optional)"),
+          tags$input(
+            id = "figure-studio-subtitle",
+            type = "text",
+            value = "",
+            maxlength = "200",
+            placeholder = "Study, cohort, method, or comparison",
+            title = "Optional line shown beneath the figure title.",
+            autocomplete = "off"
+          )
+        )
+      ),
+      tags$label(
+        class = "figure-studio-field",
+        title = "Set the publication grid to one, two, or three columns.",
+        span("Columns"),
+        tags$select(
+          id = "figure-studio-columns",
+          tags$option(value = "1", "1"),
+          tags$option(value = "2", selected = "selected", "2"),
+          tags$option(value = "3", "3")
+        )
+      ),
+      tags$label(
+        class = "figure-studio-field",
+        title = "Apply the selected color profile to the preview and final export.",
+        span("Figure style"),
+        tags$select(
+          id = "figure-studio-profile",
+          tags$option(value = "color", "Full Color"),
+          tags$option(value = "paper-color", "Paper Color"),
+          tags$option(value = "colorblind", "Colorblind"),
+          tags$option(value = "gray", "Paper Gray"),
+          tags$option(value = "mono", "Paper Mono")
+        )
+      ),
+      tags$label(
+        class = "figure-studio-field",
+        title = "Controls PNG raster resolution only. SVG remains vector.",
+        span("PNG size"),
+        tags$select(
+          id = "figure-studio-resolution",
+          tags$option(value = "1", "Screen (1×)"),
+          tags$option(value = "2", selected = "selected", "High (2×)"),
+          tags$option(value = "3", "Ultra (3×)")
+        )
+      ),
+      div(
+        class = "figure-studio-export-actions",
+        tags$button(
+          id = "figure-studio-preview",
+          type = "button",
+          class = "figure-studio-btn figure-studio-btn-secondary",
+          `data-figure-tooltip` = "Inspect the exact final composition before downloading",
+          icon("eye"),
+          span("Preview")
+        ),
+        tags$button(
+          id = "figure-studio-export-svg",
+          type = "button",
+          class = "figure-studio-btn figure-studio-btn-primary",
+          `data-figure-tooltip` = "Download an editable, publication-ready vector figure",
+          icon("project-diagram"),
+          span("Export SVG")
+        ),
+        tags$button(
+          id = "figure-studio-export-png",
+          type = "button",
+          class = "figure-studio-btn figure-studio-btn-primary",
+          `data-figure-tooltip` = "Download the final figure at the selected PNG size",
+          icon("image"),
+          span("Export PNG")
+        )
+      )
+    ),
+    div(
+      class = "figure-studio-workspace",
+      tags$aside(
+        class = "figure-studio-library",
+        div(
+          class = "figure-studio-pane-heading",
+          div(
+            span(class = "figure-studio-pane-kicker", "Panel library"),
+            h3("Add one chart")
+          ),
+          tags$button(
+            type = "button",
+            class = "figure-studio-help-dot",
+            `data-figure-guide-open` = "true",
+            `data-figure-tooltip` = "Open the step-by-step guide",
+            `aria-controls` = "figure-studio-guide",
+            `aria-expanded` = "false",
+            `aria-label` = "Open Figure Studio guide",
+            "?"
+          )
+        ),
+        p(class = "figure-studio-pane-copy", "Choose a data context, then add any available visualization as a new panel."),
+        tags$label(
+          class = "figure-studio-field figure-studio-field-block",
+          title = "Choose which CGV workflow supplies charts to the library.",
+          span("Data context"),
+          tags$select(
+            id = "figure-studio-context",
+            tags$option(value = "homo", "Multi-Gene Search"),
+            tags$option(value = "ortho", "Cross-Species Search")
+          )
+        ),
+        tags$label(
+          class = "figure-studio-search",
+          icon("search"),
+          tags$input(
+            id = "figure-studio-catalog-search",
+            type = "search",
+            placeholder = "Find a chart...",
+            autocomplete = "off"
+          )
+        ),
+        div(id = "figure-studio-catalog", class = "figure-studio-catalog"),
+        div(
+          class = "figure-studio-library-note",
+          icon("info-circle"),
+          span("Unavailable charts remain visible and explain which CGV result must be generated first.")
+        )
+      ),
+      div(
+        class = "figure-studio-canvas-shell",
+        div(
+          class = "figure-studio-canvas-topline",
+          div(
+            strong(id = "figure-studio-panel-summary", "0 panels"),
+            span(
+              id = "figure-studio-save-status",
+              title = "This temporary draft is kept only when you save the CGV session.",
+              "Temporary draft"
+            )
+          ),
+          div(
+            class = "figure-studio-canvas-actions",
+            tags$button(
+              id = "figure-studio-add-panel",
+              type = "button",
+              class = "figure-studio-btn figure-studio-btn-secondary",
+              `data-figure-tooltip` = "Jump to the Panel library and choose another chart",
+              icon("plus"),
+              span("Add panel")
+            ),
+            tags$button(
+              id = "figure-studio-clear",
+              type = "button",
+              class = "figure-studio-btn figure-studio-btn-danger",
+              `data-figure-tooltip` = "Remove every panel from this composition",
+              icon("trash"),
+              span("Clear")
+            )
+          )
+        ),
+        div(
+          id = "figure-studio-empty",
+          class = "figure-studio-empty",
+          div(class = "figure-studio-empty-icon", icon("object-group")),
+          h3("Start with an empty publication canvas"),
+          p("Add as many panels as the figure needs. Each panel contains one chart and can be reordered, resized, duplicated, or removed."),
+          tags$button(
+            type = "button",
+            class = "figure-studio-btn figure-studio-btn-primary",
+            `data-figure-empty-add` = "true",
+            icon("plus"),
+            span("Add first panel")
+          )
+        ),
+        div(
+          id = "figure-studio-canvas",
+          class = "figure-studio-canvas",
+          `aria-label` = "Publication figure canvas"
+        ),
+        div(
+          id = "figure-studio-size-warning",
+          class = "figure-studio-size-warning",
+          hidden = "hidden",
+          icon("exclamation-triangle"),
+          span()
+        )
+      ),
+      tags$aside(
+        class = "figure-studio-inspector",
+        div(
+          class = "figure-studio-pane-heading",
+          div(
+            span(class = "figure-studio-pane-kicker", "Selected panel"),
+            h3(id = "figure-studio-inspector-title", "No panel selected")
+          )
+        ),
+        div(
+          id = "figure-studio-inspector-empty",
+          class = "figure-studio-inspector-empty",
+          icon("mouse-pointer"),
+          p("Select a panel to edit its title, size, position, and source.")
+        ),
+        div(
+          id = "figure-studio-inspector-form",
+          class = "figure-studio-inspector-form",
+          hidden = "hidden",
+          tags$label(
+            class = "figure-studio-field figure-studio-field-block",
+            title = "This heading appears beside the automatic A, B, C… panel label.",
+            span("Panel title"),
+            tags$input(
+              id = "figure-studio-panel-title",
+              type = "text",
+              maxlength = "120",
+              autocomplete = "off"
+            )
+          ),
+          div(
+            class = "figure-studio-source-readout",
+            span("Chart source"),
+            strong(id = "figure-studio-panel-source", "—")
+          ),
+          tags$label(
+            class = "figure-studio-field figure-studio-field-block",
+            title = "Choose how many grid columns this panel occupies.",
+            span("Panel width"),
+            tags$select(
+              id = "figure-studio-panel-span",
+              tags$option(value = "1", "1 column"),
+              tags$option(value = "2", "2 columns"),
+              tags$option(value = "3", "3 columns")
+            )
+          ),
+          tags$label(
+            class = "figure-studio-field figure-studio-field-block",
+            title = "Auto preserves the chart proportions; manual sizes intentionally compress or expand it.",
+            span("Panel height"),
+            tags$select(
+              id = "figure-studio-panel-height",
+              tags$option(value = "auto", selected = "selected", "Auto · fit chart"),
+              tags$option(value = "compact", "Compact"),
+              tags$option(value = "standard", "Standard"),
+              tags$option(value = "tall", "Tall")
+            )
+          ),
+          tags$label(
+            class = "figure-studio-check-field",
+            tags$input(id = "figure-studio-panel-show-title", type = "checkbox", checked = "checked"),
+            span("Show panel label and title")
+          ),
+          p(class = "figure-studio-inspector-note", "Auto uses the chart's real proportions and adapts when its number of genes or transcripts changes. Manual heights remain available for intentional compression."),
+          div(
+            class = "figure-studio-panel-order-actions",
+            tags$button(
+              id = "figure-studio-move-back",
+              type = "button",
+              class = "figure-studio-btn figure-studio-btn-secondary",
+              icon("arrow-left"),
+              span("Earlier")
+            ),
+            tags$button(
+              id = "figure-studio-move-forward",
+              type = "button",
+              class = "figure-studio-btn figure-studio-btn-secondary",
+              span("Later"),
+              icon("arrow-right")
+            )
+          ),
+          tags$button(
+            id = "figure-studio-duplicate",
+            type = "button",
+            class = "figure-studio-btn figure-studio-btn-secondary figure-studio-btn-block",
+            icon("clone"),
+            span("Duplicate panel")
+          ),
+          tags$button(
+            id = "figure-studio-remove",
+            type = "button",
+            class = "figure-studio-btn figure-studio-btn-danger figure-studio-btn-block",
+            icon("trash"),
+            span("Remove panel")
+          )
+        )
+      )
+    ),
+    tags$input(id = "figure_studio_state", type = "hidden", value = ""),
+    div(
+      id = "figure-studio-preview-modal",
+      class = "figure-studio-preview-modal",
+      role = "dialog",
+      `aria-modal` = "true",
+      `aria-hidden` = "true",
+      `aria-labelledby` = "figure-studio-preview-title",
+      hidden = "hidden",
+      div(
+        class = "figure-studio-preview-backdrop",
+        `data-figure-preview-close` = "true"
+      ),
+      div(
+        class = "figure-studio-preview-dialog",
+        div(
+          class = "figure-studio-preview-header",
+          div(
+            span(class = "figure-studio-pane-kicker", "Final output"),
+            h3(id = "figure-studio-preview-title", "Export preview"),
+            p("This uses the same composition and SVG source as the exported figure.")
+          ),
+          tags$button(
+            id = "figure-studio-preview-close",
+            type = "button",
+            class = "figure-studio-icon-btn",
+            title = "Close preview",
+            `aria-label` = "Close preview",
+            icon("times")
+          )
+        ),
+        div(
+          class = "figure-studio-preview-info",
+          span(id = "figure-studio-preview-meta", "Preparing preview…"),
+          span("Zoom with the browser or scroll to inspect details.")
+        ),
+        div(
+          class = "figure-studio-preview-stage",
+          div(
+            id = "figure-studio-preview-paper",
+            class = "figure-studio-preview-paper"
+          )
+        ),
+        div(
+          class = "figure-studio-preview-footer",
+          span("If this looks correct, export it directly from here."),
+          div(
+            class = "figure-studio-preview-actions",
+            tags$button(
+            id = "figure-studio-preview-export-svg",
+            type = "button",
+            class = "figure-studio-btn figure-studio-btn-secondary",
+            `data-figure-tooltip` = "Download this exact preview as SVG",
+            icon("project-diagram"),
+              span("Export SVG")
+            ),
+            tags$button(
+            id = "figure-studio-preview-export-png",
+            type = "button",
+            class = "figure-studio-btn figure-studio-btn-primary",
+            `data-figure-tooltip` = "Download this exact preview as PNG",
+            icon("image"),
+              span("Export PNG")
+            )
+          )
+        )
+      )
+    ),
+    div(
+      id = "figure-studio-toast",
+      class = "figure-studio-toast",
+      role = "status",
+      `aria-live` = "polite",
+      hidden = "hidden"
+    )
+  )
+}
+
+analytics_export_bank <- function(prefix) {
+  ids <- paste0(
+    prefix,
+    c(
+      "_arch_chart_export", "_exon_chart_export", "_seq_chart_export",
+      "_context_chart_export", "_exon_dist_chart_export", "_intron_dist_chart_export", "_scatter_chart_export",
+      "_heatmap_chart_export", "_radar_chart_export", "_corr_chart_export"
+    )
+  )
+  tags$div(
+    id = paste0(prefix, "_analytics_export_bank"),
+    class = "analytics-export-bank",
+    `aria-hidden` = "true",
+    style = paste(
+      "position:absolute;left:-10000px;top:0;width:1200px;",
+      "max-width:1200px;overflow:hidden;opacity:0.01;",
+      "pointer-events:none;z-index:-1;"
+    ),
+    lapply(ids, function(output_id) {
+      tags$div(
+        id = paste0(output_id, "_wrap"),
+        style = "width:1200px;min-height:480px;",
+        ggiraph::girafeOutput(output_id, height = "auto", width = "100%")
+      )
+    })
+  )
+}
+
 analytics_scatter_tip_html <- paste0(
   "<strong>GC Content vs Gene Length</strong><br/>",
   "Bubble scatter built from the analytics summary table. Each point is one loaded entry.",
@@ -203,6 +878,88 @@ analytics_corr_tip_html <- paste0(
   "<div class='ci-tip'>Diagonal cells are always 1.00. bp metrics are log&#8321;&#8320;-transformed before correlation. Requires &ge;3 genes.</div>"
 )
 
+get_initial_ready_preloaded_registry <- function() {
+  reg <- tryCatch(
+    get_preloaded_species_registry(registry_path = file.path("annotations", "registry.tsv"), base_dir = "."),
+    error = function(e) data.frame()
+  )
+  if (is.null(reg) || !is.data.frame(reg) || nrow(reg) == 0) {
+    return(data.frame())
+  }
+  if (!"ready" %in% colnames(reg)) {
+    reg$ready <- TRUE
+  }
+  reg[as.logical(reg$ready), , drop = FALSE]
+}
+
+build_initial_species_grouped_grid <- function(df_in, input_id, mode) {
+  if (is.null(df_in) || !is.data.frame(df_in) || nrow(df_in) == 0) {
+    return(list(div(
+      class = "species-grid-empty",
+      "No installed organisms yet. Install organisms in Settings > Organisms, use NCBI Search, or upload your own files."
+    )))
+  }
+  if (!"kingdom" %in% colnames(df_in)) df_in$kingdom <- ""
+  kingdom_order <- c("Animalia", "Plantae", "Fungi")
+  df_in$kingdom[!nzchar(as.character(df_in$kingdom))] <- "Other"
+  kingdoms_present <- intersect(kingdom_order, unique(as.character(df_in$kingdom)))
+  leftover <- setdiff(unique(as.character(df_in$kingdom)), kingdom_order)
+  kingdoms_present <- c(kingdoms_present, leftover)
+
+  sections <- lapply(kingdoms_present, function(kg) {
+    sub_df <- df_in[as.character(df_in$kingdom) == kg, , drop = FALSE]
+    if (nrow(sub_df) == 0) return(NULL)
+
+    cards <- lapply(seq_len(nrow(sub_df)), function(i) {
+      sid <- as.character(sub_df$species_id[i] %||% "")
+      org <- as.character(sub_df$organism[i] %||% sub_df$label[i] %||% "Unknown")
+      icn <- as.character(sub_df$icon_url[i] %||% "/icons/DNA.ico")
+      div(
+        class = "species-grid-card",
+        `data-species-id` = sid,
+        role = "button",
+        tabindex = "0",
+        style = "cursor:pointer;",
+        div(
+          class = "species-grid-icon-wrap",
+          tags$img(class = "species-grid-icon-img", src = icn, alt = org)
+        ),
+        div(
+          class = "species-grid-text",
+          span(class = "species-grid-name", org)
+        )
+      )
+    })
+
+    div(
+      class = "species-kingdom-group",
+      div(class = "species-kingdom-divider"),
+      div(class = "species-kingdom-header", kg),
+      div(
+        class = "species-grid",
+        `data-input-id` = input_id,
+        `data-mode` = mode,
+        cards
+      )
+    )
+  })
+  Filter(Negate(is.null), sections)
+}
+
+initial_ready_preloaded_registry <- get_initial_ready_preloaded_registry()
+initial_homo_species_grid <- tagList(
+  div(
+    class = "species-grid-shell species-grid-shell-initial",
+    build_initial_species_grouped_grid(initial_ready_preloaded_registry, "homo_preloaded_species", "single")
+  )
+)
+initial_ortho_species_grid <- tagList(
+  div(
+    class = "species-grid-shell species-grid-shell-initial",
+    build_initial_species_grouped_grid(initial_ready_preloaded_registry, "ortho_preloaded_species", "multi")
+  )
+)
+
 source("R/ui_desktop_downloads.R", local = TRUE)
 
 fluidPage(
@@ -215,61 +972,443 @@ fluidPage(
       tags$meta(`http-equiv` = "Cache-Control", content = "no-cache, must-revalidate"),
       tags$meta(`http-equiv` = "Pragma", content = "no-cache"),
       tags$meta(`http-equiv` = "Expires", content = "0"),
+      tags$link(rel = "stylesheet", href = versioned_asset_path("css/figure_studio.css")),
+      tags$script(HTML("
+        (function() {
+          function formatBytes(value) {
+            var n = Number(value || 0);
+            if (!isFinite(n) || n <= 0) return '';
+            var units = ['B', 'KB', 'MB', 'GB', 'TB'];
+            var unit = 0;
+            while (n >= 1024 && unit < units.length - 1) {
+              n = n / 1024;
+              unit += 1;
+            }
+            return n.toFixed(n >= 10 || unit === 0 ? 0 : 1) + ' ' + units[unit];
+          }
+
+          function setText(id, text) {
+            var el = document.getElementById(id);
+            if (el) el.textContent = text || '';
+          }
+
+          function formatEta(value) {
+            var seconds = Number(value || 0);
+            if (!isFinite(seconds) || seconds <= 0) return '';
+            if (seconds < 60) return Math.ceil(seconds) + 's';
+            var minutes = Math.ceil(seconds / 60);
+            return minutes + 'm';
+          }
+
+          function statusLabel(status) {
+            var map = {
+              installed: 'Installed',
+              not_installed: 'Not installed',
+              partial: 'Partial',
+              update_available: 'Update available',
+              bundled: 'Bundled'
+            };
+            return map[status] || status || 'Unknown';
+          }
+
+          function phaseLabel(phase) {
+            var map = {
+              preparing: 'Preparing',
+              connecting: 'Connecting',
+              downloading: 'Downloading',
+              verifying: 'Verifying',
+              extracting: 'Extracting',
+              installing_cache: 'Installing cache',
+              cancelling: 'Cancelling',
+              cancelled: 'Cancelled',
+              complete: 'Complete',
+              error: 'Error'
+            };
+            return map[phase] || phase || '';
+          }
+
+          var desktopDatasetProgress = {};
+          var desktopDatasetManifest = null;
+
+          function iconForDataset(item) {
+            var label = String(item.label || '').trim();
+            var speciesId = String(item.speciesId || item.id || '').toLowerCase();
+            var normalizedLabel = label.toLowerCase();
+            var iconAliases = [
+              { test: function() { return normalizedLabel.indexOf('botrytis cinerea') === 0 || speciesId.indexOf('botrytis_cinerea') === 0; }, icon: 'icons/Botrytis cinerea.ico' },
+              { test: function() { return normalizedLabel.indexOf('fragaria vesca') === 0 || speciesId.indexOf('fragaria_vesca') === 0; }, icon: 'icons/Fragaria vesca.ico' },
+              { test: function() { return normalizedLabel.indexOf('oryza sativa indica') === 0 || speciesId.indexOf('oryza_sativa_indica') === 0; }, icon: 'icons/Oryza sativa indica.ico' },
+              { test: function() { return normalizedLabel.indexOf('oryza sativa ssp. japonica') === 0 || speciesId.indexOf('oryza_sativa_ssp_japonica') === 0; }, icon: 'icons/Oryza sativa japonica.ico' }
+            ];
+            if (item.icon) return String(item.icon).replace(/^\\/+/, '');
+            for (var i = 0; i < iconAliases.length; i += 1) {
+              if (iconAliases[i].test()) return iconAliases[i].icon;
+            }
+            if (label) return 'icons/' + label + '.ico';
+            return 'icons/DNA.ico';
+          }
+
+          function updateDesktopDatasetProgress(datasetId, payload) {
+            if (!datasetId) return;
+            desktopDatasetProgress[datasetId] = Object.assign({}, desktopDatasetProgress[datasetId] || {}, payload || {});
+            var escapedId = window.CSS && CSS.escape ? CSS.escape(datasetId) : String(datasetId).replace(/\"/g, '\\\\\"');
+            var card = document.querySelector('[data-desktop-dataset-id=\"' + escapedId + '\"]');
+            if (!card) return;
+            applyDesktopDatasetProgress(card, desktopDatasetProgress[datasetId]);
+          }
+
+          function applyDesktopDatasetProgress(card, progress) {
+            progress = progress || {};
+            var phase = progress.phase || (progress.skipped ? 'complete' : '');
+            var percent = progress.percent == null ? null : Math.max(0, Math.min(1, Number(progress.percent)));
+            var fill = card.querySelector('.desktop-organism-progress-fill');
+            var text = card.querySelector('.desktop-organism-progress-text');
+            var button = card.querySelector('.desktop-organism-download');
+            var status = card.querySelector('.desktop-organism-status-pill');
+            var active = phase && phase !== 'complete' && phase !== 'error' && phase !== 'cancelled';
+            var cancellable = ['preparing', 'connecting', 'downloading', 'verifying'].indexOf(phase) !== -1;
+            card.classList.toggle('is-downloading', active);
+            card.classList.toggle('has-error', phase === 'error');
+            if (fill) {
+              fill.style.width = percent == null ? '28%' : Math.round(percent * 100) + '%';
+              fill.classList.toggle('is-indeterminate', percent == null && active);
+            }
+            if (text) {
+              var bits = [];
+              if (phase) bits.push(phaseLabel(phase));
+              if (progress.message) bits.push(progress.message);
+              if (percent != null && phase !== 'complete') bits.push(Math.round(percent * 100) + '%');
+              if (progress.speed && phase === 'downloading') bits.push(formatBytes(progress.speed) + '/s');
+              if (progress.eta && phase === 'downloading') bits.push(formatEta(progress.eta) + ' left');
+              text.textContent = bits.join(' · ');
+            }
+            if (status && phase) status.textContent = phase === 'complete' ? 'Installed' : phaseLabel(phase);
+            if (button) {
+              button.dataset.action = cancellable ? 'cancel' : (active ? 'wait' : 'download');
+              button.textContent = cancellable ? 'Cancel' : (phase === 'cancelling' ? 'Cancelling...' : (active ? 'Working...' : button.dataset.defaultLabel));
+              button.disabled = (active && !cancellable) || (!active && button.dataset.downloadable !== 'true');
+            }
+          }
+
+          function renderDesktopDatasets(manifest) {
+            var root = document.getElementById('desktop-organism-list');
+            if (!root) return;
+            var datasets = (manifest && manifest.datasets) || [];
+            desktopDatasetManifest = manifest || { datasets: [] };
+            root.textContent = '';
+            var installedCount = datasets.filter(function(item) {
+              return item.local && (item.local.status === 'installed' || item.local.status === 'bundled');
+            }).length;
+            var pendingCount = Math.max(0, datasets.length - installedCount);
+            setText('desktop-organism-count', datasets.length ? datasets.length + ' available' : 'No catalog configured');
+            setText('desktop-organism-installed-count', installedCount ? installedCount + ' installed' : 'No organisms installed');
+            setText('desktop-organism-pending-count', pendingCount ? pendingCount + ' not installed' : 'Catalog complete');
+            var dataPath = document.getElementById('desktop-organism-data-path');
+            var cachePath = document.getElementById('desktop-organism-cache-path');
+            if (dataPath && manifest && manifest.dataRoot) dataPath.textContent = manifest.dataRoot;
+            if (cachePath && manifest && manifest.cacheRoot) cachePath.textContent = manifest.cacheRoot;
+
+            if (!window.cgvDesktop) {
+              root.innerHTML = '<div class=\"desktop-organism-empty\">Desktop organism downloads are available only in CGV Desktop.</div>';
+              return;
+            }
+            if (!datasets.length) {
+              root.innerHTML = '<div class=\"desktop-organism-empty\">No downloadable organism catalog is configured yet. Add a catalog URL to desktop/data-manifest.json or CGV_DESKTOP_CATALOG_URL.</div>';
+              return;
+            }
+
+            renderDesktopOrganismHighlights(datasets);
+            renderDesktopOrganismModalList();
+          }
+
+          function renderDesktopOrganismHighlights(datasets) {
+            var root = document.getElementById('desktop-organism-list');
+            if (!root) return;
+            root.textContent = '';
+            var installed = datasets.filter(function(item) {
+              return item.local && (item.local.status === 'installed' || item.local.status === 'bundled');
+            }).slice(0, 6);
+            if (!installed.length) {
+              root.innerHTML = '<div class=\"desktop-organism-empty\">No organisms installed yet. Open the catalog to download the references you need.</div>';
+              return;
+            }
+            installed.forEach(function(item) {
+              var chip = document.createElement('span');
+              chip.className = 'desktop-organism-chip';
+              var img = document.createElement('img');
+              img.alt = '';
+              img.src = iconForDataset(item);
+              img.onerror = function() { this.onerror = null; this.src = 'icons/DNA.ico'; };
+              var text = document.createElement('span');
+              text.className = 'desktop-organism-scientific-name';
+              text.textContent = item.label || item.id;
+              chip.append(img, text);
+              root.append(chip);
+            });
+            if (datasets.filter(function(item) {
+              return item.local && (item.local.status === 'installed' || item.local.status === 'bundled');
+            }).length > installed.length) {
+              var more = document.createElement('span');
+              more.className = 'desktop-organism-chip desktop-organism-chip-muted';
+              more.textContent = '+' + (datasets.filter(function(item) {
+                return item.local && (item.local.status === 'installed' || item.local.status === 'bundled');
+              }).length - installed.length) + ' more';
+              root.append(more);
+            }
+          }
+
+          function activeDesktopDatasetFilter() {
+            var search = document.getElementById('desktop-organism-search');
+            var status = document.getElementById('desktop-organism-filter');
+            return {
+              query: String(search && search.value || '').trim().toLowerCase(),
+              status: String(status && status.value || 'all')
+            };
+          }
+
+          function matchesDesktopDatasetFilter(item, filter) {
+            var status = item.local && item.local.status || 'not_installed';
+            if (filter.status !== 'all') {
+              if (filter.status === 'installed' && !(status === 'installed' || status === 'bundled')) return false;
+              if (filter.status === 'available' && (status === 'installed' || status === 'bundled')) return false;
+              if (filter.status === 'not_installed' && status !== 'not_installed') return false;
+              if (filter.status === 'updates' && status !== 'update_available') return false;
+            }
+            if (!filter.query) return true;
+            var haystack = [item.label, item.id, item.speciesId, item.description, item.version].filter(Boolean).join(' ').toLowerCase();
+            return haystack.indexOf(filter.query) !== -1;
+          }
+
+          function renderDesktopOrganismModalList() {
+            var modalList = document.getElementById('desktop-organism-modal-list');
+            if (!modalList) return;
+            var datasets = desktopDatasetManifest && desktopDatasetManifest.datasets || [];
+            var filter = activeDesktopDatasetFilter();
+            var visible = datasets.filter(function(item) { return matchesDesktopDatasetFilter(item, filter); });
+            modalList.textContent = '';
+            setText('desktop-organism-modal-count', visible.length + ' shown');
+            if (!visible.length) {
+              modalList.innerHTML = '<div class=\"desktop-organism-empty\">No organisms match this search.</div>';
+              return;
+            }
+
+            visible.forEach(function(item) {
+              var status = item.local && item.local.status || 'not_installed';
+              var card = document.createElement('article');
+              card.className = 'desktop-organism-card desktop-organism-card-' + status;
+              card.dataset.desktopDatasetId = item.id || '';
+
+              var iconWrap = document.createElement('div');
+              iconWrap.className = 'desktop-organism-icon-wrap';
+              var iconImg = document.createElement('img');
+              iconImg.className = 'desktop-organism-icon';
+              iconImg.alt = '';
+              iconImg.src = iconForDataset(item);
+              iconImg.onerror = function() { this.onerror = null; this.src = 'icons/DNA.ico'; };
+              iconWrap.append(iconImg);
+
+              var body = document.createElement('div');
+              body.className = 'desktop-organism-card-body';
+
+              var title = document.createElement('strong');
+              title.className = 'desktop-organism-title desktop-organism-scientific-name';
+              title.textContent = item.label || item.id;
+
+              var details = document.createElement('span');
+              details.className = 'desktop-organism-details';
+              var size = formatBytes(item.sizeBytes || item.package && item.package.sizeBytes);
+              var version = item.version ? 'v' + item.version : '';
+              details.textContent = [size, version, item.speciesId || item.id].filter(Boolean).join(' · ');
+
+              var meta = document.createElement('code');
+              meta.className = 'desktop-organism-meta';
+              meta.textContent = item.description || '';
+
+              var progress = document.createElement('div');
+              progress.className = 'desktop-organism-progress';
+              var progressTrack = document.createElement('span');
+              progressTrack.className = 'desktop-organism-progress-track';
+              var progressFill = document.createElement('span');
+              progressFill.className = 'desktop-organism-progress-fill';
+              progressTrack.append(progressFill);
+              var progressText = document.createElement('span');
+              progressText.className = 'desktop-organism-progress-text';
+              progress.append(progressTrack, progressText);
+              body.append(title, details, meta, progress);
+
+              var actions = document.createElement('div');
+              actions.className = 'desktop-organism-actions';
+              var pill = document.createElement('span');
+              pill.className = 'desktop-organism-status-pill desktop-organism-status-pill-' + status;
+              pill.textContent = statusLabel(status);
+
+              var button = document.createElement('button');
+              button.type = 'button';
+              button.className = 'btn btn-sm btn-download desktop-organism-download';
+              var downloadable = item.downloadable !== false;
+              button.dataset.downloadable = downloadable ? 'true' : 'false';
+              button.textContent = downloadable
+                ? (status === 'installed' ? 'Verify' : 'Download')
+                : 'Bundled';
+              button.dataset.defaultLabel = button.textContent;
+              button.dataset.action = 'download';
+              button.disabled = !downloadable;
+
+              button.addEventListener('click', function() {
+                if (!downloadable || !window.cgvDesktop) return;
+                if (button.dataset.action === 'cancel' && window.cgvDesktop.cancelDatasetDownload) {
+                  updateDesktopDatasetProgress(item.id, { phase: 'cancelling', percent: null });
+                  window.cgvDesktop.cancelDatasetDownload(item.id);
+                  return;
+                }
+                updateDesktopDatasetProgress(item.id, { phase: 'preparing', percent: null });
+                setText('desktop-organism-status', 'Preparing ' + (item.label || item.id) + '...');
+                window.cgvDesktop.downloadDataset(item.id).then(function(result) {
+                  if (result && result.canceled) {
+                    updateDesktopDatasetProgress(item.id, { phase: 'cancelled', message: 'Download canceled.' });
+                    setText('desktop-organism-status', 'Download canceled.');
+                    return null;
+                  }
+                  setText('desktop-organism-status', 'Installed ' + (item.label || item.id) + '. Refreshing organism registry...');
+                  if (window.Shiny) {
+                    Shiny.setInputValue('desktop_dataset_installed', { id: item.id, at: Date.now() }, { priority: 'event' });
+                  }
+                  return window.cgvDesktop.listDatasets();
+                }).then(function(manifest) {
+                  if (manifest) renderDesktopDatasets(manifest);
+                }).catch(function(error) {
+                  updateDesktopDatasetProgress(item.id, { phase: 'error', percent: null });
+                  setText('desktop-organism-status', error && error.message ? error.message : 'Download failed.');
+                });
+              });
+
+              actions.append(pill, button);
+              card.append(iconWrap, body, actions);
+              modalList.append(card);
+              if (desktopDatasetProgress[item.id]) applyDesktopDatasetProgress(card, desktopDatasetProgress[item.id]);
+            });
+          }
+
+          function refreshDesktopDatasets() {
+            if (!window.cgvDesktop) {
+              renderDesktopDatasets({ datasets: [] });
+              return;
+            }
+            window.cgvDesktop.listDatasets().then(renderDesktopDatasets).catch(function(error) {
+              setText('desktop-organism-status', error && error.message ? error.message : 'Unable to load organism catalog.');
+            });
+            if (window.cgvDesktop.getRuntime) {
+              window.cgvDesktop.getRuntime().then(function(runtime) {
+                setText('desktop-organism-data-path', runtime.dataRoot || '');
+                setText('desktop-organism-cache-path', runtime.cacheRoot || '');
+              }).catch(function() {});
+            }
+          }
+
+          document.addEventListener('DOMContentLoaded', function() {
+            refreshDesktopDatasets();
+            var openCatalogBtn = document.getElementById('desktop-organism-open-catalog');
+            var closeCatalogBtn = document.getElementById('desktop-organism-modal-close');
+            var catalogModal = document.getElementById('desktop-organism-modal');
+            var catalogBackdrop = catalogModal && catalogModal.querySelector('.desktop-organism-modal-backdrop');
+            var catalogSearch = document.getElementById('desktop-organism-search');
+            var catalogFilter = document.getElementById('desktop-organism-filter');
+            function openCatalogModal() {
+              if (!catalogModal) return;
+              catalogModal.classList.add('is-open');
+              catalogModal.setAttribute('aria-hidden', 'false');
+              renderDesktopOrganismModalList();
+              if (catalogSearch) catalogSearch.focus();
+            }
+            function closeCatalogModal() {
+              if (!catalogModal) return;
+              catalogModal.classList.remove('is-open');
+              catalogModal.setAttribute('aria-hidden', 'true');
+            }
+            if (openCatalogBtn) openCatalogBtn.addEventListener('click', openCatalogModal);
+            if (closeCatalogBtn) closeCatalogBtn.addEventListener('click', closeCatalogModal);
+            if (catalogBackdrop) catalogBackdrop.addEventListener('click', closeCatalogModal);
+            if (catalogSearch) catalogSearch.addEventListener('input', renderDesktopOrganismModalList);
+            if (catalogFilter) catalogFilter.addEventListener('change', renderDesktopOrganismModalList);
+            document.addEventListener('keydown', function(event) {
+              if (event.key === 'Escape' && catalogModal && catalogModal.classList.contains('is-open')) closeCatalogModal();
+            });
+            var refreshBtn = document.getElementById('desktop-organism-refresh');
+            if (refreshBtn) refreshBtn.addEventListener('click', refreshDesktopDatasets);
+            var resetBtn = document.getElementById('desktop-organism-reset');
+            if (resetBtn) resetBtn.addEventListener('click', function() {
+              if (!window.cgvDesktop || !window.cgvDesktop.removeInstalledOrganisms) return;
+              var ok = window.confirm('Remove installed organisms and local organism caches from this desktop profile?');
+              if (!ok) return;
+              resetBtn.disabled = true;
+              setText('desktop-organism-status', 'Removing installed organisms...');
+              window.cgvDesktop.removeInstalledOrganisms().then(function() {
+                desktopDatasetProgress = {};
+                setText('desktop-organism-status', 'Installed organisms removed. Refreshing catalog...');
+                if (window.Shiny) {
+                  Shiny.setInputValue('desktop_dataset_installed', { id: 'reset', at: Date.now() }, { priority: 'event' });
+                }
+                return window.cgvDesktop.listDatasets();
+              }).then(renderDesktopDatasets).catch(function(error) {
+                setText('desktop-organism-status', error && error.message ? error.message : 'Unable to remove installed organisms.');
+              }).finally(function() {
+                resetBtn.disabled = false;
+              });
+            });
+            if (window.cgvDesktop && window.cgvDesktop.onDownloadProgress) {
+              window.cgvDesktop.onDownloadProgress(function(payload) {
+                if (!payload) return;
+                if (payload.datasetId) updateDesktopDatasetProgress(payload.datasetId, payload);
+                var label = phaseLabel(payload.phase);
+                if (payload.phase === 'error') {
+                  setText('desktop-organism-status', payload.message || 'Download failed.');
+                  return;
+                }
+                if (payload.phase === 'cancelled') {
+                  setText('desktop-organism-status', payload.message || 'Download canceled.');
+                  return;
+                }
+                if (payload.phase === 'connecting' || payload.phase === 'preparing') {
+                  setText('desktop-organism-status', label + ' organism package...');
+                  return;
+                }
+                if (payload.phase === 'extracting' || payload.phase === 'installing_cache' || payload.phase === 'verifying') {
+                  setText('desktop-organism-status', label + ' organism package...');
+                  return;
+                }
+                if (payload.skipped) {
+                  setText('desktop-organism-status', 'Existing package verified.');
+                  return;
+                }
+                if (payload.percent != null) {
+                  var bits = ['Downloading... ' + Math.round(payload.percent * 100) + '%'];
+                  if (payload.speed) bits.push(formatBytes(payload.speed) + '/s');
+                  if (payload.eta) bits.push(formatEta(payload.eta) + ' left');
+                  setText('desktop-organism-status', bits.join(' · '));
+                }
+              });
+            }
+          });
+        })();
+      ")),
       tags$title("CGV | Comparative Gene Viewer"),
+      tags$link(rel = "stylesheet", href = versioned_asset_path("css/cross_species_header_status.css")),
       tags$link(rel = "stylesheet", href = versioned_asset_path("css/cgv_desktop_downloads.css")),
-      tags$script(src = "https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"),
+      tags$script(HTML(sprintf(
+        "window.__cgvTransportTiming = %s; window.__cgvTransportFlushMs = %s;",
+        jsonlite::toJSON(app_env_flag("APP_TRANSPORT_TIMING", FALSE), auto_unbox = TRUE),
+        jsonlite::toJSON(app_env_int("APP_TRANSPORT_FLUSH_MS", 5000L, min_value = 50L), auto_unbox = TRUE)
+      ))),
+      tags$script(src = versioned_asset_path("js/transport_metrics.js")),
+      tags$script(src = versioned_asset_path("js/lazy_jszip.js")),
+      tags$script(src = versioned_asset_path("js/version_probe.js")),
+      tags$script(src = versioned_asset_path("js/rounded_rects.js")),
+      tags$script(src = versioned_asset_path("js/autocomplete_core.js")),
+      tags$script(src = versioned_asset_path("js/footer_scroll_controls.js")),
       tags$script(HTML(sprintf("
         window.__cgvAppVersion = %s;
         window.__cgvDefaultLightIcon = %s;
         window.__cgvDefaultDarkIcon = %s;
-        (function () {
-          function normalizeVersion(value) {
-            return String(value || '').trim();
-          }
-
-          function buildProbeUrl() {
-            var probeUrl = new URL(window.location.href);
-            probeUrl.searchParams.set('__cgv_probe__', String(Date.now()));
-            return probeUrl.toString();
-          }
-
-          function buildReloadUrl(nextVersion) {
-            var reloadUrl = new URL(window.location.href);
-            reloadUrl.searchParams.delete('__cgv_probe__');
-            reloadUrl.searchParams.set('v', nextVersion);
-            return reloadUrl.toString();
-          }
-
-          function maybeReloadForNewVersion() {
-            var currentVersion = normalizeVersion(window.__cgvAppVersion);
-            if (!currentVersion || !window.fetch || !window.DOMParser) return;
-
-            fetch(buildProbeUrl(), {
-              cache: 'no-store',
-              credentials: 'same-origin',
-              headers: { 'Cache-Control': 'no-cache' }
-            })
-              .then(function (resp) {
-                if (!resp.ok) throw new Error('version probe failed');
-                return resp.text();
-              })
-              .then(function (html) {
-                var doc = new DOMParser().parseFromString(html, 'text/html');
-                var meta = doc.querySelector('meta[name=\"cgv-app-version\"]');
-                var latestVersion = normalizeVersion(meta && meta.getAttribute('content'));
-                if (latestVersion && latestVersion !== currentVersion) {
-                  window.location.replace(buildReloadUrl(latestVersion));
-                }
-              })
-              .catch(function () {});
-          }
-
-          if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', maybeReloadForNewVersion, { once: true });
-          } else {
-            maybeReloadForNewVersion();
-          }
-        })();
       ",
       jsonlite::toJSON(app_asset_version, auto_unbox = TRUE),
       jsonlite::toJSON(versioned_asset_path("favicon2.ico?v=2"), auto_unbox = TRUE),
@@ -290,1015 +1429,6 @@ fluidPage(
         });
       ")),
       tags$link(rel = "shortcut icon", type = "image/x-icon", href = versioned_asset_path("favicon.ico?v=2")),
-      tags$style(HTML("
-      :root {
-        --app-font-family: 'Roboto', 'Helvetica Neue', Arial, sans-serif;
-      }
-      .navbar {
-        background-color: #2C3E50 !important;
-        margin: 0 !important;
-        border-radius: 0 !important;
-        width: 100%;
-        max-width: 100%;
-      }
-      .navbar-brand {
-        padding: 5px 15px !important;
-        height: 50px !important;
-        display: flex;
-        align-items: center;
-      }
-      .navbar-brand-content {
-        display: flex;
-        align-items: center;
-        height: 100%;
-      }
-      .navbar-logo {
-        height: 38px;
-        margin-right: 12px;
-        border-radius: 2px;
-        object-fit: contain;
-      }
-      .navbar-text-container {
-        display: flex;
-        flex-direction: column;
-        justify-content: center;
-        align-items: center;
-      }
-      .navbar-title-main {
-        font-family: var(--app-font-family);
-        font-size: 34px;
-        font-weight: 900;
-        letter-spacing: 12px;
-        line-height: 0.85;
-        margin-bottom: 4px;
-        color: #FFFFFF;
-        text-align: center;
-        -webkit-text-stroke: 2px #FFFFFF;
-        margin-left: 12px;
-        transform: scaleX(1.15);
-      }
-      .navbar-title-sub {
-        font-size: 9.5px;
-        font-weight: 600;
-        letter-spacing: 0px;
-        line-height: 1;
-        color: #FFFFFF;
-        white-space: nowrap;
-        text-align: center;
-      }
-      html, body {
-        font-family: var(--app-font-family) !important;
-        margin: 0 !important;
-        padding: 0 !important;
-        height: 100%;
-        min-height: 100%;
-        width: 100%;
-        max-width: 100%;
-        overflow-x: hidden !important;
-        overflow-y: hidden !important;
-        overscroll-behavior: none !important;
-        overscroll-behavior-x: none !important;
-        overscroll-behavior-y: none !important;
-        background: var(--app-shell-bg) !important;
-      }
-      button, input, optgroup, select, textarea {
-        font-family: inherit !important;
-      }
-      input, textarea, select {
-        color-scheme: light;
-      }
-      input[list] {
-        color: #2C3E50 !important;
-        -webkit-text-fill-color: #2C3E50 !important;
-        caret-color: #2C3E50;
-      }
-      datalist, datalist option {
-        color: #2C3E50 !important;
-        background-color: #FFFFFF !important;
-      }
-      .panel-content .selectize-dropdown .option.active,
-      .panel-content .selectize-dropdown .option.selected,
-      .panel-content .selectize-dropdown .option.active.selected,
-      .panel-content .selectize-dropdown [data-selectable].active,
-      .panel-content .selectize-dropdown [data-selectable].selected,
-      .panel-content .selectize-dropdown .active,
-      .panel-content .selectize-dropdown .selected,
-      .panel-content .selectize-dropdown-content .active,
-      .panel-content .selectize-dropdown-content .selected {
-        background: #DDF4EE !important;
-        background-color: #DDF4EE !important;
-        background-image: none !important;
-        color: #2C3E50 !important;
-      }
-      .panel-content .selectize-dropdown .option.active *,
-      .panel-content .selectize-dropdown .option.selected *,
-      .panel-content .selectize-dropdown .active *,
-      .panel-content .selectize-dropdown .selected * {
-        color: #2C3E50 !important;
-      }
-      .panel-content .dropdown-menu > .active > a,
-      .panel-content .dropdown-menu > .active > a:hover,
-      .panel-content .dropdown-menu > .active > a:focus,
-      .panel-content .bootstrap-select .dropdown-menu li.active > a,
-      .panel-content .bootstrap-select .dropdown-menu li.active > a:hover,
-      .panel-content .bootstrap-select .dropdown-menu li.selected > a,
-      .panel-content .bootstrap-select .dropdown-menu li.selected > a:hover {
-        background: #DDF4EE !important;
-        background-color: #DDF4EE !important;
-        color: #2C3E50 !important;
-        background-image: none !important;
-      }
-      .navbar-brand, .nav-link {
-        color: #FFFFFF !important;
-      }
-      .nav-link.active {
-        color: #18BC9C !important;
-      }
-      .nav-link:hover {
-        color: #18BC9C !important;
-      }
-      .btn-primary {
-        background-color: #18BC9C !important;
-        border-color: #18BC9C !important;
-      }
-      .btn-primary:hover {
-        background-color: #128F76 !important;
-        border-color: #128F76 !important;
-      }
-      .btn-download {
-        position: static !important;
-        padding: 2px 5px;
-        font-size: 12px;
-        background-color: #18BC9C !important;
-        border-color: #18BC9C !important;
-        margin: 0 !important;
-      }
-      .btn-clear-plots {
-        background-color: #F3F6F9 !important;
-        border: 1px solid #C9D3DD !important;
-        color: #2C3E50 !important;
-        font-weight: 600;
-      }
-      .btn-clear-plots:hover {
-        background-color: #E8EEF4 !important;
-        border-color: #B8C6D3 !important;
-      }
-      .card {
-        box-shadow: 0 4px 8px 0 rgba(0,0,0,0.1);
-        transition: 0.3s;
-        border-radius: 5px;
-        margin-bottom: 20px;
-        min-height: auto !important;
-      }
-      .card:hover {
-        box-shadow: 0 8px 16px 0 rgba(0,0,0,0.2);
-      }
-      .card-header {
-        background: #2C3E50 !important;
-        color: white !important;
-        font-weight: bold;
-        border-radius: 5px 5px 0 0 !important;
-        margin-bottom: 0 !important;
-        padding: 8px 15px !important;
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-      }
-      .card-isoform .card-header {
-        background: #356D75 !important;
-      }
-      .card-body {
-        padding: 0 5px 5px 5px !important;
-      }
-      .ggiraph-container {
-        margin: 0 auto;
-        text-align: left;
-        width: 100% !important;
-        height: 100% !important;
-        overflow-x: hidden;
-        overflow-y: hidden;
-      }
-      .ggiraph-svg, .ggiraph-svg-0 {
-        display: block !important;
-        margin: 0 !important;
-        width: 100% !important;
-        height: 100% !important;
-      }
-      .ggiraph-svg svg {
-        width: 100% !important;
-        height: 100% !important;
-        max-width: none !important;
-        display: block !important;
-      }
-      .promoter-plot-container {
-        position: relative;
-        overflow: visible;
-        line-height: 0;
-        display: flex;
-        align-items: center;
-      }
-      .promoter-plot-container.plot-geometry-settling {
-        pointer-events: none !important;
-      }
-      .promoter-plot-container.plot-geometry-settling > :not(.promoter-plot-transition-loader) {
-        visibility: hidden !important;
-      }
-      .promoter-plot-transition-loader {
-        position: absolute;
-        inset: 0;
-        display: none;
-        align-items: center;
-        justify-content: center;
-        overflow: hidden;
-        pointer-events: none;
-        z-index: 3;
-      }
-      .promoter-plot-container.plot-geometry-settling .promoter-plot-transition-loader {
-        display: flex;
-      }
-      .promoter-plot-transition-loader .promoter-plot-dna-loader {
-        width: 132px;
-        height: 34px;
-        transform: scale(0.5);
-        transform-origin: center center;
-        opacity: 0.94;
-      }
-      .promoter-plot-transition-loader .promoter-plot-dna-loader .app-dna-node::before {
-        box-shadow: 0 0 0 1px rgba(24, 188, 156, 0.14), 0 0 6px rgba(24, 188, 156, 0.22);
-      }
-      .promoter-plot-container > .html-widget,
-      .promoter-plot-container > .html-widget-output,
-      .promoter-plot-container > .girafe,
-      .promoter-plot-container .girafe,
-      .promoter-plot-container .html-widget,
-      .promoter-plot-container .girafe_container_std,
-      .promoter-plot-container .ggiraph-container {
-        width: 100% !important;
-        height: 100% !important;
-        min-height: 100% !important;
-        max-height: 100% !important;
-        margin: 0 !important;
-        display: flex !important;
-        align-items: center !important;
-      }
-      .promoter-plot-container .girafe_container_std {
-        text-align: left !important;
-        justify-content: stretch !important;
-      }
-      .promoter-plot-container .girafe_container {
-        padding-bottom: 0 !important;
-        height: 100% !important;
-        display: flex !important;
-        align-items: center !important;
-      }
-      .promoter-plot-container svg.ggiraph-svg,
-      .promoter-plot-container .girafe_container_std > svg {
-        display: block !important;
-        width: 100% !important;
-        height: 100% !important;
-        min-height: 100% !important;
-        max-height: 100% !important;
-        margin: 0 !important;
-        vertical-align: top !important;
-      }
-      .promoter-region-popup {
-        position: fixed;
-        left: 0;
-        top: 0;
-        width: min(430px, calc(100vw - 24px));
-        max-height: min(420px, calc(100vh - 24px));
-        background: #F8FCFB;
-        border: 1px solid #BFDCD4;
-        border-radius: 12px;
-        box-shadow: 0 14px 30px rgba(27, 58, 72, 0.28);
-        z-index: 12120;
-        overflow: hidden;
-        opacity: 0;
-        transform: translateY(10px);
-        pointer-events: none;
-        transition: opacity 0.2s ease, transform 0.2s ease;
-      }
-      .promoter-region-popup.open {
-        opacity: 1;
-        transform: translateY(0);
-        pointer-events: auto;
-      }
-      .promoter-region-popup.place-top::before {
-        content: '';
-        position: absolute;
-        left: 50%;
-        bottom: -10px;
-        transform: translateX(-50%);
-        border-width: 10px 9px 0 9px;
-        border-style: solid;
-        border-color: #BFDCD4 transparent transparent transparent;
-      }
-      .promoter-region-popup.place-top::after {
-        content: '';
-        position: absolute;
-        left: 50%;
-        bottom: -9px;
-        transform: translateX(-50%);
-        border-width: 9px 8px 0 8px;
-        border-style: solid;
-        border-color: #F8FCFB transparent transparent transparent;
-      }
-      .promoter-region-popup.place-bottom::before {
-        content: '';
-        position: absolute;
-        left: 50%;
-        top: -10px;
-        transform: translateX(-50%);
-        border-width: 0 9px 10px 9px;
-        border-style: solid;
-        border-color: transparent transparent #BFDCD4 transparent;
-      }
-      .promoter-region-popup.place-bottom::after {
-        content: '';
-        position: absolute;
-        left: 50%;
-        top: -9px;
-        transform: translateX(-50%);
-        border-width: 0 8px 9px 8px;
-        border-style: solid;
-        border-color: transparent transparent #2C3E50 transparent;
-      }
-      .promoter-region-popup-header {
-        background: #2C3E50;
-        color: #FFFFFF;
-        min-height: 48px;
-        padding: 10px 12px;
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        border-bottom: 1px solid rgba(255, 255, 255, 0.12);
-        gap: 8px;
-      }
-      .promoter-region-popup-title-wrap {
-        min-width: 0;
-        flex: 1 1 auto;
-      }
-      .promoter-region-popup-title {
-        margin: 0;
-        font-size: 15px;
-        font-weight: 700;
-        line-height: 1.1;
-      }
-      .promoter-region-popup-subtitle {
-        margin: 2px 0 0;
-        font-size: 11px;
-        font-weight: 600;
-        line-height: 1.2;
-        color: rgba(255, 255, 255, 0.88);
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-      }
-      .promoter-region-popup-close {
-        border: 1px solid rgba(255, 255, 255, 0.26);
-        background: rgba(255, 255, 255, 0.06);
-        color: #FFFFFF;
-        border-radius: 7px;
-        min-width: 28px;
-        height: 28px;
-        padding: 0 8px;
-        line-height: 1;
-        font-size: 17px;
-        font-weight: 600;
-        flex: 0 0 auto;
-      }
-      .promoter-region-popup-close:hover {
-        background: rgba(24, 188, 156, 0.22);
-        border-color: rgba(24, 188, 156, 0.6);
-      }
-      .promoter-region-popup-body {
-        background: linear-gradient(180deg, #F8FCFB 0%, #EEF6F4 100%);
-        padding: 10px;
-        overflow-y: auto;
-      }
-      .promoter-len-label {
-        display: block;
-        margin: 0 0 4px;
-        font-size: 12px;
-        font-weight: 700;
-        color: #2C3E50;
-      }
-      .promoter-len-input {
-        width: 100%;
-        height: 32px;
-        border: 1px solid #BFDCD4;
-        border-radius: 7px;
-        padding: 5px 8px;
-        background: #FFFFFF;
-        color: #2C3E50;
-        font-size: 12.6px;
-        font-weight: 600;
-        outline: none;
-      }
-      .promoter-len-input:focus {
-        border-color: #66CCBC;
-        box-shadow: 0 0 0 2px rgba(24, 188, 156, 0.18);
-      }
-      .promoter-len-slider {
-        width: 100%;
-        margin: 8px 0 4px;
-        accent-color: #18BC9C;
-        cursor: pointer;
-      }
-      .promoter-len-hint {
-        margin: 0 0 8px;
-        color: #5D6D7E;
-        font-size: 11px;
-        font-weight: 600;
-      }
-      .promoter-download-btn {
-        width: 100%;
-        height: 32px;
-        border: 1px solid #0F8E79;
-        border-radius: 7px;
-        background: #18BC9C;
-        color: #FFFFFF;
-        font-size: 12px;
-        font-weight: 700;
-        line-height: 1;
-        padding: 0 8px;
-      }
-      .promoter-download-btn:hover {
-        background: #149A83;
-        border-color: #0D7C6B;
-      }
-      .alert {
-        position: fixed;
-        bottom: 20px;
-        right: 20px;
-        z-index: 9999;
-        min-width: 300px;
-        animation: slideIn 0.5s ease-in-out;
-      }
-      .app-status-popup {
-        position: fixed;
-        right: 18px;
-        bottom: 18px;
-        width: min(460px, calc(100vw - 24px));
-        max-height: 52vh;
-        background: #F8FCFB;
-        border: 1px solid #BFDCD4;
-        border-radius: 12px;
-        box-shadow: 0 14px 30px rgba(27, 58, 72, 0.28);
-        z-index: 12050;
-        overflow: hidden;
-        display: flex;
-        flex-direction: column;
-        opacity: 0;
-        transform: translateY(14px);
-        pointer-events: none;
-        transition: opacity 0.2s ease, transform 0.2s ease;
-      }
-      .app-status-popup.open {
-        opacity: 1;
-        transform: translateY(0);
-        pointer-events: auto;
-      }
-      .app-status-popup-header {
-        background: #2C3E50;
-        color: #FFFFFF;
-        min-height: 48px;
-        padding: 10px 12px;
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        border-bottom: 1px solid rgba(255, 255, 255, 0.12);
-      }
-      .app-status-popup-title {
-        display: inline-flex;
-        align-items: center;
-        gap: 8px;
-        font-size: 15px;
-        font-weight: 700;
-        letter-spacing: 0.1px;
-      }
-      .app-status-popup-actions {
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-      }
-      .app-status-popup-btn {
-        border: 1px solid rgba(255, 255, 255, 0.26);
-        background: rgba(255, 255, 255, 0.06);
-        color: #FFFFFF;
-        border-radius: 7px;
-        min-width: 28px;
-        height: 28px;
-        padding: 0 8px;
-        line-height: 1;
-        font-size: 12px;
-        font-weight: 600;
-      }
-      .app-status-popup-btn:hover {
-        background: rgba(24, 188, 156, 0.22);
-        border-color: rgba(24, 188, 156, 0.6);
-      }
-      .app-status-popup-loader {
-        display: none;
-        padding: 12px 10px 10px;
-        border-bottom: 1px solid #D7E8E3;
-        background: linear-gradient(180deg, #F3FBF8 0%, #ECF5FA 100%);
-        align-items: center;
-        justify-content: center;
-        flex-direction: column;
-        gap: 8px;
-        flex: 1 1 auto;
-      }
-      .app-status-popup.loading .app-status-popup-loader {
-        display: flex;
-        border-bottom: none;
-        min-height: 210px;
-      }
-      .app-dna-loader {
-        width: 220px;
-        height: 56px;
-        position: relative;
-      }
-      .app-dna-wave {
-        position: absolute;
-        inset: 0;
-        display: flex;
-        justify-content: space-between;
-      }
-      .app-dna-wave .app-dna-node {
-        position: relative;
-        width: 8px;
-        height: 8px;
-        border-radius: 50%;
-        transform: translateY(0);
-        animation: app-dna-shift 1.85s ease-in-out infinite;
-        animation-delay: calc(var(--i) * -0.09s);
-      }
-      .app-dna-wave .app-dna-node::before {
-        content: '';
-        position: absolute;
-        inset: 0;
-        border-radius: 50%;
-        background: #18BC9C;
-        box-shadow: 0 0 0 1px rgba(24, 188, 156, 0.18), 0 0 8px rgba(24, 188, 156, 0.32);
-        animation: app-dna-scale 1.85s linear infinite;
-        animation-delay: calc(var(--i) * -0.09s);
-      }
-      .app-dna-wave-top .app-dna-node {
-        animation-direction: reverse;
-      }
-      .app-dna-wave-top .app-dna-node::before {
-        background: #18BC9C;
-      }
-      .app-dna-wave-bottom .app-dna-node {
-        animation-delay: calc(0.92s + (var(--i) * -0.09s));
-      }
-      .app-dna-wave-bottom .app-dna-node::before {
-        background: #2C3E50;
-        box-shadow: 0 0 0 1px rgba(44, 62, 80, 0.18), 0 0 8px rgba(44, 62, 80, 0.28);
-        animation-delay: calc(0.92s + (var(--i) * -0.09s));
-      }
-      html[data-app-theme=\"dark\"] .app-dna-wave .app-dna-node::before {
-        background: #18BC9C;
-        box-shadow: 0 0 0 1px rgba(24, 188, 156, 0.28), 0 0 10px rgba(24, 188, 156, 0.44);
-      }
-      html[data-app-theme=\"dark\"] .app-dna-wave-top .app-dna-node::before {
-        background: #18BC9C;
-        box-shadow: 0 0 0 1px rgba(24, 188, 156, 0.28), 0 0 10px rgba(24, 188, 156, 0.44);
-      }
-      html[data-app-theme=\"dark\"] .app-dna-wave-bottom .app-dna-node::before {
-        background: #FFFFFF;
-        box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.28), 0 0 10px rgba(255, 255, 255, 0.44);
-      }
-      .app-status-popup-loader-text {
-        color: #2C3E50;
-        font-size: 13px;
-        font-weight: 700;
-        text-align: center;
-        white-space: pre-line;
-        line-height: 1.4;
-        max-width: 96%;
-        margin-top: 16px;
-      }
-      .app-status-popup-log {
-        background: linear-gradient(180deg, #F8FCFB 0%, #EEF6F4 100%);
-        padding: 10px;
-        overflow-y: auto;
-        overflow-x: hidden;
-        flex: 1 1 auto;
-      }
-      .app-status-popup.loading .app-status-popup-log {
-        display: none;
-      }
-      .app-status-popup-entry {
-        background: #FFFFFF;
-        border: 1px solid #D7E8E3;
-        border-left: 4px solid #18BC9C;
-        border-radius: 9px;
-        padding: 8px 10px 9px;
-        margin-bottom: 8px;
-        box-shadow: 0 1px 2px rgba(44, 62, 80, 0.06);
-      }
-      .app-status-popup-entry:last-child {
-        margin-bottom: 0;
-      }
-      .app-status-popup-entry-head {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        margin-bottom: 4px;
-        gap: 8px;
-      }
-      .app-status-popup-entry-context {
-        color: #2C3E50;
-        font-size: 11px;
-        font-weight: 700;
-        text-transform: uppercase;
-        letter-spacing: 0.3px;
-      }
-      .app-status-popup-entry-time {
-        color: #6C8191;
-        font-size: 11px;
-        font-weight: 600;
-      }
-      .app-status-popup-entry-text {
-        color: #1F2E38;
-        font-size: 13px;
-        line-height: 1.35;
-        white-space: pre-wrap;
-        word-break: break-word;
-      }
-      .app-status-popup.tone-info .app-status-popup-header { background: #2C3E50; }
-      .app-status-popup.tone-success .app-status-popup-header { background: #0F8E79; }
-      .app-status-popup.tone-warning .app-status-popup-header { background: #A86C18; }
-      .app-status-popup.tone-error .app-status-popup-header { background: #9A2F2F; }
-      .app-status-popup-entry.tone-info { border-left-color: #18BC9C; }
-      .app-status-popup-entry.tone-success { border-left-color: #0F8E79; }
-      .app-status-popup-entry.tone-warning { border-left-color: #D08A1E; }
-      .app-status-popup-entry.tone-error { border-left-color: #CC4C4C; }
-      @keyframes app-dna-shift {
-        0%, 100% { transform: translateY(0); }
-        50% { transform: translateY(46px); }
-      }
-      @keyframes app-dna-scale {
-        0%, 100% { transform: scale(1); opacity: 0.86; }
-        25% { transform: scale(1.65); opacity: 1; }
-        50% { transform: scale(0.95); opacity: 0.84; }
-        75% { transform: scale(0.55); opacity: 0.52; }
-      }
-      @media (max-width: 768px) {
-        .app-status-popup {
-          right: 10px;
-          bottom: 10px;
-          width: calc(100vw - 20px);
-          max-height: 46vh;
-        }
-      }
-      @keyframes slideIn {
-        from {
-          transform: translateX(100%);
-          opacity: 0;
-        }
-        to {
-          transform: translateX(0);
-          opacity: 1;
-        }
-      }
-      .waiter-overlay {
-        background-color: rgba(255, 255, 255, 0.8);
-      }
-      .loading-message {
-        color: #2C3E50;
-        font-size: 1.2em;
-        margin-top: 10px;
-      }
-      .panel-content {
-        background-color: white;
-        padding: 20px;
-        border-radius: 5px;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
-      }
-      .blast-option {
-        margin: 10px 0;
-        display: flex;
-        align-items: center;
-        gap: 5px;
-      }
-      .blast-info-icon {
-        color: #18BC9C;
-        cursor: help;
-        margin-left: 5px;
-      }
-      .blast-info-icon:hover {
-        color: #128F76;
-      }
-      .viz-mode-wrap {
-        margin-top: 0;
-        margin-bottom: 0;
-      }
-      .viz-mode-wrap .control-label {
-        display: none;
-      }
-      .container-fluid, .container, .container-sm, .container-md, .container-lg, .container-xl, .container-xxl {
-        max-width: 100% !important;
-        width: 100% !important;
-        padding-left: 0 !important;
-        padding-right: 0 !important;
-      }
-      .viz-mode-toggle .shiny-options-group {
-        --app-switch-bg-clr: linear-gradient(180deg, #E3E7EC 0%, #D8DDE4 100%);
-        --app-switch-border-clr: #BCC5CF;
-        --app-switch-padding: 3px;
-        --app-slider-bg-clr: linear-gradient(135deg, #18BC9C 0%, #2C7FB8 100%);
-        --app-slider-bg-clr-on: linear-gradient(135deg, #18BC9C 0%, #2C7FB8 100%);
-        --app-slider-txt-clr: #FFFFFF;
-        --app-switch-count: 2;
-        --app-switch-index: 0;
-        position: relative;
-        isolation: isolate;
-        display: grid;
-        grid-template-columns: repeat(var(--app-switch-count), minmax(0, 1fr));
-        gap: 0 !important;
-        margin: 0 !important;
-        padding: 0 !important;
-        width: 100%;
-        border: 1px solid var(--app-switch-border-clr);
-        border-radius: 9999px;
-        background: var(--app-switch-bg-clr);
-        box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.38), 0 2px 8px rgba(19, 49, 74, 0.12);
-      }
-      .viz-mode-toggle .shiny-options-group::before {
-        content: '';
-        position: absolute;
-        top: var(--app-switch-padding);
-        bottom: var(--app-switch-padding);
-        left: var(--app-switch-padding);
-        width: calc((100% - (var(--app-switch-padding) * 2)) / var(--app-switch-count));
-        border-radius: 9999px;
-        background: var(--app-slider-bg-clr);
-        box-shadow: inset 0 1px 1px rgba(0, 0, 0, 0.28), 0 1px rgba(255, 255, 255, 0.3);
-        transform: translateX(calc(var(--app-switch-index) * 100%));
-        transition: transform 220ms ease, background-color 220ms ease;
-        z-index: -1;
-      }
-      .viz-mode-toggle .shiny-options-group:has(.radio-inline input[type='radio']:checked)::before,
-      .viz-mode-toggle .shiny-options-group.has-selection::before {
-        background: var(--app-slider-bg-clr-on);
-      }
-      .viz-mode-toggle .shiny-options-group:focus-within {
-        box-shadow: 0 0 0 2px rgba(26, 76, 108, 0.22), inset 0 1px 1px rgba(255, 255, 255, 0.35), 0 2px 8px rgba(22, 52, 76, 0.12);
-      }
-      .app-control-panel .viz-mode-toggle .radio-inline {
-        margin: 0 !important;
-        min-height: 32px;
-        padding: 6px 10px !important;
-        cursor: pointer;
-        font-weight: 700;
-        font-size: 11.2px;
-        letter-spacing: 0;
-        line-height: 1.1;
-        color: #1F425B !important;
-        opacity: 0.92;
-        background: transparent;
-        border: none;
-        border-radius: 9999px !important;
-        text-align: center;
-        white-space: normal;
-        word-wrap: break-word;
-        display: grid !important;
-        place-items: center;
-        align-content: center;
-        text-indent: 0 !important;
-        position: relative;
-        z-index: 1;
-        transition: color 220ms ease, opacity 220ms ease;
-      }
-      .app-control-panel .viz-mode-toggle .radio-inline input[type='radio'] {
-        position: absolute;
-        width: 1px;
-        height: 1px;
-        padding: 0;
-        margin: 0 !important;
-        overflow: hidden;
-        clip: rect(0, 0, 0, 0);
-        white-space: nowrap;
-        border-width: 0;
-      }
-      .app-control-panel .viz-mode-toggle .radio-inline:has(input[type='radio']:checked),
-      .app-control-panel .viz-mode-toggle .radio-inline.is-active {
-        color: var(--app-slider-txt-clr) !important;
-        opacity: 1;
-      }
-      .app-control-panel .viz-mode-toggle .radio-inline:hover:not(.is-active) {
-        opacity: 1;
-        color: #17384F !important;
-      }
-      /* 5-option ortho visual mode toggle: tighter padding + smaller font so labels fit */
-      #ortho_visual_mode.viz-mode-toggle .shiny-options-group {
-        min-height: 42px;
-      }
-      #ortho_visual_mode.viz-mode-toggle .radio-inline {
-        padding: 5px 2px !important;
-        font-size: 9.5px !important;
-        min-height: 42px;
-        line-height: 1.2;
-        white-space: normal;
-        word-break: normal;
-        overflow-wrap: normal;
-        hyphens: none;
-      }
-      .homo-action-row {
-        display: flex;
-        gap: 10px;
-        margin-top: 6px;
-        margin-bottom: 8px;
-        flex-wrap: wrap;
-      }
-      .homo-action-cell {
-        flex: 1 1 0;
-        min-width: 140px;
-      }
-      .homo-action-btn {
-        width: 100%;
-        min-height: 48px !important;
-        border-radius: 8px !important;
-        padding: 8px 12px !important;
-        display: flex !important;
-        flex-direction: row;
-        align-items: center;
-        justify-content: center;
-        gap: 8px;
-        text-align: center;
-        line-height: 1.2;
-        font-size: 14px !important;
-        font-weight: 600 !important;
-        white-space: normal !important;
-      }
-      .homo-action-btn .fa {
-        font-size: 16px;
-        margin-bottom: 0;
-      }
-    ")),
-      tags$style(HTML("
-      /* ── Plot zoom control ─────────────────────────────────── */
-      .plot-zoom-control {
-        display: inline-flex;
-        align-items: center;
-        gap: 3px;
-        background: #EEF2F5;
-        border: 1px solid #B8C4CE;
-        border-radius: 7px;
-        padding: 2px 5px;
-        flex-shrink: 0;
-      }
-      .plot-zoom-btn {
-        background: none;
-        border: none;
-        cursor: pointer;
-        color: #2C3E50;
-        font-size: 15px;
-        font-weight: 700;
-        width: 22px;
-        height: 22px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        border-radius: 4px;
-        padding: 0;
-        line-height: 1;
-        transition: background 0.12s;
-        flex-shrink: 0;
-      }
-      .plot-zoom-btn:hover:not(:disabled) { background: #C4D4DF; }
-      .plot-zoom-btn:disabled { opacity: 0.3; cursor: not-allowed; }
-      .plot-zoom-label {
-        font-size: 11px;
-        font-weight: 600;
-        color: #2C3E50;
-        min-width: 34px;
-        text-align: center;
-        cursor: default;
-        user-select: none;
-      }
-      /* Scroll wrapper around plot containers */
-      .plots-zoom-wrap {
-        width: 100%;
-        max-width: none; /* allow transcript plots to use the full pane width; SVG width behavior is stabilized in plot_zoom.js */
-        overflow-x: auto;
-        overflow-y: visible;
-      }
-      #plot-container,
-      #ortho-plot-container {
-        min-width: 100%;
-        transition: width 0.2s ease;
-      }
-      /* Dark mode */
-      html[data-app-theme='dark'] .plot-zoom-control {
-        background: #223347;
-        border-color: #2D4460;
-      }
-      html[data-app-theme='dark'] .plot-zoom-btn,
-      html[data-app-theme='dark'] .plot-zoom-label {
-        color: #A8C5DA;
-      }
-      html[data-app-theme='dark'] .plot-zoom-btn:hover:not(:disabled) {
-        background: #2D4460;
-      }
-      /* ── Analytics pill tabs – light mode ─────────────────── */
-      #homo_analytics_tabs .nav-link,
-      #ortho_analytics_tabs .nav-link,
-      #chart_modal_tabs .nav-link,
-      ul#homo_analytics_tabs .nav-link,
-      ul#ortho_analytics_tabs .nav-link,
-      ul#chart_modal_tabs .nav-link {
-        color: #2C3E50 !important;
-        background-color: #DDE3E9 !important;
-        border: 1px solid #B8C4CE !important;
-        border-radius: 20px !important;
-        font-size: 12px !important;
-        font-weight: 500 !important;
-        padding: 4px 13px !important;
-        opacity: 1 !important;
-        visibility: visible !important;
-      }
-      #homo_analytics_tabs .nav-link:hover,
-      #ortho_analytics_tabs .nav-link:hover,
-      #chart_modal_tabs .nav-link:hover,
-      ul#homo_analytics_tabs .nav-link:hover,
-      ul#ortho_analytics_tabs .nav-link:hover,
-      ul#chart_modal_tabs .nav-link:hover {
-        background-color: #C4D4DF !important;
-        color: #1A2B3C !important;
-      }
-      #homo_analytics_tabs .nav-link.active,
-      #ortho_analytics_tabs .nav-link.active,
-      #chart_modal_tabs .nav-link.active,
-      ul#homo_analytics_tabs .nav-link.active,
-      ul#ortho_analytics_tabs .nav-link.active,
-      ul#chart_modal_tabs .nav-link.active {
-        background-color: #2C3E50 !important;
-        color: #ffffff !important;
-        border-color: #2C3E50 !important;
-        font-weight: 600 !important;
-      }
-      /* ── ggiraph tooltip z-index fix ──────────────────────── */
-      .tooltip_ggint,
-      .girafe-tooltip,
-      div[id^='tooltip_'] {
-        z-index: 99999 !important;
-        pointer-events: none !important;
-      }
-      /* Prevent analytics chart containers from trapping tooltips */
-      .analytics-chart-wrap,
-      .analytics-chart-wrap .ggiraph-container,
-      .analytics-chart-wrap .ggiraph-svg,
-      .analytics-chart-wrap .ggiraph-svg svg,
-      .girafe_container_std,
-      .girafe_container_std svg {
-        overflow: visible !important;
-      }
-      .analytics-chart-wrap .ggiraph-svg,
-      .analytics-chart-wrap .ggiraph-svg svg {
-        height: auto !important;
-      }
-      .chart-modal-chart-wrap .girafe_container_std,
-      .chart-modal-chart-wrap .ggiraph-container,
-      .chart-modal-chart-wrap .ggiraph-svg,
-      .chart-modal-chart-wrap .girafe_container_std svg,
-      .chart-modal-chart-wrap .ggiraph-svg svg {
-        width: 100% !important;
-        max-width: 100% !important;
-        height: auto !important;
-        overflow: visible !important;
-      }
-      /* Main transcript structure blocks (exon/CDS/UTR/etc): subtle rounded corners */
-      .plot-transcript-card .girafe_container_std svg rect[data-id^='feature_'],
-      .plot-transcript-card .girafe_container_std svg rect[data-id^='compact_region_'] {
-        rx: 3.4px;
-        ry: 3.4px;
-      }
-      /* ── Dark mode overrides ───────────────────────────────── */
-      html[data-app-theme='dark'] #homo_analytics_tabs .nav-link,
-      html[data-app-theme='dark'] #ortho_analytics_tabs .nav-link,
-      html[data-app-theme='dark'] #chart_modal_tabs .nav-link,
-      html[data-app-theme='dark'] ul#homo_analytics_tabs .nav-link,
-      html[data-app-theme='dark'] ul#ortho_analytics_tabs .nav-link,
-      html[data-app-theme='dark'] ul#chart_modal_tabs .nav-link {
-        color: #A8C5DA !important;
-        background-color: #223347 !important;
-        border-color: #2D4460 !important;
-      }
-      html[data-app-theme='dark'] #homo_analytics_tabs .nav-link.active,
-      html[data-app-theme='dark'] #ortho_analytics_tabs .nav-link.active,
-      html[data-app-theme='dark'] #chart_modal_tabs .nav-link.active,
-      html[data-app-theme='dark'] ul#homo_analytics_tabs .nav-link.active,
-      html[data-app-theme='dark'] ul#ortho_analytics_tabs .nav-link.active,
-      html[data-app-theme='dark'] ul#chart_modal_tabs .nav-link.active {
-        background-color: #18BC9C !important;
-        color: #ffffff !important;
-        border-color: #18BC9C !important;
-      }
-      ")),
       tags$script(HTML("
       Shiny.addCustomMessageHandler('force_refresh_picker', function(message) {
         var ids = (message && message.ids) ? message.ids : [];
@@ -1313,137 +1443,34 @@ fluidPage(
         });
       });
 
-      function applyRoundedTranscriptFeatureRects(root) {
-        var scope = root && root.querySelectorAll ? root : document;
-        var nodes = scope.querySelectorAll(
-          '.plot-transcript-card .girafe_container_std svg rect[data-id^=\"feature_\"], ' +
-          '.plot-transcript-card .girafe_container_std svg rect[data-id^=\"compact_region_\"]'
-        );
-        if (!nodes || !nodes.length) return;
-        nodes.forEach(function(node) {
-          node.setAttribute('rx', '3.4');
-          node.setAttribute('ry', '3.4');
-        });
-      }
+      document.addEventListener('DOMContentLoaded', function() {
 
-      function installRoundedTranscriptFeatureRectObserver() {
-        if (window.__cgvRoundedFeatureRectObserverInstalled) return;
-        window.__cgvRoundedFeatureRectObserverInstalled = true;
-
-        var rafQueued = false;
-        var queueApply = function() {
-          if (rafQueued) return;
-          rafQueued = true;
-          window.requestAnimationFrame(function() {
-            rafQueued = false;
-            applyRoundedTranscriptFeatureRects(document);
+        // These panes are inside a collapsible sidebar. In that context,
+        // Shiny conditionalPanel can fail to re-evaluate its initial state.
+        // Keep data-source visibility deterministic on every radio change.
+        var dataSourcePanelModes = {
+          'homo-preloaded': ['preloaded'],
+          'homo-ncbi': ['ncbi'],
+          'homo-upload': ['upload'],
+          'ortho-preloaded': ['preloaded', 'mixed'],
+          'ortho-ncbi': ['ncbi', 'mixed'],
+          'ortho-upload': ['upload', 'mixed']
+        };
+        var syncDataSourcePanels = function() {
+          document.querySelectorAll('[data-source-panel]').forEach(function(panel) {
+            var panelName = String(panel.getAttribute('data-source-panel') || '');
+            var workflow = panelName.split('-')[0];
+            var selected = document.querySelector('input[name=\"' + workflow + '_data_mode\"]:checked');
+            var mode = selected ? String(selected.value || '') : 'preloaded';
+            var shouldShow = (dataSourcePanelModes[panelName] || []).indexOf(mode) !== -1;
+            panel.toggleAttribute('hidden', !shouldShow);
+            panel.setAttribute('aria-hidden', shouldShow ? 'false' : 'true');
+            panel.querySelectorAll('[data-source-mixed-divider]').forEach(function(divider) {
+              divider.toggleAttribute('hidden', mode !== 'mixed');
+            });
           });
         };
-
-        applyRoundedTranscriptFeatureRects(document);
-
-        if (window.MutationObserver && document.body) {
-          var observer = new MutationObserver(function() {
-            queueApply();
-          });
-          observer.observe(document.body, { childList: true, subtree: true });
-        }
-
-        document.addEventListener('shiny:value', queueApply, true);
-        document.addEventListener('shiny:recalculated', queueApply, true);
-      }
-
-      function sanitizeAutocompleteChoices(values, maxItems) {
-        var list = Array.isArray(values) ? values : [];
-        var limit = Math.max(1, parseInt(maxItems || 8000, 10));
-        var seen = Object.create(null);
-        var out = [];
-        for (var i = 0; i < list.length; i += 1) {
-          var vv = (list[i] === null || list[i] === undefined) ? '' : String(list[i]);
-          vv = vv.replace(/\\s+/g, ' ').trim();
-          if (!vv) continue;
-          var key = vv.toLowerCase();
-          if (seen[key]) continue;
-          seen[key] = true;
-          out.push(vv);
-          if (out.length >= limit) break;
-        }
-        return out;
-      }
-
-      Shiny.addCustomMessageHandler('update_gene_autocomplete', function(message) {
-        var inputId = (message && message.input_id) ? message.input_id : '';
-        if (!inputId) return;
-        var isGlobalSearch = inputId === 'global_search_query';
-        var listId = inputId + '_suggestions';
-        var choicesRaw = (message && message.choices) ? message.choices : [];
-        var choices = sanitizeAutocompleteChoices(choicesRaw, isGlobalSearch ? 15000 : 3000);
-        var dl = document.getElementById(listId);
-        var inputEl = document.getElementById(inputId);
-        if (inputEl) {
-          var useNativeDatalist = !isGlobalSearch;
-          if (useNativeDatalist) {
-            inputEl.setAttribute('list', listId);
-            inputEl.setAttribute('autocomplete', 'off');
-          } else {
-            inputEl.removeAttribute('list');
-            inputEl.setAttribute('autocomplete', 'new-password');
-          }
-          inputEl.setAttribute('data-form-type', 'other');
-          inputEl.setAttribute('data-lpignore', 'true');
-          inputEl.setAttribute('data-1p-ignore', 'true');
-          inputEl.setAttribute('autocorrect', 'off');
-          inputEl.setAttribute('autocapitalize', 'off');
-          inputEl.setAttribute('spellcheck', 'false');
-          inputEl.style.color = '#2C3E50';
-          inputEl.style.backgroundColor = '#F8FCFB';
-          inputEl.style.caretColor = '#2C3E50';
-          inputEl.style.colorScheme = 'light';
-        }
-
-        if (isGlobalSearch) {
-          window.__globalGeneSuggestionPool = choices;
-          if (dl && dl.replaceChildren) {
-            dl.replaceChildren();
-          } else if (dl) {
-            dl.innerHTML = '';
-          }
-          var updatedEvt;
-          try {
-            updatedEvt = new Event('cgv-global-suggestions-updated');
-          } catch (err) {
-            updatedEvt = document.createEvent('Event');
-            updatedEvt.initEvent('cgv-global-suggestions-updated', true, true);
-          }
-          document.dispatchEvent(updatedEvt);
-          return;
-        }
-
-        if (!dl) return;
-        var frag = document.createDocumentFragment();
-        choices.forEach(function(vv) {
-          var opt = document.createElement('option');
-          opt.value = vv;
-          opt.label = vv;
-          opt.textContent = vv;
-          frag.appendChild(opt);
-        });
-        // Temporarily disconnect the input from the datalist before updating it.
-        // This prevents Chrome/Edge from triggering inline autocomplete during the
-        // update, which can silently delete the last 1-3 characters the user typed.
-        var savedList = inputEl ? inputEl.getAttribute('list') : null;
-        if (inputEl && savedList) inputEl.removeAttribute('list');
-        if (dl.replaceChildren) {
-          dl.replaceChildren(frag);
-        } else {
-          dl.innerHTML = '';
-          dl.appendChild(frag);
-        }
-        if (inputEl && savedList) inputEl.setAttribute('list', savedList);
-      });
-
-      document.addEventListener('DOMContentLoaded', function() {
-        installRoundedTranscriptFeatureRectObserver();
+        window.syncDataSourcePanels = syncDataSourcePanels;
 
         var syncVizModeToggles = function() {
           var groups = document.querySelectorAll('.viz-mode-toggle .shiny-options-group');
@@ -1467,14 +1494,74 @@ fluidPage(
             group.classList.toggle('has-selection', hasActive);
           });
         };
+        window.syncVizModeToggles = syncVizModeToggles;
+        var syncVizModeToggleForTarget = function(target) {
+          if (!target || !target.closest) return;
+          var label = target.closest('.viz-mode-toggle .radio-inline');
+          if (!label) return;
+          var radio = label.querySelector('input[type=\"radio\"]');
+          if (!radio || radio.disabled) return;
+          var name = String(radio.name || '');
+          var value = String(radio.value || '');
+          var group = label.closest('.shiny-options-group');
+          if (!group) return;
+          var labels = Array.prototype.slice.call(group.querySelectorAll('.radio-inline'));
+          var activeIndex = Math.max(0, labels.indexOf(label));
+          labels.forEach(function(lbl, idx) {
+            lbl.classList.toggle('is-active', idx === activeIndex);
+            var lblRadio = lbl.querySelector('input[type=\"radio\"]');
+            if (lblRadio && lblRadio.name === name) {
+              lblRadio.checked = idx === activeIndex;
+            }
+          });
+          group.style.setProperty('--app-switch-count', String(Math.max(labels.length, 1)));
+          group.style.setProperty('--app-switch-index', String(activeIndex));
+          group.classList.add('has-selection');
+          if (name === 'homo_visual_mode' && window.updateHomoSpecialCardVisibility) {
+            window.updateHomoSpecialCardVisibility();
+          } else if (name === 'ortho_visual_mode' && window.updateOrthoSpecialCardVisibility) {
+            window.updateOrthoSpecialCardVisibility();
+          }
+          var toggleRoot = label.closest('.viz-mode-toggle');
+          if (toggleRoot) {
+            toggleRoot.classList.add('is-mode-pending');
+            window.setTimeout(function() {
+              toggleRoot.classList.remove('is-mode-pending');
+            }, 2400);
+          }
+          if (window.Shiny && Shiny.setInputValue && name && value) {
+            Shiny.setInputValue(name, value, { priority: 'event' });
+          }
+          syncDataSourcePanels();
+        };
+        document.addEventListener('pointerdown', function(evt) {
+          syncVizModeToggleForTarget(evt && evt.target ? evt.target : null);
+        }, true);
+        document.addEventListener('mousedown', function(evt) {
+          syncVizModeToggleForTarget(evt && evt.target ? evt.target : null);
+        }, true);
+        document.addEventListener('touchstart', function(evt) {
+          syncVizModeToggleForTarget(evt && evt.target ? evt.target : null);
+        }, true);
+        document.addEventListener('click', function(evt) {
+          syncVizModeToggleForTarget(evt && evt.target ? evt.target : null);
+        }, true);
         document.addEventListener('change', function(evt) {
           var t = evt && evt.target ? evt.target : null;
           if (t && t.matches('.viz-mode-toggle input[type=\"radio\"]')) {
             syncVizModeToggles();
+            syncDataSourcePanels();
           }
         });
         $(document).on('shiny:value', syncVizModeToggles);
+        $(document).on('shiny:connected shiny:value', syncDataSourcePanels);
+        $(document).on('shiny:value', function() {
+          document.querySelectorAll('.viz-mode-toggle.is-mode-pending').forEach(function(node) {
+            node.classList.remove('is-mode-pending');
+          });
+        });
         syncVizModeToggles();
+        syncDataSourcePanels();
 
         var input1 = document.getElementById('filter1');
         if (input1) {
@@ -1506,6 +1593,9 @@ fluidPage(
           var normalizedMode = String(mode || '').trim();
           if (normalizedMode !== 'homologous' && normalizedMode !== 'orthologous') return false;
           var gene = String(rawValue == null ? '' : rawValue);
+          if (window.cgvBeginSearchFeedback) {
+            if (!window.cgvBeginSearchFeedback(normalizedMode, gene)) return false;
+          }
           Shiny.setInputValue('workflow_enter_search', {
             mode: normalizedMode,
             gene: gene,
@@ -1539,6 +1629,41 @@ fluidPage(
         if (inputId === 'homo_preloaded_species') return $('#homo-organism-summary-text');
         if (inputId === 'ortho_preloaded_species') return $('#ortho-organism-summary-text');
         return $();
+      }
+
+      function setSpeciesInputValue(inputId, value) {
+        if (!inputId) return;
+        window.__currentSpeciesSelections = window.__currentSpeciesSelections || {};
+        window.__currentSpeciesSelections[inputId] = value;
+        if (window.Shiny && typeof Shiny.setInputValue === 'function') {
+          Shiny.setInputValue(inputId, value, {priority: 'event'});
+          return;
+        }
+        window.__pendingSpeciesSelections = window.__pendingSpeciesSelections || {};
+        window.__pendingSpeciesSelections[inputId] = value;
+      }
+
+      function flushPendingSpeciesSelections() {
+        var pending = window.__pendingSpeciesSelections || {};
+        Object.keys(pending).forEach(function(inputId) {
+          setSpeciesInputValue(inputId, pending[inputId]);
+        });
+        window.__pendingSpeciesSelections = {};
+      }
+
+      function restoreSpeciesGridSelection(inputId) {
+        inputId = String(inputId || '');
+        if (!inputId) return;
+        var current = window.__currentSpeciesSelections && window.__currentSpeciesSelections[inputId];
+        if (current === undefined || current === null || current === '') return;
+        var selected = Array.isArray(current) ? current.map(String) : [String(current)];
+        var $grids = $('.species-grid[data-input-id=\"' + inputId + '\"]');
+        if (!$grids.length) return;
+        $grids.find('.species-grid-card').each(function() {
+          var id = String($(this).attr('data-species-id') || '');
+          $(this).toggleClass('selected', selected.indexOf(id) >= 0);
+        });
+        updateOrganismSummaryFromGrid($grids.first());
       }
 
       function updateOrganismSummaryFromGrid($grid) {
@@ -1593,7 +1718,7 @@ fluidPage(
         if (!inputId) return;
         $('.species-grid[data-input-id=\"' + inputId + '\"] .species-grid-card').removeClass('selected');
         $card.addClass('selected');
-        Shiny.setInputValue(inputId, id, {priority: 'event'});
+        setSpeciesInputValue(inputId, id);
         updateOrganismSummaryFromGrid($grid);
         var $details = $grid.closest('details');
         if ($details.length) {
@@ -1614,16 +1739,86 @@ fluidPage(
         $allGrids.find('.species-grid-card.selected').each(function() {
           sel.push($(this).attr('data-species-id'));
         });
-        Shiny.setInputValue(inputId, sel.length ? sel : null, {priority: 'event'});
+        setSpeciesInputValue(inputId, sel.length ? sel : null);
         updateOrganismSummaryFromGrid($grid);
       });
 
+      $(document).on('shiny:connected', flushPendingSpeciesSelections);
+
       // Keep organism summary labels consistent after Shiny UI re-renders.
       $(document).on('shiny:value', function() {
+        setTimeout(function() {
+          ['homo_species_grid', 'ortho_species_grid'].forEach(function(outputId) {
+            var live = document.getElementById(outputId);
+            var fallback = document.getElementById(outputId + '_initial');
+            if (live && fallback && $.trim($(live).html() || '').length) {
+              fallback.parentNode.removeChild(fallback);
+            }
+          });
+          restoreSpeciesGridSelection('homo_preloaded_species');
+          restoreSpeciesGridSelection('ortho_preloaded_species');
+        }, 0);
         $('.species-grid[data-input-id]').each(function() {
           updateOrganismSummaryFromGrid($(this));
         });
       });
+
+      function selectSpeciesGridCard(inputId, speciesId) {
+        inputId = String(inputId || '');
+        speciesId = String(speciesId || '');
+        if (!inputId || !speciesId) return false;
+        var $grids = $('.species-grid[data-input-id=\"' + inputId + '\"]');
+        if (!$grids.length) return false;
+        var $card = $grids.find('.species-grid-card[data-species-id=\"' + speciesId + '\"]').first();
+        if (!$card.length) return false;
+        var mode = String($grids.first().attr('data-mode') || 'single');
+        if (mode === 'single') {
+          $grids.find('.species-grid-card').removeClass('selected');
+          $card.addClass('selected');
+          setSpeciesInputValue(inputId, speciesId);
+        } else {
+          $card.addClass('selected');
+          var selected = [];
+          $grids.find('.species-grid-card.selected').each(function() {
+            var id = $(this).attr('data-species-id') || '';
+            if (id && selected.indexOf(id) < 0) selected.push(id);
+          });
+          setSpeciesInputValue(inputId, selected.length ? selected : null);
+        }
+        updateOrganismSummaryFromGrid($card.closest('.species-grid'));
+        return true;
+      }
+
+      if (window.Shiny && typeof Shiny.addCustomMessageHandler === 'function') {
+        Shiny.addCustomMessageHandler('cgv:species-grid-refresh', function(msg) {
+          var speciesId = msg && msg.species_id ? String(msg.species_id) : '';
+          var maxAttempts = speciesId ? 10 : 1;
+          var attemptDelayMs = 100;
+
+          function applyGridRefresh(attempt) {
+            $('.species-grid[data-input-id]').each(function() {
+              updateOrganismSummaryFromGrid($(this));
+            });
+            var selectedHomo = true;
+            var selectedOrtho = true;
+            if (speciesId) {
+              selectedHomo = selectSpeciesGridCard('homo_preloaded_species', speciesId);
+              selectedOrtho = selectSpeciesGridCard('ortho_preloaded_species', speciesId);
+            }
+            flushPendingSpeciesSelections();
+
+            if (speciesId && (!selectedHomo || !selectedOrtho) && attempt < maxAttempts) {
+              setTimeout(function() {
+                applyGridRefresh(attempt + 1);
+              }, attemptDelayMs);
+            }
+          }
+
+          setTimeout(function() {
+            applyGridRefresh(1);
+          }, 0);
+        });
+      }
 
       // Initial sync (for cases where grids are already present).
       setTimeout(function() {
@@ -1636,20 +1831,25 @@ fluidPage(
       tags$script(src = versioned_asset_path("js/dna_loader_unifier.js")),
       tags$script(src = versioned_asset_path("js/plot_zoom.js")),
       tags$script(src = versioned_asset_path("js/export_svg.js")),
+      tags$script(src = versioned_asset_path("js/figure_studio.js")),
+      tags$script(src = versioned_asset_path("js/string_theme.js")),
       tags$script(src = versioned_asset_path("js/status_popup.js")),
+      tags$script(src = versioned_asset_path("js/search_submit_feedback.js")),
       tags$script(src = versioned_asset_path("js/promoter_popup.js")),
       tags$script(src = versioned_asset_path("js/go_terms_popup.js")),
       tags$script(src = versioned_asset_path("js/papers_popup.js")),
       tags$script(src = versioned_asset_path("js/preloaded_assembly_popup.js")),
       tags$script(src = versioned_asset_path("js/metrics_popup.js")),
+      tags$script(src = versioned_asset_path("js/info_button_relocator.js")),
       tags$script(src = versioned_asset_path("js/ortho_lazy_loader.js")),
       tags$script(src = versioned_asset_path("js/summary_context_layout.js")),
       tags$script(src = versioned_asset_path("js/ncbi_search.js")),
+      tags$script(src = versioned_asset_path("js/organism_images.js")),
       tags$script(src = versioned_asset_path("js/mobile_enhancements.js"), defer = NA),
       tags$script(src = versioned_asset_path("js/cgv_desktop_downloads.js"), defer = NA),
       tags$script(HTML("
       (function () {
-        var validTargets = ['home', 'homologous', 'orthologous', 'desktop-app', 'settings', 'help', 'feedback'];
+        var validTargets = ['home', 'homologous', 'orthologous', 'figure-studio', 'guide', 'desktop-app', 'settings', 'help', 'feedback'];
         var suggestionState = { items: [], activeIndex: -1 };
         var collapsedSuggestionState = { items: [], activeIndex: -1 };
         var suggestionObserver = null;
@@ -1684,11 +1884,27 @@ fluidPage(
           if (collapsedInput) collapsedInput.placeholder = ph;
         }
 
+        function syncSummaryContextVisibility(target) {
+          var homoSection = document.getElementById('homo_context_section');
+          var orthoSection = document.getElementById('ortho_context_section');
+          if (homoSection) homoSection.style.display = target === 'homologous' ? 'flex' : 'none';
+          if (orthoSection) orthoSection.style.display = target === 'orthologous' ? 'flex' : 'none';
+          if (target === 'homologous' || target === 'orthologous') {
+            keepSummaryContextOpaque();
+            if (window.requestAnimationFrame) {
+              window.requestAnimationFrame(function () {
+                document.dispatchEvent(new Event('shiny:value'));
+              });
+            }
+          }
+        }
+
         function setActiveNav(target) {
           if (target === 'homologous' || target === 'orthologous') {
             lastWorkflowTarget = target;
           }
           updateBatchUiVisibility(target);
+          syncSummaryContextVisibility(target);
           var buttons = document.querySelectorAll('.app-nav-btn');
           buttons.forEach(function (btn) {
             btn.classList.toggle('is-active', btn.getAttribute('data-target') === target);
@@ -1717,6 +1933,27 @@ fluidPage(
 
           var activeBtn = document.querySelector('.app-nav-btn.is-active[data-target]');
           return activeBtn ? activeBtn.getAttribute('data-target') : null;
+        }
+
+        function activateNavTabImmediately(target) {
+          if (!isValidTarget(target)) return false;
+          var link = document.querySelector('#navtabs a[data-value=\"' + target + '\"]');
+          if (!link) return false;
+          try {
+            if (window.jQuery && jQuery.fn && jQuery.fn.tab) {
+              jQuery(link).tab('show');
+            } else {
+              link.click();
+            }
+            return true;
+          } catch (err) {
+            try {
+              link.click();
+              return true;
+            } catch (err2) {
+              return false;
+            }
+          }
         }
 
         function updateCompactModeLayoutState() {
@@ -1750,6 +1987,25 @@ fluidPage(
             regularCards.style.display = (mode === 'aligned' || mode === 'pip_blocks' || mode === 'pip_multipip') ? 'none' : '';
           }
         }
+        window.updateOrthoSpecialCardVisibility = updateOrthoSpecialCardVisibility;
+
+        function updateHomoSpecialCardVisibility() {
+          var alignedShell = document.getElementById('homo-aligned-card-shell');
+          var pipShell = document.getElementById('homo-pip-card-shell');
+          var multipipShell = document.getElementById('homo-multipip-card-shell');
+          var regularCards = document.getElementById('homo-plot-cards-container');
+          var homoMode = document.querySelector('input[name=\"homo_visual_mode\"]:checked');
+          var mode = homoMode ? String(homoMode.value || '').trim().toLowerCase() : 'compact';
+          if (mode === 'pip') mode = 'pip_blocks';
+
+          if (alignedShell) alignedShell.style.display = mode === 'aligned' ? '' : 'none';
+          if (pipShell) pipShell.style.display = mode === 'pip_blocks' ? '' : 'none';
+          if (multipipShell) multipipShell.style.display = mode === 'pip_multipip' ? '' : 'none';
+          if (regularCards) {
+            regularCards.style.display = (mode === 'aligned' || mode === 'pip_blocks' || mode === 'pip_multipip') ? 'none' : '';
+          }
+        }
+        window.updateHomoSpecialCardVisibility = updateHomoSpecialCardVisibility;
 
         function closeOrganismSubmenus(scope) {
           var root = scope || document;
@@ -1757,6 +2013,27 @@ fluidPage(
           detailsList.forEach(function (detailsEl) {
             detailsEl.open = false;
             detailsEl.removeAttribute('open');
+          });
+        }
+
+        function fitWorkflowPanelToViewport(panel) {
+          if (!panel || !panel.classList || !panel.classList.contains('is-open')) return;
+          if (window.matchMedia && window.matchMedia('(max-width: 960px)').matches) {
+            panel.style.maxHeight = '';
+            return;
+          }
+
+          var rect = panel.getBoundingClientRect();
+          var viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
+          var bottomPad = 14;
+          var available = Math.max(220, viewportHeight - rect.top - bottomPad);
+          panel.style.maxHeight = available + 'px';
+        }
+
+        function fitOpenWorkflowPanelToViewport() {
+          window.requestAnimationFrame(function () {
+            var panel = document.querySelector('.app-nav-inline-panel[data-workflow-panel].is-open');
+            fitWorkflowPanelToViewport(panel);
           });
         }
 
@@ -1769,6 +2046,9 @@ fluidPage(
 
             if (isOpen) {
               closeOrganismSubmenus(panel);
+              fitWorkflowPanelToViewport(panel);
+            } else {
+              panel.style.maxHeight = '';
             }
 
             var relatedBtn = document.querySelector('.app-nav-btn[data-target=\"' + panelTarget + '\"]');
@@ -1779,16 +2059,43 @@ fluidPage(
           });
         }
 
+        document.addEventListener('toggle', function (evt) {
+          if (!evt.target || !evt.target.closest || !evt.target.closest('.app-nav-inline-panel[data-workflow-panel]')) return;
+          fitOpenWorkflowPanelToViewport();
+        }, true);
+
+        window.addEventListener('resize', fitOpenWorkflowPanelToViewport);
+
         function suppressWorkflowPanelAutoOpenOnce() {
           suppressWorkflowPanelOnNextNav = true;
         }
 
+        function isDesktopRuntime() {
+          return !!(window.cgvDesktop && typeof window.cgvDesktop.getRuntime === 'function');
+        }
+
         function getStoredTheme() {
+          if (!isDesktopRuntime()) {
+            // Web sessions always start in light mode. Clear a preference saved by
+            // previous releases so it cannot affect a later browser visit.
+            try {
+              localStorage.removeItem('cgv-theme');
+            } catch (err) {}
+            return 'light';
+          }
+
           try {
             return localStorage.getItem('cgv-theme') || 'light';
           } catch (err) {
             return 'light';
           }
+        }
+
+        function persistTheme(themeName) {
+          if (!isDesktopRuntime()) return;
+          try {
+            localStorage.setItem('cgv-theme', themeName);
+          } catch (err) {}
         }
 
         function syncThemeWithShiny(themeName, forceSend) {
@@ -1805,9 +2112,7 @@ fluidPage(
           var nextTheme = theme === 'dark' ? 'dark' : 'light';
           document.documentElement.setAttribute('data-app-theme', nextTheme);
 
-          try {
-            localStorage.setItem('cgv-theme', nextTheme);
-          } catch (err) {}
+          persistTheme(nextTheme);
 
           var themeLogos = document.querySelectorAll('img[data-light-src][data-dark-src]');
           if (themeLogos && themeLogos.length) {
@@ -1827,6 +2132,13 @@ fluidPage(
           }
 
           syncThemeWithShiny(nextTheme, false);
+
+          var homeIframe = document.getElementById('cgv-home-iframe');
+          if (homeIframe && homeIframe.contentWindow) {
+            try {
+              homeIframe.contentWindow.postMessage({ type: 'cgv-theme-change', theme: nextTheme }, '*');
+            } catch (err) {}
+          }
         }
 
         function toggleTheme() {
@@ -1913,6 +2225,50 @@ fluidPage(
 
         function getQuickFabSearchInput() {
           return document.getElementById('app-fab-search-query');
+        }
+
+        function getQuickFabEnabledToggle() {
+          return document.getElementById('quick_fab_enabled');
+        }
+
+        function getStoredQuickFabEnabled() {
+          try {
+            return localStorage.getItem('cgv-quick-fab-enabled') === '1';
+          } catch (err) {
+            return false;
+          }
+        }
+
+        function isQuickFabEnabled() {
+          var toggle = getQuickFabEnabledToggle();
+          if (toggle) return !!toggle.checked;
+          return getStoredQuickFabEnabled();
+        }
+
+        function applyQuickFabEnabled(enabled) {
+          var nextEnabled = !!enabled;
+          var root = getQuickFabRoot();
+          var mainToggle = getQuickFabMainToggle();
+          var settingsToggle = getQuickFabEnabledToggle();
+
+          try {
+            localStorage.setItem('cgv-quick-fab-enabled', nextEnabled ? '1' : '0');
+          } catch (err) {}
+
+          if (settingsToggle && settingsToggle.checked !== nextEnabled) {
+            settingsToggle.checked = nextEnabled;
+          }
+
+          if (root) {
+            root.classList.toggle('is-disabled', !nextEnabled);
+            if (!nextEnabled) {
+              setQuickFabPanel(null);
+              root.classList.remove('is-open', 'has-open-panel', 'show-scroll-top');
+              if (mainToggle) mainToggle.setAttribute('aria-expanded', 'false');
+            }
+          }
+
+          updateQuickFabScrollTopVisibility();
         }
 
         function isQuickFabOpen() {
@@ -2010,13 +2366,15 @@ fluidPage(
           var scrollTopBtn = getQuickFabScrollTopToggle();
           var scrollY = getActiveScrollTopValue();
           var isWorkflowActive = isWorkflowTabActive();
+          var isFabEnabled = isQuickFabEnabled();
           var hasWorkflowScroll = getWorkflowScrollNodes().length > 0;
-          var shouldShow = isWorkflowActive && !isQuickFabOpen() && (scrollY > 120 || hasWorkflowScroll);
+          var shouldShow = isFabEnabled && isWorkflowActive && !isQuickFabOpen() && (scrollY > 120 || hasWorkflowScroll);
 
           if (root) {
-            root.classList.toggle('is-hidden', !isWorkflowActive);
-            root.setAttribute('aria-hidden', isWorkflowActive ? 'false' : 'true');
-            if (isWorkflowActive) {
+            root.classList.toggle('is-disabled', !isFabEnabled);
+            root.classList.toggle('is-hidden', !isFabEnabled || !isWorkflowActive);
+            root.setAttribute('aria-hidden', (isFabEnabled && isWorkflowActive) ? 'false' : 'true');
+            if (isFabEnabled && isWorkflowActive) {
               root.classList.toggle('show-scroll-top', shouldShow);
             } else {
               root.classList.remove('show-scroll-top');
@@ -2208,6 +2566,13 @@ fluidPage(
               btn.setAttribute('tabindex', '-1');
             }
           });
+
+          var alignmentGroup = document.getElementById('app-fab-alignment-mode-group');
+          if (alignmentGroup) {
+            var showAlignment = target === 'orthologous';
+            alignmentGroup.classList.toggle('is-hidden', !showAlignment);
+            alignmentGroup.setAttribute('aria-hidden', showAlignment ? 'false' : 'true');
+          }
         }
 
         function setQuickFabMode(mode) {
@@ -2288,6 +2653,9 @@ fluidPage(
           var zoomToggle = getQuickFabZoomToggle();
           var searchRunBtn = document.getElementById('app-fab-search-run');
           var searchInput = getQuickFabSearchInput();
+          var settingsToggle = getQuickFabEnabledToggle();
+
+          applyQuickFabEnabled(getStoredQuickFabEnabled());
 
           if (mainToggle) {
             mainToggle.addEventListener('click', function (evt) {
@@ -2407,8 +2775,19 @@ fluidPage(
               syncQuickFabModeControls();
               updateCompactModeLayoutState();
               updateOrthoSpecialCardVisibility();
+              updateHomoSpecialCardVisibility();
             }
           });
+
+          document.addEventListener('change', function (evt) {
+            var target = evt && evt.target ? evt.target : null;
+            if (!target || target.id !== 'quick_fab_enabled') return;
+            applyQuickFabEnabled(!!target.checked);
+          });
+
+          if (settingsToggle) {
+            settingsToggle.checked = getStoredQuickFabEnabled();
+          }
 
           window.addEventListener('scroll', updateQuickFabScrollTopVisibility, { passive: true });
           bindQuickFabScrollListeners(document);
@@ -2422,11 +2801,20 @@ fluidPage(
             bindQuickFabScrollListeners(document);
             updateQuickFabScrollTopVisibility();
           });
-          paneObserver.observe(document.body, { childList: true, subtree: true });
+          if (document.body && document.body.nodeType === 1) {
+            paneObserver.observe(document.body, { childList: true, subtree: true });
+          } else {
+            document.addEventListener('DOMContentLoaded', function () {
+              if (document.body && document.body.nodeType === 1) {
+                paneObserver.observe(document.body, { childList: true, subtree: true });
+              }
+            }, { once: true });
+          }
 
           syncQuickFabModeControls();
           updateCompactModeLayoutState();
           updateOrthoSpecialCardVisibility();
+          updateHomoSpecialCardVisibility();
           updateQuickFabScrollTopVisibility();
         }
 
@@ -2481,6 +2869,8 @@ fluidPage(
           var isMobile = window.matchMedia('(max-width: 960px)').matches;
           var desiredCollapsed = !!collapsed;
           var nextCollapsed = isMobile ? false : desiredCollapsed;
+          var stateChanged = !!shell && shell.classList.contains('sidebar-collapsed') !== nextCollapsed;
+          if (stateChanged) prepareHomeSidebarTransition(nextCollapsed);
           if (shell) {
             shell.classList.toggle('sidebar-collapsed', nextCollapsed);
           }
@@ -2502,8 +2892,66 @@ fluidPage(
           } catch (err) {}
         }
 
+        function prepareHomeSidebarTransition(nextCollapsed) {
+          if (getActiveNavTarget() !== 'home') return false;
+          var iframe = document.getElementById('cgv-home-iframe');
+          if (!iframe) return false;
+          var shell = document.querySelector('.app-shell');
+          var sidebar = shell ? shell.querySelector('.app-sidebar') : null;
+          var w = iframe.getBoundingClientRect().width;
+          var sidebarWidth = sidebar ? sidebar.getBoundingClientRect().width : (nextCollapsed ? 300 : 88);
+          var targetSidebarWidth = nextCollapsed ? 88 : 300;
+          var destinationWidth = Math.max(
+            320,
+            Math.round(w + sidebarWidth - targetSidebarWidth)
+          );
+          if (w && w > 100) {
+            iframe.style.width = destinationWidth + 'px';
+            iframe.style.maxWidth = 'none';
+          }
+          iframe.classList.add('cgv-home-iframe-resizing');
+          if (shell) shell.classList.add('home-sidebar-transitioning');
+          if (iframe.__cgvHomeSidebarTimer) {
+            clearTimeout(iframe.__cgvHomeSidebarTimer);
+          }
+          if (iframe.__cgvHomeSidebarEndHandler && sidebar) {
+            sidebar.removeEventListener('transitionend', iframe.__cgvHomeSidebarEndHandler);
+          }
+          if (iframe.contentWindow) {
+            try { iframe.contentWindow.postMessage({ type: 'cgv-parent-resizing' }, '*'); } catch (err) {}
+          }
+
+          var finishTransition = function () {
+            if (iframe.__cgvHomeSidebarTimer) {
+              clearTimeout(iframe.__cgvHomeSidebarTimer);
+              iframe.__cgvHomeSidebarTimer = null;
+            }
+            if (sidebar && iframe.__cgvHomeSidebarEndHandler) {
+              sidebar.removeEventListener('transitionend', iframe.__cgvHomeSidebarEndHandler);
+            }
+            iframe.__cgvHomeSidebarEndHandler = null;
+            iframe.style.width = '100%';
+            iframe.style.maxWidth = '';
+            iframe.classList.remove('cgv-home-iframe-resizing');
+            if (shell) shell.classList.remove('home-sidebar-transitioning');
+            if (iframe.contentWindow) {
+              try { iframe.contentWindow.postMessage({ type: 'cgv-parent-resize-done' }, '*'); } catch (err) {}
+            }
+          };
+
+          iframe.__cgvHomeSidebarEndHandler = function (event) {
+            if (event.target === sidebar && (event.propertyName === 'width' || event.propertyName === 'min-width')) {
+              finishTransition();
+            }
+          };
+          if (sidebar) sidebar.addEventListener('transitionend', iframe.__cgvHomeSidebarEndHandler);
+          iframe.__cgvHomeSidebarTimer = setTimeout(finishTransition, 260);
+          return true;
+        }
+
         function notifyPlotLayoutResize() {
           if (!window || typeof window.dispatchEvent !== 'function') return;
+          if (getActiveNavTarget() === 'home') return;
           window.dispatchEvent(new Event('resize'));
           setTimeout(function () {
             window.dispatchEvent(new Event('resize'));
@@ -2762,6 +3210,278 @@ fluidPage(
           Shiny.addCustomMessageHandler('cgv_trigger_ortho_search', function(message) {
             var btn = document.getElementById('search_gene');
             if (btn) btn.click();
+          });
+        }
+
+        function parsePartialGeneSuggestionPayload(node) {
+          var raw = node && node.getAttribute ? String(node.getAttribute('data-resolution') || '') : '';
+          var out = {};
+          if (raw) {
+            try {
+              out = JSON.parse(raw) || {};
+            } catch (err) {
+              out = {};
+            }
+          }
+          var fallbackGene = String((node && (node.getAttribute('data-gene') || node.value)) || '').trim();
+          if (!out.gene && fallbackGene) out.gene = fallbackGene;
+          if (!out.plot_gene) out.plot_gene = String((node && node.value) || out.local_gene_id || out.gene || '').trim();
+          out.gene = String(out.gene || '').trim();
+          out.plot_gene = String(out.plot_gene || '').trim();
+          out.local_gene_id = String(out.local_gene_id || '').trim();
+          out.local_symbol = String(out.local_symbol || '').trim();
+          out.term_type = String(out.term_type || '').trim();
+          out.source_db = String(out.source_db || '').trim();
+          out.confidence = String(out.confidence || '').trim();
+          out.match_role = String(out.match_role || '').trim();
+          out.requires_confirmation = !!out.requires_confirmation;
+          return out;
+        }
+
+        document.addEventListener('click', function(evt) {
+          var btn = evt.target && evt.target.closest ? evt.target.closest('.partial-gene-suggestion-btn') : null;
+          if (!btn || !window.Shiny || !Shiny.setInputValue) return;
+          evt.preventDefault();
+          var mode = String(btn.getAttribute('data-mode') || 'homologous');
+          var item = parsePartialGeneSuggestionPayload(btn);
+          var gene = String(item.plot_gene || item.local_gene_id || item.gene || '').trim();
+          if (!gene) return;
+          Shiny.setInputValue('partial_gene_suggestion_pick', {
+            mode: mode,
+            gene: gene,
+            item: item,
+            nonce: Date.now()
+          }, { priority: 'event' });
+        }, true);
+
+        document.addEventListener('click', function(evt) {
+          var selectAllBtn = evt.target && evt.target.closest ? evt.target.closest('.gene-match-select-all') : null;
+          if (!selectAllBtn) return;
+          evt.preventDefault();
+          var modal = selectAllBtn.closest('.modal-content') || document;
+          var selector = String(selectAllBtn.getAttribute('data-check-selector') || '').trim();
+          if (!selector) return;
+          var checks = Array.prototype.slice.call(modal.querySelectorAll(selector));
+          var shouldSelect = checks.some(function(node) { return !node.checked; });
+          checks.forEach(function(node) {
+            node.checked = shouldSelect;
+            node.dispatchEvent(new Event('change', { bubbles: true }));
+          });
+        }, true);
+
+        function updateGeneMatchSelection(modal, selector) {
+          if (!modal || !selector) return;
+          var checks = Array.prototype.slice.call(modal.querySelectorAll(selector));
+          var selectedCount = checks.filter(function(node) { return node.checked; }).length;
+          modal.querySelectorAll('.gene-match-selection-count').forEach(function(status) {
+            if (String(status.getAttribute('data-check-selector') || '') === selector) {
+              status.textContent = selectedCount + ' selected';
+            }
+          });
+          modal.querySelectorAll('.gene-match-select-all').forEach(function(button) {
+            if (String(button.getAttribute('data-check-selector') || '') !== selector) return;
+            var allSelected = checks.length > 0 && selectedCount === checks.length;
+            button.setAttribute('aria-pressed', allSelected ? 'true' : 'false');
+            var label = button.querySelector('.gene-match-select-all-label');
+            if (label) label.textContent = allSelected ? 'Deselect all' : 'Select all';
+            var runSelector = String(button.getAttribute('data-run-selector') || '').trim();
+            var runButton = runSelector ? modal.querySelector(runSelector) : null;
+            if (runButton) runButton.disabled = selectedCount === 0;
+          });
+        }
+
+        document.addEventListener('change', function(evt) {
+          var check = evt.target;
+          if (!check || !check.matches ||
+              !check.matches('.partial-gene-suggestion-check, .alias-index-match-check')) return;
+          var modal = check.closest('.modal-content') || document;
+          var selector = check.matches('.alias-index-match-check')
+            ? '.alias-index-match-check'
+            : '.partial-gene-suggestion-check';
+          updateGeneMatchSelection(modal, selector);
+        }, true);
+
+        document.addEventListener('click', function(evt) {
+          var runBtn = evt.target && evt.target.closest ? evt.target.closest('#partial-gene-suggestion-search-selected') : null;
+          if (!runBtn || !window.Shiny || !Shiny.setInputValue) return;
+          evt.preventDefault();
+          var checks = document.querySelectorAll('.partial-gene-suggestion-check:checked');
+          var items = Array.prototype.slice.call(checks).map(parsePartialGeneSuggestionPayload).filter(function(item) {
+            return item && String(item.plot_gene || item.local_gene_id || item.gene || '').trim();
+          });
+          var seen = {};
+          items = items.filter(function(item) {
+            var key = String(item.plot_gene || item.local_gene_id || item.gene || '').trim();
+            if (!key || seen[key]) return false;
+            seen[key] = true;
+            return true;
+          });
+          var genes = items.map(function(item) {
+            return String(item.plot_gene || item.local_gene_id || item.gene || '').trim();
+          });
+          if (!genes.length) return;
+          Shiny.setInputValue('partial_gene_suggestion_pick', {
+            mode: 'homologous',
+            genes: genes,
+            items: items,
+            nonce: Date.now()
+          }, { priority: 'event' });
+        }, true);
+
+        document.addEventListener('click', function(evt) {
+          var runBtn = evt.target && evt.target.closest ? evt.target.closest('#alias-index-match-plot-selected') : null;
+          if (!runBtn || !window.Shiny || !Shiny.setInputValue) return;
+          evt.preventDefault();
+          var modal = runBtn.closest('.modal-content') || document;
+          var checks = modal.querySelectorAll('.alias-index-match-check:checked');
+          var genes = Array.prototype.slice.call(checks).map(function(node) {
+            return String(node.value || '').trim();
+          }).filter(function(value, index, arr) {
+            return value && arr.indexOf(value) === index;
+          });
+          if (!genes.length) return;
+          Shiny.setInputValue('alias_index_match_pick', {
+            mode: 'homologous',
+            genes: genes,
+            nonce: Date.now()
+          }, { priority: 'event' });
+        }, true);
+
+        document.addEventListener('click', function(evt) {
+          var extBtn = evt.target && evt.target.closest ? evt.target.closest('#partial-gene-suggestion-search-external') : null;
+          if (!extBtn || !window.Shiny || !Shiny.setInputValue) return;
+          evt.preventDefault();
+          var mode = String(extBtn.getAttribute('data-mode') || 'homologous');
+          var query = String(extBtn.getAttribute('data-query') || '').trim();
+          if (!query) return;
+          Shiny.setInputValue('partial_gene_external_alias_search', {
+            mode: mode,
+            gene: query,
+            nonce: Date.now()
+          }, { priority: 'event' });
+        }, true);
+
+        function keepSummaryContextOpaque() {
+          var sections = document.querySelectorAll('#homo_context_section, #ortho_context_section');
+          sections.forEach(function(section) {
+            if (section.style.opacity && section.style.opacity !== '1') section.style.opacity = '1';
+            if (section.style.filter && section.style.filter !== 'none') section.style.filter = 'none';
+            section.classList.remove('recalculating');
+            section.querySelectorAll('.shiny-bound-output, .recalculating').forEach(function(el) {
+              if (el.style.opacity && el.style.opacity !== '1') el.style.opacity = '1';
+              if (el.style.filter && el.style.filter !== 'none') el.style.filter = 'none';
+              if (el.classList.contains('recalculating')) el.classList.remove('recalculating');
+            });
+          });
+        }
+
+        function hideInitialSummaryContextFallback(outputId) {
+          if (outputId !== 'homo_context_header' && outputId !== 'ortho_context_header') return;
+          var outputEl = document.getElementById(outputId);
+          var section = outputEl ? outputEl.closest('.summary-context-section') : null;
+          var fallback = section ? section.querySelector('.summary-context-card-initial') : null;
+          if (fallback && outputEl && outputEl.children && outputEl.children.length > 0) {
+            fallback.style.display = 'none';
+          }
+        }
+
+        document.addEventListener('shiny:value', function(evt) {
+          var target = evt && evt.target;
+          if (target && target.id) hideInitialSummaryContextFallback(target.id);
+        });
+
+        function watchInitialSummaryContextFallbacks() {
+          if (typeof MutationObserver !== 'function') return;
+          ['homo_context_header', 'ortho_context_header'].forEach(function(outputId) {
+            var outputEl = document.getElementById(outputId);
+            if (!outputEl || outputEl.__cgvInitialFallbackObserver) return;
+            outputEl.__cgvInitialFallbackObserver = true;
+            var observer = new MutationObserver(function() {
+              hideInitialSummaryContextFallback(outputId);
+            });
+            observer.observe(outputEl, { childList: true });
+            hideInitialSummaryContextFallback(outputId);
+          });
+        }
+
+        if (document.readyState === 'loading') {
+          document.addEventListener('DOMContentLoaded', watchInitialSummaryContextFallbacks, { once: true });
+        } else {
+          watchInitialSummaryContextFallbacks();
+        }
+
+        function initSummaryContextTooltips(root) {
+          if (!window.jQuery || !window.jQuery.fn || !window.jQuery.fn.tooltip) return;
+          var scope = root || document;
+          window.jQuery(scope).find('.summary-organism-pill').each(function() {
+            try { window.jQuery(this).tooltip('destroy'); } catch (e) {}
+            this.removeAttribute('data-toggle');
+            this.removeAttribute('data-html');
+            this.removeAttribute('data-container');
+            this.removeAttribute('data-placement');
+          });
+          window.jQuery('.tooltip').remove();
+        }
+
+        function markOrthoHeaderLookupStarted() {
+          var section = document.getElementById('ortho_context_section');
+          if (!section) return;
+          section.style.display = '';
+          keepSummaryContextOpaque();
+          section.querySelectorAll('.summary-organism-pill').forEach(function(pill) {
+            pill.classList.remove(
+              'summary-organism-pill-found',
+              'summary-organism-pill-found_local',
+              'summary-organism-pill-found_alias',
+              'summary-organism-pill-found_external',
+              'summary-organism-pill-external_search',
+              'summary-organism-pill-not_found'
+            );
+            pill.classList.add('summary-organism-pill-local_search');
+            pill.setAttribute('title', 'Searching local annotation');
+            pill.removeAttribute('data-status-tooltip');
+          });
+          initSummaryContextTooltips(section);
+        }
+
+        document.addEventListener('click', function(e) {
+          var trigger = e.target && e.target.closest ? e.target.closest('#search_gene') : null;
+          if (trigger) {
+            markOrthoHeaderLookupStarted();
+            setTimeout(keepSummaryContextOpaque, 0);
+            setTimeout(keepSummaryContextOpaque, 120);
+            setTimeout(keepSummaryContextOpaque, 500);
+          }
+        }, true);
+
+        if (window.MutationObserver) {
+          var summaryOpacityScheduled = false;
+          var summaryOpacityObserver = new MutationObserver(function() {
+            if (summaryOpacityScheduled) return;
+            summaryOpacityScheduled = true;
+            window.requestAnimationFrame(function() {
+              summaryOpacityScheduled = false;
+              keepSummaryContextOpaque();
+            });
+          });
+          document.addEventListener('DOMContentLoaded', function() {
+            var root = document.body || document.documentElement;
+            if (root) {
+              summaryOpacityObserver.observe(root, {
+                subtree: true,
+                attributes: true,
+                attributeFilter: ['class', 'style']
+              });
+            }
+          });
+        }
+
+        document.addEventListener('DOMContentLoaded', function() {
+          initSummaryContextTooltips(document);
+        });
+        if (window.jQuery) {
+          window.jQuery(document).on('shiny:value shiny:bound shiny:idle', function() {
+            initSummaryContextTooltips(document);
           });
         }
 
@@ -3325,14 +4045,14 @@ fluidPage(
               } else {
                 setWorkflowPanel(target);
                 setActiveNav(target);
-                if (window.Shiny && Shiny.setInputValue) {
+                if (!activateNavTabImmediately(target) && window.Shiny && Shiny.setInputValue) {
                   Shiny.setInputValue('app_nav_click', target, { priority: 'event' });
                 }
               }
             } else {
               setWorkflowPanel(null);
               setActiveNav(target);
-              if (!isAlreadyActive && window.Shiny && Shiny.setInputValue) {
+              if (!isAlreadyActive && !activateNavTabImmediately(target) && window.Shiny && Shiny.setInputValue) {
                 Shiny.setInputValue('app_nav_click', target, { priority: 'event' });
               }
               /* Auto-close mobile nav when navigating to a non-workflow tab */
@@ -3370,6 +4090,24 @@ fluidPage(
                 document.documentElement.setAttribute('data-colorblind-mode', 'true');
               } else {
                 document.documentElement.setAttribute('data-colorblind-mode', 'false');
+              }
+            });
+
+            Shiny.addCustomMessageHandler('reset_color_palette_ui', function(message) {
+              var defaultColors = {
+                'color_exon': '#F45D75',
+                'color_cds': '#E8A44F',
+                'color_utr': '#5BC0EB',
+                'color_gene': '#FFB7BF',
+                'color_identity_high': '#CC2929',
+                'color_identity_mid': '#E07858',
+                'color_identity_low': '#5CB85C',
+                'color_header_gene': '#2C3E50',
+                'color_header_transcript': '#24445B'
+              };
+              for (var id in defaultColors) {
+                var el = document.getElementById(id);
+                if (el) el.value = defaultColors[id];
               }
             });
           }
@@ -3463,7 +4201,7 @@ fluidPage(
               class = "app-brand-descriptor",
               div(class = "app-brand-kicker", "Comparative"),
               div(class = "app-brand-subtitle", "Gene Viewer"),
-              div(class = "app-brand-version", "v1.0.0")
+              div(class = "app-brand-version", paste0("v", cgv_release_version))
             )
           ),
           tags$button(
@@ -3523,16 +4261,18 @@ fluidPage(
                         class = "viz-mode-toggle"
                       )
                     ),
-                    conditionalPanel(
-                      condition = "input.homo_data_mode == 'upload'",
+                    div(
+                      class = "app-source-panel app-upload-inputs",
+                      `data-source-panel` = "homo-upload",
+                      hidden = "hidden",
                       fileInput(
                         inputId = "file1",
-                        label = "Upload annotation file",
+                        label = "Annotation file",
                         accept = c(".gff", ".gff3", ".gtf", ".txt")
                       ),
                       fileInput(
                         inputId = "genome_fasta1",
-                        label = "Upload genome FASTA/2bit (required)",
+                        label = "Genome FASTA/2bit file",
                         accept = c(".fa", ".fasta", ".fna", ".fa.gz", ".fasta.gz", ".fna.gz", ".2bit")
                       ),
                       tags$details(
@@ -3561,12 +4301,12 @@ fluidPage(
                             accept = c(".gaf", ".gaf.gz", ".gz")
                           )
                         )
-                      ),
-                      class = "app-upload-inputs"
+                      )
                     ),
-                    conditionalPanel(
-                      condition = "input.homo_data_mode == 'ncbi'",
-                      class = "app-ncbi-search-panel",
+                    div(
+                      class = "app-source-panel app-ncbi-search-panel",
+                      `data-source-panel` = "homo-ncbi",
+                      hidden = "hidden",
                       div(
                         class = "app-ncbi-search-input-wrap",
                         tags$label(class = "app-ncbi-search-label", icon("globe"), "Search NCBI for an organism"),
@@ -3587,11 +4327,9 @@ fluidPage(
                     )
                   ),
                   div(
-                    class = "app-compact-section app-compact-section-tight",
-                    div(class = "app-compact-label", icon("sliders"), span("Visualization mode")),
+                    class = "app-hidden-query",
                     tags$datalist(id = "filter1_suggestions"),
                     div(
-                      class = "app-hidden-query",
                       htmltools::tagAppendAttributes(
                         textInput(
                           inputId = "filter1",
@@ -3601,45 +4339,31 @@ fluidPage(
                         list = "filter1_suggestions"
                       )
                     ),
-                    div(
-                      class = "viz-mode-wrap",
-                      htmltools::tagAppendAttributes(
-                        radioButtons(
-                          inputId = "homo_visual_mode",
-                          label = NULL,
-                          choices = c("Compact" = "compact", "Detailed" = "detailed"),
-                          selected = "compact",
-                          inline = TRUE
-                        ),
-                        class = "viz-mode-toggle"
-                      )
-                    )
+                    uiOutput("homo_visual_mode_ui")
                   ),
                   div(
-                    class = "app-compact-section app-compact-section-tight app-organism-inline-section",
-                    tags$details(
-                      class = "app-submenu app-submenu-organism app-submenu-organism-inline",
-                      tags$summary(
-                        span(
-                          class = "app-organism-summary-main",
-                          icon("dna"),
-                          span(id = "homo-organism-summary-text", class = "app-organism-summary-text", "Organism selection")
+                    class = "app-source-panel",
+                    `data-source-panel` = "homo-preloaded",
+                    div(
+                      class = "app-compact-section app-compact-section-tight app-organism-inline-section",
+                      tags$details(
+                        class = "app-submenu app-submenu-organism app-submenu-organism-inline",
+                        tags$summary(
+                          span(
+                            class = "app-organism-summary-main",
+                            icon("dna"),
+                            span(id = "homo-organism-summary-text", class = "app-organism-summary-text", "Organism selection")
+                          ),
+                          span(class = "app-organism-summary-info", uiOutput("homo_preloaded_info_icon", container = span))
                         ),
-                        span(class = "app-organism-summary-info", uiOutput("homo_preloaded_info_icon", container = span))
-                      ),
-                      div(
-                        class = "app-submenu-body",
-                        conditionalPanel(
-                          condition = "input.homo_data_mode == 'preloaded'",
+                        div(
+                          class = "app-submenu-body",
+                          div(
+                            id = "homo_species_grid_initial",
+                            class = "species-grid-fallback",
+                            initial_homo_species_grid
+                          ),
                           uiOutput("homo_species_grid")
-                        ),
-                        conditionalPanel(
-                          condition = "input.homo_data_mode == 'upload'",
-                          p(class = "app-submenu-hint", "Organism is inferred from uploaded files.")
-                        ),
-                        conditionalPanel(
-                          condition = "input.homo_data_mode == 'ncbi'",
-                          p(class = "app-submenu-hint", "Organism will be loaded from NCBI after download.")
                         )
                       )
                     )
@@ -3685,24 +4409,55 @@ fluidPage(
                         radioButtons(
                           inputId = "ortho_data_mode",
                           label = NULL,
-                          choices = c("Preloaded organisms" = "preloaded", "NCBI Search" = "ncbi", "Upload files" = "upload"),
+                          choices = c("Preloaded organisms" = "preloaded", "NCBI Search" = "ncbi", "Upload files" = "upload", "Mixed sources" = "mixed"),
                           selected = "preloaded",
                           inline = TRUE
                         ),
                         class = "viz-mode-toggle"
                       )
                     ),
-                    conditionalPanel(
-                      condition = "input.ortho_data_mode == 'upload'",
+                    div(
+                      class = "app-source-panel",
+                      `data-source-panel` = "ortho-preloaded",
+                      div(
+                        class = "app-compact-section app-compact-section-tight app-organism-inline-section",
+                        div(class = "app-source-divider", `data-source-mixed-divider` = "true", hidden = "hidden", span("Preloaded organisms")),
+                        tags$details(
+                          class = "app-submenu app-submenu-organism app-submenu-organism-inline",
+                          tags$summary(
+                            span(
+                              class = "app-organism-summary-main",
+                              icon("dna"),
+                              span(id = "ortho-organism-summary-text", class = "app-organism-summary-text", "Organism selection")
+                            ),
+                            span(class = "app-organism-summary-info", uiOutput("ortho_preloaded_info_icon", container = span))
+                          ),
+                          div(
+                            class = "app-submenu-body",
+                            div(
+                              id = "ortho_species_grid_initial",
+                              class = "species-grid-fallback",
+                              initial_ortho_species_grid
+                            ),
+                            uiOutput("ortho_species_grid")
+                          )
+                        )
+                      )
+                    ),
+                    div(
+                      class = "app-source-panel app-upload-inputs",
+                      `data-source-panel` = "ortho-upload",
+                      hidden = "hidden",
+                      div(class = "app-source-divider", `data-source-mixed-divider` = "true", hidden = "hidden", span("Upload files")),
                       fileInput(
                         inputId = "files",
-                        label = "Upload annotation files",
+                        label = "Annotation files",
                         multiple = TRUE,
                         accept = c(".gff", ".gff3", ".gtf", ".txt")
                       ),
                       fileInput(
                         inputId = "genome_fasta_ortho",
-                        label = "Upload genome FASTA/2bit files (required, one per annotation)",
+                        label = "Genome FASTA/2bit files",
                         multiple = TRUE,
                         accept = c(".fa", ".fasta", ".fna", ".fa.gz", ".fasta.gz", ".fna.gz", ".2bit")
                       ),
@@ -3735,12 +4490,13 @@ fluidPage(
                             accept = c(".gaf", ".gaf.gz", ".gz")
                           )
                         )
-                      ),
-                      class = "app-upload-inputs"
+                      )
                     ),
-                    conditionalPanel(
-                      condition = "input.ortho_data_mode == 'ncbi'",
-                      class = "app-ncbi-search-panel",
+                    div(
+                      class = "app-source-panel app-ncbi-search-panel",
+                      `data-source-panel` = "ortho-ncbi",
+                      hidden = "hidden",
+                      div(class = "app-source-divider", `data-source-mixed-divider` = "true", hidden = "hidden", span("NCBI Search")),
                       div(
                         class = "app-ncbi-search-input-wrap",
                         tags$label(class = "app-ncbi-search-label", icon("globe"), "Search NCBI for organisms"),
@@ -3761,11 +4517,9 @@ fluidPage(
                     )
                   ),
                   div(
-                    class = "app-compact-section app-compact-section-tight",
-                    div(class = "app-compact-label", icon("sliders"), span("Visualization mode")),
+                    class = "app-hidden-query",
                     tags$datalist(id = "gene_name_suggestions"),
                     div(
-                      class = "app-hidden-query",
                       htmltools::tagAppendAttributes(
                         textInput(
                           inputId = "gene_name",
@@ -3784,7 +4538,7 @@ fluidPage(
                           choices = c(
                             "Compact" = "compact",
                             "Detailed" = "detailed",
-                            "Comparative Aligned" = "aligned",
+                            "Aligned synteny" = "aligned",
                             "LASTZ Blocks" = "pip_blocks",
                             "MultiPIP-style" = "pip_multipip"
                           ),
@@ -3794,43 +4548,23 @@ fluidPage(
                         class = "viz-mode-toggle"
                       )
                     )
-                  ),
-                  div(
-                    class = "app-compact-section app-compact-section-tight app-organism-inline-section",
-                    tags$details(
-                      class = "app-submenu app-submenu-organism app-submenu-organism-inline",
-                      tags$summary(
-                        span(
-                          class = "app-organism-summary-main",
-                          icon("dna"),
-                          span(id = "ortho-organism-summary-text", class = "app-organism-summary-text", "Organism selection")
-                        ),
-                        span(class = "app-organism-summary-info", uiOutput("ortho_preloaded_info_icon", container = span))
-                      ),
-                      div(
-                        class = "app-submenu-body",
-                        conditionalPanel(
-                          condition = "input.ortho_data_mode == 'preloaded'",
-                          uiOutput("ortho_species_grid")
-                        ),
-                        conditionalPanel(
-                          condition = "input.ortho_data_mode == 'upload'",
-                          p(class = "app-submenu-hint", "Organism list comes from the uploaded set.")
-                        ),
-                        conditionalPanel(
-                          condition = "input.ortho_data_mode == 'ncbi'",
-                          p(class = "app-submenu-hint", "Organisms will be loaded from NCBI after download.")
-                        )
-                      )
-                    )
                   )
                 )
               )
             )
           )
         ),
+        tags$button(
+          type = "button",
+          class = "app-nav-btn app-nav-btn-figure-studio",
+          `data-target` = "figure-studio",
+          title = "Build a publication-ready multi-panel figure",
+          icon("object-group"),
+          span("Figure Studio")
+        ),
+        tags$button(type = "button", class = "app-nav-btn", `data-target` = "guide", title = "CGV Guide", icon("route"), span("CGV Guide")),
         tags$button(type = "button", class = "app-nav-btn", `data-target` = "settings", title = "Settings", icon("cog"), span("Settings")),
-        tags$button(type = "button", class = "app-nav-btn", `data-target` = "help", title = "Help", icon("question-circle"), span("Help")),
+
         tags$button(type = "button", class = "app-nav-btn", `data-target` = "feedback", title = "Feedback", icon("comment-dots"), span("Feedback")),
         tags$button(
           type = "button",
@@ -3994,12 +4728,6 @@ fluidPage(
       # ── Mobile context bar: sticky breadcrumb for mobile navigation ──
       div(
         class = "mobile-context-bar",
-        tags$button(
-          class = "mobile-ctx-hamburger",
-          onclick = "if(typeof toggleMobileNav==='function')toggleMobileNav();",
-          `aria-label` = "Open menu",
-          HTML("&#9776;")
-        ),
         span(class = "mobile-ctx-label",
           span(class = "mobile-ctx-gene", ""),
           span(class = "mobile-ctx-workflow", "")
@@ -4010,969 +4738,813 @@ fluidPage(
         type = "hidden",
         selected = "home",
         tabPanel(
-          title = "Home",
-          value = "home",
+          title = "CGV Guide",
+          value = "guide",
           div(
-            class = "content-wrapper app-main-pane app-home-pane",
-
-            # ── Hero section with particles background ──────────────────────
+            class = "content-wrapper app-main-pane app-guide-pane",
+            tags$link(rel = "stylesheet", href = versioned_asset_path("css/cgv_guide.css")),
             div(
-              class = "app-home-hero-wrap",
-              tags$canvas(id = "home-particles", class = "home-particles-canvas"),
+              class = "guide-shell",
               div(
-                class = "app-home-hero-content",
+                class = "guide-route-panel",
                 div(
-                  class = "app-home-brand home-reveal",
-                  tags$img(
-                    src = versioned_asset_path("favicon2.ico?v=2"),
-                    class = "app-home-brand-logo home-hero-logo-pulse",
-                    `data-light-src` = versioned_asset_path("favicon2.ico?v=2"),
-                    `data-dark-src` = versioned_asset_path("favicon.ico?v=2"),
-                    alt = "CGV logo"
+                  class = "guide-route-intro",
+                  div(
+                    class = "guide-intro-copy",
+                    span(class = "guide-kicker", icon("route"), "CGV Guide"),
+                    h1(class = "guide-title", "Choose a workflow, then follow each step"),
+                    p(class = "guide-subtitle", "Use the video routes for a guided walkthrough or open the complete Web and Desktop reference.")
                   ),
                   div(
-                    class = "app-home-brand-copy",
-                    h1(class = "app-home-title home-reveal", "Comparative Gene Viewer"),
-                    p(class = "app-home-subtitle home-reveal",
-                      "Explore, compare, and analyze gene structures across species in one unified workspace.",
-                      tags$br(),
-                      tags$span(class = "home-typing-wrap",
-                        "Built for ",
-                        tags$span(class = "home-typing-text", `data-words` = '["researchers.","bioinformaticians.","educators.","students."]', "researchers."),
-                        tags$span(class = "home-typing-cursor", "|")
+                    class = "guide-manual-card",
+                    div(class = "guide-manual-icon", icon("book-open")),
+                    div(
+                      class = "guide-manual-copy",
+                      span(class = "guide-manual-eyebrow", "Complete documentation"),
+                      strong("CGV User Manual"),
+                      tags$small("English · Web and Desktop · Always opens the latest published edition")
+                    ),
+                    div(
+                      class = "guide-manual-actions",
+                      tags$a(
+                        href = cgv_manual_path,
+                        target = "_blank",
+                        rel = "noopener noreferrer",
+                        class = "guide-manual-open",
+                        `aria-label` = "Open the latest CGV User Manual",
+                        icon("arrow-up-right-from-square"),
+                        span("Open manual")
+                      ),
+                      tags$a(
+                        href = cgv_manual_path,
+                        download = "CGV_User_Manual.pdf",
+                        class = "guide-manual-download",
+                        `aria-label` = "Download the latest CGV User Manual PDF",
+                        icon("download"),
+                        span("PDF")
                       )
                     )
                   )
                 ),
-
-                # ── CTA buttons ─────────────────────────────────────────────
+                tags$button(
+                  type = "button",
+                  class = "guide-route-card guide-desktop-only",
+                  `data-guide-route` = "desktop-downloads",
+                  span(class = "guide-route-number", "00"),
+                  span(class = "guide-route-icon", icon("download")),
+                  span(class = "guide-route-copy",
+                    tags$strong("Desktop Downloads"),
+                    tags$small("Install organisms from the desktop catalog before starting an analysis.")
+                  )
+                ),
+                tags$button(
+                  type = "button",
+                  class = "guide-route-card is-active",
+                  `data-guide-route` = "multigene",
+                  span(class = "guide-route-number", "01"),
+                  span(class = "guide-route-icon", icon("search")),
+                  span(class = "guide-route-copy",
+                    tags$strong("Multi-Gene Search"),
+                    tags$small("Compare several genes inside one selected organism.")
+                  )
+                ),
+                tags$button(
+                  type = "button",
+                  class = "guide-route-card",
+                  `data-guide-route` = "cross",
+                  span(class = "guide-route-number", "02"),
+                  span(class = "guide-route-icon", icon("sitemap")),
+                  span(class = "guide-route-copy",
+                    tags$strong("Cross-Species Search"),
+                    tags$small("Compare one gene across multiple organisms.")
+                  )
+                ),
+                tags$button(
+                  type = "button",
+                  class = "guide-route-card",
+                  `data-guide-route` = "common",
+                  span(class = "guide-route-number", "03"),
+                  span(class = "guide-route-icon", icon("chart-line")),
+                  span(class = "guide-route-copy",
+                    tags$strong("Common Analysis"),
+                    tags$small("Review models, analytics, popups, and exports.")
+                  )
+                )
+              ),
+              div(
+                class = "guide-workspace",
+              div(
+                class = "guide-step-panel",
                 div(
-                  class = "home-hero-actions home-reveal",
+                  class = "guide-panel-head",
+                  span(class = "guide-kicker", icon("list-ol"), "Step by step"),
+                  h2(id = "guide-route-title", "Multi-Gene Search"),
+                  p(id = "guide-route-summary", "Use this path when the analysis is centered on one organism and several genes.")
+                ),
+                div(
+                  class = "guide-step-list",
                   tags$button(
                     type = "button",
-                    class = "home-cta-btn home-cta-choice-gene",
+                    class = "guide-step-item guide-step-parent",
+                    `data-step-index` = "0",
+                    `data-step-title` = "Choose organism",
+                    `data-step-copy` = "Select the organism or assembly that will define the annotation set for the Multi-Gene workflow.",
+                    `data-step-media` = guide_media_map[["guide-multigene-01a-preloaded-organism.mp4"]],
+                    span(class = "guide-step-number", "01"),
+                    span(class = "guide-step-text",
+                      tags$strong("Choose organism"),
+                      tags$small("Pick the reference organism.")
+                    ),
+                    span(class = "guide-step-chevron", icon("chevron-down"))
+                  ),
+                  tags$button(
+                    type = "button",
+                    class = "guide-step-item guide-step-parent",
+                    `data-step-index` = "1",
+                    `data-step-title` = "Search and add genes",
+                    `data-step-copy` = "Type gene names, use autocomplete suggestions, and build a batch for comparison.",
+                    `data-step-media` = "",
+                    span(class = "guide-step-number", "02"),
+                    span(class = "guide-step-text",
+                      tags$strong("Search and add genes"),
+                      tags$small("Build the gene batch.")
+                    ),
+                    span(class = "guide-step-chevron", icon("chevron-down"))
+                  ),
+                  tags$button(
+                    type = "button",
+                    class = "guide-step-item",
+                    `data-step-index` = "2",
+                    `data-step-title` = "Generate visualization",
+                    `data-step-copy` = "Run the search with Generate visualization, or press Enter where the active search control supports it.",
+                    `data-step-media` = "",
+                    span(class = "guide-step-number", "03"),
+                    span(class = "guide-step-text",
+                      tags$strong("Generate visualization"),
+                      tags$small("Create the comparison view.")
+                    )
+                  ),
+                  tags$button(
+                    type = "button",
+                    class = "guide-step-item guide-step-parent",
+                    `data-step-index` = "3",
+                    `data-step-title` = "Inspect chart",
+                    `data-step-copy` = "Review the rendered gene model, inspect compact or detailed visualizations, and use hover tooltips for feature context.",
+                    `data-step-media` = "",
+                    span(class = "guide-step-number", "04"),
+                    span(class = "guide-step-text",
+                      tags$strong("Inspect chart"),
+                      tags$small("Compact or detailed views.")
+                    ),
+                    span(class = "guide-step-chevron", icon("chevron-down"))
+                  )
+                ),
+                div(
+                  class = "guide-actions",
+                  tags$button(
+                    type = "button",
+                    class = "guide-primary-btn",
+                    `data-guide-open` = "multigene",
                     onclick = "document.querySelector('.app-nav-btn[data-target=\"homologous\"]').click();",
-                    span(class = "home-cta-icon-wrap", icon("search")),
-                    span(
-                      class = "home-cta-copy",
-                      span(class = "home-cta-title", "Multi-Gene Search"),
-                      span(class = "home-cta-note", "Inspect several genes within one organism.")
-                    )
+                    icon("search"),
+                    "Open Multi-Gene"
                   ),
                   tags$button(
                     type = "button",
-                    class = "home-cta-btn home-cta-choice-cross",
+                    class = "guide-secondary-btn",
+                    `data-guide-open` = "cross",
                     onclick = "document.querySelector('.app-nav-btn[data-target=\"orthologous\"]').click();",
-                    span(class = "home-cta-icon-wrap", icon("dna")),
-                    span(
-                      class = "home-cta-copy",
-                      span(class = "home-cta-title", "Cross-Species Analysis"),
-                      span(class = "home-cta-note", "Compare representative gene structures across species.")
-                    )
-                  )
-                ),
-
-                # ── Stats counters (dynamic from registry) ──────────────────
-                uiOutput("home_stats_strip")
-              )
-            ),
-
-            # ── JS for home animations ──────────────────────────────────────
-            tags$script(src = versioned_asset_path("js/home_animations.js")),
-
-            # ── CSS for home + help informational content ────────────────────
-            tags$style(HTML("
-              .home-section {
-                margin: 0 0 24px 0;
-                padding: 22px 22px;
-                background: linear-gradient(180deg, #fbfdff 0%, #f5f9fc 100%);
-                border: 1px solid #dbe6ef;
-                border-radius: 16px;
-                box-shadow: 0 10px 24px rgba(32, 58, 82, 0.07);
-              }
-              .home-section-title {
-                font-size: 22px;
-                font-weight: 800;
-                color: #1f3246;
-                margin: 0 0 8px 0;
-                display: flex;
-                align-items: center;
-                gap: 10px;
-                line-height: 1.2;
-              }
-              .home-section-title .fa,
-              .home-section-title .fas {
-                color: #18BC9C;
-                font-size: 18px;
-              }
-              .home-section-sub {
-                max-width: 860px;
-                font-size: 13px;
-                color: #5a6f82;
-                margin: 0 0 16px 0;
-                line-height: 1.6;
-              }
-              .app-home-pane > .home-section:first-of-type {
-                margin-top: 0;
-              }
-              .app-home-pane > .home-section {
-                max-width: 1280px;
-                margin-left: auto;
-                margin-right: auto;
-                margin-bottom: 24px;
-              }
-              .home-motivation-grid,
-              .home-features-grid,
-              .home-scope-grid {
-                display: grid;
-                gap: 12px;
-              }
-              .home-motivation-grid {
-                grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
-              }
-              .home-features-grid {
-                grid-template-columns: repeat(3, minmax(0, 1fr));
-              }
-              .home-scope-grid {
-                grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-              }
-              .home-flow-strip {
-                display: flex;
-                align-items: center;
-                gap: 0;
-                margin-bottom: 18px;
-                flex-wrap: wrap;
-              }
-              .home-flow-step {
-                display: flex;
-                align-items: center;
-                gap: 10px;
-                padding: 14px 14px;
-                border-radius: 14px;
-                border: 1px solid #d8e3ec;
-                background: #ffffff;
-                position: relative;
-                transition: all 0.3s cubic-bezier(0.22, 1, 0.36, 1);
-              }
-              .home-flow-step:hover {
-                border-color: rgba(24, 188, 156, 0.3);
-                box-shadow: 0 8px 24px rgba(24, 188, 156, 0.1);
-                transform: translateY(-2px);
-              }
-              .home-flow-step-icon {
-                width: 38px;
-                height: 38px;
-                border-radius: 11px;
-                background: linear-gradient(135deg, #eff8f5 0%, #e3f4ee 100%);
-                color: #18BC9C;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                font-size: 15px;
-                flex-shrink: 0;
-                transition: transform 0.3s ease;
-              }
-              .home-flow-step:hover .home-flow-step-icon {
-                transform: scale(1.1);
-              }
-              .home-flow-step-label {
-                font-size: 12.5px;
-                font-weight: 800;
-                color: #22364a;
-                letter-spacing: 0.01em;
-                line-height: 1.35;
-              }
-              .home-motivation-card,
-              .home-feature-card,
-              .home-scope-yes-card,
-              .home-scope-no-card {
-                border-radius: 14px;
-                border: 1px solid #d8e3ec;
-                background: #ffffff;
-                padding: 18px;
-                min-height: 100%;
-                transition: all 0.32s cubic-bezier(0.22, 1, 0.36, 1);
-              }
-              .home-motivation-card-icon,
-              .home-feature-card-icon {
-                width: 42px;
-                height: 42px;
-                border-radius: 12px;
-                background: linear-gradient(135deg, #eff8f5 0%, #e3f4ee 100%);
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                margin-bottom: 12px;
-                font-size: 17px;
-                color: #18BC9C;
-                transition: transform 0.3s cubic-bezier(0.22, 1, 0.36, 1),
-                            box-shadow 0.3s ease;
-              }
-              .home-card-hover:hover .home-motivation-card-icon,
-              .home-card-hover:hover .home-feature-card-icon {
-                transform: scale(1.12) rotate(-3deg);
-                box-shadow: 0 4px 14px rgba(24, 188, 156, 0.2);
-              }
-              .home-motivation-card h4,
-              .home-feature-card h4,
-              .home-scope-yes-card h4,
-              .home-scope-no-card h4 {
-                font-size: 14px;
-                font-weight: 700;
-                color: #22364a;
-                margin: 0 0 8px 0;
-                line-height: 1.3;
-              }
-              .home-motivation-card p,
-              .home-feature-card p {
-                font-size: 12.5px;
-                color: #566c7f;
-                line-height: 1.6;
-                margin: 0;
-              }
-              .home-feature-card {
-                position: relative;
-                overflow: hidden;
-              }
-              .home-feature-card::after {
-                display: none;
-              }
-              .home-scope-yes-card {
-                border-color: #b7ded2;
-                background: linear-gradient(180deg, #fbfffd 0%, #f0faf6 100%);
-              }
-              .home-scope-no-card {
-                border-color: #e6d3c0;
-                background: linear-gradient(180deg, #fffdfa 0%, #fbf4ec 100%);
-              }
-              .home-scope-yes-card h4 { color: #0d6e50; }
-              .home-scope-no-card h4 { color: #8b5629; }
-              .home-scope-yes-card ul,
-              .home-scope-no-card ul {
-                margin: 0;
-                padding: 0;
-              }
-              .home-scope-yes-card li,
-              .home-scope-no-card li {
-                list-style: none;
-                display: flex;
-                align-items: flex-start;
-                gap: 8px;
-                padding: 4px 0;
-                font-size: 12.5px;
-                line-height: 1.55;
-                color: #4f6477;
-              }
-              .home-scope-yes-card li::before,
-              .home-scope-no-card li::before {
-                font-weight: 900;
-                flex-shrink: 0;
-                line-height: 1.2;
-              }
-              .home-scope-yes-card li::before {
-                content: '✓';
-                color: #18BC9C;
-              }
-              .home-scope-no-card li::before {
-                content: '✗';
-                color: #df8350;
-              }
-              .home-comparison-wrap {
-                overflow-x: auto;
-                border: 1px solid #d6e2ec;
-                border-radius: 14px;
-                background: #ffffff;
-                transition: box-shadow 0.3s ease;
-              }
-              .home-comparison-wrap:hover {
-                box-shadow: 0 8px 28px rgba(32, 58, 82, 0.08);
-              }
-              .home-comparison-table tbody tr {
-                transition: background 0.2s ease;
-              }
-              .home-comparison-table tbody tr:hover td {
-                background: rgba(24, 188, 156, 0.04) !important;
-              }
-              .home-comparison-table {
-                width: 100%;
-                border-collapse: collapse;
-                min-width: 640px;
-                font-size: 12px;
-              }
-              .home-comparison-table thead th {
-                background: #1f3246;
-                color: #e8f2f9;
-                font-size: 11px;
-                font-weight: 700;
-                padding: 10px 11px;
-                text-align: center;
-                white-space: nowrap;
-                letter-spacing: 0.03em;
-                border-right: 1px solid #304b63;
-              }
-              .home-comparison-table thead th:first-child {
-                text-align: left;
-              }
-              .home-comparison-table thead th.ctv-col {
-                background: #18BC9C;
-                color: #ffffff;
-              }
-              .home-comparison-table td {
-                padding: 9px 11px;
-                border-bottom: 1px solid #e6edf3;
-                border-right: 1px solid #e6edf3;
-                text-align: center;
-                vertical-align: middle;
-                color: #53697b;
-              }
-              .home-comparison-table tbody tr:nth-child(odd) td {
-                background: #fbfdff;
-              }
-              .home-comparison-table tbody tr:nth-child(even) td {
-                background: #ffffff;
-              }
-              .home-comparison-table td:first-child {
-                text-align: left;
-                font-size: 12px;
-                font-weight: 600;
-                color: #22364a;
-                white-space: nowrap;
-              }
-              .home-comparison-table td.ctv-col {
-                background: #f0faf7 !important;
-              }
-              .ctv-yes,
-              .ctv-no,
-              .ctv-partial {
-                font-weight: 800;
-                font-size: 15px;
-              }
-              .ctv-yes { color: #18BC9C; }
-              .ctv-no { color: #a8b7c3; }
-              .ctv-partial { color: #f0a234; }
-              .home-comparison-note {
-                margin: 10px 0 0 0;
-                font-size: 12px;
-                color: #61778b;
-                line-height: 1.55;
-              }
-              html[data-app-theme='dark'] .home-section {
-                background: linear-gradient(180deg, #132a3f 0%, #172f45 100%);
-                border-color: #274b66;
-                box-shadow: 0 12px 26px rgba(0, 0, 0, 0.24);
-              }
-              html[data-app-theme='dark'] .home-section-title {
-                color: #d5e7f7;
-              }
-              html[data-app-theme='dark'] .home-section-sub,
-              html[data-app-theme='dark'] .home-comparison-note {
-                color: #93b2c8;
-              }
-              html[data-app-theme='dark'] .home-motivation-card,
-              html[data-app-theme='dark'] .home-feature-card,
-              html[data-app-theme='dark'] .home-scope-yes-card,
-              html[data-app-theme='dark'] .home-scope-no-card {
-                background: #10263a;
-                border-color: #2a4e69;
-              }
-              html[data-app-theme='dark'] .home-motivation-card-icon,
-              html[data-app-theme='dark'] .home-feature-card-icon {
-                background: linear-gradient(180deg, #1b3d50 0%, #1c4850 100%);
-              }
-              html[data-app-theme='dark'] .home-flow-step {
-                background: #10263a;
-                border-color: #2a4e69;
-              }
-              html[data-app-theme='dark'] .home-flow-step-icon {
-                background: linear-gradient(135deg, #1b3d50 0%, #1c4850 100%);
-              }
-              html[data-app-theme='dark'] .home-flow-step-label {
-                color: #d5e7f7;
-              }
-              html[data-app-theme='dark'] .home-flow-arrow {
-                background: linear-gradient(90deg, #18BC9C, rgba(24, 188, 156, 0.2));
-              }
-              html[data-app-theme='dark'] .home-flow-step-number {
-                box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-              }
-              html[data-app-theme='dark'] .home-motivation-card h4,
-              html[data-app-theme='dark'] .home-feature-card h4 {
-                color: #d5e7f7;
-              }
-              html[data-app-theme='dark'] .home-motivation-card p,
-              html[data-app-theme='dark'] .home-feature-card p,
-              html[data-app-theme='dark'] .home-scope-yes-card li,
-              html[data-app-theme='dark'] .home-scope-no-card li {
-                color: #9ebdd2;
-              }
-              html[data-app-theme='dark'] .home-scope-yes-card {
-                background: linear-gradient(180deg, #102a1f 0%, #163326 100%);
-                border-color: #2f6b4f;
-              }
-              html[data-app-theme='dark'] .home-scope-no-card {
-                background: linear-gradient(180deg, #2a1d14 0%, #34231b 100%);
-                border-color: #71402a;
-              }
-              html[data-app-theme='dark'] .home-scope-yes-card h4 {
-                color: #77dab7;
-              }
-              html[data-app-theme='dark'] .home-scope-no-card h4 {
-                color: #f0a06a;
-              }
-              html[data-app-theme='dark'] .home-comparison-wrap {
-                border-color: #2a4c67;
-                background: #11263a;
-              }
-              html[data-app-theme='dark'] .home-comparison-table thead th {
-                background: #0d2236;
-                color: #c7ddef;
-                border-right-color: #24425b;
-              }
-              html[data-app-theme='dark'] .home-comparison-table thead th.ctv-col {
-                background: #0e8a70;
-                color: #ffffff;
-              }
-              html[data-app-theme='dark'] .home-comparison-table tbody tr:nth-child(odd) td {
-                background: #132a3f;
-              }
-              html[data-app-theme='dark'] .home-comparison-table tbody tr:nth-child(even) td {
-                background: #183247;
-              }
-              html[data-app-theme='dark'] .home-comparison-table td {
-                border-color: #274b66;
-                color: #9ebdd2;
-              }
-              html[data-app-theme='dark'] .home-comparison-table td:first-child {
-                color: #d5e7f7;
-              }
-              html[data-app-theme='dark'] .home-comparison-table td.ctv-col {
-                background: #14382f !important;
-              }
-              @media (max-width: 700px) {
-                .home-section {
-                  padding: 16px;
-                  margin-bottom: 18px;
-                }
-                .home-section-title {
-                  font-size: 18px;
-                }
-                .home-section-sub {
-                  font-size: 12.5px;
-                }
-                .home-flow-strip {
-                  grid-template-columns: 1fr 1fr;
-                }
-                .home-features-grid {
-                  grid-template-columns: 1fr;
-                }
-                .home-comparison-table {
-                  font-size: 11px;
-                  min-width: 580px;
-                }
-              }
-              @media (min-width: 701px) and (max-width: 1120px) {
-                .home-features-grid {
-                  grid-template-columns: repeat(2, minmax(0, 1fr));
-                }
-              }
-
-              /* ── At a glance section ──────────────────────────── */
-              .home-glance-grid {
-                display: flex;
-                flex-direction: column;
-                gap: 14px;
-              }
-              .home-glance-two-col {
-                display: grid;
-                grid-template-columns: 1fr 1fr;
-                gap: 14px;
-                align-items: start;
-              }
-              .home-glance-col {
-                display: flex;
-                flex-direction: column;
-                gap: 14px;
-              }
-              .home-glance-card {
-                border-radius: 14px;
-                border: 1px solid #d8e3ec;
-                background: #ffffff;
-                padding: 18px;
-              }
-              .home-glance-card-header {
-                display: flex;
-                align-items: center;
-                gap: 10px;
-                margin-bottom: 8px;
-              }
-              .home-glance-card-icon {
-                width: 36px;
-                height: 36px;
-                border-radius: 10px;
-                background: linear-gradient(135deg, #18BC9C, #0fa383);
-                color: #ffffff;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                font-size: 15px;
-                flex-shrink: 0;
-              }
-              .home-glance-card-header h4 {
-                font-size: 15px;
-                font-weight: 800;
-                color: #22364a;
-                margin: 0;
-                line-height: 1.2;
-              }
-              .home-glance-card-desc {
-                font-size: 12.5px;
-                color: #5a6f82;
-                line-height: 1.55;
-                margin: 0 0 12px 0;
-              }
-
-              /* Kingdoms grid (genomes) */
-              .home-glance-kingdoms {
-                display: grid;
-                grid-template-columns: repeat(3, 1fr);
-                gap: 10px;
-              }
-              .home-glance-kingdom { min-width: 0; }
-              .home-glance-badge {
-                display: inline-block;
-                padding: 3px 10px;
-                border-radius: 999px;
-                font-size: 10.5px;
-                font-weight: 700;
-                letter-spacing: 0.03em;
-                text-transform: uppercase;
-                margin-bottom: 5px;
-              }
-              .home-badge-animals { background: #e8f4fd; color: #2980b9; }
-              .home-badge-plants  { background: #e8f9f0; color: #0d6e50; }
-              .home-badge-fungi   { background: #fef3e8; color: #b06c2a; }
-              .home-badge-other   { background: #f0e8fe; color: #7c3aed; }
-              .home-glance-kingdom ul {
-                margin: 0; padding: 0; list-style: none;
-              }
-              .home-glance-kingdom li {
-                font-size: 11px;
-                color: #566c7f;
-                padding: 1.5px 0;
-                line-height: 1.4;
-                font-style: italic;
-              }
-              .home-glance-note {
-                margin-top: 12px;
-                padding: 8px 12px;
-                border-radius: 10px;
-                background: rgba(24, 188, 156, 0.06);
-                border: 1px solid rgba(24, 188, 156, 0.12);
-                font-size: 11.5px;
-                color: #18BC9C;
-                font-weight: 600;
-                display: flex;
-                align-items: center;
-                gap: 6px;
-              }
-
-              /* Search modes */
-              .home-glance-modes {
-                display: flex;
-                flex-direction: column;
-                gap: 10px;
-              }
-              .home-glance-mode {
-                display: flex;
-                gap: 12px;
-                padding: 12px 14px;
-                border-radius: 12px;
-                border: 1px solid #d8e3ec;
-                background: rgba(24, 188, 156, 0.02);
-                transition: border-color 0.25s ease, box-shadow 0.25s ease;
-              }
-              .home-glance-mode:hover {
-                border-color: rgba(24, 188, 156, 0.25);
-                box-shadow: 0 4px 16px rgba(24, 188, 156, 0.08);
-              }
-              .home-glance-mode-icon {
-                width: 32px; height: 32px;
-                border-radius: 9px;
-                background: linear-gradient(135deg, #18BC9C, #0fa383);
-                color: #fff;
-                display: flex; align-items: center; justify-content: center;
-                font-size: 13px; flex-shrink: 0;
-              }
-              .home-glance-mode strong {
-                font-size: 13px; color: #22364a; display: block; margin-bottom: 3px;
-              }
-              .home-glance-mode p {
-                font-size: 11.5px; color: #566c7f; line-height: 1.5; margin: 0;
-              }
-
-              /* Analytics chips */
-              .home-glance-chart-list {
-                display: flex;
-                flex-wrap: wrap;
-                gap: 7px;
-              }
-              .home-glance-chip {
-                display: inline-flex;
-                align-items: center;
-                gap: 6px;
-                padding: 6px 12px;
-                border-radius: 9px;
-                background: rgba(24, 188, 156, 0.06);
-                border: 1px solid rgba(24, 188, 156, 0.12);
-                font-size: 12px;
-                font-weight: 600;
-                color: #22364a;
-                transition: all 0.22s ease;
-              }
-              .home-glance-chip:hover {
-                background: rgba(24, 188, 156, 0.12);
-                border-color: rgba(24, 188, 156, 0.25);
-                transform: translateY(-1px);
-              }
-              .home-glance-chip .fa,
-              .home-glance-chip .fas {
-                color: #18BC9C; font-size: 11px;
-              }
-
-              /* Export list */
-              .home-glance-export-list {
-                display: flex;
-                flex-direction: column;
-                gap: 7px;
-              }
-              .home-glance-export {
-                display: flex;
-                align-items: center;
-                gap: 10px;
-                padding: 8px 12px;
-                border-radius: 10px;
-                border: 1px solid #d8e3ec;
-                background: #ffffff;
-                transition: all 0.22s ease;
-              }
-              .home-glance-export:hover {
-                border-color: rgba(24, 188, 156, 0.25);
-                box-shadow: 0 3px 12px rgba(24, 188, 156, 0.08);
-              }
-              .home-glance-export-icon {
-                width: 28px; height: 28px;
-                border-radius: 8px;
-                background: linear-gradient(135deg, #eff8f5, #e3f4ee);
-                color: #18BC9C;
-                display: flex; align-items: center; justify-content: center;
-                font-size: 12px; flex-shrink: 0;
-              }
-              .home-glance-export strong {
-                font-size: 12.5px; color: #22364a; display: block; line-height: 1.2;
-              }
-              .home-glance-export small {
-                font-size: 11px; color: #6a7f91; font-weight: 500;
-              }
-
-              /* Dark theme for at-a-glance */
-              html[data-app-theme='dark'] .home-glance-card {
-                background: #10263a; border-color: #2a4e69;
-              }
-              html[data-app-theme='dark'] .home-glance-card-header h4,
-              html[data-app-theme='dark'] .home-glance-mode strong,
-              html[data-app-theme='dark'] .home-glance-chip,
-              html[data-app-theme='dark'] .home-glance-export strong {
-                color: #d5e7f7;
-              }
-              html[data-app-theme='dark'] .home-glance-card-desc,
-              html[data-app-theme='dark'] .home-glance-kingdom li,
-              html[data-app-theme='dark'] .home-glance-mode p,
-              html[data-app-theme='dark'] .home-glance-export small {
-                color: #9ebdd2;
-              }
-              html[data-app-theme='dark'] .home-glance-mode,
-              html[data-app-theme='dark'] .home-glance-export {
-                background: #0e1f31; border-color: #2a4e69;
-              }
-              html[data-app-theme='dark'] .home-glance-chip {
-                background: rgba(24, 188, 156, 0.08);
-                border-color: rgba(24, 188, 156, 0.15);
-              }
-              html[data-app-theme='dark'] .home-glance-export-icon {
-                background: linear-gradient(135deg, #1b3d50, #1c4850);
-              }
-              html[data-app-theme='dark'] .home-badge-animals { background: #1a3248; color: #5eb8e8; }
-              html[data-app-theme='dark'] .home-badge-plants  { background: #163326; color: #5ed4a0; }
-              html[data-app-theme='dark'] .home-badge-fungi   { background: #2a1d14; color: #e8a65e; }
-              html[data-app-theme='dark'] .home-badge-other   { background: #261a3e; color: #b28aef; }
-              html[data-app-theme='dark'] .home-glance-note {
-                background: rgba(24, 188, 156, 0.08);
-                border-color: rgba(24, 188, 156, 0.15);
-              }
-
-              /* Responsive at-a-glance */
-              @media (max-width: 700px) {
-                .home-glance-two-col {
-                  grid-template-columns: 1fr;
-                }
-                .home-glance-kingdoms {
-                  grid-template-columns: 1fr;
-                }
-              }
-              @media (min-width: 701px) and (max-width: 1120px) {
-                .home-glance-two-col {
-                  grid-template-columns: 1fr;
-                }
-              }
-            ")),
-
-            # ── 1. How it works (general workflow) ─────────────────────────
-            div(
-              class = "home-section home-reveal",
-              p(class = "home-section-title", icon("star"), "How it works"),
-              p(
-                class = "home-section-sub",
-                "A simple workflow from gene search to publication-ready results."
-              ),
-              div(
-                class = "home-flow-strip home-flow-strip-animated home-stagger-parent",
-                div(
-                  class = "home-flow-step home-flow-step-anim home-stagger-child",
-                  div(class = "home-flow-step-number", "1"),
-                  div(class = "home-flow-step-icon", icon("database")),
-                  div(class = "home-flow-step-label", "Choose organism & genome")
-                ),
-                div(class = "home-flow-connector home-stagger-child", tags$span(class = "home-flow-arrow")),
-                div(
-                  class = "home-flow-step home-flow-step-anim home-stagger-child",
-                  div(class = "home-flow-step-number", "2"),
-                  div(class = "home-flow-step-icon", icon("search")),
-                  div(class = "home-flow-step-label", "Search genes by name or ID")
-                ),
-                div(class = "home-flow-connector home-stagger-child", tags$span(class = "home-flow-arrow")),
-                div(
-                  class = "home-flow-step home-flow-step-anim home-stagger-child",
-                  div(class = "home-flow-step-number", "3"),
-                  div(class = "home-flow-step-icon", icon("eye")),
-                  div(class = "home-flow-step-label", "Visualize & compare structures")
-                ),
-                div(class = "home-flow-connector home-stagger-child", tags$span(class = "home-flow-arrow")),
-                div(
-                  class = "home-flow-step home-flow-step-anim home-stagger-child",
-                  div(class = "home-flow-step-number", "4"),
-                  div(class = "home-flow-step-icon", icon("chart-bar")),
-                  div(class = "home-flow-step-label", "Analyze with interactive charts")
-                ),
-                div(class = "home-flow-connector home-stagger-child", tags$span(class = "home-flow-arrow")),
-                div(
-                  class = "home-flow-step home-flow-step-anim home-stagger-child",
-                  div(class = "home-flow-step-number", "5"),
-                  div(class = "home-flow-step-icon", icon("download")),
-                  div(class = "home-flow-step-label", "Export & share results")
-                )
-              )
-            ),
-
-            # ── 2. Core capabilities ──────────────────────────────────────
-            div(
-              class = "home-section home-reveal",
-              p(class = "home-section-title", icon("cubes"), "Core capabilities"),
-              p(
-                class = "home-section-sub",
-                "Everything you need for comparative gene structure analysis in one place."
-              ),
-              div(
-                class = "home-features-grid home-stagger-parent",
-                div(
-                  class = "home-feature-card home-card-hover home-stagger-child",
-                  div(class = "home-feature-card-icon", icon("search")),
-                  tags$h4("Gene search across organisms"),
-                  tags$p("Query multiple annotated genes within one organism or compare one gene across species.")
-                ),
-                div(
-                  class = "home-feature-card home-card-hover home-stagger-child",
-                  div(class = "home-feature-card-icon", icon("dna")),
-                  tags$h4("Comparative aligned view"),
-                  tags$p("Compare representative gene models and label exon-level event patterns across organisms.")
-                ),
-                div(
-                  class = "home-feature-card home-card-hover home-stagger-child",
-                  div(class = "home-feature-card-icon", icon("chart-bar")),
-                  tags$h4("Interactive gene cards"),
-                  tags$p("Inspect gene structure, transcripts, genomic context, tooltips, zoom, and linked resources.")
-                ),
-                div(
-                  class = "home-feature-card home-card-hover home-stagger-child",
-                  div(class = "home-feature-card-icon", icon("chart-pie")),
-                  tags$h4("Built-in analytics"),
-                  tags$p("Structural and sequence analytics with 9 chart types \u2014 all without leaving the app.")
-                ),
-                div(
-                  class = "home-feature-card home-card-hover home-stagger-child",
-                  div(class = "home-feature-card-icon", icon("upload")),
-                  tags$h4("Preloaded & custom data"),
-                  tags$p("Work with preloaded references or upload your own genome and annotation pair.")
-                ),
-                div(
-                  class = "home-feature-card home-card-hover home-stagger-child",
-                  div(class = "home-feature-card-icon", icon("download")),
-                  tags$h4("Export & session reuse"),
-                  tags$p("Export figures, tables, sequences. Save or restore full sessions for later.")
-                )
-              )
-            ),
-
-            # ── 3. At a glance (dynamic from registry) ────────────────────
-            uiOutput("home_glance_section"),
-
-            # ── 4. Why CGV was built ──────────────────────────────────────
-            div(
-              class = "home-section home-reveal",
-              p(class = "home-section-title", icon("lightbulb"), "Why CGV was built"),
-              p(
-                class = "home-section-sub",
-                "Comparative gene structure analysis made easier to inspect, explain, and share \u2014 without jumping between browsers, scripts, and static plots."
-              ),
-              div(
-                class = "home-motivation-grid home-stagger-parent",
-                div(
-                  class = "home-motivation-card home-card-hover home-stagger-child",
-                  div(class = "home-motivation-card-icon", icon("exclamation-triangle")),
-                  tags$h4("The problem"),
-                  tags$p("Genome browsers are great for locus inspection, but not for clear side-by-side gene structure comparison across species.")
-                ),
-                div(
-                  class = "home-motivation-card home-card-hover home-stagger-child",
-                  div(class = "home-motivation-card-icon", icon("sitemap")),
-                  tags$h4("The workflow gap"),
-                  tags$p("Search, alignment, inspection, and export are usually spread across several tools. CGV unifies them.")
-                ),
-                div(
-                  class = "home-motivation-card home-card-hover home-stagger-child",
-                  div(class = "home-motivation-card-icon", icon("users")),
-                  tags$h4("Who CGV is for"),
-                  tags$p("Biologists, bioinformaticians, and students who want a guided visual workflow instead of code-heavy pipelines.")
-                )
-              )
-            ),
-
-            # ── 5. Scope ─────────────────────────────────────────────────
-            div(
-              class = "home-section home-reveal",
-              p(class = "home-section-title", icon("info-circle"), "Scope"),
-              p(
-                class = "home-section-sub",
-                "CGV is focused on gene-centered structure interpretation. Clear scope helps pair CGV with the right upstream or downstream tools."
-              ),
-              div(
-                class = "home-scope-grid home-stagger-parent",
-                div(
-                  class = "home-scope-yes-card home-card-hover home-stagger-child",
-                  tags$h4(icon("check-circle"), "Designed for"),
-                  tags$ul(
-                    tags$li("Comparative gene and exon structure analysis across multiple organisms"),
-                    tags$li("Aligned exon-level relationships in a cross-species context"),
-                    tags$li("Interactive gene metrics, transcript structure, sequence composition"),
-                    tags$li("Preloaded references with custom genome and annotation uploads"),
-                    tags$li("Publication-ready exports: plots, tables, and sequences"),
-                    tags$li("Session save and restore for reproducible review")
-                  )
-                ),
-                div(
-                  class = "home-scope-no-card home-card-hover home-stagger-child",
-                  tags$h4(icon("times-circle"), "Not designed for"),
-                  tags$ul(
-                    tags$li("Differential expression, isoform switching, or abundance testing"),
-                    tags$li("Variant calling, SNP/INDEL analysis, RNA-seq quantification"),
-                    tags$li("Whole-genome browsing or large region navigation"),
-                    tags$li("De novo genome or transcriptome assembly"),
-                    tags$li("Phylogenetic inference or protein 3D structure prediction"),
-                    tags$li("High-throughput genome-wide batch analysis")
+                    icon("sitemap"),
+                    "Open Cross-Species"
                   )
                 )
-              )
-            ),
-
-            # ── 6. How CGV compares ──────────────────────────────────────
-            div(
-              class = "home-section home-reveal",
-              p(class = "home-section-title", icon("table"), "How CGV compares"),
-              p(
-                class = "home-section-sub",
-                HTML("Compact scope summary: &nbsp; \u2713 native support &nbsp;&nbsp; ~ possible with limits &nbsp;&nbsp; \u2717 not the main purpose")
               ),
               div(
-                class = "home-comparison-wrap",
-                tags$table(
-                  class = "home-comparison-table",
-                  tags$thead(
-                    tags$tr(
-                      tags$th("Capability"),
-                      tags$th(class = "ctv-col", icon("star"), " CGV"),
-                      tags$th("Ensembl / UCSC"),
-                      tags$th("JBrowse2 / Apollo"),
-                      tags$th("IsoformSwitchAnalyzeR / FLAIR"),
-                      tags$th("gggenomes / gggenes")
-                    )
+                class = "guide-media-panel",
+                div(
+                  class = "guide-video-shell",
+                  div(
+                    class = "guide-media-caption",
+                    h3(id = "guide-media-title", "Welcome to CGV Guide"),
+                    p(id = "guide-media-copy", "Choose a workflow, then select the step you want to learn. The intro video appears here until you pick a specific step.")
                   ),
-                  tags$tbody(
-                    tags$tr(
-                      tags$td("Cross-species gene structure comparison"),
-                      tags$td(class = "ctv-col", span(class = "ctv-yes", "\u2713")),
-                      tags$td(span(class = "ctv-partial", "~"), tags$small(" locus browsing")),
-                      tags$td(span(class = "ctv-partial", "~"), tags$small(" manual setup")),
-                      tags$td(span(class = "ctv-no", "\u2717")),
-                      tags$td(span(class = "ctv-partial", "~"), tags$small(" static plots"))
-                    ),
-                    tags$tr(
-                      tags$td("Representative exon alignment with event labels"),
-                      tags$td(class = "ctv-col", span(class = "ctv-yes", "\u2713")),
-                      tags$td(span(class = "ctv-no", "\u2717")),
-                      tags$td(span(class = "ctv-no", "\u2717")),
-                      tags$td(span(class = "ctv-no", "\u2717")),
-                      tags$td(span(class = "ctv-no", "\u2717"))
-                    ),
-                    tags$tr(
-                      tags$td("Interactive gene cards plus analytics"),
-                      tags$td(class = "ctv-col", span(class = "ctv-yes", "\u2713")),
-                      tags$td(span(class = "ctv-partial", "~"), tags$small(" limited metrics")),
-                      tags$td(span(class = "ctv-partial", "~"), tags$small(" browser focus")),
-                      tags$td(span(class = "ctv-partial", "~"), tags$small(" analysis focus")),
-                      tags$td(span(class = "ctv-partial", "~"), tags$small(" plot focus"))
-                    ),
-                    tags$tr(
-                      tags$td("Browser-based workflow, no code required"),
-                      tags$td(class = "ctv-col", span(class = "ctv-yes", "\u2713")),
-                      tags$td(span(class = "ctv-yes", "\u2713")),
-                      tags$td(span(class = "ctv-partial", "~"), tags$small(" config driven")),
-                      tags$td(span(class = "ctv-no", "\u2717")),
-                      tags$td(span(class = "ctv-no", "\u2717"))
-                    ),
-                    tags$tr(
-                      tags$td("Custom genome plus annotation uploads"),
-                      tags$td(class = "ctv-col", span(class = "ctv-yes", "\u2713")),
-                      tags$td(span(class = "ctv-no", "\u2717")),
-                      tags$td(span(class = "ctv-yes", "\u2713")),
-                      tags$td(span(class = "ctv-partial", "~")),
-                      tags$td(span(class = "ctv-yes", "\u2713"))
-                    ),
-                    tags$tr(
-                      tags$td("Export figures, tables, sequences, sessions"),
-                      tags$td(class = "ctv-col", span(class = "ctv-yes", "\u2713")),
-                      tags$td(span(class = "ctv-partial", "~"), tags$small(" basic export")),
-                      tags$td(span(class = "ctv-partial", "~")),
-                      tags$td(span(class = "ctv-partial", "~")),
-                      tags$td(span(class = "ctv-partial", "~"), tags$small(" mostly plots"))
+                  div(
+                    class = "guide-video-frame",
+                    div(
+                      class = "guide-video-placeholder",
+                      tags$video(
+                        id = "guide-media-video",
+                        class = "guide-media-video",
+                        autoplay = NA,
+                        muted = NA,
+                        loop = NA,
+                        playsinline = NA,
+                        preload = "auto",
+                        tabindex = "-1",
+                        if (nzchar(guide_media_map[["guide-intro.mp4"]])) {
+                          tags$source(src = guide_media_map[["guide-intro.mp4"]], type = "video/mp4")
+                        }
+                      ),
+                      span(class = "guide-video-icon", icon("film")),
+                      h3("Video / GIF placeholder")
                     )
                   )
+                ),
+                div(
+                  class = "guide-media-notes",
+                  div(
+                    class = "guide-note",
+                    span(class = "guide-note-icon", icon("video")),
+                    span("Drop a short MP4 or GIF into this placeholder when the screen capture is ready.")
+                  ),
+                  div(
+                    class = "guide-note",
+                    span(class = "guide-note-icon", icon("mouse-pointer")),
+                    span("Users can move route by route and step by step without leaving this page.")
+                  )
                 )
-              ),
-              p(
-                class = "home-comparison-note",
-                "Scope summary, not benchmark. Many of these tools are complementary and can be combined in one analysis workflow."
               )
-            )
+              )
+            ),
+            tags$script(HTML(sprintf(
+              "window.CGV_GUIDE_MEDIA = %s;",
+              jsonlite::toJSON(as.list(guide_media_map), auto_unbox = TRUE)
+            ))),
+            tags$script(HTML("
+              (function() {
+                var root = document.querySelector('.app-guide-pane');
+                if (!root || root.dataset.guideReady === '1') return;
+                root.dataset.guideReady = '1';
+                var guideMedia = window.CGV_GUIDE_MEDIA || {};
+
+                function guideVideo(fileName) {
+                  return guideMedia[fileName] || '';
+                }
+
+                var routeData = {
+                  multigene: {
+                    title: 'Multi-Gene Search',
+                    summary: 'Use this path when the analysis is centered on one organism and several genes.',
+                    open: 'multigene',
+                    steps: [
+                      {
+                        title: 'Choose organism',
+                        copy: 'Select the organism or assembly that will define the annotation set for the Multi-Gene workflow.',
+                        short: 'Preloaded, NCBI, or upload.',
+                        substeps: [
+                          { title: 'Preloaded organism', short: 'Use an available organism.', copy: 'Choose an organism whose reference annotation and genome are available in this CGV session. Hosted deployments may provide references directly, while CGV Desktop installs them on demand.', media: guideVideo('guide-multigene-01a-preloaded-organism.mp4') },
+                          { title: 'NCBI search', short: 'Find a new assembly.', copy: 'Search NCBI when the organism is not preloaded, then let CGV prepare the selected assembly for the workflow.', media: guideVideo('guide-multigene-01b-ncbi-search.mp4') },
+                          { title: 'Upload files', short: 'Bring your own data.', copy: 'Upload compatible annotation and genome files when you want to work with your own local dataset.', media: guideVideo('guide-multigene-01c-upload-files.mp4') }
+                        ]
+                      },
+                      {
+                        title: 'Search and add genes',
+                        copy: 'Type gene names, use autocomplete suggestions, and build the gene set that will be visualized together.',
+                        short: 'One gene or batch genes.',
+                        substeps: [
+                          { title: 'Add one gene', short: 'Search a single gene.', copy: 'Enter one gene name, select the best match when suggestions appear, and add it to the current analysis.', media: guideVideo('guide-multigene-02a-add-one-gene.mp4') },
+                          { title: 'Add batch genes', short: 'Build a comparison set.', copy: 'Add several genes to the batch list before running the visualization, so CGV can render them as one comparison.', media: guideVideo('guide-multigene-02b-add-batch-genes.mp4') }
+                        ]
+                      },
+                      {
+                        title: 'Generate visualization',
+                        copy: 'Click Generate visualization to render the selected genes and keep the resulting charts in the workspace.',
+                        short: 'Render the gene models.',
+                        media: guideVideo('guide-multigene-03-generate-visualization.mp4')
+                      },
+                      {
+                        title: 'Inspect chart',
+                        copy: 'Review the rendered gene model, inspect compact or detailed visualizations, and use hover tooltips for feature context.',
+                        short: 'Compact or detailed views.',
+                        substeps: [
+                          { title: 'Compact visualization', short: 'Hover for tooltips.', copy: 'Use compact view for a condensed structural overview, then hover over interactive regions to inspect coordinates and feature details.', media: guideVideo('guide-multigene-04a-compact-visualization.mp4') },
+                          { title: 'Detailed visualization', short: 'Feature-level view.', copy: 'Switch to detailed view when you need exon, CDS, UTR, intron, transcript, and coordinate detail at a more granular level.', media: guideVideo('guide-multigene-04b-detailed-visualization.mp4') }
+                        ]
+                      },
+                      {
+                        title: 'Alignment, optional',
+                        copy: 'Use alignment to compare transcript structures within the same gene when multiple transcript isoforms are available.',
+                        short: 'Compare isoforms.',
+                        media: guideVideo('guide-multigene-05-alignment-optional.mp4')
+                      },
+                      {
+                        title: 'Export',
+                        copy: 'Download publication-ready figures and supporting result tables when the analysis is ready to share.',
+                        short: 'Save figures and tables.',
+                        substeps: [
+                          { title: 'Export figures', short: 'Save visual outputs.', copy: 'Export the generated visualizations for reports, teaching material, or publication figures.', media: guideVideo('guide-multigene-06a-export-figures.mp4') },
+                          { title: 'Export tables/results', short: 'Save supporting data.', copy: 'Download available tables or result summaries when you need the structured data behind the visual analysis.', media: guideVideo('guide-multigene-06b-export-tables-results.mp4') }
+                        ]
+                      }
+                    ]
+                  },
+                  cross: {
+                    title: 'Cross-Species Search',
+                    summary: 'Use this path to compare one selected gene across organisms. This comparison is not a complete inventory of every gene-family member within each organism.',
+                    open: 'cross',
+                    steps: [
+                      {
+                        title: 'Choose organisms',
+                        copy: 'Build the organism set that CGV will use for the cross-species comparison.',
+                        short: 'Preloaded, NCBI, upload, or mixed.',
+                        substeps: [
+                          { title: 'Preloaded organisms', short: 'Use available species.', copy: 'Select organisms from the available registry when their annotations and genomes are ready in this session. In CGV Desktop, install organisms from the catalog before using them here.', media: guideVideo('guide-cross-01a-preloaded-organisms.mp4') },
+                          { title: 'NCBI search', short: 'Add external assemblies.', copy: 'Search NCBI to add organisms or assemblies that are not part of the preloaded set.', media: guideVideo('guide-cross-01b-ncbi-search.mp4') },
+                          { title: 'Upload files', short: 'Use your own data.', copy: 'Upload compatible annotation and genome files for organisms that should be included in the comparison.', media: guideVideo('guide-cross-01c-upload-files.mp4') },
+                          { title: 'Mixed sources', short: 'Combine inputs.', copy: 'Combine preloaded organisms, NCBI-downloaded assemblies, and uploaded files in the same cross-species analysis.', media: guideVideo('guide-cross-01d-mixed-sources.mp4') }
+                        ]
+                      },
+                      { title: 'Search gene', copy: 'Enter one target gene and let CGV resolve compatible identifiers across the selected organisms. Additional family members found only within individual organisms are not listed here; use Multi-Gene Search to explore a family in one organism.', short: 'Focus on one shared gene.', media: guideVideo('guide-cross-02-search-gene.mp4') },
+                      {
+                        title: 'Generate visualization',
+                        copy: 'Click Generate visualization to render the selected cross-species comparison and keep the returned charts in the workspace.',
+                        short: 'Render the comparison.',
+                        media: guideVideo('guide-cross-03-generate-visualization.mp4')
+                      },
+                      {
+                        title: 'Inspect chart',
+                        copy: 'Review the rendered cross-species gene model, inspect compact or detailed visualizations, and use hover tooltips for feature context.',
+                        short: 'Compact or detailed views.',
+                        substeps: [
+                          { title: 'Compact visualization', short: 'Condensed comparison.', copy: 'Use compact visualization to compare representative gene structures across organisms in a concise layout.', media: guideVideo('guide-cross-03a-compact-visualization.mp4') },
+                          { title: 'Detailed visualization', short: 'Inspect features.', copy: 'Use detailed visualization to inspect feature-level structure and transcript details across organisms.', media: guideVideo('guide-cross-03b-detailed-visualization.mp4') }
+                        ]
+                      },
+                      {
+                        title: 'Align mode',
+                        copy: 'Use alignment-oriented views when you need structural or sequence-level comparison across organisms.',
+                        short: 'Synteny, LASTZ, or MultiPIP.',
+                        substeps: [
+                          { title: 'Comparative synteny align', short: 'Compare ordered structures.', copy: 'Use comparative synteny alignment to inspect how gene structures line up across selected organisms.', media: guideVideo('guide-cross-05a-comparative-synteny-align.mp4') },
+                          { title: 'LASTZ blocks', short: 'Inspect local blocks.', copy: 'Use LASTZ blocks to review local alignment fragments and identity patterns between loci.', media: guideVideo('guide-cross-05b-lastz-blocks.mp4') },
+                          { title: 'MultiPIP', short: 'Multi-organism alignment view.', copy: 'Use MultiPIP to inspect aligned conservation-style blocks across multiple organisms when the required data is available.', media: guideVideo('guide-cross-05c-multipip.mp4') }
+                        ]
+                      },
+                      {
+                        title: 'Export',
+                        copy: 'Export cross-species visualizations or alignment views once the comparison is ready to share.',
+                        short: 'Save comparison figures.',
+                        media: guideVideo('guide-cross-06a-export-alignment-visual-figures.mp4')
+                      }
+                    ]
+                  },
+                  common: {
+                    title: 'Common Analysis',
+                    summary: 'Shared tools for interpreting models, charts, popups, sessions, settings, and cleanup in CGV.',
+                    open: '',
+                    steps: [
+                      { title: 'Review analytics charts', copy: 'Analyze the statistics generated from the current visualizations, including structural and sequence-derived summaries.', short: 'Statistics from rendered data.', media: guideVideo('guide-common-01-review-analytics-charts.mp4') },
+                      { title: 'Review tables/results', copy: 'Inspect the tables and result summaries that support the currently rendered gene or cross-species views.', short: 'Structured result views.', media: guideVideo('guide-common-02-review-tables-results.mp4') },
+                      { title: 'Visualize transcript variants', copy: 'Compare transcript isoforms from the same gene to inspect differences in exon structure, CDS organization, UTRs, and transcript length.', short: 'Isoforms from one gene.', media: guideVideo('guide-common-03-visualize-transcript-variants.mp4') },
+                      { title: 'Inspect gene information', copy: 'Open gene context layers from available external databases and CGV popups to add biological meaning to the visualization.', short: 'External database context.', media: guideVideo('guide-common-04-inspect-gene-information.mp4') },
+                      { title: 'Download promoter sequences', copy: 'Use promoter tools when you need upstream sequence context associated with the selected gene model.', short: 'Promoter sequence context.', media: guideVideo('guide-common-05-download-promoter-sequences.mp4') },
+                      { title: 'Review literature', copy: 'Inspect literature associated with the gene when CGV can connect the gene context to papers or external references.', short: 'Gene-associated papers.', media: guideVideo('guide-common-06-review-literature.mp4') },
+                      { title: 'Review organism and assembly info', copy: 'Open organism photos, assembly reports, assembly statistics, and related organism metadata when available.', short: 'Organisms, assemblies, photos.', media: guideVideo('guide-common-07-review-organism-assembly-info.mp4') },
+                      { title: 'Configure external alias lookup', copy: 'Turn external alias lookup sources on or off to control which databases CGV uses when local gene names do not match directly.', short: 'Control alias databases.', media: guideVideo('guide-common-08-configure-external-alias-lookup.mp4') },
+                      {
+                        title: 'Sessions',
+                        copy: 'Save or restore work sessions so you can continue an analysis without rebuilding it from scratch.',
+                        short: 'Save or load work.',
+                        substeps: [
+                          { title: 'Save work session', short: 'Export current state.', copy: 'Save the current plots and settings as a session file when you want to return to the same analysis later.', media: guideVideo('guide-common-09a-save-work-session.mp4') },
+                          { title: 'Load work session', short: 'Restore previous state.', copy: 'Load a previously saved session file to restore plots and settings into the current CGV session.', media: guideVideo('guide-common-09b-load-work-session.mp4') }
+                        ]
+                      },
+                      { title: 'Clear visualizations', copy: 'Remove current visualizations when you want to reset the workspace before starting a new analysis.', short: 'Reset the workspace.', media: guideVideo('guide-common-10-clear-visualizations.mp4') }
+                    ]
+                  },
+                  'desktop-downloads': {
+                    title: 'Desktop Downloads',
+                    summary: 'Install organisms from the CGV Desktop catalog. The base installer ships without organisms; up to 25 installable organisms are available depending on the catalog and what you choose to download.',
+                    open: 'settings',
+                    desktopOnly: true,
+                    steps: [
+                      { title: 'Open Settings', copy: 'Go to Settings and find the Organisms section. This section is available only in CGV Desktop.', short: 'Go to Settings.', media: '' },
+                      { title: 'Open organism catalog', copy: 'Click Open catalog to view the downloadable organism library for this desktop profile.', short: 'View the library.', media: '' },
+                      { title: 'Search or filter', copy: 'Use search and status filters to find an organism. The catalog can provide up to 25 installable organisms, but only downloaded organisms appear in Preloaded selectors.', short: 'Find an organism.', media: '' },
+                      { title: 'Download organism', copy: 'Click Download for the organism you need. CGV Desktop downloads the package, verifies it, extracts it, and installs local caches.', short: 'Install references.', media: '' },
+                      { title: 'Confirm availability', copy: 'After installation, return to Multi-Gene or Cross-Species Search and choose the organism from the Preloaded organism selectors.', short: 'Use the organism.', media: '' },
+                      { title: 'Remove installed organisms', copy: 'Use Remove installed organisms when you want to clear the desktop profile and its local organism caches.', short: 'Optional cleanup.', media: '' }
+                    ]
+                  }
+                };
+
+                if (!window.cgvDesktop) {
+                  delete routeData['desktop-downloads'];
+                  root.querySelectorAll('.guide-desktop-only').forEach(function(node) {
+                    node.remove();
+                  });
+                }
+
+                var routeTitle = root.querySelector('#guide-route-title');
+                var routeSummary = root.querySelector('#guide-route-summary');
+                var mediaTitle = root.querySelector('#guide-media-title');
+                var mediaCopy = root.querySelector('#guide-media-copy');
+                var mediaCaption = root.querySelector('.guide-media-caption');
+                var mediaVideo = root.querySelector('#guide-media-video');
+                var stepList = root.querySelector('.guide-step-list');
+                var openButtons = root.querySelectorAll('[data-guide-open]');
+                var videoBlobCache = {};
+                var preloadedVideos = {};
+                var videoReadyTimer = null;
+                var introMedia = guideVideo('guide-intro.mp4');
+                var introContent = {
+                  title: 'Welcome to CGV Guide',
+                  copy: 'Choose a workflow, then select the step you want to learn. The intro video appears here until you pick a specific step.',
+                  media: introMedia
+                };
+
+                function markVideoReady(isReady) {
+                  if (!mediaVideo) return;
+                  mediaVideo.classList.toggle('is-ready', !!isReady);
+                }
+
+                function markVideoHasMedia(hasMedia) {
+                  if (!mediaVideo) return;
+                  var frame = mediaVideo.closest('.guide-video-placeholder');
+                  if (frame) frame.classList.toggle('has-media', !!hasMedia);
+                }
+
+                if (mediaVideo) {
+                  mediaVideo.muted = true;
+                  mediaVideo.defaultMuted = true;
+                  mediaVideo.playsInline = true;
+                  mediaVideo.setAttribute('muted', '');
+                  mediaVideo.setAttribute('playsinline', '');
+                  mediaVideo.setAttribute('webkit-playsinline', '');
+                  ['loadedmetadata', 'loadeddata', 'canplay', 'canplaythrough', 'playing'].forEach(function(eventName) {
+                    mediaVideo.addEventListener(eventName, function() { markVideoReady(true); });
+                  });
+                  mediaVideo.addEventListener('error', function() {
+                    markVideoReady(false);
+                    if (mediaVideo.dataset.guideBlobSource !== '1') {
+                      loadVideoAsBlob(mediaVideo.dataset.guideOriginalSource || mediaVideo.dataset.guideSource || '');
+                    }
+                  });
+                }
+
+                function playCurrentVideo() {
+                  if (!mediaVideo) return;
+                  window.requestAnimationFrame(function() {
+                    mediaVideo.muted = true;
+                    mediaVideo.defaultMuted = true;
+                    mediaVideo.playsInline = true;
+                    var playAttempt = mediaVideo.play();
+                    if (playAttempt && typeof playAttempt.then === 'function') {
+                      playAttempt.then(function() { markVideoReady(true); }).catch(function() {});
+                    }
+                  });
+                }
+
+                function setVideoSource(src, isBlobSource, originalSrc) {
+                  if (!mediaVideo || !src) return;
+                  markVideoHasMedia(true);
+                  mediaVideo.dataset.guideSource = src;
+                  mediaVideo.dataset.guideBlobSource = isBlobSource ? '1' : '0';
+                  mediaVideo.dataset.guideOriginalSource = isBlobSource ? (originalSrc || '') : src;
+                  mediaVideo.setAttribute('src', src);
+                  var source = mediaVideo.querySelector('source');
+                  if (source) source.setAttribute('src', src);
+                  mediaVideo.load();
+                  playCurrentVideo();
+                }
+
+                function loadVideoAsBlob(originalSrc) {
+                  if (!mediaVideo || !originalSrc || !window.fetch || !window.URL || !window.URL.createObjectURL) return;
+                  if (mediaVideo.dataset.guideBlobSource === '1') return;
+                  if (videoBlobCache[originalSrc]) {
+                    setVideoSource(videoBlobCache[originalSrc], true, originalSrc);
+                    return;
+                  }
+                  fetch(originalSrc, { cache: 'force-cache' })
+                    .then(function(response) {
+                      if (!response.ok) throw new Error('Video request failed');
+                      return response.blob();
+                    })
+                    .then(function(blob) {
+                      if (!blob || !blob.size) return;
+                      var blobUrl = URL.createObjectURL(blob);
+                      videoBlobCache[originalSrc] = blobUrl;
+                      if (mediaVideo.dataset.guideSource === originalSrc && !mediaVideo.classList.contains('is-ready')) {
+                        setVideoSource(blobUrl, true, originalSrc);
+                      }
+                    })
+                    .catch(function() {});
+                }
+
+                function preloadVideo(src) {
+                  if (!src || preloadedVideos[src]) return;
+                  preloadedVideos[src] = true;
+                  var link = document.createElement('link');
+                  link.rel = 'preload';
+                  link.as = 'video';
+                  link.href = src;
+                  document.head.appendChild(link);
+                  if (window.fetch) {
+                    fetch(src, { cache: 'force-cache' }).catch(function() {});
+                  }
+                }
+
+                function preloadRouteVideos(route) {
+                  var data = routeData[route];
+                  if (!data || !data.steps) return;
+                  data.steps.forEach(function(step) {
+                    preloadVideo(step.media || '');
+                    (step.substeps || []).forEach(function(substep) {
+                      preloadVideo(substep.media || '');
+                    });
+                  });
+                }
+
+                function scheduleVideoFallback(src) {
+                  if (videoReadyTimer) window.clearTimeout(videoReadyTimer);
+                  if (!src) return;
+                  videoReadyTimer = window.setTimeout(function() {
+                    if (!mediaVideo || mediaVideo.classList.contains('is-ready')) return;
+                    if (mediaVideo.dataset.guideSource !== src) return;
+                    loadVideoAsBlob(src);
+                  }, 1600);
+                }
+
+                function getStep(route, index, subIndex) {
+                  var data = routeData[route];
+                  var step = (data && data.steps[index]) || (data && data.steps[0]);
+                  if (!step) return null;
+                  if (subIndex !== null && subIndex !== undefined && step.substeps && step.substeps[subIndex]) {
+                    var substep = step.substeps[subIndex];
+                    return {
+                      title: substep.title,
+                      copy: substep.copy || step.copy,
+                      short: substep.short || step.short || '',
+                      media: substep.media || step.media || '',
+                      parentTitle: step.title
+                    };
+                  }
+                  return step;
+                }
+
+                function updateMedia(content) {
+                  if (!content) return;
+                  if (mediaCaption) mediaCaption.classList.remove('is-refreshing');
+                  if (mediaTitle) mediaTitle.textContent = content.title;
+                  if (mediaCopy) mediaCopy.textContent = content.copy;
+                  if (mediaCaption) {
+                    void mediaCaption.offsetWidth;
+                    mediaCaption.classList.add('is-refreshing');
+                  }
+                  if (mediaVideo && content.media) {
+                    var current = mediaVideo.dataset.guideOriginalSource || mediaVideo.dataset.guideSource || mediaVideo.getAttribute('src') || mediaVideo.currentSrc || '';
+                    if (current !== content.media) {
+                      setVideoSource(content.media, false, content.media);
+                    }
+                    scheduleVideoFallback(content.media);
+                  } else {
+                    if (mediaVideo) {
+                      mediaVideo.pause();
+                      mediaVideo.removeAttribute('src');
+                      mediaVideo.dataset.guideSource = '';
+                      mediaVideo.dataset.guideOriginalSource = '';
+                      mediaVideo.dataset.guideBlobSource = '0';
+                      mediaVideo.load();
+                    }
+                    markVideoHasMedia(false);
+                    markVideoReady(false);
+                  }
+                }
+
+                function clearStepSelection() {
+                  root.querySelectorAll('.guide-step-item').forEach(function(item) {
+                    item.classList.remove('is-active', 'is-expanded');
+                    item.setAttribute('aria-expanded', 'false');
+                  });
+                  root.querySelectorAll('.guide-step-group').forEach(function(group) {
+                    group.classList.remove('is-expanded');
+                  });
+                  root.querySelectorAll('.guide-substep-item').forEach(function(item) {
+                    item.classList.remove('is-active');
+                  });
+                }
+
+                function renderIntro() {
+                  clearStepSelection();
+                  updateMedia(introContent);
+                }
+
+                function renderStep(route, index, subIndex) {
+                  var data = routeData[route];
+                  var parentStep = data && data.steps[index];
+                  if ((subIndex === null || subIndex === undefined) && parentStep && parentStep.substeps && parentStep.substeps.length) {
+                    subIndex = 0;
+                  }
+                  var step = getStep(route, index, subIndex);
+                  if (!data || !step) return;
+                  root.querySelectorAll('.guide-step-item').forEach(function(item) {
+                    item.classList.toggle('is-active', item.dataset.stepIndex === String(index));
+                    item.classList.toggle('is-expanded', item.dataset.stepIndex === String(index));
+                    item.setAttribute('aria-expanded', item.dataset.stepIndex === String(index) ? 'true' : 'false');
+                  });
+                  root.querySelectorAll('.guide-step-group').forEach(function(group) {
+                    group.classList.toggle('is-expanded', group.dataset.stepIndex === String(index));
+                  });
+                  root.querySelectorAll('.guide-substep-item').forEach(function(item) {
+                    item.classList.toggle(
+                      'is-active',
+                      item.dataset.stepIndex === String(index) && item.dataset.substepIndex === String(subIndex)
+                    );
+                  });
+                  updateMedia(step);
+                }
+
+                function renderRoute(route) {
+                  var data = routeData[route] || routeData.multigene;
+                  root.dataset.activeGuideRoute = route;
+                  preloadRouteVideos(route);
+                  root.querySelectorAll('[data-guide-route]').forEach(function(card) {
+                    card.classList.toggle('is-active', card.dataset.guideRoute === route);
+                  });
+                  if (routeTitle) routeTitle.textContent = data.title;
+                  if (routeSummary) routeSummary.textContent = data.summary;
+                  if (stepList) {
+                    stepList.innerHTML = '';
+                    data.steps.forEach(function(step, index) {
+                      var group = document.createElement('div');
+                      group.className = 'guide-step-group';
+                      group.dataset.stepIndex = String(index);
+                      var button = document.createElement('button');
+                      button.type = 'button';
+                      button.className = 'guide-step-item guide-step-parent';
+                      button.dataset.stepIndex = String(index);
+                      button.dataset.stepTitle = step.title;
+                      button.dataset.stepCopy = step.copy;
+                      button.dataset.stepMedia = step.media || '';
+                      button.setAttribute('aria-expanded', 'false');
+                      button.innerHTML =
+                        '<span class=\"guide-step-number\">' + String(index + 1).padStart(2, '0') + '</span>' +
+                        '<span class=\"guide-step-text\"><strong></strong><small></small></span>' +
+                        (step.substeps && step.substeps.length ? '<span class=\"guide-step-chevron\"><i class=\"fa fa-chevron-down\"></i></span>' : '');
+                      button.querySelector('strong').textContent = step.title;
+                      button.querySelector('small').textContent = step.short || '';
+                      button.addEventListener('click', function() { renderStep(route, index, null); });
+                      group.appendChild(button);
+                      if (step.substeps && step.substeps.length) {
+                        var subList = document.createElement('div');
+                        subList.className = 'guide-substep-list';
+                        step.substeps.forEach(function(substep, subIndex) {
+                          var subButton = document.createElement('button');
+                          subButton.type = 'button';
+                          subButton.className = 'guide-substep-item';
+                          subButton.dataset.stepIndex = String(index);
+                          subButton.dataset.substepIndex = String(subIndex);
+                          subButton.innerHTML =
+                            '<span class=\"guide-substep-marker\"></span>' +
+                            '<span class=\"guide-substep-text\"><strong></strong><small></small></span>';
+                          subButton.querySelector('strong').textContent = substep.title;
+                          subButton.querySelector('small').textContent = substep.short || '';
+                          subButton.addEventListener('click', function() { renderStep(route, index, subIndex); });
+                          subList.appendChild(subButton);
+                        });
+                        group.appendChild(subList);
+                      }
+                      stepList.appendChild(group);
+                    });
+                  }
+                  openButtons.forEach(function(button) {
+                    var target = button.dataset.guideOpen;
+                    button.hidden = route === 'common' || route === 'desktop-downloads' || (target !== data.open && target !== 'common');
+                  });
+                  renderIntro();
+                }
+
+                root.querySelectorAll('[data-guide-route]').forEach(function(card) {
+                  card.addEventListener('click', function() {
+                    var route = card.dataset.guideRoute || 'multigene';
+                    if (!routeData[route]) route = 'multigene';
+                    renderRoute(route);
+                  });
+                });
+                renderRoute('multigene');
+              })();
+            "))
           )
+        ),
+        tabPanel(
+          title = "Home",
+          value = "home",
+          div(
+            class = "content-wrapper app-main-pane app-home-pane app-home-pane-isolated",
+            tags$iframe(
+              id = "cgv-home-iframe",
+              class = "cgv-home-iframe",
+              src = versioned_asset_path("home_preview_cgv.html"),
+              title = "Comparative Gene Viewer Home",
+              loading = "eager",
+              scrolling = "yes"
+            )
+          ),
+          tags$style(HTML("
+            .app-home-pane-isolated {
+              padding: 0 !important;
+              overflow: visible !important;
+              background: transparent !important;
+            }
+            .cgv-home-iframe {
+              display: block;
+              width: 100%;
+              height: calc(100dvh - 12px);
+              min-height: 640px;
+              max-height: calc(100dvh - 12px);
+              border: 0;
+              background: transparent;
+              overflow: auto;
+              contain: strict;
+              transform: translateZ(0);
+              backface-visibility: hidden;
+              transition: none !important;
+            }
+            .cgv-home-iframe.cgv-home-iframe-resizing {
+              pointer-events: none;
+              transform: translateZ(0);
+            }
+            .app-shell.home-sidebar-transitioning .app-home-pane-isolated {
+              contain: strict;
+              overflow: hidden !important;
+            }
+            .app-home-pane-isolated {
+              contain: layout paint style;
+            }
+            /* Feedback uses the same animation utility classes as Home.
+               Because the new Home is now inside an iframe, we force Feedback
+               to remain visible even if the Home animation script does not run there. */
+            .feedback-shell .home-reveal,
+            .feedback-shell .home-stagger-child,
+            .feedback-shell .home-stagger-parent,
+            .feedback-shell .feedback-hero,
+            .feedback-shell .feedback-info-card,
+            .feedback-shell .feedback-form-section {
+              opacity: 1 !important;
+              visibility: visible !important;
+              transform: none !important;
+              filter: none !important;
+            }
+          ")),
+          tags$script(HTML("
+            (function () {
+              if (window.__cgvHomeIframeBridgeBound) return;
+              window.__cgvHomeIframeBridgeBound = true;
+
+              var allowedTargets = ['home', 'homologous', 'orthologous', 'figure-studio', 'guide', 'desktop-app', 'settings', 'help', 'feedback'];
+
+              function resetHomeIframeScroll() {
+                var iframe = document.getElementById('cgv-home-iframe');
+                if (!iframe || !iframe.contentWindow) return;
+                try { iframe.contentWindow.scrollTo(0, 0); } catch (err) {}
+              }
+
+              function activateTarget(target) {
+                if (allowedTargets.indexOf(target) === -1) return;
+
+                var sidebarButton = document.querySelector('.app-nav-btn[data-target=\"' + target + '\"]');
+                if (sidebarButton) {
+                  sidebarButton.click();
+                  return;
+                }
+
+                var tabLink = document.querySelector('#navtabs a[data-value=\"' + target + '\"]');
+                if (tabLink) {
+                  if (window.jQuery && jQuery.fn && jQuery.fn.tab) jQuery(tabLink).tab('show');
+                  else tabLink.click();
+                }
+              }
+
+              window.addEventListener('message', function (event) {
+                var data = event.data || {};
+                if (!data || typeof data !== 'object') return;
+
+                if (data.type === 'cgv-home-height') {
+                  // Intentionally ignored.
+                  // The Home uses internal scroll/sticky storytelling; auto-expanding
+                  // the iframe to full document height breaks that interaction.
+                }
+
+                if (data.type === 'cgv-home-nav') {
+                  activateTarget(String(data.target || ''));
+                }
+              });
+
+              document.addEventListener('click', function (event) {
+                var btn = event.target && event.target.closest ? event.target.closest('.app-nav-btn[data-target=\"home\"]') : null;
+                if (btn) setTimeout(resetHomeIframeScroll, 80);
+              });
+
+              // Sidebar resizing is coordinated by prepareHomeSidebarTransition().
+              // Keeping the guard in one place avoids duplicate timers and layouts.
+            })();
+          "))
+        ),
+        tabPanel(
+          title = "Figure Studio",
+          value = "figure-studio",
+          figure_studio_page()
         ),
         tabPanel(
           title = "CGV Desktop",
@@ -4988,6 +5560,7 @@ fluidPage(
               id = "homo_context_section",
               class = "summary-context-section",
               style = "display:none;",
+              initial_summary_context_header("Multi-Gene", "Genes: pending"),
               uiOutput("homo_context_header")
             ),
             div(
@@ -5074,7 +5647,7 @@ fluidPage(
                 class = "analytics-body",
                 style = "display:none; margin-top:12px;",
                 div(
-                  class = "analytics-tabs-shell",
+                class = "analytics-tabs-shell",
                   actionButton(
                     inputId = "btn_download_all_homo_analytics_svg",
                     label = span(icon("file-zipper"), " SVG ZIP"),
@@ -5087,6 +5660,7 @@ fluidPage(
                     type = "pills",
                     tabPanel(
                       title = tagList(icon("dna"), " Architecture"),
+                      value = "arch",
                       div(
                         class = "analytics-chart-wrap",
                         analytics_chart_toolbar("homo_arch_chart", "homo_architecture.svg", "homo_arch_order", choices = analytics_arch_order_choices),
@@ -5099,6 +5673,7 @@ fluidPage(
                     ),
                     tabPanel(
                       title = tagList(icon("layer-group"), " Exons / Introns"),
+                      value = "exon",
                       div(
                         class = "analytics-chart-wrap",
                         analytics_chart_toolbar("homo_exon_chart", "homo_exons_introns.svg", "homo_exon_order", choices = analytics_exon_order_choices),
@@ -5111,6 +5686,7 @@ fluidPage(
                     ),
                     tabPanel(
                       title = tagList(icon("microscope"), " Sequence"),
+                      value = "seq",
                       div(
                         class = "analytics-chart-wrap",
                         analytics_chart_toolbar("homo_seq_chart", "homo_sequence_composition.svg", "homo_seq_order", choices = analytics_seq_order_choices),
@@ -5123,6 +5699,7 @@ fluidPage(
                     ),
                     tabPanel(
                       title = tagList(icon("map-marker-alt"), " Genomic Context"),
+                      value = "context",
                       div(
                         class = "analytics-chart-wrap",
                         analytics_chart_toolbar("homo_context_chart", "homo_genomic_context.svg", "homo_context_order", choices = analytics_context_order_choices),
@@ -5135,6 +5712,7 @@ fluidPage(
                     ),
                     tabPanel(
                       title = tagList(icon("ruler-horizontal"), " Exon Lengths"),
+                      value = "exon_dist",
                       div(
                         class = "analytics-chart-wrap",
                         analytics_chart_toolbar("homo_exon_dist_chart", "homo_exon_lengths.svg", "homo_exon_dist_order", choices = analytics_exon_dist_order_choices),
@@ -5148,7 +5726,23 @@ fluidPage(
                       )
                     ),
                     tabPanel(
+                      title = tagList(icon("arrows-left-right"), " Intron Lengths"),
+                      value = "intron_dist",
+                      div(
+                        class = "analytics-chart-wrap",
+                        analytics_chart_toolbar("homo_intron_dist_chart", "homo_intron_lengths.svg", "homo_intron_dist_order", choices = analytics_intron_dist_order_choices),
+                        chart_info_tip("<strong>Intron Length Distribution</strong><br/>Violin + box + jitter showing individual intron lengths inferred from gaps between consecutive annotated exons.<div class='ci-axes'><b>Y-axis:</b> Gene entry<br/><b>X-axis:</b> Intron length in bp (log&#8321;&#8320;)</div><div class='ci-tip'>Genes without introns are omitted from the distribution; if none have introns, a clear no-intron message is shown.</div>"),
+                        shinycssloaders::withSpinner(
+                          ggiraph::girafeOutput("homo_intron_dist_chart",
+                            height = "auto", width = "100%"
+                          ),
+                          type = 4, color = "#2C3E50", size = 0.6
+                        )
+                      )
+                    ),
+                    tabPanel(
                       title = tagList(icon("circle-dot"), " Scatter"),
+                      value = "scatter",
                       div(
                         class = "analytics-chart-wrap",
                         analytics_chart_toolbar("homo_scatter_chart", "homo_scatter.svg", "homo_scatter_order", choices = analytics_scatter_order_choices),
@@ -5163,6 +5757,7 @@ fluidPage(
                     ),
                     tabPanel(
                       title = tagList(icon("table-cells"), " Heatmap"),
+                      value = "heatmap",
                       div(
                         class = "analytics-chart-wrap",
                         analytics_chart_toolbar("homo_heatmap_chart", "homo_heatmap.svg", "homo_heatmap_order", choices = analytics_heatmap_order_choices),
@@ -5177,6 +5772,7 @@ fluidPage(
                     ),
                     tabPanel(
                       title = tagList(icon("chart-pie"), " Radar"),
+                      value = "radar",
                       div(
                         class = "analytics-chart-wrap",
                         analytics_chart_toolbar("homo_radar_chart", "homo_radar.svg", "homo_radar_order", choices = analytics_radar_order_choices),
@@ -5191,6 +5787,7 @@ fluidPage(
                     ),
                     tabPanel(
                       title = tagList(icon("grip-lines"), " Correlations"),
+                      value = "corr",
                       div(
                         class = "analytics-chart-wrap",
                         analytics_chart_toolbar(
@@ -5210,12 +5807,14 @@ fluidPage(
                 )
               )
             ),
+            analytics_export_bank("homo"),
             # ──────────────────────────────────────────────────────
             div(
               class = "plots-zoom-wrap",
               div(
                 id = "plot-container",
                 style = "position: relative;",
+                uiOutput("homo_special_cards_ui"),
                 div(id = "homo-plot-cards-container"),
                 uiOutput("homo_load_more_banner")
               )
@@ -5231,6 +5830,7 @@ fluidPage(
               id = "ortho_context_section",
               class = "summary-context-section",
               style = "display:none;",
+              initial_summary_context_header("Cross-Species", "Gene: pending", "Compare across organisms"),
               uiOutput("ortho_context_header")
             ),
             div(
@@ -5317,7 +5917,7 @@ fluidPage(
                 class = "analytics-body",
                 style = "display:none; margin-top:12px;",
                 div(
-                  class = "analytics-tabs-shell",
+                class = "analytics-tabs-shell",
                   actionButton(
                     inputId = "btn_download_all_ortho_analytics_svg",
                     label = span(icon("file-zipper"), " SVG ZIP"),
@@ -5330,6 +5930,7 @@ fluidPage(
                     type = "pills",
                     tabPanel(
                       title = tagList(icon("dna"), " Architecture"),
+                      value = "arch",
                       div(
                         class = "analytics-chart-wrap",
                         analytics_chart_toolbar("ortho_arch_chart", "ortho_architecture.svg", "ortho_arch_order", choices = analytics_arch_order_choices),
@@ -5342,6 +5943,7 @@ fluidPage(
                     ),
                     tabPanel(
                       title = tagList(icon("layer-group"), " Exons / Introns"),
+                      value = "exon",
                       div(
                         class = "analytics-chart-wrap",
                         analytics_chart_toolbar("ortho_exon_chart", "ortho_exons_introns.svg", "ortho_exon_order", choices = analytics_exon_order_choices),
@@ -5354,6 +5956,7 @@ fluidPage(
                     ),
                     tabPanel(
                       title = tagList(icon("microscope"), " Sequence"),
+                      value = "seq",
                       div(
                         class = "analytics-chart-wrap",
                         analytics_chart_toolbar("ortho_seq_chart", "ortho_sequence_composition.svg", "ortho_seq_order", choices = analytics_seq_order_choices),
@@ -5366,6 +5969,7 @@ fluidPage(
                     ),
                     tabPanel(
                       title = tagList(icon("map-marker-alt"), " Genomic Context"),
+                      value = "context",
                       div(
                         class = "analytics-chart-wrap",
                         analytics_chart_toolbar("ortho_context_chart", "ortho_genomic_context.svg", "ortho_context_order", choices = analytics_context_order_choices),
@@ -5378,6 +5982,7 @@ fluidPage(
                     ),
                     tabPanel(
                       title = tagList(icon("ruler-horizontal"), " Exon Lengths"),
+                      value = "exon_dist",
                       div(
                         class = "analytics-chart-wrap",
                         analytics_chart_toolbar("ortho_exon_dist_chart", "ortho_exon_lengths.svg", "ortho_exon_dist_order", choices = analytics_exon_dist_order_choices),
@@ -5391,7 +5996,23 @@ fluidPage(
                       )
                     ),
                     tabPanel(
+                      title = tagList(icon("arrows-left-right"), " Intron Lengths"),
+                      value = "intron_dist",
+                      div(
+                        class = "analytics-chart-wrap",
+                        analytics_chart_toolbar("ortho_intron_dist_chart", "ortho_intron_lengths.svg", "ortho_intron_dist_order", choices = analytics_intron_dist_order_choices),
+                        chart_info_tip("<strong>Intron Length Distribution</strong><br/>Violin + box + jitter showing individual intron lengths inferred from gaps between consecutive annotated exons.<div class='ci-axes'><b>Y-axis:</b> Organism<br/><b>X-axis:</b> Intron length in bp (log&#8321;&#8320;)</div><div class='ci-tip'>Genes without introns are omitted from the distribution; if none have introns, a clear no-intron message is shown.</div>"),
+                        shinycssloaders::withSpinner(
+                          ggiraph::girafeOutput("ortho_intron_dist_chart",
+                            height = "auto", width = "100%"
+                          ),
+                          type = 4, color = "#2C3E50", size = 0.6
+                        )
+                      )
+                    ),
+                    tabPanel(
                       title = tagList(icon("circle-dot"), " Scatter"),
+                      value = "scatter",
                       div(
                         class = "analytics-chart-wrap",
                         analytics_chart_toolbar("ortho_scatter_chart", "ortho_scatter.svg", "ortho_scatter_order", choices = analytics_scatter_order_choices),
@@ -5406,6 +6027,7 @@ fluidPage(
                     ),
                     tabPanel(
                       title = tagList(icon("table-cells"), " Heatmap"),
+                      value = "heatmap",
                       div(
                         class = "analytics-chart-wrap",
                         analytics_chart_toolbar("ortho_heatmap_chart", "ortho_heatmap.svg", "ortho_heatmap_order", choices = analytics_heatmap_order_choices),
@@ -5420,6 +6042,7 @@ fluidPage(
                     ),
                     tabPanel(
                       title = tagList(icon("chart-pie"), " Radar"),
+                      value = "radar",
                       div(
                         class = "analytics-chart-wrap",
                         analytics_chart_toolbar("ortho_radar_chart", "ortho_radar.svg", "ortho_radar_order", choices = analytics_radar_order_choices),
@@ -5434,6 +6057,7 @@ fluidPage(
                     ),
                     tabPanel(
                       title = tagList(icon("grip-lines"), " Correlations"),
+                      value = "corr",
                       div(
                         class = "analytics-chart-wrap",
                         analytics_chart_toolbar(
@@ -5453,6 +6077,7 @@ fluidPage(
                 )
               )
             ),
+            analytics_export_bank("ortho"),
             # ──────────────────────────────────────────────────────
             div(
               class = "plots-zoom-wrap",
@@ -5472,18 +6097,14 @@ fluidPage(
                       div(
                         style = "display:flex; align-items:center; gap:10px;",
                         tags$i(class = "fa fa-stream", style = "font-size:16px;"),
-                        span("MultiPIP-style View"),
-                        span(
-                          style = "font-size:11px; font-weight:700; padding:2px 8px; border-radius:999px; background:rgba(255,255,255,0.18); border:1px solid rgba(255,255,255,0.25);",
-                          "beta"
-                        )
+                        span("MultiPIP-style View")
                       ),
                       div(
                         style = "display:flex; align-items:center; gap:8px;",
                         tags$button(
                           class = "btn btn-sm btn-export-svg",
                           title = "Export plot as SVG",
-                          onclick = "exportSVG('ortho_multipip_plot_out', 'multipip_style_view.svg')",
+                          onclick = "exportAlignmentSVG('ortho_multipip_plot_out', 'multipip_style_view')",
                           style = "background:rgba(255,255,255,0.15); border:1px solid rgba(255,255,255,0.3); color:white; border-radius:6px; padding:4px 10px; font-size:12px;",
                           HTML("&#x2913; SVG")
                         ),
@@ -5674,6 +6295,69 @@ fluidPage(
                     value = FALSE,
                     status = "primary"
                   )
+                ),
+                # ── Color Palette Customization ────────────────────────────
+                div(
+                  class = "color-palette-section",
+                  div(
+                    class = "palette-group",
+                    style = "display: none;",
+                    h4(icon("palette"), span("Transcript Features")),
+                    p("Customize colors for gene model elements."),
+                    div(
+                      class = "palette-row",
+                      div(class = "palette-item",
+                          tags$label(`for` = "color_exon", "Exon"),
+                          tags$input(type = "color", id = "color_exon", class = "color-input", value = "#F45D75")),
+                      div(class = "palette-item",
+                          tags$label(`for` = "color_cds", "CDS"),
+                          tags$input(type = "color", id = "color_cds", class = "color-input", value = "#E8A44F")),
+                      div(class = "palette-item",
+                          tags$label(`for` = "color_utr", "UTR"),
+                          tags$input(type = "color", id = "color_utr", class = "color-input", value = "#5BC0EB")),
+                      div(class = "palette-item",
+                          tags$label(`for` = "color_gene", "Gene"),
+                          tags$input(type = "color", id = "color_gene", class = "color-input", value = "#FFB7BF"))
+                    )
+                  ),
+                  div(
+                    class = "palette-group",
+                    style = "display: none;",
+                    h4(icon("layer-group"), span("LASTZ Identity")),
+                    p("Colors for alignment fragments by identity percentage."),
+                    div(
+                      class = "palette-row",
+                      div(class = "palette-item",
+                          tags$label(`for` = "color_identity_high", "High (≥80%)"),
+                          tags$input(type = "color", id = "color_identity_high", class = "color-input", value = "#CC2929")),
+                      div(class = "palette-item",
+                          tags$label(`for` = "color_identity_mid", "Medium (50-79%)"),
+                          tags$input(type = "color", id = "color_identity_mid", class = "color-input", value = "#E07858")),
+                      div(class = "palette-item",
+                          tags$label(`for` = "color_identity_low", "Low (<50%)"),
+                          tags$input(type = "color", id = "color_identity_low", class = "color-input", value = "#5CB85C"))
+                    )
+                  ),
+                  div(
+                    class = "palette-group",
+                    style = "display: none;",
+                    h4(icon("square"), span("Card Headers")),
+                    p("Background gradient colors for gene and transcript headers."),
+                    div(
+                      class = "palette-row",
+                      div(class = "palette-item",
+                          tags$label(`for` = "color_header_gene", "Gene header"),
+                          tags$input(type = "color", id = "color_header_gene", class = "color-input", value = "#2C3E50")),
+                      div(class = "palette-item",
+                          tags$label(`for` = "color_header_transcript", "Transcript header"),
+                          tags$input(type = "color", id = "color_header_transcript", class = "color-input", value = "#24445B"))
+                    )
+                  ),
+                  div(
+                    class = "palette-reset-row",
+                    style = "display: none;",
+                    actionButton("reset_color_palette", label = span("Reset to defaults"), icon = icon("rotate-left"), class = "btn btn-sm btn-reset-palette")
+                  )
                 )
               ),
               div(
@@ -5697,6 +6381,26 @@ fluidPage(
                     inputId = "confirm_delete_actions",
                     label = NULL,
                     value = TRUE,
+                    status = "primary"
+                  )
+                ),
+                div(
+                  class = "settings-row",
+                  div(
+                    class = "settings-row-info",
+                    tags$span(
+                      class = "settings-row-title",
+                      icon("location-arrow"), "Quick navigation button"
+                    ),
+                    tags$span(
+                      class = "settings-row-desc",
+                      "Show the floating quick-actions button for search, display mode, and plot zoom."
+                    )
+                  ),
+                  shinyWidgets::materialSwitch(
+                    inputId = "quick_fab_enabled",
+                    label = NULL,
+                    value = FALSE,
                     status = "primary"
                   )
                 )
@@ -5822,6 +6526,96 @@ fluidPage(
                 )
               ),
               div(
+                class = "help-section desktop-organisms-section",
+                h3(icon("download"), span("Organisms")),
+                p("Install reference organisms into this desktop profile. The base installer ships without organisms. The catalog can provide up to 25 installable organisms, depending on availability and what you choose to download. Downloaded datasets appear in the Preloaded organism selectors after installation."),
+                div(
+                  class = "desktop-organism-toolbar",
+                  div(
+                    class = "desktop-organism-summary-stats",
+                    span(id = "desktop-organism-count", class = "desktop-organism-count", "Checking catalog..."),
+                    span(id = "desktop-organism-installed-count", class = "desktop-organism-count", ""),
+                    span(id = "desktop-organism-pending-count", class = "desktop-organism-count", "")
+                  ),
+                  div(
+                    class = "desktop-organism-toolbar-actions",
+                    tags$button(
+                      id = "desktop-organism-open-catalog",
+                      type = "button",
+                      class = "btn btn-sm btn-download",
+                      icon("table-cells-large"),
+                      span("Open catalog")
+                    ),
+                    tags$button(
+                      id = "desktop-organism-reset",
+                      type = "button",
+                      class = "btn btn-sm desktop-organism-reset",
+                      icon("trash"),
+                      span("Remove installed organisms")
+                    ),
+                    tags$button(
+                      id = "desktop-organism-refresh",
+                      type = "button",
+                      class = "btn btn-sm btn-download",
+                      icon("rotate-right"),
+                      span("Refresh")
+                    )
+                  )
+                ),
+                div(
+                  class = "desktop-organism-paths",
+                  div(tags$span("Data"), tags$code(id = "desktop-organism-data-path", "")),
+                  div(tags$span("Cache"), tags$code(id = "desktop-organism-cache-path", ""))
+                ),
+                div(id = "desktop-organism-status", class = "desktop-organism-status", ""),
+                div(id = "desktop-organism-list", class = "desktop-organism-list desktop-organism-summary-list"),
+                div(
+                  id = "desktop-organism-modal",
+                  class = "desktop-organism-modal",
+                  `aria-hidden` = "true",
+                  div(class = "desktop-organism-modal-backdrop"),
+                  div(
+                    class = "desktop-organism-modal-panel",
+                    role = "dialog",
+                    `aria-modal` = "true",
+                    `aria-labelledby` = "desktop-organism-modal-title",
+                    div(
+                      class = "desktop-organism-modal-header",
+                      div(
+                        h4(id = "desktop-organism-modal-title", icon("download"), span("Organism catalog")),
+                        span(id = "desktop-organism-modal-count", class = "desktop-organism-count", "")
+                      ),
+                      tags$button(
+                        id = "desktop-organism-modal-close",
+                        type = "button",
+                        class = "btn btn-sm desktop-organism-icon-button",
+                        `aria-label` = "Close catalog",
+                        icon("xmark")
+                      )
+                    ),
+                    div(
+                      class = "desktop-organism-modal-controls",
+                      tags$input(
+                        id = "desktop-organism-search",
+                        type = "search",
+                        class = "desktop-organism-search",
+                        placeholder = "Search organisms"
+                      ),
+                      tags$select(
+                        id = "desktop-organism-filter",
+                        class = "desktop-organism-filter",
+                        tags$option(value = "all", "All"),
+                        tags$option(value = "available", "Available"),
+                        tags$option(value = "not_installed", "Not installed"),
+                        tags$option(value = "installed", "Installed"),
+                        tags$option(value = "updates", "Updates")
+                      )
+                    ),
+                    div(id = "desktop-organism-modal-list", class = "desktop-organism-list desktop-organism-modal-list")
+                  )
+                )
+              ),
+              div(
                 class = "help-section",
                 h3(icon("save"), span("Work sessions")),
                 p("Download your current work session (plots and settings) as an .rds file, or upload a previously saved session file to restore it."),
@@ -5847,1783 +6641,6 @@ fluidPage(
           )
         ),
         tabPanel(
-          title = "Help",
-          value = "help",
-          div(
-            class = "content-wrapper app-main-pane app-help-pane",
-            div(
-              class = "help-content",
-              tags$style(HTML("
-              .help-content {
-                display: flex;
-                flex-direction: column;
-                gap: 22px;
-                padding: 0;
-                background: transparent !important;
-                border: none !important;
-                outline: none !important;
-                border-radius: 0;
-                box-shadow: none !important;
-              }
-              .help-section {
-                padding: 18px 20px;
-                background: linear-gradient(180deg, #fbfdff 0%, #f5f9fc 100%);
-                border: 1px solid #dbe6ef;
-                border-radius: 16px;
-                box-shadow: 0 10px 24px rgba(32, 58, 82, 0.07);
-              }
-              .help-section h3 {
-                color: #1f3246;
-                margin: 0 0 8px 0;
-                font-size: 18px;
-                font-weight: 800;
-                line-height: 1.2;
-                display: flex;
-                align-items: center;
-                gap: 9px;
-              }
-              .help-section p,
-              .help-section li {
-                color: #566c7f;
-                font-size: 12.5px;
-                line-height: 1.6;
-              }
-              .help-section > p {
-                max-width: 860px;
-                margin: 0 0 14px 0;
-              }
-              .help-section ul,
-              .help-section ol {
-                margin: 0;
-                padding-left: 20px;
-              }
-              .settings-content {
-                font-size: 13px;
-              }
-              .settings-content h2 {
-                margin-top: 0;
-                margin-bottom: 14px;
-                font-size: 22px;
-                font-weight: 700;
-                line-height: 1.2;
-                color: #2C3E50;
-              }
-              .settings-content .help-section {
-                margin-bottom: 16px;
-                padding: 14px 16px;
-                border-radius: 8px;
-                box-shadow: none;
-              }
-              .settings-content .help-section h3 {
-                margin: 0 0 8px 0;
-                font-size: 16px;
-                font-weight: 600;
-                line-height: 1.25;
-              }
-              .settings-content .help-section p,
-              .settings-content .help-section li {
-                font-size: 13px;
-                line-height: 1.42;
-              }
-              .settings-content .help-section ul,
-              .settings-content .help-section ol {
-                margin-bottom: 6px;
-              }
-              .settings-content .control-label {
-                font-size: 12.5px;
-                margin-bottom: 4px;
-                font-weight: 600;
-              }
-              .settings-content .form-control,
-              .settings-content .selectize-input {
-                font-size: 12.5px;
-              }
-              .settings-content .btn,
-              .settings-content .btn-sm {
-                font-size: 12px;
-              }
-              .settings-content .app-submenu-hint {
-                font-size: 11.5px;
-                line-height: 1.35;
-              }
-              .db-source-grid {
-                display: grid;
-                grid-template-columns: repeat(auto-fit, minmax(168px, 1fr));
-                gap: 10px;
-                margin-top: 8px;
-              }
-              .db-source-item {
-                --db-accent: #18bc9c;
-                --db-accent-soft: rgba(24, 188, 156, 0.2);
-                position: relative;
-              }
-              .db-source-item-mygene,
-              .db-source-item-ncbi,
-              .db-source-item-uniprot,
-              .db-source-item-ensembl {
-                --db-accent: #18bc9c;
-                --db-accent-soft: rgba(24, 188, 156, 0.3);
-              }
-              .db-source-input {
-                position: absolute;
-                opacity: 0;
-                pointer-events: none;
-              }
-              .db-source-card {
-                position: relative;
-                display: flex;
-                flex-direction: column;
-                align-items: center;
-                justify-content: center;
-                gap: 10px;
-                min-height: 150px;
-                border-radius: 18px;
-                border: 1px solid #cfd8e1;
-                background: linear-gradient(162deg, #f9fbfd 0%, #edf2f6 56%, #e7edf3 100%);
-                padding: 12px 12px 10px;
-                box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.78), 0 10px 18px rgba(22, 43, 65, 0.11);
-                transition: box-shadow 0.12s ease, border-color 0.12s ease, background 0.12s ease;
-                cursor: pointer;
-                margin-bottom: 0;
-                overflow: hidden;
-              }
-              .db-source-card::before {
-                content: \"\";
-                position: absolute;
-                inset: 0;
-                border-radius: inherit;
-                background: linear-gradient(180deg, rgba(255, 255, 255, 0.34) 0%, rgba(255, 255, 255, 0) 55%);
-                pointer-events: none;
-              }
-              .db-source-card:hover {
-                border-color: #bcc8d4;
-                box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.82), 0 11px 18px rgba(22, 43, 65, 0.12);
-              }
-              .db-source-input:focus-visible + .db-source-card {
-                outline: 2px solid var(--db-accent);
-                outline-offset: 2px;
-              }
-              .db-source-card-icon-wrap {
-                width: 60px;
-                height: 60px;
-                border-radius: 14px;
-                border: 1px solid #c6d0da;
-                background: linear-gradient(165deg, #e5ecf2 0%, #d8e2ea 100%);
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                padding: 8px;
-                transition: border-color 0.12s ease, background 0.12s ease;
-              }
-              .db-source-card-icon {
-                width: 100%;
-                height: 100%;
-                object-fit: contain;
-                display: block;
-                filter: grayscale(1) saturate(0.1) opacity(0.72);
-                transition: filter 0.12s ease;
-              }
-              .db-source-card-text {
-                display: flex;
-                flex-direction: column;
-                align-items: center;
-                justify-content: center;
-                line-height: 1.25;
-                text-align: center;
-              }
-              .db-source-card-title {
-                font-size: clamp(17px, 1.1vw, 21px);
-                font-weight: 800;
-                color: #667585;
-                letter-spacing: 0.01em;
-                line-height: 1.06;
-              }
-              .db-source-card-indicator {
-                position: absolute;
-                top: 9px;
-                right: 9px;
-                width: 8px;
-                height: 8px;
-                border-radius: 999px;
-                background: #9eacb8;
-                transition: background 0.12s ease, box-shadow 0.12s ease;
-              }
-              .db-source-card-bar {
-                margin-top: 1px;
-                width: 54%;
-                height: 4px;
-                border-radius: 999px;
-                background: #cad3dc;
-                transition: width 0.12s ease, background 0.12s ease, box-shadow 0.12s ease;
-              }
-              .db-source-input:checked + .db-source-card {
-                border-color: var(--db-accent);
-                background: linear-gradient(162deg, rgba(24, 188, 156, 0.24) 0%, rgba(24, 188, 156, 0.14) 58%, #e8f6f2 100%);
-                box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.82), 0 11px 18px rgba(8, 66, 57, 0.18);
-              }
-              .db-source-input:checked + .db-source-card .db-source-card-icon-wrap {
-                border-color: var(--db-accent);
-                background: linear-gradient(165deg, rgba(24, 188, 156, 0.28) 0%, rgba(24, 188, 156, 0.16) 100%);
-              }
-              .db-source-input:checked + .db-source-card .db-source-card-icon {
-                filter: none;
-              }
-              .db-source-input:checked + .db-source-card .db-source-card-title {
-                color: var(--db-accent);
-              }
-              .db-source-input:checked + .db-source-card .db-source-card-indicator,
-              .db-source-input:checked + .db-source-card .db-source-card-bar {
-                background: var(--db-accent);
-              }
-              .db-source-input:checked + .db-source-card .db-source-card-bar {
-                width: 100%;
-                box-shadow: 0 0 0 1px rgba(24, 188, 156, 0.16);
-              }
-              .settings-session-controls {
-                display: flex;
-                flex-direction: column;
-                gap: 10px;
-                max-width: 440px;
-              }
-              .settings-session-controls #download_work_session,
-              .settings-session-controls #load_work_session_btn {
-                width: 100%;
-                min-height: 40px;
-                display: inline-flex;
-                align-items: center;
-                justify-content: center;
-                gap: 8px;
-                border-radius: 8px;
-                font-size: 12px;
-                font-weight: 700;
-                padding: 6px 14px;
-                background-color: #18BC9C !important;
-                border: 1px solid #18BC9C !important;
-                color: #FFFFFF !important;
-                box-shadow: none !important;
-                transform: none !important;
-                transition: background-color 0.12s ease, border-color 0.12s ease, color 0.12s ease;
-              }
-              .settings-session-controls #download_work_session:hover,
-              .settings-session-controls #download_work_session:focus,
-              .settings-session-controls #load_work_session_btn:hover,
-              .settings-session-controls #load_work_session_btn:focus {
-                background-color: #128F76 !important;
-                border-color: #128F76 !important;
-                color: #FFFFFF !important;
-                box-shadow: none !important;
-                transform: none !important;
-              }
-              .settings-session-controls .form-group {
-                margin-bottom: 0;
-              }
-              .settings-session-actions {
-                display: flex;
-                gap: 8px;
-                flex-wrap: wrap;
-                align-items: center;
-              }
-              .settings-session-actions .btn {
-                min-width: 170px;
-              }
-              .settings-session-manager .selectize-control {
-                margin-bottom: 0;
-              }
-              .help-icon {
-                font-size: 20px;
-                color: #18BC9C;
-                display: inline-flex;
-                align-items: center;
-                justify-content: center;
-                width: 1.05em;
-                line-height: 1;
-                vertical-align: middle;
-              }
-              .help-hero {
-                background: linear-gradient(180deg, #f6fbf9 0%, #eef6f4 100%);
-                border-color: #d2e5df;
-              }
-              .help-hero-head {
-                display: flex;
-                align-items: flex-start;
-                gap: 14px;
-                margin-bottom: 12px;
-              }
-              .help-hero-logo {
-                width: 52px;
-                height: 52px;
-                border-radius: 14px;
-                border: 1px solid #c8ddd7;
-                background: #ffffff;
-                object-fit: contain;
-                padding: 7px;
-                box-shadow: 0 8px 18px rgba(17, 64, 56, 0.1);
-                flex-shrink: 0;
-              }
-              .help-hero-title {
-                margin: 0;
-                color: #1f3246;
-                font-size: 22px;
-                font-weight: 800;
-                line-height: 1.15;
-              }
-              .help-hero-subtitle {
-                margin: 4px 0 0 0;
-                color: #566c7f;
-                font-size: 13px;
-                line-height: 1.6;
-                max-width: 780px;
-              }
-              .help-pill-row {
-                display: flex;
-                flex-wrap: wrap;
-                gap: 8px;
-              }
-              .help-pill {
-                display: inline-flex;
-                align-items: center;
-                gap: 6px;
-                padding: 5px 11px;
-                border-radius: 999px;
-                border: 1px solid #cddbe7;
-                background: #eef5fb;
-                color: #244865;
-                font-size: 11px;
-                font-weight: 700;
-              }
-              .help-process-grid,
-              .help-mode-grid,
-              .help-split-grid {
-                display: grid;
-                gap: 12px;
-                margin-top: 12px;
-              }
-              .help-process-grid {
-                grid-template-columns: repeat(auto-fit, minmax(185px, 1fr));
-              }
-              .help-mode-grid {
-                grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-              }
-              .help-split-grid {
-                grid-template-columns: repeat(auto-fit, minmax(235px, 1fr));
-              }
-              .help-process-card,
-              .help-mode-card,
-              .help-mini-card,
-              .help-db-logo-item {
-                border: 1px solid #d8e3ec;
-                border-radius: 14px;
-                background: #ffffff;
-              }
-              .help-process-card,
-              .help-mode-card,
-              .help-mini-card {
-                padding: 14px;
-              }
-              .help-process-step {
-                font-size: 11px;
-                font-weight: 800;
-                color: #688095;
-                text-transform: uppercase;
-                letter-spacing: 0.05em;
-                margin-bottom: 6px;
-              }
-              .help-process-title,
-              .help-mode-card h4,
-              .help-mini-card h4 {
-                margin: 0 0 8px 0;
-                color: #22364a;
-                font-size: 14px;
-                font-weight: 700;
-                display: flex;
-                align-items: center;
-                gap: 7px;
-              }
-              .help-process-desc,
-              .help-mode-card p,
-              .help-mini-card p {
-                margin: 0;
-                color: #566c7f;
-                font-size: 12.5px;
-                line-height: 1.6;
-              }
-              .help-mode-card ul,
-              .help-mini-card ul {
-                margin-top: 10px;
-                padding-left: 18px;
-              }
-              .help-mode-card li,
-              .help-mini-card li {
-                margin-bottom: 4px;
-              }
-              .help-kbd {
-                display: inline-block;
-                padding: 1px 6px;
-                border-radius: 6px;
-                border: 1px solid #c8d5e2;
-                background: #f4f8fc;
-                color: #28435a;
-                font-size: 11px;
-                font-weight: 700;
-              }
-              .help-flow-list {
-                margin-top: 14px !important;
-              }
-              .help-flow-list li {
-                margin-bottom: 6px;
-              }
-              .help-db-logo-row {
-                display: grid;
-                grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
-                gap: 8px;
-                margin-top: 10px;
-              }
-              .help-db-logo-item {
-                padding: 9px 10px;
-                display: flex;
-                align-items: center;
-                gap: 8px;
-              }
-              .help-db-logo-item img {
-                width: 28px;
-                height: 28px;
-                object-fit: contain;
-                border-radius: 8px;
-                border: 1px solid #d3dee8;
-                background: #f7fafc;
-                padding: 3px;
-                flex-shrink: 0;
-              }
-              .help-db-logo-item span {
-                font-size: 12px;
-                font-weight: 700;
-                color: #2a445b;
-              }
-              .help-faq-list {
-                display: flex;
-                flex-direction: column;
-                gap: 8px;
-                margin-top: 4px;
-              }
-              .help-faq-item {
-                background: #ffffff;
-                border: 1px solid #d9e4ed;
-                border-radius: 14px;
-                overflow: hidden;
-              }
-              .help-faq-item[open] {
-                border-color: #18BC9C66;
-                box-shadow: 0 10px 22px rgba(24, 188, 156, 0.09);
-              }
-              .help-faq-question {
-                cursor: pointer;
-                padding: 13px 16px;
-                font-size: 13px;
-                font-weight: 700;
-                color: #22364a;
-                display: flex;
-                align-items: center;
-                gap: 8px;
-                list-style: none;
-                user-select: none;
-              }
-              .help-faq-question::before {
-                display: none;
-              }
-              .help-faq-answer {
-                padding: 0 16px 14px 40px;
-              }
-              .help-faq-answer p,
-              .help-faq-answer li {
-                font-size: 12.5px;
-                line-height: 1.6;
-              }
-              .help-faq-answer p {
-                margin: 0 0 6px 0;
-              }
-              .help-faq-answer ul {
-                margin-top: 6px;
-                padding-left: 18px;
-              }
-              .help-faq-answer code {
-                background: #eef4fb;
-                border: 1px solid #cdd9e5;
-                border-radius: 4px;
-                padding: 1px 5px;
-                font-size: 11px;
-                font-family: 'Courier New', monospace;
-                color: #2a445b;
-              }
-              html[data-app-theme=\"dark\"] .db-source-card {
-                border-color: #405365;
-                background: linear-gradient(162deg, #1d2c3a 0%, #182634 56%, #152230 100%);
-                box-shadow: inset 0 1px 0 rgba(211, 229, 246, 0.06), 0 12px 24px rgba(0, 0, 0, 0.3);
-              }
-              html[data-app-theme=\"dark\"] .db-source-card:hover {
-                border-color: #5a6f84;
-              }
-              html[data-app-theme=\"dark\"] .db-source-card-icon-wrap {
-                border-color: #596e82;
-                background: linear-gradient(165deg, #2e4051 0%, #253646 100%);
-              }
-              html[data-app-theme=\"dark\"] .db-source-card-title {
-                color: #99acbf;
-              }
-              html[data-app-theme=\"dark\"] .db-source-card-indicator {
-                background: #8294a6;
-              }
-              html[data-app-theme=\"dark\"] .db-source-card-bar {
-                background: #73879b;
-              }
-              html[data-app-theme=\"dark\"] .db-source-input:checked + .db-source-card {
-                background: linear-gradient(162deg, rgba(24, 108, 92, 0.72) 0%, rgba(20, 82, 72, 0.84) 58%, #13352f 100%);
-              }
-              html[data-app-theme=\"dark\"] .help-section {
-                background: linear-gradient(180deg, #132a3f 0%, #172f45 100%);
-                border-color: #274b66;
-                box-shadow: 0 12px 26px rgba(0, 0, 0, 0.24);
-              }
-              html[data-app-theme=\"dark\"] .help-section h3,
-              html[data-app-theme=\"dark\"] .help-hero-title,
-              html[data-app-theme=\"dark\"] .help-process-title,
-              html[data-app-theme=\"dark\"] .help-mode-card h4,
-              html[data-app-theme=\"dark\"] .help-mini-card h4,
-              html[data-app-theme=\"dark\"] .help-faq-question {
-                color: #d5e7f7;
-              }
-              html[data-app-theme=\"dark\"] .help-section p,
-              html[data-app-theme=\"dark\"] .help-section li,
-              html[data-app-theme=\"dark\"] .help-hero-subtitle,
-              html[data-app-theme=\"dark\"] .help-process-desc,
-              html[data-app-theme=\"dark\"] .help-mode-card p,
-              html[data-app-theme=\"dark\"] .help-mini-card p,
-              html[data-app-theme=\"dark\"] .help-faq-answer p,
-              html[data-app-theme=\"dark\"] .help-faq-answer li {
-                color: #9ebdd2;
-              }
-              html[data-app-theme=\"dark\"] .help-hero {
-                background: linear-gradient(180deg, #11322a 0%, #122d26 100%);
-                border-color: #2d6758;
-              }
-              html[data-app-theme=\"dark\"] .help-hero-logo {
-                border-color: #3d6d62;
-                background: #0f2b23;
-              }
-              html[data-app-theme=\"dark\"] .help-pill {
-                border-color: #3b617d;
-                background: #183149;
-                color: #d3e6f7;
-              }
-              html[data-app-theme=\"dark\"] .help-process-card,
-              html[data-app-theme=\"dark\"] .help-mode-card,
-              html[data-app-theme=\"dark\"] .help-mini-card,
-              html[data-app-theme=\"dark\"] .help-db-logo-item,
-              html[data-app-theme=\"dark\"] .help-faq-item {
-                border-color: #2a4e69;
-                background: #10263a;
-              }
-              html[data-app-theme=\"dark\"] .help-process-step {
-                color: #9ab2c8;
-              }
-              html[data-app-theme=\"dark\"] .help-kbd {
-                border-color: #406482;
-                background: #1a354c;
-                color: #d6e8f7;
-              }
-              html[data-app-theme=\"dark\"] .help-db-logo-item img {
-                border-color: #45647f;
-                background: #183249;
-              }
-              html[data-app-theme=\"dark\"] .help-db-logo-item span {
-                color: #d2e6f8;
-              }
-              html[data-app-theme=\"dark\"] .help-faq-item[open] {
-                border-color: #18BC9Caa;
-              }
-              html[data-app-theme=\"dark\"] .help-faq-answer code {
-                background: #1b3349;
-                border-color: #34516b;
-                color: #9dd0e8;
-              }
-              /* ── Step number badges ──────────────────────────────────── */
-              .help-process-card {
-                transition: transform 0.22s ease, box-shadow 0.22s ease;
-              }
-              .help-process-card:hover {
-                transform: translateY(-3px);
-                box-shadow: 0 12px 28px rgba(24, 188, 156, 0.12);
-                border-color: rgba(24, 188, 156, 0.3);
-              }
-              .help-process-step {
-                display: inline-flex;
-                align-items: center;
-                justify-content: center;
-                width: 26px;
-                height: 26px;
-                border-radius: 8px;
-                background: linear-gradient(135deg, #18BC9C, #0fa383);
-                color: #ffffff;
-                font-size: 12px;
-                font-weight: 900;
-                margin-bottom: 10px;
-                letter-spacing: 0;
-                text-transform: none;
-              }
-              .help-mode-card,
-              .help-mini-card {
-                transition: transform 0.22s ease, box-shadow 0.22s ease;
-              }
-              .help-mode-card:hover,
-              .help-mini-card:hover {
-                transform: translateY(-3px);
-                box-shadow: 0 10px 24px rgba(24, 188, 156, 0.1);
-                border-color: rgba(24, 188, 156, 0.28);
-              }
-              /* ── Mode card accent bar ────────────────────────────────── */
-              .help-mode-card-icon {
-                width: 38px;
-                height: 38px;
-                border-radius: 11px;
-                background: linear-gradient(135deg, #18BC9C, #0fa383);
-                color: #ffffff;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                font-size: 16px;
-                margin-bottom: 10px;
-              }
-              /* ── FAQ accordion (JS-powered) ──────────────────────────── */
-              .help-faq-item {
-                background: #ffffff;
-                border: 1px solid #d9e4ed;
-                border-radius: 14px;
-                overflow: hidden;
-                transition: border-color 0.25s ease, box-shadow 0.25s ease;
-              }
-              .help-faq-item.is-open {
-                border-color: rgba(24, 188, 156, 0.4);
-                box-shadow: 0 8px 22px rgba(24, 188, 156, 0.09);
-              }
-              .help-faq-question {
-                width: 100%;
-                background: none;
-                border: none;
-                cursor: pointer;
-                padding: 14px 16px;
-                font-size: 13px;
-                font-weight: 700;
-                color: #22364a;
-                display: flex;
-                align-items: center;
-                gap: 10px;
-                text-align: left;
-                user-select: none;
-                transition: background 0.18s ease;
-              }
-              .help-faq-question:hover {
-                background: rgba(24, 188, 156, 0.03);
-              }
-              .help-faq-icon {
-                width: 22px;
-                height: 22px;
-                border-radius: 7px;
-                background: rgba(24, 188, 156, 0.1);
-                color: #18BC9C;
-                font-size: 14px;
-                font-weight: 900;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                flex-shrink: 0;
-                transition: transform 0.3s cubic-bezier(0.22, 1, 0.36, 1),
-                            background 0.25s ease;
-                line-height: 1;
-              }
-              .help-faq-item.is-open .help-faq-icon {
-                transform: rotate(45deg);
-                background: rgba(24, 188, 156, 0.18);
-              }
-              .help-faq-body {
-                max-height: 0;
-                overflow: hidden;
-                transition: max-height 0.38s cubic-bezier(0.22, 1, 0.36, 1);
-              }
-              .help-faq-item.is-open .help-faq-body {
-                max-height: 600px;
-              }
-              .help-faq-answer {
-                padding: 2px 16px 16px 48px;
-              }
-              .help-faq-answer p,
-              .help-faq-answer li {
-                font-size: 12.5px;
-                line-height: 1.65;
-                color: #566c7f;
-              }
-              .help-faq-answer p { margin: 0 0 6px 0; }
-              .help-faq-answer ul { margin-top: 6px; padding-left: 18px; }
-              .help-faq-answer code {
-                background: #eef4fb;
-                border: 1px solid #cdd9e5;
-                border-radius: 4px;
-                padding: 1px 5px;
-                font-size: 11px;
-                font-family: 'Courier New', monospace;
-                color: #2a445b;
-              }
-              /* ── Section title accent ────────────────────────────────── */
-              .help-section-label {
-                display: inline-flex;
-                align-items: center;
-                gap: 6px;
-                font-size: 10.5px;
-                font-weight: 800;
-                letter-spacing: 0.07em;
-                text-transform: uppercase;
-                color: #18BC9C;
-                background: rgba(24, 188, 156, 0.08);
-                border: 1px solid rgba(24, 188, 156, 0.15);
-                border-radius: 999px;
-                padding: 3px 10px;
-                margin-bottom: 8px;
-                width: fit-content;
-              }
-              /* ── Dark theme additions ────────────────────────────────── */
-              html[data-app-theme=\"dark\"] .help-faq-item {
-                background: #10263a;
-                border-color: #2a4e69;
-              }
-              html[data-app-theme=\"dark\"] .help-faq-item.is-open {
-                border-color: rgba(24, 188, 156, 0.5);
-              }
-              html[data-app-theme=\"dark\"] .help-faq-question {
-                color: #d5e7f7;
-              }
-              html[data-app-theme=\"dark\"] .help-faq-question:hover {
-                background: rgba(24, 188, 156, 0.05);
-              }
-              html[data-app-theme=\"dark\"] .help-faq-icon {
-                background: rgba(24, 188, 156, 0.12);
-              }
-              html[data-app-theme=\"dark\"] .help-faq-answer p,
-              html[data-app-theme=\"dark\"] .help-faq-answer li {
-                color: #9ebdd2;
-              }
-              html[data-app-theme=\"dark\"] .help-faq-answer code {
-                background: #1b3349;
-                border-color: #34516b;
-                color: #9dd0e8;
-              }
-              html[data-app-theme=\"dark\"] .help-section-label {
-                background: rgba(24, 188, 156, 0.1);
-                border-color: rgba(24, 188, 156, 0.2);
-              }
-              html[data-app-theme=\"dark\"] .help-mode-card-icon {
-                background: linear-gradient(135deg, #1a9e86, #127a67);
-              }
-              /* ── Hero mini-stats ─────────────────────────────────────── */
-              .help-hero-stats {
-                display: flex;
-                flex-wrap: wrap;
-                gap: 10px;
-                margin-top: 14px;
-              }
-              .help-hero-stat {
-                display: flex;
-                align-items: center;
-                gap: 8px;
-                padding: 7px 14px;
-                border-radius: 12px;
-                background: rgba(24, 188, 156, 0.07);
-                border: 1px solid rgba(24, 188, 156, 0.15);
-                transition: background 0.2s ease, transform 0.2s ease;
-              }
-              .help-hero-stat:hover {
-                background: rgba(24, 188, 156, 0.12);
-                transform: translateY(-2px);
-              }
-              .help-hero-stat-num {
-                font-size: 18px;
-                font-weight: 900;
-                color: #18BC9C;
-                line-height: 1;
-              }
-              .help-hero-stat-label {
-                font-size: 11.5px;
-                font-weight: 600;
-                color: #3a5568;
-              }
-              html[data-app-theme=\"dark\"] .help-hero-stat {
-                background: rgba(24, 188, 156, 0.08);
-                border-color: rgba(24, 188, 156, 0.18);
-              }
-              html[data-app-theme=\"dark\"] .help-hero-stat-label { color: #9ebdd2; }
-              /* ── View cards (5 viz modes) ────────────────────────────── */
-              .help-views-grid {
-                display: grid;
-                grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-                gap: 10px;
-                margin-top: 12px;
-              }
-              .help-view-card {
-                border: 1px solid #d8e3ec;
-                border-radius: 14px;
-                background: #ffffff;
-                padding: 14px;
-                transition: transform 0.22s ease, box-shadow 0.22s ease, border-color 0.22s ease;
-                position: relative;
-                overflow: hidden;
-              }
-              .help-view-card::before {
-                content: '';
-                position: absolute;
-                top: 0; left: 0; right: 0;
-                height: 3px;
-                background: linear-gradient(90deg, #18BC9C, #44B0FF);
-                opacity: 0;
-                transition: opacity 0.25s ease;
-                border-radius: 14px 14px 0 0;
-              }
-              .help-view-card:hover {
-                transform: translateY(-4px);
-                box-shadow: 0 14px 32px rgba(24, 188, 156, 0.13);
-                border-color: rgba(24, 188, 156, 0.3);
-              }
-              .help-view-card:hover::before { opacity: 1; }
-              .help-view-card-icon {
-                width: 36px; height: 36px;
-                border-radius: 10px;
-                background: linear-gradient(135deg, #18BC9C, #0fa383);
-                color: #ffffff;
-                display: flex; align-items: center; justify-content: center;
-                font-size: 15px;
-                margin-bottom: 10px;
-                transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
-              }
-              .help-view-card:hover .help-view-card-icon {
-                transform: scale(1.15) rotate(-5deg);
-              }
-              .help-view-card h4 {
-                margin: 0 0 6px 0;
-                font-size: 13px;
-                font-weight: 800;
-                color: #22364a;
-              }
-              .help-view-card p {
-                margin: 0;
-                font-size: 11.5px;
-                color: #566c7f;
-                line-height: 1.55;
-              }
-              .help-view-badge {
-                display: inline-block;
-                margin-top: 8px;
-                padding: 2px 8px;
-                border-radius: 999px;
-                font-size: 9.5px;
-                font-weight: 800;
-                letter-spacing: 0.04em;
-                text-transform: uppercase;
-              }
-              .help-view-badge-both {
-                background: rgba(24, 188, 156, 0.1);
-                color: #18BC9C;
-                border: 1px solid rgba(24, 188, 156, 0.2);
-              }
-              .help-view-badge-cross {
-                background: rgba(68, 176, 255, 0.1);
-                color: #2980b9;
-                border: 1px solid rgba(68, 176, 255, 0.2);
-              }
-              html[data-app-theme=\"dark\"] .help-view-card {
-                background: #10263a; border-color: #2a4e69;
-              }
-              html[data-app-theme=\"dark\"] .help-view-card h4 { color: #d5e7f7; }
-              html[data-app-theme=\"dark\"] .help-view-card p { color: #9ebdd2; }
-              /* ── Popup features grid ─────────────────────────────────── */
-              .help-popup-grid {
-                display: grid;
-                grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-                gap: 10px;
-                margin-top: 12px;
-              }
-              .help-popup-card {
-                border: 1px solid #d8e3ec;
-                border-radius: 12px;
-                background: #ffffff;
-                padding: 12px 14px;
-                display: flex;
-                gap: 10px;
-                align-items: flex-start;
-                transition: transform 0.2s ease, box-shadow 0.2s ease;
-              }
-              .help-popup-card:hover {
-                transform: translateY(-2px);
-                box-shadow: 0 8px 20px rgba(24, 188, 156, 0.09);
-                border-color: rgba(24, 188, 156, 0.25);
-              }
-              .help-popup-card-icon {
-                width: 30px; height: 30px; flex-shrink: 0;
-                border-radius: 9px;
-                background: linear-gradient(135deg, #18BC9C, #0fa383);
-                color: #fff;
-                display: flex; align-items: center; justify-content: center;
-                font-size: 13px;
-              }
-              .help-popup-card strong {
-                display: block;
-                font-size: 12.5px;
-                color: #22364a;
-                margin-bottom: 3px;
-              }
-              .help-popup-card p {
-                margin: 0;
-                font-size: 11.5px;
-                color: #566c7f;
-                line-height: 1.5;
-              }
-              /* ── Export cards ────────────────────────────────────────── */
-              .help-export-grid {
-                display: grid;
-                grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
-                gap: 9px;
-                margin-top: 12px;
-              }
-              .help-export-card {
-                border: 1px solid #d8e3ec;
-                border-radius: 12px;
-                background: #ffffff;
-                padding: 11px 13px;
-                display: flex;
-                align-items: center;
-                gap: 10px;
-                transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
-              }
-              .help-export-card:hover {
-                transform: translateY(-2px);
-                box-shadow: 0 8px 18px rgba(24, 188, 156, 0.1);
-                border-color: rgba(24, 188, 156, 0.28);
-              }
-              .help-export-icon {
-                width: 32px; height: 32px; flex-shrink: 0;
-                border-radius: 9px;
-                background: linear-gradient(135deg, #eff8f5, #e3f4ee);
-                color: #18BC9C;
-                display: flex; align-items: center; justify-content: center;
-                font-size: 14px;
-                border: 1px solid rgba(24, 188, 156, 0.15);
-                transition: background 0.2s ease, transform 0.2s ease;
-              }
-              .help-export-card:hover .help-export-icon {
-                background: linear-gradient(135deg, #18BC9C, #0fa383);
-                color: #ffffff;
-                transform: scale(1.1);
-              }
-              .help-export-card strong {
-                font-size: 12.5px;
-                color: #22364a;
-                display: block;
-              }
-              .help-export-card small {
-                font-size: 11px;
-                color: #6a7f91;
-              }
-              /* ── Alignment mode detail cards ─────────────────────────── */
-              .help-align-grid {
-                display: grid;
-                grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-                gap: 10px;
-                margin-top: 12px;
-              }
-              .help-align-card {
-                border: 1px solid #d8e3ec;
-                border-radius: 13px;
-                background: #ffffff;
-                padding: 14px;
-                transition: all 0.22s ease;
-              }
-              .help-align-card:hover {
-                transform: translateY(-3px);
-                border-color: rgba(24, 188, 156, 0.3);
-                box-shadow: 0 10px 24px rgba(24, 188, 156, 0.1);
-              }
-              .help-align-card-head {
-                display: flex;
-                align-items: center;
-                gap: 9px;
-                margin-bottom: 7px;
-              }
-              .help-align-card-icon {
-                width: 30px; height: 30px;
-                border-radius: 8px;
-                background: linear-gradient(135deg, #18BC9C, #0fa383);
-                color: #fff;
-                display: flex; align-items: center; justify-content: center;
-                font-size: 13px;
-                flex-shrink: 0;
-              }
-              .help-align-card strong {
-                font-size: 13px;
-                font-weight: 800;
-                color: #22364a;
-              }
-              .help-align-card p {
-                font-size: 11.5px;
-                color: #566c7f;
-                line-height: 1.55;
-                margin: 0 0 7px 0;
-              }
-              .help-align-matrix {
-                display: inline-flex;
-                align-items: center;
-                gap: 5px;
-                padding: 3px 9px;
-                border-radius: 7px;
-                background: rgba(24, 188, 156, 0.06);
-                border: 1px solid rgba(24, 188, 156, 0.12);
-                font-size: 10.5px;
-                font-weight: 700;
-                color: #18BC9C;
-                font-family: 'Courier New', monospace;
-              }
-              /* ── Chart chips animated ────────────────────────────────── */
-              @keyframes helpChipIn {
-                from { opacity: 0; transform: scale(0.8) translateY(6px); }
-                to   { opacity: 1; transform: scale(1) translateY(0); }
-              }
-              .help-chart-chips {
-                display: flex;
-                flex-wrap: wrap;
-                gap: 7px;
-                margin-top: 12px;
-              }
-              .help-chart-chip {
-                display: inline-flex;
-                align-items: center;
-                gap: 6px;
-                padding: 6px 12px;
-                border-radius: 9px;
-                background: rgba(24, 188, 156, 0.06);
-                border: 1px solid rgba(24, 188, 156, 0.12);
-                font-size: 12px;
-                font-weight: 600;
-                color: #22364a;
-                cursor: default;
-                transition: all 0.22s ease;
-              }
-              .help-chart-chip:hover {
-                background: rgba(24, 188, 156, 0.12);
-                border-color: rgba(24, 188, 156, 0.28);
-                transform: translateY(-2px);
-                box-shadow: 0 4px 12px rgba(24, 188, 156, 0.12);
-              }
-              .help-chart-chip .fa,
-              .help-chart-chip .fas { color: #18BC9C; font-size: 11px; }
-              /* ── Organism kingdom tags ───────────────────────────────── */
-              .help-kingdoms-row {
-                display: flex;
-                flex-wrap: wrap;
-                gap: 8px;
-                margin-top: 12px;
-              }
-              .help-kingdom-pill {
-                display: flex;
-                align-items: center;
-                gap: 8px;
-                padding: 7px 14px;
-                border-radius: 12px;
-                font-size: 12px;
-                font-weight: 700;
-                transition: transform 0.2s ease;
-              }
-              .help-kingdom-pill:hover { transform: translateY(-2px); }
-              .help-kingdom-animals { background: #e8f4fd; color: #2980b9; border: 1px solid #b8d8f0; }
-              .help-kingdom-plants  { background: #e8f9f0; color: #0d6e50; border: 1px solid #9ed9be; }
-              .help-kingdom-fungi   { background: #fef3e8; color: #b06c2a; border: 1px solid #f0c99e; }
-              html[data-app-theme=\"dark\"] .help-kingdom-animals { background: #1a3248; color: #5eb8e8; border-color: #2a4e69; }
-              html[data-app-theme=\"dark\"] .help-kingdom-plants  { background: #163326; color: #5ed4a0; border-color: #2a5040; }
-              html[data-app-theme=\"dark\"] .help-kingdom-fungi   { background: #2a1d14; color: #e8a65e; border-color: #503322; }
-              /* ── Dark for new elements ───────────────────────────────── */
-              html[data-app-theme=\"dark\"] .help-popup-card,
-              html[data-app-theme=\"dark\"] .help-export-card,
-              html[data-app-theme=\"dark\"] .help-align-card,
-              html[data-app-theme=\"dark\"] .help-view-card {
-                background: #10263a; border-color: #2a4e69;
-              }
-              html[data-app-theme=\"dark\"] .help-popup-card strong,
-              html[data-app-theme=\"dark\"] .help-align-card strong,
-              html[data-app-theme=\"dark\"] .help-export-card strong { color: #d5e7f7; }
-              html[data-app-theme=\"dark\"] .help-popup-card p,
-              html[data-app-theme=\"dark\"] .help-align-card p,
-              html[data-app-theme=\"dark\"] .help-export-card small { color: #9ebdd2; }
-              html[data-app-theme=\"dark\"] .help-export-icon {
-                background: linear-gradient(135deg, #1b3d50, #1c4850);
-                border-color: rgba(24, 188, 156, 0.2);
-              }
-              html[data-app-theme=\"dark\"] .help-chart-chip {
-                color: #d5e7f7;
-                background: rgba(24, 188, 156, 0.07);
-                border-color: rgba(24, 188, 156, 0.15);
-              }
-              html[data-app-theme=\"dark\"] .help-align-matrix {
-                background: rgba(24, 188, 156, 0.09);
-                border-color: rgba(24, 188, 156, 0.18);
-              }
-              @media (max-width: 700px) {
-                .db-source-grid {
-                  grid-template-columns: repeat(auto-fit, minmax(136px, 1fr));
-                  gap: 10px;
-                }
-                .db-source-card {
-                  min-height: 136px;
-                  padding: 10px 9px;
-                  gap: 8px;
-                }
-                .db-source-card-title {
-                  font-size: 15px;
-                }
-                .db-source-card-icon-wrap {
-                  width: 50px;
-                  height: 50px;
-                }
-                .help-section {
-                  padding: 16px;
-                }
-                .help-section h3 {
-                  font-size: 17px;
-                }
-                .help-hero-head {
-                  flex-direction: column;
-                }
-                .help-hero-logo {
-                  width: 46px;
-                  height: 46px;
-                }
-              }
-            ")),
-              # ── Hero ────────────────────────────────────────────────────────
-              div(
-                class = "help-section help-hero home-reveal",
-                div(
-                  class = "help-hero-head",
-                  tags$img(
-                    src = versioned_asset_path("favicon2.ico?v=2"),
-                    class = "help-hero-logo",
-                    `data-light-src` = versioned_asset_path("favicon2.ico?v=2"),
-                    `data-dark-src` = versioned_asset_path("favicon.ico?v=2"),
-                    alt = "CGV logo"
-                  ),
-                  div(
-                    div(class = "help-section-label", icon("book"), "User Guide"),
-                    h3(class = "help-hero-title", "CGV User Guide"),
-                    p(class = "help-hero-subtitle", "Everything you need to move from query setup to interpretation. Covers search modes, alignment views, analytics, exports, and troubleshooting.")
-                  )
-                ),
-                div(
-                  class = "help-hero-stats home-stagger-parent",
-                  div(class = "help-hero-stat home-stagger-child",
-                    span(class = "help-hero-stat-num", "2"), span(class = "help-hero-stat-label", "Search modes")),
-                  div(class = "help-hero-stat home-stagger-child",
-                    span(class = "help-hero-stat-num", "5"), span(class = "help-hero-stat-label", "Visualization views")),
-                  div(class = "help-hero-stat home-stagger-child",
-                    span(class = "help-hero-stat-num", "10"), span(class = "help-hero-stat-label", "Analytics charts")),
-                  div(class = "help-hero-stat home-stagger-child",
-                    span(class = "help-hero-stat-num", "3"), span(class = "help-hero-stat-label", "Alignment modes")),
-                  div(class = "help-hero-stat home-stagger-child",
-                    span(class = "help-hero-stat-num", "5+"), span(class = "help-hero-stat-label", "Export formats"))
-                )
-              ),
-              # ── Quick Start ─────────────────────────────────────────────────
-              div(
-                class = "help-section home-reveal",
-                div(class = "help-section-label", icon("sitemap"), "Quick Start"),
-                h3(icon("sitemap", class = "help-icon"), "Quick Start Workflow"),
-                p("A practical order for most analyses: pick the right search mode first, then build organisms and gene queries, generate the view, and explore results."),
-                div(
-                  class = "help-process-grid home-stagger-parent",
-                  div(
-                    class = "help-process-card home-stagger-child",
-                    div(class = "help-process-step", "1"),
-                    h4(class = "help-process-title", icon("random"), "Pick a search mode"),
-                    p(class = "help-process-desc", "Choose ", tags$strong("Multi-Gene Search"), " to compare several genes in one organism, or ", tags$strong("Cross-Species Gene Search"), " to trace one gene across multiple species.")
-                  ),
-                  div(
-                    class = "help-process-card home-stagger-child",
-                    div(class = "help-process-step", "2"),
-                    h4(class = "help-process-title", icon("globe"), "Select organisms"),
-                    p(class = "help-process-desc", "Pick from the preloaded reference genomes or upload your own genome + annotation pair. You can mix preloaded and custom organisms.")
-                  ),
-                  div(
-                    class = "help-process-card home-stagger-child",
-                    div(class = "help-process-step", "3"),
-                    h4(class = "help-process-title", icon("search"), "Enter gene names"),
-                    p(class = "help-process-desc", "Type gene identifiers in the search box. CGV resolves aliases automatically via MyGene, NCBI, UniProt, and Ensembl. In Multi-Gene mode, add all genes before running.")
-                  ),
-                  div(
-                    class = "help-process-card home-stagger-child",
-                    div(class = "help-process-step", "4"),
-                    h4(class = "help-process-title", icon("play"), "Generate the view"),
-                    p(class = "help-process-desc", "Run the visualization. Gene cards load with structure plots, transcript metrics, and quick-action links. Summary table and analytics become available immediately.")
-                  ),
-                  div(
-                    class = "help-process-card home-stagger-child",
-                    div(class = "help-process-step", "5"),
-                    h4(class = "help-process-title", icon("chart-bar"), "Explore and export"),
-                    p(class = "help-process-desc", "Use the Summary Table, open the 10 analytics chart panels, click genes for popups (metrics, GO terms, papers, promoter), and export SVG, CSV, FASTA, or a full session.")
-                  )
-                )
-              ),
-              # ── Search Modes ────────────────────────────────────────────────
-              div(
-                class = "help-section home-reveal",
-                div(class = "help-section-label", icon("random"), "Search Modes"),
-                h3(icon("random", class = "help-icon"), "Search Modes"),
-                p("Two complementary modes. Both share the same interface but unlock different views and comparison frameworks."),
-                div(
-                  class = "help-mode-grid home-stagger-parent",
-                  div(
-                    class = "help-mode-card home-stagger-child",
-                    div(class = "help-mode-card-icon", icon("search")),
-                    h4("Multi-Gene Search"),
-                    p("Inspect and compare multiple annotated genes within one organism side by side. Ideal for structural review across isoforms and paralogs."),
-                    tags$ul(
-                      tags$li("Compare gene architecture, exon/intron metrics, and sequence composition for multiple genes at once."),
-                      tags$li("Examine all transcript isoforms per gene with individual structure plots."),
-                      tags$li("Access all 10 analytics chart types. Visualize available in: Compact and Detailed views.")
-                    )
-                  ),
-                  div(
-                    class = "help-mode-card home-stagger-child",
-                    div(class = "help-mode-card-icon", icon("dna")),
-                    h4("Cross-Species Gene Search"),
-                    p("Compare one gene across multiple organisms with representative models aligned side by side. Designed for cross-species structural analysis."),
-                    tags$ul(
-                      tags$li("One gene queried simultaneously in each selected organism."),
-                      tags$li("Unlocks the Comparative Aligned View, LASTZ Blocks, and Multi-PIP in addition to Compact and Detailed."),
-                      tags$li("Exon-level event labeling: conservation, duplication (1:n, n:1), loss, and partial matches.")
-                    )
-                  )
-                )
-              ),
-
-              # ── Visualization Views ──────────────────────────────────────────
-              div(
-                class = "help-section home-reveal",
-                div(class = "help-section-label", icon("eye"), "Visualization Views"),
-                h3(icon("eye", class = "help-icon"), "Visualization Views"),
-                p("CGV offers five view modes. Compact and Detailed are available in both search modes. The three alignment views are exclusive to Cross-Species search."),
-                div(
-                  class = "help-views-grid home-stagger-parent",
-                  div(
-                    class = "help-view-card home-stagger-child",
-                    div(class = "help-view-card-icon", icon("compress-arrows-alt")),
-                    h4("Compact"),
-                    p("Minimalist gene structure panel. Fits many genes on screen. Ideal for first-pass inspection."),
-                    span(class = "help-view-badge help-view-badge-both", "Both modes")
-                  ),
-                  div(
-                    class = "help-view-card home-stagger-child",
-                    div(class = "help-view-card-icon", icon("list-alt")),
-                    h4("Detailed"),
-                    p("Full annotation with exons, CDS, UTR, strand, coordinates and zoom. Best for thorough single-gene review."),
-                    span(class = "help-view-badge help-view-badge-both", "Both modes")
-                  ),
-                  div(
-                    class = "help-view-card home-stagger-child",
-                    div(class = "help-view-card-icon", icon("dna")),
-                    h4("Comparative Aligned"),
-                    p("Selects one representative transcript per organism, aligns them, and displays exon correspondence as ribbons with event-type labels."),
-                    span(class = "help-view-badge help-view-badge-cross", "Cross-species only")
-                  ),
-                  div(
-                    class = "help-view-card home-stagger-child",
-                    div(class = "help-view-card-icon", icon("grip-lines")),
-                    h4("LASTZ Blocks"),
-                    p("Local pairwise alignment blocks across the genomic locus showing conserved regions between the query and each reference species."),
-                    span(class = "help-view-badge help-view-badge-cross", "Cross-species only")
-                  ),
-                  div(
-                    class = "help-view-card home-stagger-child",
-                    div(class = "help-view-card-icon", icon("chart-line")),
-                    h4("Multi-PIP"),
-                    p("Percent Identity Plot across the genomic window. Visualizes conservation patterns of the query locus against multiple references."),
-                    span(class = "help-view-badge help-view-badge-cross", "Cross-species only")
-                  )
-                )
-              ),
-
-              # ── Alignment modes ─────────────────────────────────────────────
-              div(
-                class = "help-section home-reveal",
-                div(class = "help-section-label", icon("align-center"), "Alignment Modes"),
-                h3(icon("align-center", class = "help-icon"), "Alignment Modes (Comparative Aligned View)"),
-                p("The Comparative Aligned View supports three alignment strategies. Each uses a different sequence representation and scoring matrix."),
-                div(
-                  class = "help-align-grid home-stagger-parent",
-                  div(
-                    class = "help-align-card home-stagger-child",
-                    div(class = "help-align-card-head",
-                      div(class = "help-align-card-icon", icon("atom")),
-                      tags$strong("Translated CDS")
-                    ),
-                    tags$p("Aligns the protein translations of each representative CDS. Best for detecting conserved coding regions even across divergent genomes."),
-                    span(class = "help-align-matrix", "BLOSUM62")
-                  ),
-                  div(
-                    class = "help-align-card home-stagger-child",
-                    div(class = "help-align-card-head",
-                      div(class = "help-align-card-icon", icon("dna")),
-                      tags$strong("CDS Nucleotide")
-                    ),
-                    tags$p("Aligns the nucleotide CDS sequences directly. Useful when comparing closely related species where nucleotide identity is high."),
-                    span(class = "help-align-matrix", "EDNAFULL")
-                  ),
-                  div(
-                    class = "help-align-card home-stagger-child",
-                    div(class = "help-align-card-head",
-                      div(class = "help-align-card-icon", icon("layer-group")),
-                      tags$strong("Exon")
-                    ),
-                    tags$p("Aligns full exon sequences including UTRs. Captures structural variation beyond the CDS and is suitable for lncRNA comparisons."),
-                    span(class = "help-align-matrix", "EDNAFULL")
-                  )
-                ),
-                p(style = "margin-top:10px; font-size:12px; color:#566c7f;",
-                  icon("info-circle"), " All three modes use Needleman-Wunsch global alignment. Configurable window sizes: gene body, \u00b15 kb, \u00b110 kb, \u00b125 kb, \u00b150 kb apply to LASTZ Blocks and Multi-PIP.")
-              ),
-              # ── Understanding Results ────────────────────────────────────────
-              div(
-                class = "help-section home-reveal",
-                div(class = "help-section-label", icon("chart-bar"), "Results"),
-                h3(icon("chart-bar", class = "help-icon"), "Understanding Results"),
-                p("CGV returns multiple output layers. Each adds a different level of depth to your analysis."),
-                div(
-                  class = "help-split-grid home-stagger-parent",
-                  div(
-                    class = "help-mini-card home-stagger-child",
-                    h4(icon("th-large"), "Gene cards"),
-                    tags$ul(
-                      tags$li("One card per gene with structure plot (exons, CDS, UTR, strand, zoom, hoverable coordinates)."),
-                      tags$li("Metrics: transcript length, CDS length, protein length (aa), GC%, exon/intron counts, biotype."),
-                      tags$li("Quick-action links for alias resolution and direct sequence actions.")
-                    )
-                  ),
-                  div(
-                    class = "help-mini-card home-stagger-child",
-                    h4(icon("mouse-pointer"), "Gene card popups"),
-                    tags$ul(
-                      tags$li(tags$strong("Metrics popup"), " — nucleotide composition donut, isoform comparison chart, genomic context scatter."),
-                      tags$li(tags$strong("GO Annotations"), " — Gene Ontology terms from local files or live Ensembl lookup."),
-                      tags$li(tags$strong("Papers"), " — recent publications via Europe PMC."),
-                      tags$li(tags$strong("Promoter"), " — upstream region FASTA (100–5,000 bp) with coordinate export.")
-                    )
-                  ),
-                  div(
-                    class = "help-mini-card home-stagger-child",
-                    h4(icon("table"), "Summary Table"),
-                    tags$ul(
-                      tags$li("Sortable and filterable. Columns: gene, transcript, chromosome, strand, exon count, lengths, organism (cross-species mode)."),
-                      tags$li("Filter or rank results quickly before opening chart panels."),
-                      tags$li("Export as CSV for downstream analysis.")
-                    )
-                  )
-                ),
-                div(style = "margin-top: 14px;",
-                  p(style = "margin: 0 0 8px 0; font-size: 13px; font-weight: 700; color: #22364a;", icon("chart-bar"), " 10 analytics chart types:"),
-                  div(
-                    class = "help-chart-chips home-stagger-parent",
-                    div(class = "help-chart-chip home-stagger-child", icon("dna"), "Architecture"),
-                    div(class = "help-chart-chip home-stagger-child", icon("layer-group"), "Exons & Introns"),
-                    div(class = "help-chart-chip home-stagger-child", icon("microscope"), "Sequence"),
-                    div(class = "help-chart-chip home-stagger-child", icon("map-marker-alt"), "Genomic Context"),
-                    div(class = "help-chart-chip home-stagger-child", icon("ruler-horizontal"), "Exon Lengths"),
-                    div(class = "help-chart-chip home-stagger-child", icon("circle-dot"), "Scatter"),
-                    div(class = "help-chart-chip home-stagger-child", icon("table-cells"), "Heatmap"),
-                    div(class = "help-chart-chip home-stagger-child", icon("chart-pie"), "Radar"),
-                    div(class = "help-chart-chip home-stagger-child", icon("grip-lines"), "Correlations"),
-                    div(class = "help-chart-chip home-stagger-child", icon("align-left"), "Transcript Isoforms")
-                  )
-                )
-              ),
-              # ── Organisms ───────────────────────────────────────────────────
-              div(
-                class = "help-section home-reveal",
-                div(class = "help-section-label", icon("globe"), "Organisms"),
-                h3(icon("globe", class = "help-icon"), "Preloaded Reference Genomes"),
-                p("CGV ships with reference genome assemblies and NCBI RefSeq annotations covering three kingdoms. You can also upload custom genomes."),
-                div(
-                  class = "help-kingdoms-row home-stagger-parent",
-                  div(class = "help-kingdom-pill help-kingdom-animals home-stagger-child",
-                    icon("paw"),
-                    div(
-                      tags$strong("Animalia (11)"),
-                      tags$small(style="display:block; font-weight:500; font-size:10.5px; margin-top:2px;",
-                        "H. sapiens, M. musculus, P. troglodytes, S. scrofa, C. lupus, D. rerio, X. laevis, D. melanogaster, C. elegans, D. rotundus, E. caballus")
-                    )
-                  ),
-                  div(class = "help-kingdom-pill help-kingdom-plants home-stagger-child",
-                    icon("leaf"),
-                    div(
-                      tags$strong("Plantae (11)"),
-                      tags$small(style="display:block; font-weight:500; font-size:10.5px; margin-top:2px;",
-                        "A. thaliana, A. lyrata, Z. mays (2 assemblies), O. sativa (2), S. lycopersicum, S. tuberosum, S. pennellii, H. vulgare, P. vulgaris, T. aestivum")
-                    )
-                  ),
-                  div(class = "help-kingdom-pill help-kingdom-fungi home-stagger-child",
-                    icon("bacteria"),
-                    div(
-                      tags$strong("Fungi (4)"),
-                      tags$small(style="display:block; font-weight:500; font-size:10.5px; margin-top:2px;",
-                        "S. cerevisiae, S. pombe, N. crassa, C. albicans")
-                    )
-                  )
-                ),
-                div(style = "margin-top: 12px;",
-                  div(class = "help-mini-card",
-                    style = "display:flex; gap:10px; align-items:flex-start;",
-                    div(style = "font-size:20px; color:#18BC9C; flex-shrink:0; margin-top:2px;", icon("upload")),
-                    div(
-                      h4(style = "margin:0 0 5px 0; font-size:13px; font-weight:700; color:#22364a;", "Upload your own genome"),
-                      p(style = "margin:0; font-size:12px; color:#566c7f;",
-                        "Provide a genome file (", tags$code(".fa"), ", ", tags$code(".fa.gz"), ", ", tags$code(".fna"), ", ", tags$code(".2bit"), ") and a matching annotation (",
-                        tags$code(".gff3"), ", ", tags$code(".gtf"), "). You can mix uploaded and preloaded organisms in the same analysis.")
-                    )
-                  )
-                )
-              ),
-
-              # ── Exports & Sessions ──────────────────────────────────────────
-              div(
-                class = "help-section home-reveal",
-                div(class = "help-section-label", icon("download"), "Exports & Sessions"),
-                h3(icon("download", class = "help-icon"), "Export Formats & Session Management"),
-                p("Multiple output options for publications, data pipelines, and workspace persistence."),
-                div(
-                  class = "help-export-grid home-stagger-parent",
-                  div(class = "help-export-card home-stagger-child",
-                    div(class = "help-export-icon", icon("image")),
-                    div(tags$strong("SVG"), tags$small("Individual chart or gene structure vector export"))
-                  ),
-                  div(class = "help-export-card home-stagger-child",
-                    div(class = "help-export-icon", icon("file-zipper")),
-                    div(tags$strong("ZIP — charts"), tags$small("Batch export all analytics panels as SVGs"))
-                  ),
-                  div(class = "help-export-card home-stagger-child",
-                    div(class = "help-export-icon", icon("file-zipper")),
-                    div(tags$strong("ZIP — structures"), tags$small("Batch export all gene structure plots as SVGs"))
-                  ),
-                  div(class = "help-export-card home-stagger-child",
-                    div(class = "help-export-icon", icon("table")),
-                    div(tags$strong("CSV"), tags$small("Summary table: lengths, exon/intron counts, GC%, coordinates"))
-                  ),
-                  div(class = "help-export-card home-stagger-child",
-                    div(class = "help-export-icon", icon("dna")),
-                    div(tags$strong("FASTA — promoter"), tags$small("Configurable upstream region (100–5,000 bp)"))
-                  ),
-                  div(class = "help-export-card home-stagger-child",
-                    div(class = "help-export-icon", icon("rotate-left")),
-                    div(tags$strong("Session (.rds)"), tags$small("Save and restore the full workspace from Settings"))
-                  )
-                )
-              ),
-
-              # ── Troubleshooting ─────────────────────────────────────────────
-              div(
-                class = "help-section home-reveal",
-                div(class = "help-section-label", icon("wrench"), "Troubleshooting"),
-                h3(icon("wrench", class = "help-icon"), "Troubleshooting & Tips"),
-                p("Most issues come from query spelling, organism selection, or annotation structure. This section covers the most common checks."),
-                div(
-                  class = "help-split-grid home-stagger-parent",
-                  div(
-                    class = "help-mini-card home-stagger-child",
-                    h4(icon("upload"), "Data inputs"),
-                    tags$ul(
-                      tags$li("Uploads require a genome file in ", tags$code(".fa"), ", ", tags$code(".fa.gz"), ", or ", tags$code(".2bit"), " plus a matching annotation in ", tags$code(".gff3"), " or ", tags$code(".gtf"), "."),
-                      tags$li("You can mix preloaded references with uploaded organisms in the same analysis."),
-                      tags$li("CGV currently ships with more than two dozen preloaded organism references.")
-                    )
-                  ),
-                  div(
-                    class = "help-mini-card",
-                    h4(icon("search"), "If a gene is missing"),
-                    tags$ul(
-                      tags$li("Check gene symbol spelling and letter case."),
-                      tags$li("Confirm that at least one organism is selected before running the search."),
-                      tags$li("For uploaded data, verify that the annotation contains the expected gene identifiers and associated transcript features.")
-                    ),
-                    div(
-                      class = "help-db-logo-row",
-                      div(
-                        class = "help-db-logo-item",
-                        tags$img(src = "icons/databases/mygene.ico", alt = "MyGene"),
-                        span("MyGene")
-                      ),
-                      div(
-                        class = "help-db-logo-item",
-                        tags$img(src = "icons/databases/ncbi.ico", alt = "NCBI Gene"),
-                        span("NCBI Gene")
-                      ),
-                      div(
-                        class = "help-db-logo-item",
-                        tags$img(src = "icons/databases/uniprot.ico", alt = "UniProt"),
-                        span("UniProt")
-                      ),
-                      div(
-                        class = "help-db-logo-item",
-                        tags$img(src = "icons/databases/ensembl.ico", alt = "Ensembl"),
-                        span("Ensembl")
-                      )
-                    )
-                  ),
-                  div(
-                    class = "help-mini-card home-stagger-child",
-                    h4(icon("bolt"), "Performance tips"),
-                    tags$ul(
-                      tags$li("Start with fewer organisms or genes, then scale up once the first view looks correct."),
-                      tags$li("Use the summary table to narrow what you inspect before opening all analytics panels."),
-                      tags$li("Reorder charts when the plot count grows so comparisons stay readable.")
-                    )
-                  ),
-                  div(
-                    class = "help-mini-card home-stagger-child",
-                    h4(icon("save"), "Sessions and display settings"),
-                    tags$ul(
-                      tags$li("Export your current work session as ", tags$code(".rds"), " when you want to resume later."),
-                      tags$li("Restore a saved session from Settings to recover plots and configuration."),
-                      tags$li("Theme, dark mode, and colorblind options can help readability for dense figure review.")
-                    )
-                  )
-                )
-              ),
-              div(
-                class = "help-section help-faq-section home-reveal",
-                div(class = "help-section-label", icon("question-circle"), "FAQ"),
-                h3(icon("question-circle", class = "help-icon"), "Frequently Asked Questions"),
-                div(
-                  class = "help-faq-list home-stagger-parent",
-
-                  # ── FAQ 1 ─────────────────────────────────────────────────
-                  div(
-                    class = "help-faq-item home-stagger-child",
-                    tags$button(
-                      class = "help-faq-question",
-                      `aria-expanded` = "false",
-                      span(class = "help-faq-icon", "+"),
-                      "What is CGV best used for?"
-                    ),
-                    div(
-                      class = "help-faq-body",
-                      div(class = "help-faq-answer",
-                        tags$p("CGV is designed for gene-centered structural comparison. It excels at examining exon/intron architecture, comparing representative gene models across species, exploring transcript isoforms, and producing publication-ready figures — all within a single guided interface, without requiring any scripting.")
-                      )
-                    )
-                  ),
-
-                  # ── FAQ 2 ─────────────────────────────────────────────────
-                  div(
-                    class = "help-faq-item home-stagger-child",
-                    tags$button(
-                      class = "help-faq-question",
-                      `aria-expanded` = "false",
-                      span(class = "help-faq-icon", "+"),
-                      "Do I need to install anything before using CGV?"
-                    ),
-                    div(
-                      class = "help-faq-body",
-                      div(class = "help-faq-answer",
-                        tags$p("No. CGV runs entirely in the browser. There is no local installation, package setup, or command-line workflow required to start exploring results.")
-                      )
-                    )
-                  ),
-
-                  # ── FAQ 3 ─────────────────────────────────────────────────
-                  div(
-                    class = "help-faq-item home-stagger-child",
-                    tags$button(
-                      class = "help-faq-question",
-                      `aria-expanded` = "false",
-                      span(class = "help-faq-icon", "+"),
-                      "When should I choose Multi-Gene versus Cross-Species Gene Search?"
-                    ),
-                    div(
-                      class = "help-faq-body",
-                      div(class = "help-faq-answer",
-                        tags$p(tags$strong("Multi-Gene Search"), " is the better choice when you want to inspect several genes within one organism. ", tags$strong("Cross-Species Gene Search"), " is the better choice when you want to compare one gene across multiple organisms and use the Comparative Aligned view.")
-                      )
-                    )
-                  ),
-
-                  # ── FAQ 4 ─────────────────────────────────────────────────
-                  div(
-                    class = "help-faq-item home-stagger-child",
-                    tags$button(
-                      class = "help-faq-question",
-                      `aria-expanded` = "false",
-                      span(class = "help-faq-icon", "+"),
-                      "What does the Comparative Aligned View show?"
-                    ),
-                    div(
-                      class = "help-faq-body",
-                      div(class = "help-faq-answer",
-                        tags$p("It selects one representative transcript per organism and aligns them globally using Needleman-Wunsch. The result is displayed as aligned exon blocks connected by ribbons, with each exon-pair labeled by event type:"),
-                        tags$ul(
-                          tags$li(tags$strong("1:1"), " — single conserved exon correspondence."),
-                          tags$li(tags$strong("1:n / n:1"), " — exon split or fusion events."),
-                          tags$li(tags$strong("Partial"), " — partial overlap between exons."),
-                          tags$li(tags$strong("Lost"), " — exon present in one organism, absent in the other.")
-                        )
-                      )
-                    )
-                  ),
-
-                  # ── FAQ 5 ─────────────────────────────────────────────────
-                  div(
-                    class = "help-faq-item home-stagger-child",
-                    tags$button(
-                      class = "help-faq-question",
-                      `aria-expanded` = "false",
-                      span(class = "help-faq-icon", "+"),
-                      "What are the three alignment modes and when should I use each?"
-                    ),
-                    div(
-                      class = "help-faq-body",
-                      div(class = "help-faq-answer",
-                        tags$ul(
-                          tags$li(tags$strong("Translated CDS (BLOSUM62)"), " — recommended for distantly related species where nucleotide identity is low but protein function is conserved."),
-                          tags$li(tags$strong("CDS Nucleotide (EDNAFULL)"), " — best for closely related species where the coding sequence at nucleotide level is still similar."),
-                          tags$li(tags$strong("Exon (EDNAFULL)"), " — aligns the full exon including UTR regions. Useful for lncRNAs or when UTR conservation is of interest.")
-                        )
-                      )
-                    )
-                  ),
-
-                  # ── FAQ 6 ─────────────────────────────────────────────────
-                  div(
-                    class = "help-faq-item home-stagger-child",
-                    tags$button(
-                      class = "help-faq-question",
-                      `aria-expanded` = "false",
-                      span(class = "help-faq-icon", "+"),
-                      "What information can I access by clicking on a gene card?"
-                    ),
-                    div(
-                      class = "help-faq-body",
-                      div(class = "help-faq-answer",
-                        tags$p("Clicking a gene opens a set of popup panels:"),
-                        tags$ul(
-                          tags$li(tags$strong("Metrics"), " — nucleotide composition donut, isoform length comparison, and genomic context scatter."),
-                          tags$li(tags$strong("GO Annotations"), " — Gene Ontology terms sourced from local annotation files, with live fallback to Ensembl."),
-                          tags$li(tags$strong("Papers"), " — recent publications retrieved from Europe PMC for that gene and organism."),
-                          tags$li(tags$strong("Promoter"), " — configurable upstream region (100–5,000 bp) shown as FASTA sequence with coordinate export.")
-                        )
-                      )
-                    )
-                  ),
-
-                  # ── FAQ 7 ─────────────────────────────────────────────────
-                  div(
-                    class = "help-faq-item home-stagger-child",
-                    tags$button(
-                      class = "help-faq-question",
-                      `aria-expanded` = "false",
-                      span(class = "help-faq-icon", "+"),
-                      "What files can I upload?"
-                    ),
-                    div(
-                      class = "help-faq-body",
-                      div(class = "help-faq-answer",
-                        tags$p("Genome formats: ", tags$code(".fa"), ", ", tags$code(".fasta"), ", ", tags$code(".fna"), " (plain or gzip-compressed), or ", tags$code(".2bit"), "."),
-                        tags$p("Annotation formats: ", tags$code(".gff3"), " or ", tags$code(".gtf"), "."),
-                        tags$p("The genome and annotation files must correspond to the same organism. You can mix uploaded organisms with preloaded references in the same analysis session.")
-                      )
-                    )
-                  ),
-
-                  # ── FAQ 8 ─────────────────────────────────────────────────
-                  div(
-                    class = "help-faq-item home-stagger-child",
-                    tags$button(
-                      class = "help-faq-question",
-                      `aria-expanded` = "false",
-                      span(class = "help-faq-icon", "+"),
-                      "How do I export or save my work?"
-                    ),
-                    div(
-                      class = "help-faq-body",
-                      div(class = "help-faq-answer",
-                        tags$ul(
-                          tags$li(tags$strong("SVG"), " — individual chart or gene structure plot export."),
-                          tags$li(tags$strong("ZIP"), " — batch export of all analytics chart SVGs, or all gene structure SVGs."),
-                          tags$li(tags$strong("CSV"), " — summary table with lengths, exon/intron counts, GC%, and coordinates."),
-                          tags$li(tags$strong("FASTA"), " — promoter region sequences with configurable window (100–5,000 bp)."),
-                          tags$li(tags$strong("Session (.rds)"), " — saves the full workspace. Restore it any time from Settings \u2192 Session Management.")
-                        )
-                      )
-                    )
-                  ),
-
-                  # ── FAQ 9 ─────────────────────────────────────────────────
-                  div(
-                    class = "help-faq-item home-stagger-child",
-                    tags$button(
-                      class = "help-faq-question",
-                      `aria-expanded` = "false",
-                      span(class = "help-faq-icon", "+"),
-                      "Why might a gene not appear in the results?"
-                    ),
-                    div(
-                      class = "help-faq-body",
-                      div(class = "help-faq-answer",
-                        tags$ul(
-                          tags$li("The gene symbol may be misspelled or use an alternative alias not present in the selected annotation."),
-                          tags$li("No organism is selected for the current search — at least one must be active."),
-                          tags$li("For uploaded data, the annotation file may not contain the expected gene identifier or a matching transcript feature.")
-                        ),
-                        tags$p("Tip: enable external alias lookup (MyGene, NCBI Gene, UniProt, or Ensembl) in Settings to automatically resolve alternative names and IDs.")
-                      )
-                    )
-                  ),
-
-                  # ── FAQ 10 ────────────────────────────────────────────────
-                  div(
-                    class = "help-faq-item home-stagger-child",
-                    tags$button(
-                      class = "help-faq-question",
-                      `aria-expanded` = "false",
-                      span(class = "help-faq-icon", "+"),
-                      "How is CGV different from genome browsers or plotting packages?"
-                    ),
-                    div(
-                      class = "help-faq-body",
-                      div(class = "help-faq-answer",
-                        tags$p("Genome browsers are built for locus navigation and broad genomic context. Plotting packages require scripted figure generation. CGV occupies a different space: guided, gene-first comparison with cross-species alignment, 10 analytics charts, popup information layers (GO, papers, promoter), and multiple export formats — all without writing code.")
-                      )
-                    )
-                  ),
-
-                  # ── FAQ 11 ────────────────────────────────────────────────
-                  div(
-                    class = "help-faq-item home-stagger-child",
-                    tags$button(
-                      class = "help-faq-question",
-                      `aria-expanded` = "false",
-                      span(class = "help-faq-icon", "+"),
-                      "What does CGV not do?"
-                    ),
-                    div(
-                      class = "help-faq-body",
-                      div(class = "help-faq-answer",
-                        tags$p("CGV is focused on gene structure visualization and comparative analysis. It does not perform: RNA-seq quantification, differential expression testing, variant calling, genome assembly, phylogenetic tree construction, or protein structure prediction. For those workflows, use dedicated tools and bring the results back to CGV for structural context.")
-                      )
-                    )
-                  )
-                )
-              )
-            )
-          )
-        ),
-        tabPanel(
           title = "Feedback",
           value = "feedback",
           div(
@@ -7632,170 +6649,6 @@ fluidPage(
               class = "help-content settings-content feedback-shell",
 
               # ── Inline CSS for new animated elements ──────────────────────
-              tags$style(HTML("
-                /* Info strip */
-                .feedback-info-strip {
-                  display: grid;
-                  grid-template-columns: repeat(3, minmax(0, 1fr));
-                  gap: 12px;
-                  margin-bottom: 0;
-                }
-                .feedback-info-card {
-                  border: 1px solid #d8e3ec;
-                  border-radius: 14px;
-                  background: #ffffff;
-                  padding: 16px;
-                  transition: transform 0.22s ease, box-shadow 0.22s ease, border-color 0.22s ease;
-                  position: relative;
-                  overflow: hidden;
-                }
-                .feedback-info-card::before {
-                  content: '';
-                  position: absolute;
-                  top: 0; left: 0; right: 0;
-                  height: 3px;
-                  background: linear-gradient(90deg, #18BC9C, #44B0FF);
-                  opacity: 0;
-                  transition: opacity 0.25s ease;
-                  border-radius: 14px 14px 0 0;
-                }
-                .feedback-info-card:hover {
-                  transform: translateY(-3px);
-                  box-shadow: 0 12px 28px rgba(24, 188, 156, 0.11);
-                  border-color: rgba(24, 188, 156, 0.28);
-                }
-                .feedback-info-card:hover::before { opacity: 1; }
-                .feedback-info-card-icon {
-                  width: 36px; height: 36px;
-                  border-radius: 10px;
-                  background: linear-gradient(135deg, #18BC9C, #0fa383);
-                  color: #ffffff;
-                  display: flex; align-items: center; justify-content: center;
-                  font-size: 15px;
-                  margin-bottom: 10px;
-                  transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
-                }
-                .feedback-info-card:hover .feedback-info-card-icon {
-                  transform: scale(1.15) rotate(-6deg);
-                }
-                .feedback-info-card h4 {
-                  font-size: 13px;
-                  font-weight: 800;
-                  color: #22364a;
-                  margin: 0 0 8px 0;
-                }
-                .feedback-info-card p,
-                .feedback-info-card li {
-                  font-size: 12px;
-                  color: #566c7f;
-                  line-height: 1.55;
-                }
-                .feedback-info-card ul,
-                .feedback-info-card ol {
-                  margin: 0;
-                  padding-left: 16px;
-                }
-                .feedback-info-card li { margin-bottom: 4px; }
-                /* Numbered steps inside info card */
-                .feedback-step-list {
-                  display: flex;
-                  flex-direction: column;
-                  gap: 7px;
-                  list-style: none;
-                  padding: 0; margin: 0;
-                }
-                .feedback-step-list li {
-                  display: flex;
-                  align-items: flex-start;
-                  gap: 9px;
-                  font-size: 12px;
-                  color: #566c7f;
-                  line-height: 1.5;
-                }
-                .feedback-step-num {
-                  width: 20px; height: 20px;
-                  border-radius: 6px;
-                  background: linear-gradient(135deg, #18BC9C, #0fa383);
-                  color: #fff;
-                  font-size: 10px;
-                  font-weight: 900;
-                  display: flex; align-items: center; justify-content: center;
-                  flex-shrink: 0;
-                  margin-top: 1px;
-                }
-                /* Form section */
-                .feedback-form-section {
-                  border: 1px solid #d8e3ec;
-                  border-radius: 16px;
-                  background: linear-gradient(180deg, #fbfdff 0%, #f5f9fc 100%);
-                  box-shadow: 0 10px 24px rgba(32, 58, 82, 0.07);
-                  overflow: hidden;
-                }
-                .feedback-form-section-header {
-                  padding: 18px 22px 14px;
-                  border-bottom: 1px solid #e8eef4;
-                  display: flex;
-                  align-items: center;
-                  gap: 10px;
-                }
-                .feedback-form-section-header-icon {
-                  width: 36px; height: 36px;
-                  border-radius: 10px;
-                  background: linear-gradient(135deg, #18BC9C, #0fa383);
-                  color: #fff;
-                  display: flex; align-items: center; justify-content: center;
-                  font-size: 15px;
-                  flex-shrink: 0;
-                }
-                .feedback-form-section-header h3 {
-                  margin: 0;
-                  font-size: 16px;
-                  font-weight: 800;
-                  color: #1f3246;
-                }
-                .feedback-form-section-header p {
-                  margin: 2px 0 0;
-                  font-size: 12px;
-                  color: #6a7f91;
-                }
-                .feedback-form-body {
-                  padding: 18px 22px;
-                  display: flex;
-                  flex-direction: column;
-                  gap: 14px;
-                }
-                /* Compact contact grid inside form */
-                .feedback-contact-grid {
-                  display: grid;
-                  grid-template-columns: 1fr 1fr;
-                  gap: 0 14px;
-                }
-                /* Dark mode */
-                html[data-app-theme='dark'] .feedback-info-card {
-                  background: #10263a; border-color: #2a4e69;
-                }
-                html[data-app-theme='dark'] .feedback-info-card h4 { color: #d5e7f7; }
-                html[data-app-theme='dark'] .feedback-info-card p,
-                html[data-app-theme='dark'] .feedback-info-card li,
-                html[data-app-theme='dark'] .feedback-step-list li { color: #9ebdd2; }
-                html[data-app-theme='dark'] .feedback-form-section {
-                  background: linear-gradient(180deg, #132a3f 0%, #172f45 100%);
-                  border-color: #274b66;
-                }
-                html[data-app-theme='dark'] .feedback-form-section-header {
-                  border-color: #2a4e69;
-                }
-                html[data-app-theme='dark'] .feedback-form-section-header h3 { color: #d5e7f7; }
-                html[data-app-theme='dark'] .feedback-form-section-header p { color: #9ebdd2; }
-                @media (max-width: 860px) {
-                  .feedback-info-strip {
-                    grid-template-columns: 1fr;
-                  }
-                  .feedback-contact-grid {
-                    grid-template-columns: 1fr;
-                  }
-                }
-              ")),
 
               # ── Hero ──────────────────────────────────────────────────────
               div(
@@ -7811,6 +6664,26 @@ fluidPage(
                     span(class = "feedback-pill home-stagger-child", icon("shield-alt"), span("Anti-spam protected")),
                     span(class = "feedback-pill home-stagger-child", icon("envelope"), span("Replies to your email"))
                   )
+                )
+              ),
+
+              div(
+                class = "feedback-manual-prompt home-reveal",
+                div(class = "feedback-manual-prompt-icon", icon("book-open")),
+                div(
+                  class = "feedback-manual-prompt-copy",
+                  span("Documentation"),
+                  h3("Check the CGV User Manual"),
+                  p("Search the complete Web and Desktop reference for workflows, interpretation guidance, exports, and troubleshooting.")
+                ),
+                tags$a(
+                  href = cgv_manual_path,
+                  target = "_blank",
+                  rel = "noopener noreferrer",
+                  class = "feedback-manual-prompt-action",
+                  `aria-label` = "Open the latest CGV User Manual",
+                  icon("arrow-up-right-from-square"),
+                  span("Open manual")
                 )
               ),
 
@@ -7966,8 +6839,8 @@ fluidPage(
             id = "app-fab-mode-toggle",
             type = "button",
             class = "app-fab-action-btn",
-            `data-label` = "Visualization mode",
-            `aria-label` = "Visualization mode",
+            `data-label` = "Display mode",
+            `aria-label` = "Display mode",
             `aria-expanded` = "false",
             icon("sliders")
           ),
@@ -8015,14 +6888,26 @@ fluidPage(
         div(
           id = "app-fab-mode-panel",
           class = "app-fab-panel app-fab-mode-panel",
-          div(class = "app-fab-panel-title", icon("sliders"), span("Visualization mode")),
+          div(class = "app-fab-panel-title", icon("sliders"), span("Display mode")),
           div(
-            class = "app-fab-mode-options",
-            tags$button(type = "button", class = "app-fab-mode-option", `data-mode` = "compact", `aria-pressed` = "false", "Compact"),
-            tags$button(type = "button", class = "app-fab-mode-option", `data-mode` = "detailed", `aria-pressed` = "false", "Detailed"),
-            tags$button(type = "button", class = "app-fab-mode-option", `data-mode` = "aligned", `aria-pressed` = "false", "Aligned"),
-            tags$button(type = "button", class = "app-fab-mode-option", `data-mode` = "pip_blocks", `aria-pressed` = "false", "LASTZ Blocks"),
-            tags$button(type = "button", class = "app-fab-mode-option", `data-mode` = "pip_multipip", `aria-pressed` = "false", "MultiPIP")
+            class = "app-fab-mode-group app-fab-visualization-mode-group",
+            div(class = "app-fab-mode-group-label", "Visualization mode"),
+            div(
+              class = "app-fab-mode-options",
+              tags$button(type = "button", class = "app-fab-mode-option", `data-mode` = "compact", `aria-pressed` = "false", "Compact"),
+              tags$button(type = "button", class = "app-fab-mode-option", `data-mode` = "detailed", `aria-pressed` = "false", "Detailed")
+            )
+          ),
+          div(
+            id = "app-fab-alignment-mode-group",
+            class = "app-fab-mode-group app-fab-alignment-mode-group",
+            div(class = "app-fab-mode-group-label", "Alignment mode"),
+            div(
+              class = "app-fab-mode-options",
+              tags$button(type = "button", class = "app-fab-mode-option", `data-mode` = "aligned", `aria-pressed` = "false", "Aligned"),
+              tags$button(type = "button", class = "app-fab-mode-option", `data-mode` = "pip_blocks", `aria-pressed` = "false", "LASTZ Blocks"),
+              tags$button(type = "button", class = "app-fab-mode-option", `data-mode` = "pip_multipip", `aria-pressed` = "false", "MultiPIP")
+            )
           ),
           div(id = "app-fab-mode-context", class = "app-fab-mode-context", "Multi-Gene mode")
         ),

@@ -1,7 +1,7 @@
-# CGV Desktop v0.1
+# CGV Desktop v1.1.0
 
-This is the first desktop wrapper for CGV. It starts the Shiny app on a private
-localhost port and opens it in an Electron window.
+CGV Desktop starts the Shiny app on a private localhost port and opens it in an
+Electron window with its own scientific runtime and persistent data workspace.
 
 ## Development
 
@@ -98,14 +98,15 @@ APP_PERF_TIMING=1 APP_SESSION_METRICS=1 npm start
 
 ## Portable Runtime Layout
 
-For a fully self-contained build, generate the platform runtime on its native host:
+For a fully self-contained build, generate the runtime for the target
+architecture. These commands are intentionally separate from installer
+generation because runtime construction is the slowest stage:
 
 ```bash
 cd desktop
-./scripts/build-runtime-macos-arm64.sh   # Apple Silicon macOS
-./scripts/build-runtime-macos-x64.sh     # Intel macOS
-./scripts/build-runtime-linux-x64.sh     # Linux x64
-npm run prepare:go       # Fetch the pinned GO release and build its lookup
+npm run runtime:mac:arm64  # Apple Silicon macOS
+npm run runtime:mac:x64    # macOS x64; Rosetta 2 is required on Apple Silicon
+npm run runtime:linux:x64  # Run on Linux x64 or in a Linux x64 build environment
 npm run verify:config    # Fast build-config guardrails
 npm run verify
 ```
@@ -120,19 +121,29 @@ desktop/resources/bin/darwin-arm64/lastz
 ```
 
 The runtime includes R, CRAN/Bioconductor packages, `lastz`, `samtools`, and
-`tabix`. Development can use compatible system tools, but packaged releases
-must pass `npm run verify` against bundled files.
+`tabix`. Packaged releases must pass `npm run verify` against bundled files.
 
 `prepare:lite` no longer clears the local Desktop profile by default, so local
 dataset and annotation caches survive packaging runs. For a destructive clean
 profile test build, launch with `CGV_DESKTOP_CLEAN_PROFILE=1 npm run prepare:lite`.
 
+## Demo Data
+
+Create a one-organism demo payload before packaging:
+
+```bash
+cd desktop
+npm run prepare:demo -- homo_sapiens
+```
+
+The packaged build includes this demo payload only. Full genomes should be
+delivered by a package catalog and downloaded into the user's local data folder.
+
 ## Dataset Catalog
 
 CGV Desktop supports an IGV-style lightweight catalog: the installer ships with
-the runtime, app, and a SHA-256-verified common GO ontology from the dated
-release in `go-assets-lock.json`, but no organism dataset. Users download only
-the verified organisms they need into their local data folder.
+runtime + app + demo data, while full organisms are downloaded later from a NAS,
+web server, or mounted `file://` location.
 
 Build package files for organisms:
 
@@ -167,9 +178,9 @@ overwritten.
 Validation commands:
 
 ```bash
-node scripts/verify-dataset-package.js --package=dataset-packages/homo_sapiens_gcf_000001405_40_grch38_p14_genomic-2026.09.zip --manifest=dataset-packages/homo_sapiens_gcf_000001405_40_grch38_p14_genomic.manifest.json
-node scripts/smoke-installed-dataset.js --data-root=/path/to/extracted/data --species=homo_sapiens
-node scripts/benchmark-cache.js --data-root=/path/to/data --species=homo_sapiens
+npm run dataset:verify -- --package=dataset-packages/homo_sapiens_gcf_000001405_40_grch38_p14_genomic-2026.09.zip --manifest=dataset-packages/homo_sapiens_gcf_000001405_40_grch38_p14_genomic.manifest.json
+npm run dataset:smoke -- --data-root=/path/to/extracted/data --species=homo_sapiens
+npm run dataset:benchmark -- --data-root=/path/to/data --species=homo_sapiens
 ```
 
 `CGV_CACHE_DIR`, `APP_ALIAS_DISK_CACHE_DIR`, and `CGV_NCBI_DOWNLOADS_DIR` remain
@@ -181,15 +192,36 @@ when the CDN URLs are ready.
 
 ## Packaging
 
+Installer commands use `--publish never`; generating a local package cannot
+implicitly upload it from CI or create a GitHub release.
+
+Lite installers do not embed the developer machine's global annotation cache.
+Each downloadable organism package includes and installs its own precomputed
+annotation index, keeping clean release builds reproducible across platforms.
+
 ```bash
 cd desktop
-npm run build:mac
-npm run build:linux
+npm ci
+npm run build:mac:arm64
+npm run build:mac:x64
 ```
 
-macOS produces `.dmg` and `.zip`. Linux produces `AppImage` and `.deb`. Apple
-signing/notarization is intentionally left as a release step after the first
-functional installer is validated.
+Run Linux packaging on Linux x64:
+
+```bash
+cd desktop
+npm ci
+npm run build:linux:x64
+```
+
+A clean GitHub-hosted Linux x64 build is also available through
+`.github/workflows/desktop-linux.yml`. It constructs the scientific runtime,
+validates both package formats and uploads the AppImage, DEB and SHA-256 file
+as one private workflow artifact.
+
+macOS produces `.dmg` and `.zip`; Linux produces `AppImage` and `.deb`. Apple
+signing/notarization remains a separate release step after the local installers
+have been validated.
 
 ### Windows beta and Microsoft Store fallback
 
@@ -200,6 +232,17 @@ uploads only a header-encrypted 7z payload with 14-day retention. It builds the
 scientific runtime, installer, and update metadata; installs the NSIS package
 silently; waits for `CGV is ready`; checks the localhost response; closes the
 app; and confirms that no bundled R process remains.
+
+To build locally on Windows x64 with Node.js 22 and the required MSYS2 MinGW64
+packages:
+
+```powershell
+cd desktop
+npm ci
+npm test
+npm run runtime:win
+npm run build:win
+```
 
 For a Microsoft Store package, define these values and run `npm run build:store`:
 

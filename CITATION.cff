@@ -2,8 +2,8 @@ cff-version: 1.2.0
 title: "CGV: Comparative Gene Viewer"
 message: "If you use CGV in your research, please cite the software using this metadata and the archived release DOI once available."
 type: software
-version: 1.0.0
-date-released: 2026-03-29
+version: 1.1.0
+date-released: 2026-07-24
 license: MIT
 url: "https://cgvapp.com"
 repository-code: "https://github.com/raulrojas22/CGV"

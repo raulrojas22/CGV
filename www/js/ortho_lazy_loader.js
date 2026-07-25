@@ -35,9 +35,16 @@
 
   function safeAutoClick(buttonId) {
     var btn = document.getElementById(buttonId);
-    if (!btn || btn.disabled || pendingByButton[buttonId] || !hasUserScrolled) return;
+    if ((btn && btn.disabled) || pendingByButton[buttonId] || !hasUserScrolled) return;
     pendingByButton[buttonId] = true;
-    btn.click();
+    if (window.Shiny && typeof Shiny.setInputValue === 'function') {
+      Shiny.setInputValue(buttonId, Date.now(), { priority: 'event' });
+    } else if (btn) {
+      btn.click();
+    } else {
+      pendingByButton[buttonId] = false;
+      return;
+    }
     setTimeout(function () {
       pendingByButton[buttonId] = false;
       scheduleBind();

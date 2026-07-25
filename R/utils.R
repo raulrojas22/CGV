@@ -11,7 +11,7 @@
 `%||%` <- function(a, b) if (!is.null(a)) a else b
 
 # Lightweight debug/performance toggles.
-# Disabled by default. Enable explicitly with:
+# Disabled by default. Enable debug and performance logs independently with:
 # Sys.setenv(APP_DEBUG_LOGS = "1", APP_PERF_TIMING = "1")
 app_debug_enabled <- function() {
     raw <- tolower(trimws(as.character(Sys.getenv("APP_DEBUG_LOGS", "0") %||% "0")))
@@ -64,8 +64,151 @@ app_perf_mark <- function(run = NULL, step = "", context = "APP") {
     if (!nzchar(msg)) {
         msg <- "tick"
     }
-    app_debug_log(head, " ", msg)
+    message(head, " ", msg)
     invisible(elapsed)
+}
+
+app_perf_now <- function() {
+    as.numeric(proc.time()[["elapsed"]])
+}
+
+app_perf_elapsed_ms <- function(t0) {
+    start_val <- suppressWarnings(as.numeric(t0 %||% NA_real_))
+    if (!is.finite(start_val)) {
+        return(NA_real_)
+    }
+    1000 * (app_perf_now() - start_val)
+}
+
+app_env_flag <- function(name, default = FALSE) {
+    default_raw <- if (isTRUE(default)) "1" else "0"
+    raw <- tolower(trimws(as.character(Sys.getenv(as.character(name %||% ""), default_raw) %||% default_raw)))
+    !raw %in% c("", "0", "false", "no", "off")
+}
+
+app_env_int <- function(name, default = 0L, min_value = NULL, max_value = NULL) {
+    raw <- trimws(as.character(Sys.getenv(as.character(name %||% ""), as.character(default %||% 0L)) %||% as.character(default %||% 0L)))
+    parsed <- suppressWarnings(as.integer(raw))
+    if (!is.finite(parsed) || is.na(parsed)) {
+        parsed <- suppressWarnings(as.integer(default %||% 0L))
+    }
+    if (!is.null(min_value)) {
+        min_i <- suppressWarnings(as.integer(min_value))
+        if (is.finite(min_i) && !is.na(min_i) && parsed < min_i) parsed <- min_i
+    }
+    if (!is.null(max_value)) {
+        max_i <- suppressWarnings(as.integer(max_value))
+        if (is.finite(max_i) && !is.na(max_i) && parsed > max_i) parsed <- max_i
+    }
+    parsed
+}
+
+app_env_path <- function(name, default = "") {
+    raw <- trimws(as.character(Sys.getenv(as.character(name %||% ""), as.character(default %||% "")) %||% ""))
+    if (!nzchar(raw)) {
+        return("")
+    }
+    normalizePath(raw, winslash = "/", mustWork = FALSE)
+}
+
+get_cgv_data_root <- function(base_dir = ".") {
+    root <- app_env_path("CGV_DATA_ROOT", "")
+    if (nzchar(root)) {
+        return(root)
+    }
+    normalizePath(base_dir, winslash = "/", mustWork = FALSE)
+}
+
+get_cgv_cache_root <- function(base_dir = ".") {
+    root <- app_env_path("CGV_CACHE_DIR", Sys.getenv("APP_CACHE_ROOT", ""))
+    if (nzchar(root)) {
+        return(root)
+    }
+    normalizePath(file.path(base_dir, "cache"), winslash = "/", mustWork = FALSE)
+}
+
+compact_girafe_svg_html <- function(html, decimals = 2L) {
+    if (!is.character(html) || length(html) == 0L || !nzchar(html[1])) {
+        return(html)
+    }
+
+    out <- html
+    out <- gsub(">\\s+<", "><", out, perl = TRUE)
+
+        decimals_i <- suppressWarnings(as.integer(decimals %||% 2L))
+    if (!is.finite(decimals_i) || is.na(decimals_i) || decimals_i < 0L) {
+        return(out)
+    }
+
+    # ggplot-generated SVG coordinates often carry far more precision than the
+    # browser can show. Rounding them trims WebSocket payloads without changing
+    # base-pair data stored in R.
+    matches <- gregexpr("(?<![A-Za-z0-9_])-?\\d+\\.\\d{4,}(?![A-Za-z0-9_])", out, perl = TRUE)
+    vals <- regmatches(out, matches)
+    if (!length(vals) || !length(vals[[1]])) {
+        return(out)
+    }
+
+    regmatches(out, matches) <- lapply(vals, function(x) {
+        nums <- suppressWarnings(as.numeric(x))
+        repl <- ifelse(
+            is.finite(nums),
+            format(round(nums, decimals_i), scientific = FALSE, trim = TRUE),
+            x
+        )
+        repl <- sub("\\.?0+$", "", repl, perl = TRUE)
+        repl[repl == "-0"] <- "0"
+        repl
+    })
+    out
+}
+
+compact_girafe_widget <- function(widget_obj, label = NULL) {
+    if (is.null(widget_obj) || !inherits(widget_obj, "girafe") || !is.list(widget_obj$x)) {
+        return(widget_obj)
+    }
+    if (!isTRUE(app_env_flag("APP_GIRAFE_COMPACT_SVG", TRUE))) {
+        return(widget_obj)
+    }
+    if (!is.character(widget_obj$x$html) || length(widget_obj$x$html) == 0L) {
+        return(widget_obj)
+    }
+
+    min_bytes <- app_env_int("APP_GIRAFE_COMPACT_MIN_BYTES", 0L, min_value = 0L)
+    before_bytes <- nchar(widget_obj$x$html, type = "bytes", allowNA = TRUE)
+    if (!is.finite(before_bytes) || before_bytes < min_bytes) {
+        return(widget_obj)
+    }
+
+    decimals <- app_env_int("APP_GIRAFE_SVG_DECIMALS", 1L, min_value = 0L, max_value = 8L)
+    compact_html <- compact_girafe_svg_html(widget_obj$x$html, decimals = decimals)
+    after_bytes <- nchar(compact_html, type = "bytes", allowNA = TRUE)
+    widget_obj$x$html <- compact_html
+
+    if (isTRUE(app_env_flag("APP_TRANSPORT_TIMING", FALSE)) && is.finite(after_bytes) && is.finite(before_bytes)) {
+        label_txt <- trimws(as.character(label %||% "girafe"))
+        if (!nzchar(label_txt)) label_txt <- "girafe"
+        message(sprintf(
+            "[TRANSPORT][girafe] label=%s raw=%dB compact=%dB saved=%dB decimals=%d",
+            label_txt,
+            as.integer(before_bytes),
+            as.integer(after_bytes),
+            as.integer(max(0, before_bytes - after_bytes)),
+            as.integer(decimals)
+        ))
+    }
+    widget_obj
+}
+
+app_perf_mark_ms <- function(run = NULL, key = "", elapsed_ms = NA_real_, context = "APP") {
+    key_txt <- trimws(as.character(key %||% ""))
+    if (!nzchar(key_txt)) {
+        key_txt <- "elapsed_ms"
+    }
+    elapsed_num <- suppressWarnings(as.numeric(elapsed_ms %||% NA_real_))
+    label <- if (is.finite(elapsed_num)) sprintf("%.1f", elapsed_num) else "NA"
+    app_perf_mark(run, sprintf("%s=%s", key_txt, label), context)
+    invisible(elapsed_num)
 }
 
 # --- 1. ANÁLISIS DE SECUENCIAS ---
@@ -75,11 +218,16 @@ calculate_sequence_composition <- function(gen_sequence) {
         return(list(composition = "Sequence Composition: N/A (Sequence empty)", length = 0))
     }
     gen_sequence <- toupper(as.character(gen_sequence[[1]] %||% ""))
-    longitud_total <- nchar(gen_sequence)
-    conteo_A <- nchar(gsub("[^A]", "", gen_sequence))
-    conteo_T <- nchar(gsub("[^T]", "", gen_sequence))
-    conteo_C <- nchar(gsub("[^C]", "", gen_sequence))
-    conteo_G <- nchar(gsub("[^G]", "", gen_sequence))
+    longitud_total <- nchar(gen_sequence, type = "bytes", allowNA = FALSE, keepNA = FALSE)
+    if (!is.finite(longitud_total) || longitud_total <= 0L) {
+        return(list(composition = "Sequence Composition: N/A (Sequence empty)", length = 0))
+    }
+
+    raw_seq <- charToRaw(gen_sequence)
+    conteo_A <- sum(raw_seq == charToRaw("A"))
+    conteo_T <- sum(raw_seq == charToRaw("T"))
+    conteo_C <- sum(raw_seq == charToRaw("C"))
+    conteo_G <- sum(raw_seq == charToRaw("G"))
 
     list(
         composition = sprintf(
@@ -88,6 +236,84 @@ calculate_sequence_composition <- function(gen_sequence) {
             (conteo_C / longitud_total) * 100, (conteo_G / longitud_total) * 100
         ),
         length = longitud_total
+    )
+}
+
+format_sequence_composition_from_counts <- function(counts, denominator = NULL) {
+    src <- counts %||% c(A = 0L, T = 0L, C = 0L, G = 0L)
+    if (is.null(names(src))) names(src) <- rep("", length(src))
+    counts <- suppressWarnings(as.integer(src[c("A", "T", "C", "G")]))
+    counts[!is.finite(counts)] <- 0L
+    names(counts) <- c("A", "T", "C", "G")
+    denom <- suppressWarnings(as.numeric(denominator %||% sum(counts, na.rm = TRUE)))
+    if (!is.finite(denom) || denom <= 0) {
+        return("Sequence Composition: N/A (Sequence empty)")
+    }
+    sprintf(
+        "Sequence Composition: A = %.2f%%\tT = %.2f%%  C = %.2f%%  G = %.2f%%",
+        100 * as.numeric(counts[["A"]]) / denom,
+        100 * as.numeric(counts[["T"]]) / denom,
+        100 * as.numeric(counts[["C"]]) / denom,
+        100 * as.numeric(counts[["G"]]) / denom
+    )
+}
+
+make_sequence_composition_blob <- function(comp) {
+    comp <- comp %||% list()
+    src <- comp$counts %||% c(A = 0L, T = 0L, C = 0L, G = 0L)
+    if (is.null(names(src))) names(src) <- rep("", length(src))
+    counts <- suppressWarnings(as.integer(src[c("A", "T", "C", "G")]))
+    counts[!is.finite(counts)] <- 0L
+    names(counts) <- c("A", "T", "C", "G")
+    fields <- c(
+        "##CGV_SEQUENCE_COMPOSITION_V1",
+        paste0("length=", as.integer(comp$length %||% 0L)),
+        paste0("known_total=", as.integer(comp$known_total %||% sum(counts, na.rm = TRUE))),
+        paste0("A=", counts[["A"]]),
+        paste0("T=", counts[["T"]]),
+        paste0("C=", counts[["C"]]),
+        paste0("G=", counts[["G"]]),
+        paste0("composition=", utils::URLencode(as.character(comp$composition %||% ""), reserved = TRUE))
+    )
+    paste(fields, collapse = "\t")
+}
+
+is_sequence_composition_blob <- function(blob_text) {
+    startsWith(as.character(blob_text %||% ""), "##CGV_SEQUENCE_COMPOSITION_V1\t")
+}
+
+parse_sequence_composition_blob <- function(blob_text) {
+    txt <- as.character(blob_text %||% "")
+    if (!is_sequence_composition_blob(txt)) {
+        return(NULL)
+    }
+    fields <- strsplit(txt, "\t", fixed = TRUE)[[1]]
+    kv <- fields[-1]
+    vals <- list()
+    for (item in kv) {
+        pos <- regexpr("=", item, fixed = TRUE)[1]
+        if (!is.finite(pos) || pos < 2) next
+        key <- substr(item, 1, pos - 1L)
+        val <- substr(item, pos + 1L, nchar(item))
+        vals[[key]] <- val
+    }
+    counts <- c(
+        A = suppressWarnings(as.integer(vals$A %||% 0L)),
+        T = suppressWarnings(as.integer(vals$T %||% 0L)),
+        C = suppressWarnings(as.integer(vals$C %||% 0L)),
+        G = suppressWarnings(as.integer(vals$G %||% 0L))
+    )
+    counts[!is.finite(counts)] <- 0L
+    composition <- tryCatch(utils::URLdecode(as.character(vals$composition %||% "")), error = function(e) "")
+    if (!nzchar(composition)) {
+        composition <- format_sequence_composition_from_counts(counts, denominator = suppressWarnings(as.numeric(vals$known_total %||% sum(counts))))
+    }
+    list(
+        composition = composition,
+        length = suppressWarnings(as.integer(vals$length %||% sum(counts))),
+        known_total = suppressWarnings(as.integer(vals$known_total %||% sum(counts))),
+        counts = counts,
+        sequence_optional = NULL
     )
 }
 
@@ -100,14 +326,14 @@ detect_organism_from_gff <- function(file_path, original_name = NULL) {
     organism_name <- NULL
     taxid_val <- NULL
 
-    taxid_match <- str_match(text, regex("taxon:(\\d+)|taxid\\s*[:=]\\s*(\\d+)", ignore_case = TRUE))
+    taxid_match <- stringr::str_match(text, stringr::regex("taxon:(\\d+)|taxid\\s*[:=]\\s*(\\d+)", ignore_case = TRUE))
     if (!all(is.na(taxid_match))) {
         taxid_val <- as.integer(na.omit(c(taxid_match[1, 2], taxid_match[1, 3]))[1])
     }
 
     header_patterns <- c("##species\\s*[:= ]\\s*([^\\n]+)", "##organism\\s*[:= ]\\s*([^\\n]+)", "organism=([^;\\n]+)", "species=([^;\\n]+)")
     for (pat in header_patterns) {
-        m <- str_match(text, regex(pat, ignore_case = TRUE))
+        m <- stringr::str_match(text, stringr::regex(pat, ignore_case = TRUE))
         if (!all(is.na(m)) && nzchar(stringr::str_trim(stringr::str_remove_all(m[1, 2], '["\']')))) {
             raw_value <- stringr::str_trim(stringr::str_remove_all(m[1, 2], '["\']'))
             url_taxid <- stringr::str_match(raw_value, "[?&]id=(\\d+)")
@@ -131,7 +357,7 @@ detect_organism_from_gff <- function(file_path, original_name = NULL) {
         list("Oryza sativa", c("rice", "oryza", "osativa")),
         list("Arabidopsis thaliana", c("arabidopsis", "thaliana", "athaliana")),
         list("Zea mays", c("maize", "corn", "zea", "zmays")),
-        list("Triticum aestivum", c("wheat", "triticum", "taestivum")),
+        list("Brachypodium distachyon", c("brachypodium", "bdistachyon", "stiff_brome")),
         list("Hordeum vulgare", c("barley", "hordeum", "vulgare")),
         list("Sorghum bicolor", c("sorghum", "sbicolor")),
         list("Homo sapiens", c("human", "homo", "hsapiens")),
@@ -264,16 +490,31 @@ normalize_org_key <- function(x) {
     trimws(x)
 }
 
+.genome_registry_cache <- new.env(parent = emptyenv())
+
 get_genome_registry <- function(genomes_dir = "genomes") {
     registry_path <- file.path(genomes_dir, "registry.tsv")
     if (!file.exists(registry_path)) {
         return(data.frame())
     }
+    cache_key <- normalizePath(registry_path, winslash = "/", mustWork = FALSE)
+    finfo <- tryCatch(file.info(registry_path), error = function(e) NULL)
+    mtime_key <- if (!is.null(finfo) && nrow(finfo) > 0L) as.numeric(finfo$mtime[[1]]) else NA_real_
+    size_key <- if (!is.null(finfo) && nrow(finfo) > 0L) as.numeric(finfo$size[[1]]) else NA_real_
+    cached <- get0(cache_key, envir = .genome_registry_cache, inherits = FALSE, ifnotfound = NULL)
+    if (is.list(cached) &&
+        identical(cached$mtime, mtime_key) &&
+        identical(cached$size, size_key) &&
+        is.data.frame(cached$data)) {
+        return(cached$data)
+    }
+
     out <- tryCatch(read.delim(registry_path, sep = "\t", stringsAsFactors = FALSE, check.names = FALSE), error = function(e) data.frame())
     if (nrow(out) == 0) {
         return(data.frame())
     }
     for (mc in setdiff(c("organism", "taxid", "fasta", "aliases"), colnames(out))) out[[mc]] <- NA_character_
+    assign(cache_key, list(mtime = mtime_key, size = size_key, data = out), envir = .genome_registry_cache)
     out
 }
 
@@ -305,7 +546,8 @@ resolve_genome_fasta <- function(det_info = NULL, uploaded_fasta_path = NULL, ge
     if (!is.null(org) && nzchar(org_key)) {
         for (i in seq_len(nrow(reg))) {
             keys <- c(reg$organism[i], unlist(strsplit(reg$aliases[i] %||% "", "\\|")))
-            norm_keys <- unique(vapply(keys, normalize_org_key, character(1)))[nzchar(unique(vapply(keys, normalize_org_key, character(1))))]
+            norm_keys <- unique(vapply(keys, normalize_org_key, character(1)))
+            norm_keys <- norm_keys[nzchar(norm_keys)]
             if (org_key %in% norm_keys || any(stringr::str_detect(org_key, stringr::fixed(norm_keys))) || any(stringr::str_detect(norm_keys, stringr::fixed(org_key)))) {
                 p <- reg$fasta[i]
                 p2 <- if (grepl("^/", p) || grepl("^[a-zA-Z]:", p)) p else file.path(genomes_dir, p)
@@ -336,21 +578,33 @@ resolve_genome_fasta <- function(det_info = NULL, uploaded_fasta_path = NULL, ge
 .seq_extract_cache <- new.env(parent = emptyenv())
 .gff_gene_index_cache <- new.env(parent = emptyenv())
 .gff_gene_light_index_cache <- new.env(parent = emptyenv())
+.partial_gene_suggestion_cache <- new.env(parent = emptyenv())
 .gff_genes_table_cache <- new.env(parent = emptyenv())
 .gff_genes_chr_index_cache <- new.env(parent = emptyenv())
 .gff_chr_length_cache <- new.env(parent = emptyenv())
 .preloaded_registry_cache <- new.env(parent = emptyenv())
 .twobit_seqinfo_cache <- new.env(parent = emptyenv())
 .twobit_handle_cache <- new.env(parent = emptyenv())
+.twobit_seqnames_sidecar_version <- 1L
 .tabix_index_override_cache <- new.env(parent = emptyenv())
+.tabix_seqnames_cache <- new.env(parent = emptyenv())
+.transcript_composition_cache <- new.env(parent = emptyenv())
 .assembly_report_cache <- new.env(parent = emptyenv())
 .assembly_stats_cache <- new.env(parent = emptyenv())
 .annotation_report_path_cache <- new.env(parent = emptyenv())
 .neighbor_context_cache <- new.env(parent = emptyenv())
+.orthologous_local_lookup_cache <- new.env(parent = emptyenv())
 .annotation_disk_cache_maintenance <- new.env(parent = emptyenv())
+.gff_autocomplete_cache_validation <- new.env(parent = emptyenv())
 .gff_index_cache_version <- "desc-clean-v2"
+.gff_autocomplete_cache_version <- 1L
 
 .cache_meta_hidden_key <- ".__cache_meta__"
+
+clear_preloaded_species_registry_cache <- function() {
+    rm(list = ls(envir = .preloaded_registry_cache, all.names = TRUE), envir = .preloaded_registry_cache)
+    invisible(TRUE)
+}
 
 parse_positive_int_env <- function(var_name, default_value) {
     raw <- trimws(as.character(Sys.getenv(as.character(var_name %||% ""), as.character(default_value)) %||% as.character(default_value)))
@@ -368,6 +622,23 @@ parse_positive_bytes_env_mb <- function(var_name, default_mb) {
         val <- as.numeric(default_mb %||% 1)
     }
     as.numeric(val) * 1024^2
+}
+
+sanitize_autocomplete_choices <- function(choices, max_total = 20000L) {
+    vals <- as.character(choices %||% character(0))
+    vals <- gsub("[\u00A0\u2007\u202F]", " ", vals, perl = TRUE)
+    vals <- trimws(vals)
+    vals <- vals[!is.na(vals) & nzchar(vals)]
+    vals <- vals[nchar(vals) <= 80]
+    vals <- unique(vals)
+    max_cap <- suppressWarnings(as.integer(max_total))
+    if (!is.finite(max_cap) || is.na(max_cap) || max_cap <= 0L) {
+        max_cap <- 20000L
+    }
+    if (length(vals) > max_cap) {
+        vals <- vals[seq_len(max_cap)]
+    }
+    vals
 }
 
 sanitize_cache_key <- function(x) {
@@ -588,13 +859,27 @@ compute_transcript_relative_coords <- function(df, strand = "+", anchor_df = NUL
     )
 }
 
-get_transcript_feature_palette <- function(is_dark_theme = FALSE, is_colorblind_mode = FALSE) {
+adjust_color_dark <- function(hex_color) {
+    if (is.null(hex_color) || !is.character(hex_color) || nchar(hex_color) != 7) {
+        return(hex_color)
+    }
+    r <- as.integer(substr(hex_color, 2L, 3L), base = 16L)
+    g <- as.integer(substr(hex_color, 4L, 5L), base = 16L)
+    b <- as.integer(substr(hex_color, 6L, 7L), base = 16L)
+    factor <- 0.75
+    r_new <- as.integer(r * factor)
+    g_new <- as.integer(g * factor)
+    b_new <- as.integer(b * factor)
+    sprintf("#%02X%02X%02X", r_new, g_new, b_new)
+}
+
+get_transcript_feature_palette <- function(is_dark_theme = FALSE, is_colorblind_mode = FALSE, custom_overrides = NULL) {
     is_dark_theme <- isTRUE(is_dark_theme)
     is_colorblind_mode <- isTRUE(is_colorblind_mode)
 
     if (is_colorblind_mode) {
         if (is_dark_theme) {
-            return(c(
+            palette <- c(
                 "compact" = "#56B4E9",
                 "gene" = "#56B4E9",
                 "exon" = "#56B4E9",
@@ -602,21 +887,20 @@ get_transcript_feature_palette <- function(is_dark_theme = FALSE, is_colorblind_
                 "utr" = "#CC79A7",
                 "codon" = "#F0E442",
                 "other" = "#D55E00"
-            ))
+            )
+        } else {
+            palette <- c(
+                "compact" = "#0072B2",
+                "gene" = "#0072B2",
+                "exon" = "#0072B2",
+                "cds" = "#009E73",
+                "utr" = "#CC79A7",
+                "codon" = "#E69F00",
+                "other" = "#56B4E9"
+            )
         }
-        return(c(
-            "compact" = "#0072B2",
-            "gene" = "#0072B2",
-            "exon" = "#0072B2",
-            "cds" = "#009E73",
-            "utr" = "#CC79A7",
-            "codon" = "#E69F00",
-            "other" = "#56B4E9"
-        ))
-    }
-
-    if (is_dark_theme) {
-        return(c(
+    } else if (is_dark_theme) {
+        palette <- c(
             "compact" = "#FF7B8F",
             "gene" = "#FF9DAF",
             "exon" = "#FF6881",
@@ -624,18 +908,28 @@ get_transcript_feature_palette <- function(is_dark_theme = FALSE, is_colorblind_
             "utr" = "#55C7E8",
             "codon" = "#B89CFF",
             "other" = "#8297AC"
-        ))
+        )
+    } else {
+        palette <- c(
+            "compact" = "#F7687C",
+            "gene" = "#FFB7BF",
+            "exon" = "#F45D75",
+            "cds" = "#E8A44F",
+            "utr" = "#5BC0EB",
+            "codon" = "#7CCFB8",
+            "other" = "#B9C1C9"
+        )
     }
 
-    c(
-        "compact" = "#F7687C",
-        "gene" = "#FFB7BF",
-        "exon" = "#F45D75",
-        "cds" = "#E8A44F",
-        "utr" = "#5BC0EB",
-        "codon" = "#7CCFB8",
-        "other" = "#B9C1C9"
-    )
+    if (!is.null(custom_overrides) && is.list(custom_overrides)) {
+        for (name in names(custom_overrides)) {
+            if (!is.null(custom_overrides[[name]]) && is.character(custom_overrides[[name]]) && nchar(custom_overrides[[name]]) == 7) {
+                palette[name] <- custom_overrides[[name]]
+            }
+        }
+    }
+
+    palette
 }
 
 compute_spliced_feature_relative_coords <- function(df, strand = "+", gap = 14) {
@@ -670,7 +964,11 @@ compute_spliced_feature_relative_coords <- function(df, strand = "+", gap = 14) 
 }
 
 get_annotation_disk_cache_dir <- function(base_dir = ".") {
-    normalizePath(file.path(base_dir, "cache", "annotation_index"), winslash = "/", mustWork = FALSE)
+    override <- app_env_path("APP_ANNOTATION_DISK_CACHE_DIR", "")
+    if (nzchar(override)) {
+        return(override)
+    }
+    normalizePath(file.path(get_cgv_cache_root(base_dir), "annotation_index"), winslash = "/", mustWork = FALSE)
 }
 
 normalize_cache_filename_family <- function(fname) {
@@ -745,7 +1043,7 @@ maintain_annotation_disk_cache <- function(base_dir = ".") {
         repaired <- repaired + 1L
     }
 
-    max_files <- parse_positive_int_env("APP_ANNOTATION_DISK_CACHE_MAX_FILES", 96L)
+    max_files <- parse_positive_int_env("APP_ANNOTATION_DISK_CACHE_MAX_FILES", 192L)
     files_after <- list.files(cdir, pattern = "\\.rds$", full.names = TRUE)
     if (length(files_after) > max_files) {
         info_after <- file.info(files_after)
@@ -764,11 +1062,16 @@ maintain_annotation_disk_cache <- function(base_dir = ".") {
 
 can_use_persistent_cache_for_path <- function(file_path, base_dir = ".") {
     p <- normalizePath(as.character(file_path %||% ""), winslash = "/", mustWork = FALSE)
-    b <- normalizePath(base_dir, winslash = "/", mustWork = FALSE)
-    if (!nzchar(p) || !nzchar(b)) {
+    roots <- unique(c(
+        normalizePath(base_dir, winslash = "/", mustWork = FALSE),
+        get_cgv_data_root(base_dir),
+        get_cgv_cache_root(base_dir)
+    ))
+    roots <- roots[nzchar(roots)]
+    if (!nzchar(p) || length(roots) == 0L) {
         return(FALSE)
     }
-    startsWith(p, paste0(b, "/")) || identical(p, b)
+    any(vapply(roots, function(root) startsWith(p, paste0(root, "/")) || identical(p, root), logical(1)))
 }
 
 canonical_cache_identity_path <- function(file_path, base_dir = ".") {
@@ -779,6 +1082,8 @@ canonical_cache_identity_path <- function(file_path, base_dir = ".") {
 
     known_roots <- unique(c(
         normalizePath(base_dir, winslash = "/", mustWork = FALSE),
+        get_cgv_data_root(base_dir),
+        get_cgv_cache_root(base_dir),
         "/app"
     ))
     known_roots <- known_roots[nzchar(known_roots)]
@@ -869,14 +1174,155 @@ save_gff_index_to_disk <- function(file_path, idx_obj, cache_kind = "gene_light"
     cpath <- get_gff_disk_index_path(file_path, cache_kind = cache_kind, base_dir = base_dir)
     cdir <- dirname(cpath)
     if (!dir.exists(cdir)) dir.create(cdir, recursive = TRUE, showWarnings = FALSE)
-    ok <- tryCatch(
-        {
-            saveRDS(idx_obj, cpath, compress = "gzip")
-            TRUE
-        },
-        error = function(e) FALSE
-    )
+    ok <- atomic_save_rds(idx_obj, cpath, compress = "gzip")
     invisible(ok)
+}
+
+atomic_save_rds <- function(object, path, compress = "gzip") {
+    target <- as.character(path %||% "")
+    if (!nzchar(target)) {
+        return(FALSE)
+    }
+    target_dir <- dirname(target)
+    if (!dir.exists(target_dir)) {
+        dir.create(target_dir, recursive = TRUE, showWarnings = FALSE)
+    }
+    tmp <- tempfile(pattern = paste0(".", basename(target), "."), tmpdir = target_dir, fileext = ".part")
+    backup <- paste0(target, ".bak")
+    on.exit(unlink(tmp, force = TRUE), add = TRUE)
+    ok <- tryCatch({
+        saveRDS(object, tmp, compress = compress)
+        verified <- readRDS(tmp)
+        if (is.null(verified) && !is.null(object)) {
+            stop("temporary RDS validation failed")
+        }
+        rm(verified)
+        if (file.exists(backup)) {
+            unlink(backup, force = TRUE)
+        }
+        had_target <- file.exists(target)
+        if (had_target && !file.rename(target, backup)) {
+            stop("could not stage existing RDS for replacement")
+        }
+        installed <- file.rename(tmp, target)
+        if (!installed) {
+            if (had_target && file.exists(backup)) {
+                file.rename(backup, target)
+            }
+            stop("could not install replacement RDS")
+        }
+        if (file.exists(backup)) {
+            unlink(backup, force = TRUE)
+        }
+        TRUE
+    }, error = function(e) {
+        if (!file.exists(target) && file.exists(backup)) {
+            file.rename(backup, target)
+        }
+        FALSE
+    })
+    isTRUE(ok)
+}
+
+build_gff_autocomplete_cache <- function(file_path, idx, max_suggestions = 20000L) {
+    p <- as.character(file_path %||% "")
+    if (!nzchar(p) || !file.exists(p) || !is.list(idx) || !is.data.frame(idx$genes_df)) {
+        return(NULL)
+    }
+    attrs <- as.character(idx$genes_df$attributes %||% rep("", nrow(idx$genes_df)))
+    display <- extract_partial_gene_display_names(attrs)
+    display <- sanitize_autocomplete_choices(display, max_total = max_suggestions)
+    keys <- as.character(normalize_partial_gene_query(display))
+    keep <- !is.na(keys) & nzchar(keys)
+    display <- display[keep]
+    keys <- keys[keep]
+    list(
+        display = display,
+        keys = keys,
+        version = .gff_autocomplete_cache_version,
+        annotation_key = gff_cache_key(p)
+    )
+}
+
+validate_gff_autocomplete_cache <- function(cache_obj, file_path) {
+    p <- as.character(file_path %||% "")
+    expected_key <- if (nzchar(p) && file.exists(p)) gff_cache_key(p) else ""
+    is.list(cache_obj) &&
+        identical(suppressWarnings(as.integer(cache_obj$version %||% NA_integer_)), .gff_autocomplete_cache_version) &&
+        identical(as.character(cache_obj$annotation_key %||% ""), expected_key) &&
+        is.character(cache_obj$display) &&
+        is.character(cache_obj$keys) &&
+        length(cache_obj$display) == length(cache_obj$keys)
+}
+
+load_gff_autocomplete_cache <- function(file_path, base_dir = ".") {
+    p <- as.character(file_path %||% "")
+    if (!nzchar(p) || !file.exists(p)) {
+        return(NULL)
+    }
+    key <- gff_cache_key(p)
+    cached <- get0(key, envir = .gff_autocomplete_cache_validation, inherits = FALSE, ifnotfound = NULL)
+    if (is.list(cached) && validate_gff_autocomplete_cache(cached, p)) {
+        return(cached)
+    }
+    cpath <- get_gff_disk_index_path(p, cache_kind = "autocomplete", base_dir = base_dir)
+    if (!file.exists(cpath)) {
+        cpath <- find_existing_gff_disk_index_path(p, cache_kind = "autocomplete", base_dir = base_dir)
+    }
+    cache_obj <- if (nzchar(cpath) && file.exists(cpath)) {
+        tryCatch(readRDS(cpath), error = function(e) NULL)
+    } else {
+        NULL
+    }
+    if (!validate_gff_autocomplete_cache(cache_obj, p)) {
+        return(NULL)
+    }
+    assign(key, cache_obj, envir = .gff_autocomplete_cache_validation)
+    cache_obj
+}
+
+ensure_gff_autocomplete_cache <- function(file_path, idx, base_dir = ".") {
+    p <- as.character(file_path %||% "")
+    existing <- load_gff_autocomplete_cache(p, base_dir = base_dir)
+    if (!is.null(existing)) {
+        return(existing)
+    }
+    cache_obj <- tryCatch(build_gff_autocomplete_cache(p, idx), error = function(e) NULL)
+    if (is.null(cache_obj)) {
+        return(NULL)
+    }
+    saved <- save_gff_index_to_disk(p, cache_obj, cache_kind = "autocomplete", base_dir = base_dir)
+    if (isTRUE(saved)) {
+        assign(gff_cache_key(p), cache_obj, envir = .gff_autocomplete_cache_validation)
+    }
+    cache_obj
+}
+
+slim_gff_gene_light_index <- function(idx) {
+    if (!is.list(idx)) {
+        return(idx)
+    }
+    keep <- intersect(c("genes_df", "gene_rows", "norm_map", "comp_map"), names(idx))
+    idx[keep]
+}
+
+slim_gff_gene_light_index_file <- function(file_path, base_dir = ".") {
+    p <- as.character(file_path %||% "")
+    cpath <- find_existing_gff_disk_index_path(p, cache_kind = "gene_light", base_dir = base_dir)
+    if (!nzchar(cpath) || !file.exists(cpath)) {
+        return(invisible(FALSE))
+    }
+    idx <- tryCatch(readRDS(cpath), error = function(e) NULL)
+    if (!is.list(idx) || is.null(idx$genes_df) || is.null(idx$norm_map)) {
+        return(invisible(FALSE))
+    }
+    removable <- intersect(c("norm_list", "comp_list", "all_norm_tokens"), names(idx))
+    ensure_gff_autocomplete_cache(p, idx, base_dir = base_dir)
+    if (length(removable) == 0L) {
+        return(invisible(TRUE))
+    }
+    slim <- slim_gff_gene_light_index(idx)
+    invisible(atomic_save_rds(slim, cpath, compress = "gzip"))
 }
 
 precompute_annotation_index_cache <- function(annotation_file_path, base_dir = ".") {
@@ -885,7 +1331,9 @@ precompute_annotation_index_cache <- function(annotation_file_path, base_dir = "
         return(NULL)
     }
     idx <- build_gff_gene_light_index(p)
-    save_gff_index_to_disk(p, idx, cache_kind = "gene_light", base_dir = base_dir)
+    slim_idx <- slim_gff_gene_light_index(idx)
+    save_gff_index_to_disk(p, slim_idx, cache_kind = "gene_light", base_dir = base_dir)
+    ensure_gff_autocomplete_cache(p, slim_idx, base_dir = base_dir)
     # Pre-warm the genes table so the first plot doesn't have to build it
     tryCatch(get_genes_table_from_annotation(p), error = function(e) NULL)
     idx
@@ -949,6 +1397,34 @@ is_tabix_annotation_file <- function(path_value, index_path = NULL) {
     file.exists(idx)
 }
 
+get_tabix_seqnames_cached <- function(file_path) {
+    p <- normalizePath(as.character(file_path %||% ""), winslash = "/", mustWork = FALSE)
+    if (!nzchar(p) || !file.exists(p) || !requireNamespace("Rsamtools", quietly = TRUE)) {
+        return(character(0))
+    }
+    idx_override <- get_tabix_index_override(p)
+    idx_path <- if (nzchar(idx_override) && file.exists(idx_override)) idx_override else find_existing_tabix_index(p)
+    info_parts <- c(p, idx_path)
+    info_sig <- vapply(info_parts, function(path_i) {
+        if (!nzchar(path_i) || !file.exists(path_i)) return("")
+        fi <- file.info(path_i)
+        paste(as.character(fi$size[1] %||% ""), as.character(as.numeric(fi$mtime[1] %||% NA_real_)), sep = ":")
+    }, character(1))
+    key <- paste(c(p, idx_path, info_sig), collapse = "||")
+    cached <- cache_env_get(.tabix_seqnames_cache, key, default = NULL)
+    if (!is.null(cached)) {
+        return(as.character(cached %||% character(0)))
+    }
+    tbx <- if (nzchar(idx_path) && file.exists(idx_path)) {
+        Rsamtools::TabixFile(p, index = idx_path)
+    } else {
+        Rsamtools::TabixFile(p)
+    }
+    seq_names <- tryCatch(as.character(Rsamtools::seqnamesTabix(tbx)), error = function(e) character(0))
+    cache_env_set(.tabix_seqnames_cache, key, seq_names, max_size = 64L)
+    seq_names
+}
+
 resolve_catalog_path <- function(path_value, base_dir = ".") {
     p <- as.character(path_value %||% "")
     if (!nzchar(p)) {
@@ -957,7 +1433,16 @@ resolve_catalog_path <- function(path_value, base_dir = ".") {
     if (grepl("^/", p) || grepl("^[A-Za-z]:", p)) {
         return(normalizePath(p, winslash = "/", mustWork = FALSE))
     }
-    normalizePath(file.path(base_dir, p), winslash = "/", mustWork = FALSE)
+    p_norm <- gsub("\\\\", "/", p)
+    first <- sub("/.*$", "", p_norm)
+    if (first %in% c("annotations", "genomes", "go_annotations", "ncbi_downloads", "data")) {
+        return(normalizePath(file.path(get_cgv_data_root(base_dir), p_norm), winslash = "/", mustWork = FALSE))
+    }
+    if (identical(first, "cache")) {
+        cache_rel <- sub("^cache/?", "", p_norm)
+        return(normalizePath(file.path(get_cgv_cache_root(base_dir), cache_rel), winslash = "/", mustWork = FALSE))
+    }
+    normalizePath(file.path(base_dir, p_norm), winslash = "/", mustWork = FALSE)
 }
 
 strip_data_extensions <- function(x) {
@@ -1039,37 +1524,15 @@ parse_assembly_report_file <- function(report_path) {
         return(out)
     }
 
-    meta_pat <- "^#\\s*([^#][^:]+):\\s*(.*)$"
-    for (ln in lines) {
-        m <- stringr::str_match(ln, meta_pat)
-        if (!all(is.na(m))) {
-            k <- tolower(trimws(as.character(m[1, 2] %||% "")))
-            v <- trimws(as.character(m[1, 3] %||% ""))
-            if (nzchar(k) && nzchar(v) && is.null(out$meta[[k]])) {
-                out$meta[[k]] <- v
-            }
-        }
-    }
-
-    add_chr_map <- function(map_obj, id_value, label_value) {
-        idv <- trimws(as.character(id_value %||% ""))
-        lbl <- trimws(as.character(label_value %||% ""))
-        if (!nzchar(idv) || !nzchar(lbl)) {
-            return(map_obj)
-        }
-        if (tolower(idv) %in% c("na", "all", ".")) {
-            return(map_obj)
-        }
-        if (tolower(lbl) %in% c("na", "all", ".")) {
-            return(map_obj)
-        }
-        keys <- unique(c(idv, sub("\\.\\d+$", "", idv)))
-        keys <- keys[nzchar(keys)]
-        for (kk in keys) {
-            k_norm <- tolower(kk)
-            if (is.null(map_obj[[k_norm]])) map_obj[[k_norm]] <- lbl
-        }
-        map_obj
+    meta_matches <- stringr::str_match(lines, "^#\\s*([^#][^:]+):\\s*(.*)$")
+    meta_keys <- tolower(trimws(as.character(meta_matches[, 2] %||% "")))
+    meta_values <- trimws(as.character(meta_matches[, 3] %||% ""))
+    meta_keep <- !is.na(meta_keys) & nzchar(meta_keys) & !is.na(meta_values) & nzchar(meta_values)
+    if (any(meta_keep)) {
+        meta_keys <- meta_keys[meta_keep]
+        meta_values <- meta_values[meta_keep]
+        first <- !duplicated(meta_keys)
+        out$meta <- as.list(stats::setNames(meta_values[first], meta_keys[first]))
     }
 
     tbl_idx <- grep("^#\\s*Sequence-Name\\t", lines)
@@ -1077,19 +1540,42 @@ parse_assembly_report_file <- function(report_path) {
         data_lines <- lines[seq.int(tbl_idx[1] + 1L, length(lines))]
         data_lines <- data_lines[!startsWith(data_lines, "#") & nzchar(trimws(data_lines))]
         if (length(data_lines) > 0) {
-            for (ln in data_lines) {
-                tok <- strsplit(ln, "\t", fixed = TRUE)[[1]]
-                if (length(tok) < 7) next
-                seq_name <- trimws(tok[1])
-                assigned <- trimws(tok[3])
-                genbank <- trimws(tok[5])
-                refseq <- trimws(tok[7])
-                ucsc <- if (length(tok) >= 10) trimws(tok[10]) else ""
-                label <- if (nzchar(assigned) && !tolower(assigned) %in% c("na", ".")) assigned else seq_name
-                out$chr_map <- add_chr_map(out$chr_map, seq_name, label)
-                out$chr_map <- add_chr_map(out$chr_map, genbank, label)
-                out$chr_map <- add_chr_map(out$chr_map, refseq, label)
-                out$chr_map <- add_chr_map(out$chr_map, ucsc, label)
+            table_text <- paste(data_lines, collapse = "\n")
+            report_df <- tryCatch(
+                utils::read.delim(
+                    text = table_text,
+                    header = FALSE,
+                    sep = "\t",
+                    quote = "",
+                    comment.char = "",
+                    fill = TRUE,
+                    stringsAsFactors = FALSE
+                ),
+                error = function(e) data.frame()
+            )
+            if (nrow(report_df) > 0L && ncol(report_df) >= 7L) {
+                seq_name <- trimws(as.character(report_df[[1]] %||% ""))
+                assigned <- trimws(as.character(report_df[[3]] %||% ""))
+                genbank <- trimws(as.character(report_df[[5]] %||% ""))
+                refseq <- trimws(as.character(report_df[[7]] %||% ""))
+                ucsc <- if (ncol(report_df) >= 10L) trimws(as.character(report_df[[10]] %||% "")) else rep("", nrow(report_df))
+                label <- ifelse(
+                    nzchar(assigned) & !tolower(assigned) %in% c("na", "."),
+                    assigned,
+                    seq_name
+                )
+                ids <- as.character(t(cbind(seq_name, genbank, refseq, ucsc)))
+                labels <- rep(label, each = 4L)
+                keys <- as.vector(rbind(ids, sub("\\.\\d+$", "", ids)))
+                key_labels <- rep(labels, each = 2L)
+                valid <- !is.na(keys) & nzchar(trimws(keys)) &
+                    !tolower(trimws(keys)) %in% c("na", "all", ".") &
+                    !is.na(key_labels) & nzchar(trimws(key_labels)) &
+                    !tolower(trimws(key_labels)) %in% c("na", "all", ".")
+                keys <- tolower(trimws(keys[valid]))
+                key_labels <- trimws(key_labels[valid])
+                first <- !duplicated(keys)
+                out$chr_map <- as.list(stats::setNames(key_labels[first], keys[first]))
             }
         }
     }
@@ -1146,7 +1632,7 @@ parse_assembly_stats_file <- function(stats_path) {
             })
             rows <- rows[!vapply(rows, is.null, logical(1))]
             if (length(rows) > 0) {
-                df <- do.call(rbind, rows)
+                df <- do.call(rbind,  rows)
                 df <- df[tolower(trimws(df$unit_name)) == "all", c("statistic", "value"), drop = FALSE]
                 if (nrow(df) > 0) {
                     df$statistic <- trimws(as.character(df$statistic))
@@ -1210,7 +1696,7 @@ get_assembly_report_path_for_annotation <- function(annotation_file_path, base_d
 }
 
 resolve_icon_web_path <- function(icon_value, base_dir = ".") {
-    default_icon <- if (file.exists(normalizePath(file.path(base_dir, "www", "icons", "DNA.ico"), winslash = "/", mustWork = FALSE))) "/icons/DNA.ico" else "/icons/dna.ico"
+    default_icon <- if (file.exists(normalizePath(file.path(base_dir, "www", "icons", "DNA.ico"), winslash = "/", mustWork = FALSE))) "icons/DNA.ico" else "icons/dna.ico"
     p <- trimws(as.character(icon_value %||% ""))
     if (!nzchar(p)) {
         return(default_icon)
@@ -1219,7 +1705,11 @@ resolve_icon_web_path <- function(icon_value, base_dir = ".") {
         return(p)
     }
     if (startsWith(p, "/")) {
-        return(p)
+        p_rel <- sub("^/+", "", p)
+        if (file.exists(normalizePath(file.path(base_dir, "www", p_rel), winslash = "/", mustWork = FALSE))) {
+            return(p_rel)
+        }
+        return(default_icon)
     }
 
     p_abs <- if (grepl("^[A-Za-z]:", p) || startsWith(p, "/")) {
@@ -1230,12 +1720,12 @@ resolve_icon_web_path <- function(icon_value, base_dir = ".") {
     www_dir <- normalizePath(file.path(base_dir, "www"), winslash = "/", mustWork = FALSE)
     if (file.exists(p_abs) && startsWith(p_abs, paste0(www_dir, "/"))) {
         rel <- substring(p_abs, nchar(www_dir) + 2)
-        return(paste0("/", rel))
+        return(rel)
     }
 
     p2 <- sub("^www/", "", p)
     if (file.exists(normalizePath(file.path(base_dir, "www", p2), winslash = "/", mustWork = FALSE))) {
-        return(paste0("/", p2))
+        return(p2)
     }
     default_icon
 }
@@ -1384,7 +1874,7 @@ parse_gff_attributes <- function(attr) {
             kvp <- strsplit(p, "=", fixed = TRUE)[[1]]
             list(key = safe_url_decode(kvp[1]), value = safe_url_decode(paste(kvp[-1], collapse = "=")))
         } else {
-            m <- str_match(p, '^([^\\s]+)\\s+"([^"]+)"')
+            m <- stringr::str_match(p, '^([^\\s]+)\\s+"([^"]+)"')
             if (!all(is.na(m))) list(key = safe_url_decode(m[1, 2]), value = safe_url_decode(m[1, 3])) else list(key = NA_character_, value = safe_url_decode(p))
         }
     })
@@ -1423,7 +1913,7 @@ normalize_gene_token <- function(x) {
 }
 normalize_gene_compact <- function(x) {
     x <- normalize_gene_token(x)
-    gsub("[;._\\-\\s]", "", x)
+    gsub("[^a-z0-9]+", "", x)
 }
 
 is_known_gene_stable_id <- function(x) {
@@ -1486,6 +1976,37 @@ is_symbol_like_gene_query <- function(q) {
     grepl("[a-z]", comp) && grepl("[0-9]", comp) && !is_known_gene_stable_id(comp)
 }
 
+is_low_specific_gene_family_query <- function(q) {
+    comp <- normalize_partial_gene_query(q)
+    nzchar(comp) &&
+        nchar(comp) >= 2L &&
+        nchar(comp) <= 8L &&
+        grepl("^[a-z]+$", comp)
+}
+
+is_same_low_specific_family_alias <- function(input_gene, alias_candidate) {
+    input_comp <- normalize_partial_gene_query(input_gene)
+    alias_comp <- normalize_partial_gene_query(alias_candidate)
+    nzchar(input_comp) &&
+        nzchar(alias_comp) &&
+        identical(input_comp, alias_comp) &&
+        is_low_specific_gene_family_query(input_gene)
+}
+
+is_ambiguous_low_specific_family_alias <- function(input_gene, alias_candidate) {
+    if (!is_low_specific_gene_family_query(input_gene)) {
+        return(FALSE)
+    }
+    input_alpha <- extract_gene_query_alpha_core(input_gene)
+    alias_alpha <- extract_gene_query_alpha_core(alias_candidate)
+    if (!nzchar(input_alpha) || !identical(input_alpha, alias_alpha)) {
+        return(FALSE)
+    }
+    alias_txt <- normalize_lookup_alias(alias_candidate)
+    alias_digits <- extract_gene_query_digit_core(alias_txt)
+    nzchar(alias_digits) && !grepl("[;._:-]", alias_txt)
+}
+
 collect_result_evidence_tokens <- function(res_obj, alias_candidate = NULL) {
     txt <- c(
         alias_candidate,
@@ -1511,42 +2032,117 @@ collect_result_evidence_tokens <- function(res_obj, alias_candidate = NULL) {
     unique(tolower(txt))
 }
 
+collect_result_identity_tokens <- function(res_obj, alias_candidate = NULL) {
+    txt <- c(
+        alias_candidate,
+        as.character(res_obj$matched_gene_name %||% ""),
+        as.character(res_obj$matched_gene_id %||% "")
+    )
+
+    if (!is.null(res_obj$data) && nrow(res_obj$data) > 0 && "V9" %in% colnames(res_obj$data)) {
+        attrs <- parse_gff_attributes(as.character(res_obj$data$V9[1] %||% ""))
+        keys <- c(
+            "id", "name", "gene", "gene_name", "gene_id", "gene_synonym",
+            "gene_synonyms", "synonym", "alias", "dbxref", "locus",
+            "locus_tag", "transcript_id", "transcript", "protein_id"
+        )
+        for (k in intersect(keys, names(attrs))) {
+            v <- attrs[[k]]
+            if (!is.null(v) && length(v) > 0) {
+                split_vals <- unlist(strsplit(as.character(v), "[,| ]"))
+                txt <- c(txt, as.character(v), split_vals)
+            }
+        }
+    }
+
+    txt <- as.character(txt %||% character(0))
+    txt <- trimws(safe_url_decode(txt))
+    txt <- txt[!is.na(txt) & nzchar(txt)]
+    txt <- txt[tolower(txt) != "na"]
+    unique(tolower(txt))
+}
+
+is_gene_symbol_extension_alias <- function(input_gene, alias_candidate) {
+    input_comp <- gsub("[^a-z0-9]+", "", normalize_gene_token(input_gene))
+    alias_comp <- gsub("[^a-z0-9]+", "", normalize_gene_token(alias_candidate))
+    if (!nzchar(input_comp) || !nzchar(alias_comp) || identical(input_comp, alias_comp)) {
+        return(FALSE)
+    }
+    if (!grepl("[a-z]", input_comp) || !grepl("[0-9]", input_comp)) {
+        return(FALSE)
+    }
+    startsWith(alias_comp, input_comp)
+}
+
+is_compact_gene_identity_match <- function(input_gene, token) {
+    input_clean <- tolower(trimws(safe_url_decode(input_gene)))
+    token_clean <- tolower(trimws(safe_url_decode(token)))
+    if (!nzchar(input_clean) || !nzchar(token_clean)) {
+        return(FALSE)
+    }
+    if (identical(input_clean, token_clean)) {
+        return(TRUE)
+    }
+
+    input_compact <- gsub("[^a-z0-9]+", "", input_clean)
+    token_compact <- gsub("[^a-z0-9]+", "", token_clean)
+    if (!nzchar(input_compact) || !nzchar(token_compact) || !identical(input_compact, token_compact)) {
+        return(FALSE)
+    }
+
+    input_alpha <- extract_gene_query_alpha_core(input_gene)
+    token_alpha <- extract_gene_query_alpha_core(token)
+    input_digits <- extract_gene_query_digit_chunks(input_gene)
+    token_digits <- extract_token_digit_chunks(token)
+    identical(input_alpha, token_alpha) &&
+        digit_chunks_compatible(input_digits, token_digits)
+}
+
+is_external_bridge_identifier_alias <- function(alias_candidate) {
+    txt <- normalize_lookup_alias(alias_candidate)
+    low <- tolower(txt)
+    comp <- gsub("[^a-z0-9]+", "", low)
+    if (!nzchar(comp)) {
+        return(FALSE)
+    }
+    is_known_gene_stable_id(txt) ||
+        grepl("^loc[a-z0-9]*[0-9][a-z0-9]*$", comp) ||
+        grepl("^[a-z]{1,3}_[0-9]+(\\.[0-9]+)?$", low) ||
+        grepl("^[a-z]{2}_[0-9]+(\\.[0-9]+)?$", low) ||
+        grepl("^[a-z]{1,4}[0-9]{5,}(\\.[0-9]+)?$", low)
+}
+
 is_alias_result_compatible <- function(input_gene, alias_candidate, res_obj,
                                       organism = NULL, taxid = NULL) {
     if (is.null(res_obj) || is.null(res_obj$data) || nrow(res_obj$data) == 0) {
+        return(FALSE)
+    }
+    if (is_same_low_specific_family_alias(input_gene, alias_candidate)) {
+        return(FALSE)
+    }
+    if (is_ambiguous_low_specific_family_alias(input_gene, alias_candidate)) {
+        return(FALSE)
+    }
+    if (is_gene_symbol_extension_alias(input_gene, alias_candidate)) {
         return(FALSE)
     }
     if (!is_symbol_like_gene_query(input_gene)) {
         return(TRUE)
     }
 
-    # Collect local evidence tokens from the GFF annotation
-    evidence <- collect_result_evidence_tokens(res_obj, alias_candidate)
-    if (length(evidence) == 0) {
+    identity <- collect_result_identity_tokens(res_obj, alias_candidate)
+    if (length(identity) == 0) {
         return(FALSE)
     }
 
-    input_clean <- tolower(trimws(input_gene))
-    evidence_clean <- tolower(trimws(evidence))
-
-    # Compact versions to ignore punctuation (hkt1;5 -> hkt15)
-    # while preserving STRICT matching (hkt1 != hkt15)
-    input_compact <- gsub("[^a-z0-9]", "", input_clean)
-    evidence_compact <- gsub("[^a-z0-9]", "", evidence_clean)
-
-    # EXACT match: input gene name found directly in annotation tokens
-    if (input_clean %in% evidence_clean || input_compact %in% evidence_compact) {
+    if (any(vapply(identity, is_compact_gene_identity_match, logical(1), input_gene = input_gene))) {
         return(TRUE)
     }
 
-    # If we reach here, the input gene name (e.g. "nhx2") is NOT directly
-    # in the annotation, but the external API returned alias_candidate
-    # (e.g. "LOC4337811") which WAS found via exact match in the annotation.
-    # Trust the external API's alias relationship — the alias_candidate
-    # bridged the gap between the user's query and the annotation file.
-    # The downstream scoring system (alias_quality_score, classify_result_rank,
-    # result_name_penalty) handles ranking and false-positive filtering.
-    return(TRUE)
+    # External aliases may bridge to local IDs (for example LOC identifiers),
+    # but symbol-like queries must not resolve through description-only terms.
+    !is_gene_symbol_extension_alias(input_gene, alias_candidate) &&
+        is_external_bridge_identifier_alias(alias_candidate)
 }
 
 normalize_lookup_alias <- function(x) {
@@ -1708,11 +2304,12 @@ choose_lookup_display_gene_name <- function(res_obj, query_candidates = characte
 
     matched_name <- normalize_lookup_alias(res_list$matched_gene_name %||% "")
     matched_id <- normalize_lookup_alias(res_list$matched_gene_id %||% "")
+    include_input_label <- !is_low_specific_gene_family_query(input_label) || !nzchar(matched_name)
     candidates <- normalize_lookup_query_candidates(c(
         best_alias_used,
         matched_name,
         query_vec,
-        input_label,
+        if (isTRUE(include_input_label)) input_label else character(0),
         matched_id
     ))
     if (length(candidates) == 0) {
@@ -1834,6 +2431,20 @@ resolve_external_alias_bridge <- function(input_gene, query_candidates, file_pat
     alias_candidates <- as.character(query_candidates_used)
     alias_candidates <- unique(vapply(alias_candidates, normalize_lookup_alias, character(1)))
     alias_candidates <- alias_candidates[nzchar(alias_candidates)]
+    if (is_low_specific_gene_family_query(input_gene)) {
+        alias_candidates <- alias_candidates[!vapply(
+            alias_candidates,
+            is_same_low_specific_family_alias,
+            logical(1),
+            input_gene = input_gene
+        )]
+        alias_candidates <- alias_candidates[!vapply(
+            alias_candidates,
+            is_ambiguous_low_specific_family_alias,
+            logical(1),
+            input_gene = input_gene
+        )]
+    }
     if (length(alias_candidates) == 0) {
         app_perf_mark(bridge_perf, "no alias candidates", "ALIAS_BRIDGE")
         return(list(
@@ -1868,7 +2479,7 @@ resolve_external_alias_bridge <- function(input_gene, query_candidates, file_pat
             show_diagnostics = FALSE,
             match_mode = "exact",
             return_meta = TRUE,
-            include_bridge_tokens = TRUE
+            include_bridge_tokens = FALSE
         )
         if (is.null(cand_res$data) || nrow(cand_res$data) == 0) {
             next
@@ -2070,7 +2681,7 @@ parse_gff_lines_to_df <- function(lines) {
     ncols <- ncols[valid]
 
     # Vectorized: build matrix for first 8 columns, handle col 9+ separately
-    mat <- do.call(rbind, lapply(fields, function(x) x[1:8]))
+    mat <- do.call(rbind,  lapply(fields, function(x) x[1:8]))
     # Column 9+: paste remaining columns (handles embedded tabs in attributes)
     attr_col <- vapply(seq_along(fields), function(i) {
         paste(fields[[i]][9:ncols[i]], collapse = "\t")
@@ -2127,10 +2738,10 @@ stream_gff_gene_rows <- function(file_path, chunk_size = 50000L) {
         }
     }
     if (length(gene_pieces) > 0) {
-        return(bind_rows(gene_pieces))
+        return(do.call(rbind, gene_pieces))
     }
     if (length(cds_pieces) > 0) {
-        return(bind_rows(cds_pieces))
+        return(do.call(rbind, cds_pieces))
     }
     empty_gff_df()
 }
@@ -2151,18 +2762,21 @@ build_gene_lookup_maps <- function(gene_attrs) {
     comp_rows <- if (length(comp_tokens) > 0) rep(seq_along(gene_attrs), lengths(comp_list)) else integer(0)
     norm_map <- if (length(norm_tokens) > 0) lapply(split(norm_rows, norm_tokens), unique) else list()
     comp_map <- if (length(comp_tokens) > 0) lapply(split(comp_rows, comp_tokens), unique) else list()
-    list(norm_list = norm_list, comp_list = comp_list, norm_map = norm_map, comp_map = comp_map, all_norm_tokens = unique(norm_tokens))
+    list(norm_map = norm_map, comp_map = comp_map)
 }
 
 build_gff_gene_light_index <- function(file_path) {
     key <- gff_cache_key(file_path)
     cached_idx <- cache_env_get(.gff_gene_light_index_cache, key, default = NULL)
     if (!is.null(cached_idx)) {
+        ensure_gff_autocomplete_cache(file_path, cached_idx, base_dir = ".")
         return(cached_idx)
     }
 
     idx_disk <- load_gff_index_from_disk(file_path, cache_kind = "gene_light", base_dir = ".")
     if (!is.null(idx_disk) && is.list(idx_disk) && !is.null(idx_disk$genes_df) && !is.null(idx_disk$norm_map)) {
+        ensure_gff_autocomplete_cache(file_path, idx_disk, base_dir = ".")
+        idx_disk <- slim_gff_gene_light_index(idx_disk)
         cache_env_set(
             .gff_gene_light_index_cache,
             key,
@@ -2183,7 +2797,9 @@ build_gff_gene_light_index <- function(file_path) {
         ),
         maps
     )
+    idx <- slim_gff_gene_light_index(idx)
     save_gff_index_to_disk(file_path, idx, cache_kind = "gene_light", base_dir = ".")
+    ensure_gff_autocomplete_cache(file_path, idx, base_dir = ".")
     cache_env_set(
         .gff_gene_light_index_cache,
         key,
@@ -2192,6 +2808,29 @@ build_gff_gene_light_index <- function(file_path) {
         max_bytes = annotation_memory_cache_limits$gene_light_max_bytes
     )
     idx
+}
+
+load_gff_gene_light_index_if_available <- function(file_path, base_dir = ".") {
+    key <- gff_cache_key(file_path)
+    cached_idx <- cache_env_get(.gff_gene_light_index_cache, key, default = NULL)
+    if (!is.null(cached_idx)) {
+        ensure_gff_autocomplete_cache(file_path, cached_idx, base_dir = base_dir)
+        return(cached_idx)
+    }
+    idx_disk <- load_gff_index_from_disk(file_path, cache_kind = "gene_light", base_dir = base_dir)
+    if (!is.null(idx_disk) && is.list(idx_disk) && !is.null(idx_disk$genes_df) && !is.null(idx_disk$norm_map)) {
+        ensure_gff_autocomplete_cache(file_path, idx_disk, base_dir = base_dir)
+        idx_disk <- slim_gff_gene_light_index(idx_disk)
+        cache_env_set(
+            .gff_gene_light_index_cache,
+            key,
+            idx_disk,
+            max_size = annotation_memory_cache_limits$gene_light_max_entries,
+            max_bytes = annotation_memory_cache_limits$gene_light_max_bytes
+        )
+        return(idx_disk)
+    }
+    NULL
 }
 
 resolve_seqname_in_vector <- function(seqid, seq_names = character(0)) {
@@ -2237,7 +2876,7 @@ scan_tabix_region_gff <- function(file_path, seqid, start_pos, end_pos) {
     } else {
         Rsamtools::TabixFile(file_path)
     }
-    seq_names <- tryCatch(as.character(Rsamtools::seqnamesTabix(tbx)), error = function(e) character(0))
+    seq_names <- get_tabix_seqnames_cached(file_path)
     resolved_seqname <- resolve_seqname_in_vector(seqid, seq_names = seq_names) %||% seqid
     region <- GenomicRanges::GRanges(
         seqnames = resolved_seqname,
@@ -2272,28 +2911,71 @@ extract_gene_block_from_df <- function(df, gene_id) {
     variants_esc <- vapply(variants, escape_regex, character(1))
     id_pattern <- paste0("(", paste(variants_esc, collapse = "|"), ")")
 
-    direct_children <- df %>%
-        filter(grepl(paste0("ID=", id_pattern, "(;|$)"), attributes) |
+    direct_children <- df |>
+        dplyr::filter(grepl(paste0("ID=", id_pattern, "(;|$)"), attributes) |
             grepl(paste0("Parent=", id_pattern, "(;|$)"), attributes))
 
-    child_ids <- str_extract(direct_children$attributes, "ID=[^;]+") %>%
-        str_remove("ID=") %>%
-        na.omit()
+    child_ids <- stringr::str_extract(direct_children$attributes, "ID=[^;]+") |>
+        stringr::str_remove("ID=") |>
+        stats::na.omit()
     grandchildren <- if (length(child_ids) > 0) {
         # Child IDs may also be URL-encoded, build variants for each
         child_variants <- unique(c(child_ids, tryCatch(safe_url_decode(child_ids), error = function(e) character(0))))
         child_variants <- child_variants[!is.na(child_variants) & nzchar(child_variants)]
         child_pattern <- paste0("(", paste(escape_regex(child_variants), collapse = "|"), ")")
-        df %>% filter(grepl(paste0("Parent=", child_pattern, "(;|$)"), attributes))
+        df |> dplyr::filter(grepl(paste0("Parent=", child_pattern, "(;|$)"), attributes))
     } else {
         data.frame()
     }
-    result_df <- as.data.frame(distinct(bind_rows(direct_children, grandchildren)))
+    result_df <- as.data.frame(dplyr::distinct(dplyr::bind_rows(direct_children, grandchildren)))
     if (nrow(result_df) == 0) {
         return(result_df)
     }
     colnames(result_df) <- paste0("V", 1:9)
     result_df
+}
+
+subset_gff_df_to_gene_region <- function(df, target_gene_row, padding_bp = 0L) {
+    if (is.null(df) || !is.data.frame(df) || nrow(df) == 0L ||
+        is.null(target_gene_row) || !is.data.frame(target_gene_row) || nrow(target_gene_row) == 0L) {
+        return(df)
+    }
+    chr <- as.character(target_gene_row$seqid[1] %||% target_gene_row$V1[1] %||% "")
+    start_pos <- suppressWarnings(as.numeric(target_gene_row$start[1] %||% target_gene_row$V4[1] %||% NA_real_))
+    end_pos <- suppressWarnings(as.numeric(target_gene_row$end[1] %||% target_gene_row$V5[1] %||% NA_real_))
+    if (!nzchar(chr) || !is.finite(start_pos) || !is.finite(end_pos)) {
+        return(df)
+    }
+    if (end_pos < start_pos) {
+        tmp <- start_pos
+        start_pos <- end_pos
+        end_pos <- tmp
+    }
+    pad <- suppressWarnings(as.numeric(padding_bp %||% 0))
+    if (!is.finite(pad) || pad < 0) {
+        pad <- 0
+    }
+    region_start <- max(1, start_pos - pad)
+    region_end <- end_pos + pad
+
+    seq_col <- if ("seqid" %in% colnames(df)) "seqid" else if ("V1" %in% colnames(df)) "V1" else ""
+    start_col <- if ("start" %in% colnames(df)) "start" else if ("V4" %in% colnames(df)) "V4" else ""
+    end_col <- if ("end" %in% colnames(df)) "end" else if ("V5" %in% colnames(df)) "V5" else ""
+    if (!nzchar(seq_col) || !nzchar(start_col) || !nzchar(end_col)) {
+        return(df)
+    }
+
+    row_start <- suppressWarnings(as.numeric(df[[start_col]]))
+    row_end <- suppressWarnings(as.numeric(df[[end_col]]))
+    keep <- as.character(df[[seq_col]]) == chr &
+        is.finite(row_start) &
+        is.finite(row_end) &
+        row_end >= region_start &
+        row_start <= region_end
+    if (!any(keep, na.rm = TRUE)) {
+        return(df)
+    }
+    df[keep %in% TRUE, , drop = FALSE]
 }
 
 build_gff_gene_index <- function(file_path) {
@@ -2333,17 +3015,1235 @@ search_gene_rows_with_index <- function(idx, gene_names, match_mode = c("flex", 
     }
     gene_norms <- normalize_gene_token(gene_names)
     gene_compacts <- normalize_gene_compact(gene_names)
+    gene_norms <- unique(gene_norms[nzchar(gene_norms)])
+    gene_compacts <- unique(gene_compacts[nzchar(gene_compacts)])
+
+    collect_lookup_hits <- function() {
+        norm_hits <- if (length(gene_norms) > 0) {
+            unlist(idx$norm_map[gene_norms], use.names = FALSE)
+        } else {
+            integer(0)
+        }
+        comp_hits <- if (length(gene_compacts) > 0) {
+            unlist(idx$comp_map[gene_compacts], use.names = FALSE)
+        } else {
+            integer(0)
+        }
+        rel <- unique(c(norm_hits, comp_hits))
+        rel <- suppressWarnings(as.integer(rel))
+        rel[!is.na(rel) & rel >= 1L & rel <= length(idx$gene_rows)]
+    }
 
     if (match_mode == "exact") {
-        rel <- unique(c(unlist(idx$norm_map[gene_norms], use.names = FALSE), unlist(idx$comp_map[gene_compacts], use.names = FALSE)))
-        rel <- rel[rel >= 1L & rel <= length(idx$gene_rows)]
+        rel <- collect_lookup_hits()
         return(idx$gene_rows[rel])
     }
 
-    hit_rel <- which(vapply(seq_along(idx$gene_rows), function(i) {
-        any(idx$norm_list[[i]] %in% gene_norms) || any(idx$comp_list[[i]] %in% gene_compacts)
-    }, logical(1)))
-    idx$gene_rows[hit_rel]
+    # Flex mode uses the same normalized/compact alias tokens as exact mode.
+    # Querying the token maps avoids scanning every gene row on every no-hit search.
+    rel <- sort(collect_lookup_hits())
+    idx$gene_rows[rel]
+}
+
+normalize_partial_gene_query <- function(x) {
+    comp <- normalize_gene_compact(x)
+    comp <- gsub("[^a-z0-9]+", "", comp)
+    trimws(comp)
+}
+
+extract_partial_gene_display_name <- function(attr) {
+    attrs <- parse_gff_attributes(attr %||% "")
+    vals <- c(
+        attrs[["gene_name"]][1],
+        attrs[["gene"]][1],
+        attrs[["name"]][1],
+        attrs[["alias"]][1],
+        attrs[["gene_synonym"]][1],
+        attrs[["locus_tag"]][1],
+        attrs[["gene_id"]][1],
+        attrs[["id"]][1]
+    )
+    vals <- trimws(safe_url_decode(as.character(vals %||% character(0))))
+    vals <- vals[!is.na(vals) & nzchar(vals)]
+    if (length(vals) == 0L) {
+        return("")
+    }
+    vals[1]
+}
+
+empty_partial_gene_suggestions_df <- function(source_labels = FALSE, source_label_preview = FALSE) {
+    out <- data.frame(
+        gene_name = character(0),
+        file_label = character(0),
+        match_type = character(0),
+        score = numeric(0),
+        source_count = integer(0),
+        local_gene_id = character(0),
+        local_symbol = character(0),
+        term_type = character(0),
+        source_db = character(0),
+        confidence = character(0),
+        match_role = character(0),
+        requires_confirmation = logical(0),
+        stringsAsFactors = FALSE
+    )
+    if (isTRUE(source_labels)) out$source_labels <- character(0)
+    if (isTRUE(source_label_preview)) out$source_label_preview <- character(0)
+    out
+}
+
+normalize_partial_gene_suggestions_df <- function(df, source_labels = FALSE, source_label_preview = FALSE) {
+    if (is.null(df) || !is.data.frame(df) || nrow(df) == 0L) {
+        return(empty_partial_gene_suggestions_df(
+            source_labels = source_labels,
+            source_label_preview = source_label_preview
+        ))
+    }
+    empty <- empty_partial_gene_suggestions_df(
+        source_labels = source_labels || "source_labels" %in% names(df),
+        source_label_preview = source_label_preview || "source_label_preview" %in% names(df)
+    )
+    for (nm in names(empty)) {
+        if (!nm %in% names(df)) {
+            if (identical(nm, "score")) {
+                df[[nm]] <- rep(NA_real_, nrow(df))
+            } else if (identical(nm, "source_count")) {
+                df[[nm]] <- rep(NA_integer_, nrow(df))
+            } else if (identical(nm, "requires_confirmation")) {
+                df[[nm]] <- rep(FALSE, nrow(df))
+            } else {
+                df[[nm]] <- rep("", nrow(df))
+            }
+        }
+    }
+    df <- df[, names(empty), drop = FALSE]
+    char_cols <- setdiff(names(df), c("score", "source_count", "requires_confirmation"))
+    for (nm in char_cols) df[[nm]] <- as.character(df[[nm]] %||% "")
+    df$score <- suppressWarnings(as.numeric(df$score))
+    df$source_count <- suppressWarnings(as.integer(df$source_count))
+    df$requires_confirmation <- as.logical(df$requires_confirmation %||% FALSE)
+    df$requires_confirmation[is.na(df$requires_confirmation)] <- FALSE
+    df
+}
+
+is_verified_local_description_alias_match <- function(match_row) {
+    if (is.null(match_row) || !is.data.frame(match_row) || nrow(match_row) == 0L) return(FALSE)
+    row <- match_row[1, , drop = FALSE]
+    local_gene_id <- trimws(as.character(row$local_gene_id[1] %||% ""))
+    if (!nzchar(local_gene_id)) return(FALSE)
+    term_type <- tolower(trimws(as.character(row$term_type[1] %||% "")))
+    source_db <- toupper(trimws(as.character(row$source_db[1] %||% "")))
+    evidence_source <- tolower(trimws(as.character(row$evidence_source[1] %||% "")))
+    term_type %in% c("description", "product", "note") &&
+        (identical(source_db, "GFF") || identical(evidence_source, "local_annotation"))
+}
+
+extract_partial_gene_display_names <- function(attrs) {
+    attrs <- as.character(attrs %||% character(0))
+    if (length(attrs) == 0L) return(character(0))
+
+    pick <- function(pattern) {
+        out <- stringr::str_match(attrs, pattern)[, 2]
+        sanitize_gene_display_name_batch(out)
+    }
+    gene_name <- pick('(?:^|;|\\t)\\s*gene_name\\s*[= ]\\s*"?([^;"\\t]+)')
+    gene_field <- pick("(?:^|;)\\s*gene=([^;]+)")
+    name_field <- pick("(?:^|;)\\s*Name=([^;]+)")
+    alias_field <- pick("(?:^|;)\\s*Alias=([^;]+)")
+    synonym_field <- pick("(?:^|;)\\s*gene_synonym=([^;]+)")
+    locus_tag <- pick("(?:^|;)\\s*locus_tag=([^;]+)")
+    gene_id <- pick("(?:^|;)\\s*gene_id=([^;]+)")
+    id_field <- pick("(?:^|;)\\s*ID=([^;]+)")
+
+    if (length(synonym_field) > 0L) {
+        synonym_field <- vapply(strsplit(as.character(synonym_field %||% ""), ",", fixed = TRUE), function(x) {
+            vals <- trimws(as.character(x %||% character(0)))
+            vals <- vals[nzchar(vals) & !is.na(vals)]
+            if (length(vals) == 0L) "" else vals[[1L]]
+        }, character(1))
+        synonym_field <- sanitize_gene_display_name_batch(synonym_field)
+    }
+
+    candidates <- data.frame(
+        gene_name = gene_name,
+        gene = gene_field,
+        name = name_field,
+        alias = alias_field,
+        synonym = synonym_field,
+        locus_tag = locus_tag,
+        gene_id = gene_id,
+        id = id_field,
+        stringsAsFactors = FALSE
+    )
+    out <- rep("", nrow(candidates))
+    for (col in names(candidates)) {
+        vals <- trimws(safe_url_decode(as.character(candidates[[col]] %||% "")))
+        take <- !nzchar(out) & !is.na(vals) & nzchar(vals)
+        out[take] <- vals[take]
+    }
+    out
+}
+
+find_partial_gene_suggestions_from_choices <- function(choices, query, file_label = NULL,
+                                                       max_suggestions = 10L,
+                                                       min_query_chars = 2L) {
+    q_comp <- normalize_partial_gene_query(query)
+    min_query_chars <- suppressWarnings(as.integer(min_query_chars %||% 2L))
+    if (!is.finite(min_query_chars) || is.na(min_query_chars) || min_query_chars < 1L) {
+        min_query_chars <- 2L
+    }
+    if (nchar(q_comp) < min_query_chars) {
+        return(empty_partial_gene_suggestions_df())
+    }
+    max_suggestions <- suppressWarnings(as.integer(max_suggestions %||% 10L))
+    if (!is.finite(max_suggestions) || is.na(max_suggestions) || max_suggestions < 1L) {
+        max_suggestions <- 10L
+    }
+    display <- trimws(as.character(choices %||% character(0)))
+    display <- display[!is.na(display) & nzchar(display) & nchar(display) <= 80]
+    if (length(display) == 0L) {
+        return(empty_partial_gene_suggestions_df())
+    }
+    comp <- vapply(display, normalize_partial_gene_query, character(1))
+    exact_hit <- comp == q_comp
+    hit_prefix <- !exact_hit & startsWith(comp, q_comp)
+    hit_contains <- !exact_hit & !hit_prefix & grepl(q_comp, comp, fixed = TRUE)
+    hit <- hit_prefix | hit_contains
+    if (!any(hit)) {
+        return(empty_partial_gene_suggestions_df())
+    }
+    out <- data.frame(
+        gene_name = display[hit],
+        file_label = rep(as.character(file_label %||% ""), sum(hit)),
+        match_type = ifelse(hit_prefix[hit], "prefix", "contains"),
+        score = ifelse(hit_prefix[hit], 100, 60) - pmax(0, nchar(comp[hit]) - nchar(q_comp)),
+        source_count = rep(1L, sum(hit)),
+        stringsAsFactors = FALSE
+    )
+    out <- normalize_partial_gene_suggestions_df(out)
+    out$key <- tolower(normalize_gene_compact(out$gene_name))
+    out <- out[!duplicated(out$key), , drop = FALSE]
+    out$key <- NULL
+    out <- out[order(-out$score, nchar(out$gene_name), tolower(out$gene_name)), , drop = FALSE]
+    if (nrow(out) > max_suggestions) out <- out[seq_len(max_suggestions), , drop = FALSE]
+    rownames(out) <- NULL
+    normalize_partial_gene_suggestions_df(out)
+}
+
+find_partial_gene_suggestions_in_index <- function(file_path, query, file_label = NULL,
+                                                   max_suggestions = 10L,
+                                                   min_query_chars = 2L,
+                                                   allow_build_index = FALSE) {
+    p <- as.character(file_path %||% "")
+    if (!nzchar(p) || !file.exists(p)) {
+        return(empty_partial_gene_suggestions_df())
+    }
+    idx <- if (isTRUE(allow_build_index)) {
+        tryCatch(build_gff_gene_light_index(p), error = function(e) NULL)
+    } else {
+        tryCatch(load_gff_gene_light_index_if_available(p, base_dir = "."), error = function(e) NULL)
+    }
+    if (is.null(idx) || !is.list(idx) || is.null(idx$genes_df) || !is.data.frame(idx$genes_df) || nrow(idx$genes_df) == 0L) {
+        return(empty_partial_gene_suggestions_df())
+    }
+    q_comp <- normalize_partial_gene_query(query)
+    row_idx <- seq_len(nrow(idx$genes_df))
+    comp_map <- idx$comp_map
+    if (is.list(comp_map) && length(comp_map) > 0L) {
+        tokens <- names(comp_map)
+        tokens <- tokens[!is.na(tokens) & nzchar(tokens)]
+        hit_tokens <- tokens[startsWith(tokens, q_comp) | grepl(q_comp, tokens, fixed = TRUE)]
+        if (length(hit_tokens) == 0L) {
+            return(empty_partial_gene_suggestions_df())
+        }
+        rel <- unique(unlist(comp_map[hit_tokens], use.names = FALSE))
+        rel <- suppressWarnings(as.integer(rel))
+        rel <- rel[!is.na(rel) & rel >= 1L & rel <= nrow(idx$genes_df)]
+        if (length(rel) == 0L) {
+            return(empty_partial_gene_suggestions_df())
+        }
+        row_idx <- rel
+    }
+    attrs <- as.character(idx$genes_df$attributes[row_idx] %||% rep("", length(row_idx)))
+    choices <- extract_partial_gene_display_names(attrs)
+    find_partial_gene_suggestions_from_choices(
+        choices = choices,
+        query = query,
+        file_label = file_label %||% basename(p),
+        max_suggestions = max_suggestions,
+        min_query_chars = min_query_chars
+    )
+}
+
+find_partial_gene_alias_suggestions_sqlite <- function(annotation_paths, query, file_labels = NULL,
+                                                       det_list = NULL, max_per_file = 20L,
+                                                       min_query_chars = 2L, base_dir = ".") {
+    if (!exists("load_alias_index_sqlite", mode = "function") || !requireNamespace("DBI", quietly = TRUE)) {
+        return(empty_partial_gene_suggestions_df())
+    }
+    q_comp <- normalize_partial_gene_query(query)
+    min_query_chars <- suppressWarnings(as.integer(min_query_chars %||% 2L))
+    if (!is.finite(min_query_chars) || is.na(min_query_chars) || min_query_chars < 1L) min_query_chars <- 2L
+    if (nchar(q_comp) < min_query_chars) {
+        return(empty_partial_gene_suggestions_df())
+    }
+    paths <- as.character(annotation_paths %||% character(0))
+    paths <- paths[nzchar(paths) & file.exists(paths)]
+    if (length(paths) == 0L) {
+        return(empty_partial_gene_suggestions_df())
+    }
+    labels <- as.character(file_labels %||% basename(paths))
+    if (length(labels) != length(paths)) labels <- basename(paths)
+    max_per_file <- suppressWarnings(as.integer(max_per_file %||% 20L))
+    if (!is.finite(max_per_file) || is.na(max_per_file) || max_per_file < 1L) max_per_file <- 20L
+    dets <- det_list
+    if (!is.list(dets)) dets <- vector("list", length(paths))
+    if (length(dets) < length(paths)) length(dets) <- length(paths)
+
+    allowed_types <- c(
+        "name", "gene_name", "gene", "gene_symbol", "alias", "gene_synonym",
+        "gene_synonyms", "synonym", "external_gene_name", "locus_tag",
+        "id", "dbxref", "entrezgene_id", "ensembl_gene_id", "uniprot_id",
+        "description", "product", "note"
+    )
+    type_sql <- paste(sprintf("'%s'", allowed_types), collapse = ",")
+    q_like_prefix <- paste0(toupper(q_comp), "%")
+    q_like_contains <- paste0("%", toupper(q_comp), "%")
+    confidence_rank <- c(HIGH = 30L, MEDIUM = 20L, LOW = 10L)
+
+    rows <- lapply(seq_along(paths), function(i) {
+        det <- tryCatch(dets[[i]], error = function(e) NULL)
+        det <- det %||% list()
+        org_id <- trimws(as.character(det$species_id %||% det$preloaded_id %||% ""))
+        if (!nzchar(org_id)) return(NULL)
+
+        con <- tryCatch(load_alias_index_sqlite(organism_id = org_id, base_dir = base_dir), error = function(e) NULL)
+        if (is.null(con)) return(NULL)
+
+        query_alias_rows <- function(like_value) {
+            sql <- sprintf(
+                paste0(
+                    "SELECT query_term_original, query_term_clean_strict, query_term_upper, local_gene_id, local_symbol, term_type, confidence, source_db ",
+                    "FROM alias_index WHERE term_type IN (%s) AND LENGTH(query_term_original) <= 100 AND ",
+                    "(query_term_clean_strict LIKE ?1 OR query_term_upper LIKE ?1 OR UPPER(local_symbol) LIKE ?1) ",
+                    "ORDER BY CASE confidence WHEN 'HIGH' THEN 1 WHEN 'MEDIUM' THEN 2 ELSE 3 END, LENGTH(query_term_original), query_term_original ",
+                    "LIMIT %d"
+                ),
+                type_sql,
+                as.integer(max_per_file * 4L)
+            )
+            tryCatch(DBI::dbGetQuery(con, sql, params = list(like_value)), error = function(e) data.frame())
+        }
+
+        alias_rows <- query_alias_rows(q_like_prefix)
+        match_type <- "prefix"
+        if (!is.data.frame(alias_rows) || nrow(alias_rows) == 0L) {
+            alias_rows <- query_alias_rows(q_like_contains)
+            match_type <- "contains"
+        }
+        alias_rows <- normalize_alias_index_df(alias_rows)
+        if (!is.data.frame(alias_rows) || nrow(alias_rows) == 0L) return(NULL)
+
+        display <- trimws(as.character(alias_rows$local_symbol %||% ""))
+        loc_like <- grepl("^LOC[0-9]+$", display, ignore.case = TRUE)
+        term_display <- trimws(as.character(alias_rows$query_term_original %||% ""))
+        term_type <- tolower(trimws(as.character(alias_rows$term_type %||% "")))
+        extract_query_token <- function(txt) {
+            txt <- trimws(as.character(txt %||% ""))
+            if (!nzchar(txt)) return("")
+            matches <- regmatches(txt, gregexpr("[A-Za-z][A-Za-z0-9._;:-]*", txt, perl = TRUE))[[1]]
+            matches <- trimws(as.character(matches %||% character(0)))
+            matches <- matches[nzchar(matches) & nchar(matches) <= 40L]
+            if (length(matches) == 0L) return("")
+            hit <- grepl(q_comp, normalize_partial_gene_query(matches), fixed = TRUE)
+            matches <- matches[hit]
+            if (length(matches) == 0L) return("")
+            matches[[1]]
+        }
+        term_token <- vapply(term_display, extract_query_token, character(1))
+        internal_like <- grepl("^(gene|transcript|rna|cds)[:_-]", display, ignore.case = TRUE)
+        term_gene_like <- nzchar(term_token) & term_type %in% c(
+            "alias", "gene_synonym", "gene_synonyms", "synonym",
+            "description", "product", "note"
+        )
+        use_term <- (!nzchar(display) | loc_like | internal_like | term_gene_like) & nzchar(term_token)
+        display[use_term] <- term_token[use_term]
+        display[!nzchar(display)] <- trimws(as.character(alias_rows$local_gene_id[!nzchar(display)] %||% ""))
+
+        keep <- nzchar(display) & normalize_partial_gene_query(display) != q_comp
+        if (!any(keep)) return(NULL)
+        alias_rows <- alias_rows[keep, , drop = FALSE]
+        display <- display[keep]
+        conf <- toupper(trimws(as.character(alias_rows$confidence %||% "")))
+        cr <- unname(confidence_rank[conf])
+        cr[is.na(cr)] <- 1L
+        score <- cr + if (identical(match_type, "prefix")) 70 else 35
+        score <- score - pmax(0, nchar(normalize_partial_gene_query(display)) - nchar(q_comp))
+        src <- trimws(as.character(alias_rows$source_db %||% ""))
+        ev <- tolower(trimws(as.character(alias_rows$evidence_source %||% "")))
+        tt <- tolower(trimws(as.character(alias_rows$term_type %||% "")))
+        is_local_source <- ev == "local_annotation" | toupper(src) == "GFF"
+        match_role <- ifelse(tt %in% c("id", "local_id", "gene_id", "ensembl_gene_id"), "stable_id",
+            ifelse(tt %in% c("name", "gene_name", "gene", "gene_symbol"), "official_symbol",
+                ifelse(tt %in% c("alias", "gene_synonym", "gene_synonyms", "synonym", "external_gene_name"), "synonym", "other")))
+        requires_confirmation <- !is_local_source & nzchar(trimws(as.character(alias_rows$local_gene_id %||% "")))
+
+        out <- data.frame(
+            gene_name = display,
+            file_label = rep(labels[[i]], length(display)),
+            match_type = rep(match_type, length(display)),
+            score = score,
+            source_count = rep(1L, length(display)),
+            local_gene_id = trimws(as.character(alias_rows$local_gene_id %||% "")),
+            local_symbol = trimws(as.character(alias_rows$local_symbol %||% "")),
+            term_type = tt,
+            source_db = src,
+            confidence = conf,
+            match_role = match_role,
+            requires_confirmation = requires_confirmation,
+            stringsAsFactors = FALSE
+        )
+        out$key <- normalize_partial_gene_query(out$gene_name)
+        out$display_preference <- ifelse(grepl("\\.", out$gene_name), 1L, 0L)
+        out <- out[order(-out$score, -out$display_preference, nchar(out$gene_name), tolower(out$gene_name)), , drop = FALSE]
+        out <- out[!duplicated(out$key), , drop = FALSE]
+        out$display_preference <- NULL
+        out$key <- NULL
+        if (nrow(out) > max_per_file) out <- out[seq_len(max_per_file), , drop = FALSE]
+        normalize_partial_gene_suggestions_df(out)
+    })
+    rows <- rows[vapply(rows, function(x) is.data.frame(x) && nrow(x) > 0L, logical(1))]
+    if (length(rows) == 0L) return(empty_partial_gene_suggestions_df())
+    normalize_partial_gene_suggestions_df(do.call(rbind, rows))
+}
+
+find_deterministic_partial_gene_suggestions <- function(annotation_paths, query, file_labels = NULL,
+                                                        det_list = NULL, max_per_file = 20L,
+                                                        max_total = 20L, min_query_chars = 2L,
+                                                        min_shared_organisms = 1L,
+                                                        source_label_preview = 4L,
+                                                        include_alias_sql = TRUE,
+                                                        base_dir = ".") {
+    q_comp <- normalize_partial_gene_query(query)
+    min_query_chars <- suppressWarnings(as.integer(min_query_chars %||% 2L))
+    if (!is.finite(min_query_chars) || is.na(min_query_chars) || min_query_chars < 1L) min_query_chars <- 2L
+    if (nchar(q_comp) < min_query_chars) {
+        return(empty_partial_gene_suggestions_df(source_labels = TRUE, source_label_preview = TRUE))
+    }
+    paths <- as.character(annotation_paths %||% character(0))
+    paths <- paths[nzchar(paths) & file.exists(paths)]
+    if (length(paths) == 0L) {
+        return(empty_partial_gene_suggestions_df(source_labels = TRUE, source_label_preview = TRUE))
+    }
+    labels <- as.character(file_labels %||% basename(paths))
+    if (length(labels) != length(paths)) labels <- basename(paths)
+    max_per_file <- suppressWarnings(as.integer(max_per_file %||% 20L))
+    if (!is.finite(max_per_file) || is.na(max_per_file) || max_per_file < 1L) max_per_file <- 20L
+    max_total <- suppressWarnings(as.integer(max_total %||% 20L))
+    if (!is.finite(max_total) || is.na(max_total) || max_total < 1L) max_total <- 20L
+    min_shared <- suppressWarnings(as.integer(min_shared_organisms %||% 1L))
+    if (!is.finite(min_shared) || is.na(min_shared) || min_shared < 1L) min_shared <- 1L
+
+    empty_out <- function() empty_partial_gene_suggestions_df(source_labels = TRUE, source_label_preview = TRUE)
+    aggregate_rows <- function(rows) {
+        rows <- rows[vapply(rows, function(x) is.data.frame(x) && nrow(x) > 0L, logical(1))]
+        if (length(rows) == 0L) return(empty_out())
+        rows <- lapply(rows, normalize_partial_gene_suggestions_df)
+        all_rows <- do.call(rbind, rows)
+        all_rows$gene_key <- normalize_partial_gene_query(all_rows$gene_name)
+        all_rows$aggregation_key <- all_rows$gene_key
+        local_ids <- trimws(as.character(all_rows$local_gene_id %||% ""))
+        file_keys <- trimws(as.character(all_rows$file_label %||% ""))
+        collision_groups <- split(seq_len(nrow(all_rows)), paste(all_rows$gene_key, file_keys, sep = "\r"))
+        for (idx in collision_groups) {
+            ids <- unique(local_ids[idx][nzchar(local_ids[idx])])
+            if (length(ids) > 1L) {
+                all_rows$aggregation_key[idx] <- paste(all_rows$gene_key[idx], local_ids[idx], sep = "\r")
+            }
+        }
+        grouped <- do.call(rbind, lapply(split(all_rows, all_rows$aggregation_key), function(df) {
+            df <- df[order(-suppressWarnings(as.numeric(df$score %||% 0)), nchar(df$gene_name), tolower(df$gene_name)), , drop = FALSE]
+            best <- df[1, , drop = FALSE]
+            labels_u <- unique(trimws(as.character(df$file_label %||% "")))
+            labels_u <- labels_u[nzchar(labels_u)]
+            best$file_label <- paste(labels_u, collapse = ", ")
+            best$source_labels <- best$file_label
+            best$source_count <- length(labels_u)
+            best$score <- max(suppressWarnings(as.numeric(df$score %||% 0)), na.rm = TRUE) + best$source_count * 5
+            best$match_type <- if (any(as.character(df$match_type %||% "") == "prefix")) "prefix" else "contains"
+            best
+        }))
+        grouped$gene_key <- NULL
+        grouped$aggregation_key <- NULL
+        grouped$source_count <- suppressWarnings(as.integer(grouped$source_count %||% 1L))
+        grouped$source_count[is.na(grouped$source_count) | grouped$source_count < 1L] <- 1L
+        grouped <- grouped[grouped$source_count >= min_shared, , drop = FALSE]
+        if (nrow(grouped) == 0L) return(empty_out())
+        is_prefix <- as.character(grouped$match_type %||% "") == "prefix"
+        grouped <- grouped[order(
+            -grouped$source_count,
+            -as.integer(is_prefix),
+            -suppressWarnings(as.numeric(grouped$score %||% 0)),
+            nchar(as.character(grouped$gene_name %||% "")),
+            tolower(as.character(grouped$gene_name %||% ""))
+        ), , drop = FALSE]
+        source_label_preview <- suppressWarnings(as.integer(source_label_preview %||% 4L))
+        if (!is.finite(source_label_preview) || is.na(source_label_preview) || source_label_preview < 1L) source_label_preview <- 4L
+        grouped$source_label_preview <- vapply(strsplit(as.character(grouped$source_labels %||% ""), ",", fixed = TRUE), function(x) {
+            labels_u <- unique(trimws(as.character(x %||% character(0))))
+            labels_u <- labels_u[nzchar(labels_u)]
+            if (length(labels_u) == 0L) return("")
+            if (length(labels_u) <= source_label_preview) return(paste(labels_u, collapse = ", "))
+            paste0(paste(labels_u[seq_len(source_label_preview)], collapse = ", "), sprintf(" +%d more", length(labels_u) - source_label_preview))
+        }, character(1))
+        if (nrow(grouped) > max_total) grouped <- grouped[seq_len(max_total), , drop = FALSE]
+        rownames(grouped) <- NULL
+        normalize_partial_gene_suggestions_df(grouped, source_labels = TRUE, source_label_preview = TRUE)
+    }
+
+    rows <- list()
+    for (i in seq_along(paths)) {
+        ac <- tryCatch(load_gff_autocomplete_cache(paths[[i]], base_dir = base_dir), error = function(e) NULL)
+        choices <- if (is.list(ac)) as.character(ac$display %||% character(0)) else character(0)
+        if (length(choices) > 0L) {
+            rows <- c(rows, list(find_partial_gene_suggestions_from_choices(
+                choices = choices,
+                query = query,
+                file_label = labels[[i]],
+                max_suggestions = max_per_file,
+                min_query_chars = min_query_chars
+            )))
+        }
+        rows <- c(rows, list(find_partial_gene_suggestions_in_index(
+            file_path = paths[[i]],
+            query = query,
+            file_label = labels[[i]],
+            max_suggestions = max_per_file,
+            min_query_chars = min_query_chars,
+            allow_build_index = FALSE
+        )))
+    }
+    if (isTRUE(include_alias_sql)) {
+        rows <- c(rows, list(find_partial_gene_alias_suggestions_sqlite(
+            annotation_paths = paths,
+            query = query,
+            file_labels = labels,
+            det_list = det_list,
+            max_per_file = max_per_file,
+            min_query_chars = min_query_chars,
+            base_dir = base_dir
+        )))
+    }
+    aggregate_rows(rows)
+}
+
+find_partial_gene_suggestions_streaming <- function(file_path, query, file_label = NULL,
+                                                    max_suggestions = 10L,
+                                                    min_query_chars = 2L,
+                                                    chunk_size = 50000L) {
+    p <- as.character(file_path %||% "")
+    q_comp <- normalize_partial_gene_query(query)
+    min_query_chars <- suppressWarnings(as.integer(min_query_chars %||% 2L))
+    if (!is.finite(min_query_chars) || is.na(min_query_chars) || min_query_chars < 1L) {
+        min_query_chars <- 2L
+    }
+    if (!nzchar(p) || !file.exists(p) || nchar(q_comp) < min_query_chars) {
+        return(empty_partial_gene_suggestions_df())
+    }
+    max_suggestions <- suppressWarnings(as.integer(max_suggestions %||% 10L))
+    if (!is.finite(max_suggestions) || is.na(max_suggestions) || max_suggestions < 1L) {
+        max_suggestions <- 10L
+    }
+    chunk_size <- suppressWarnings(as.integer(chunk_size %||% 50000L))
+    if (!is.finite(chunk_size) || is.na(chunk_size) || chunk_size < 1000L) {
+        chunk_size <- 50000L
+    }
+
+    con <- if (grepl("\\.(gz|bgz)$", p, ignore.case = TRUE)) gzfile(p, open = "rt") else file(p, open = "r")
+    on.exit(close(con), add = TRUE)
+
+    gene_pattern <- "^[^\t]+\t[^\t]+\t(gene|pseudogene|[Cc][Dd][Ss])\t"
+    out_names <- character(0)
+    out_types <- character(0)
+    out_scores <- numeric(0)
+    seen <- character(0)
+
+    repeat {
+        lines <- readLines(con, n = chunk_size, warn = FALSE)
+        if (length(lines) == 0L) break
+        lines <- lines[!startsWith(lines, "#") & grepl(gene_pattern, lines, perl = TRUE)]
+        if (length(lines) == 0L) next
+
+        fields <- strsplit(lines, "\t", fixed = TRUE)
+        attrs <- vapply(fields, function(x) if (length(x) >= 9L) x[[9L]] else "", character(1))
+        attrs <- attrs[nzchar(attrs)]
+        if (length(attrs) == 0L) next
+
+        display <- vapply(attrs, extract_partial_gene_display_name, character(1))
+        display <- trimws(display)
+        display <- display[!is.na(display) & nzchar(display) & nchar(display) <= 80]
+        if (length(display) == 0L) next
+
+        comp <- vapply(display, normalize_partial_gene_query, character(1))
+        hit_prefix <- startsWith(comp, q_comp)
+        hit_contains <- !hit_prefix & grepl(q_comp, comp, fixed = TRUE)
+        hit <- hit_prefix | hit_contains
+        if (!any(hit)) next
+
+        hit_names <- display[hit]
+        hit_keys <- tolower(normalize_gene_compact(hit_names))
+        keep <- !hit_keys %in% seen
+        if (!any(keep)) next
+
+        hit_names <- hit_names[keep]
+        hit_keys <- hit_keys[keep]
+        hit_prefix <- hit_prefix[hit][keep]
+        hit_comp <- comp[hit][keep]
+        seen <- c(seen, hit_keys)
+        out_names <- c(out_names, hit_names)
+        out_types <- c(out_types, ifelse(hit_prefix, "prefix", "contains"))
+        out_scores <- c(out_scores, ifelse(hit_prefix, 100, 60) - pmax(0, nchar(hit_comp) - nchar(q_comp)))
+
+        if (length(out_names) >= max_suggestions) {
+            break
+        }
+    }
+
+    if (length(out_names) == 0L) {
+        return(empty_partial_gene_suggestions_df())
+    }
+
+    out <- data.frame(
+        gene_name = out_names,
+        file_label = rep(as.character(file_label %||% basename(p)), length(out_names)),
+        match_type = out_types,
+        score = out_scores,
+        source_count = rep(1L, length(out_names)),
+        stringsAsFactors = FALSE
+    )
+    ord <- order(-out$score, nchar(out$gene_name), tolower(out$gene_name))
+    out <- out[ord, , drop = FALSE]
+    if (nrow(out) > max_suggestions) {
+        out <- out[seq_len(max_suggestions), , drop = FALSE]
+    }
+    rownames(out) <- NULL
+    normalize_partial_gene_suggestions_df(out)
+}
+
+find_partial_gene_suggestions_grep <- function(file_path, query, file_label = NULL,
+                                               max_suggestions = 10L,
+                                               min_query_chars = 2L) {
+    p <- as.character(file_path %||% "")
+    q_comp <- normalize_partial_gene_query(query)
+    min_query_chars <- suppressWarnings(as.integer(min_query_chars %||% 2L))
+    if (!is.finite(min_query_chars) || is.na(min_query_chars) || min_query_chars < 1L) {
+        min_query_chars <- 2L
+    }
+    if (!nzchar(p) || !file.exists(p) || nchar(q_comp) < min_query_chars) {
+        return(NULL)
+    }
+    seed <- extract_gene_query_alpha_core(query)
+    if (!nzchar(seed) || nchar(seed) < 2L) {
+        seed <- q_comp
+    }
+    if (!nzchar(seed) || nchar(seed) < min_query_chars) {
+        return(NULL)
+    }
+    tool <- if (grepl("\\.(gz|bgz)$", p, ignore.case = TRUE)) "zgrep" else "grep"
+    if (!nzchar(Sys.which(tool))) {
+        return(NULL)
+    }
+    max_suggestions <- suppressWarnings(as.integer(max_suggestions %||% 10L))
+    if (!is.finite(max_suggestions) || is.na(max_suggestions) || max_suggestions < 1L) {
+        max_suggestions <- 10L
+    }
+    pattern <- paste0("^[^\t]+\t[^\t]+\t(gene|pseudogene|[Cc][Dd][Ss])\t.*", seed)
+    lines <- tryCatch(
+        system2(tool, args = c("-E", "-i", shQuote(pattern), shQuote(p)), stdout = TRUE, stderr = FALSE),
+        warning = function(w) character(0),
+        error = function(e) character(0)
+    )
+    lines <- as.character(lines %||% character(0))
+    lines <- lines[nzchar(lines)]
+    if (length(lines) == 0L) {
+        return(data.frame(
+            gene_name = character(0),
+            file_label = character(0),
+            match_type = character(0),
+            score = numeric(0),
+            source_count = integer(0),
+            stringsAsFactors = FALSE
+        ))
+    }
+
+    fields <- strsplit(lines, "\t", fixed = TRUE)
+    attrs <- vapply(fields, function(x) if (length(x) >= 9L) x[[9L]] else "", character(1))
+    attrs <- attrs[nzchar(attrs)]
+    if (length(attrs) == 0L) {
+        return(NULL)
+    }
+    display <- vapply(attrs, extract_partial_gene_display_name, character(1))
+    display <- trimws(display)
+    display <- display[!is.na(display) & nzchar(display) & nchar(display) <= 80]
+    if (length(display) == 0L) {
+        return(data.frame(
+            gene_name = character(0),
+            file_label = character(0),
+            match_type = character(0),
+            score = numeric(0),
+            source_count = integer(0),
+            stringsAsFactors = FALSE
+        ))
+    }
+    comp <- vapply(display, normalize_partial_gene_query, character(1))
+    hit_prefix <- startsWith(comp, q_comp)
+    hit_contains <- !hit_prefix & grepl(q_comp, comp, fixed = TRUE)
+    hit <- hit_prefix | hit_contains
+    if (!any(hit)) {
+        return(data.frame(
+            gene_name = character(0),
+            file_label = character(0),
+            match_type = character(0),
+            score = numeric(0),
+            source_count = integer(0),
+            stringsAsFactors = FALSE
+        ))
+    }
+    out <- data.frame(
+        gene_name = display[hit],
+        file_label = rep(as.character(file_label %||% basename(p)), sum(hit)),
+        match_type = ifelse(hit_prefix[hit], "prefix", "contains"),
+        score = ifelse(hit_prefix[hit], 100, 60) - pmax(0, nchar(comp[hit]) - nchar(q_comp)),
+        source_count = rep(1L, sum(hit)),
+        stringsAsFactors = FALSE
+    )
+    out$key <- tolower(normalize_gene_compact(out$gene_name))
+    out <- out[!duplicated(out$key), , drop = FALSE]
+    out$key <- NULL
+    ord <- order(-out$score, nchar(out$gene_name), tolower(out$gene_name))
+    out <- out[ord, , drop = FALSE]
+    if (nrow(out) > max_suggestions) {
+        out <- out[seq_len(max_suggestions), , drop = FALSE]
+    }
+    rownames(out) <- NULL
+    out
+}
+
+find_partial_gene_suggestions_in_file <- function(file_path, query, file_label = NULL,
+                                                  max_suggestions = 10L,
+                                                  min_query_chars = 2L) {
+    p <- as.character(file_path %||% "")
+    q <- trimws(as.character(query %||% ""))
+    q_comp <- normalize_partial_gene_query(q)
+    min_query_chars <- suppressWarnings(as.integer(min_query_chars %||% 2L))
+    if (!is.finite(min_query_chars) || is.na(min_query_chars) || min_query_chars < 1L) {
+        min_query_chars <- 2L
+    }
+    if (!nzchar(p) || !file.exists(p) || nchar(q_comp) < min_query_chars) {
+        return(data.frame(
+            gene_name = character(0),
+            file_label = character(0),
+            match_type = character(0),
+            score = numeric(0),
+            source_count = integer(0),
+            stringsAsFactors = FALSE
+        ))
+    }
+    max_suggestions <- suppressWarnings(as.integer(max_suggestions %||% 10L))
+    if (!is.finite(max_suggestions) || is.na(max_suggestions) || max_suggestions < 1L) {
+        max_suggestions <- 10L
+    }
+
+    cache_key <- tryCatch(
+        paste(
+            "partial-gene-suggestions-v1",
+            gff_cache_key(p),
+            tolower(q_comp),
+            sep = "||"
+        ),
+        error = function(e) ""
+    )
+    apply_suggestion_label <- function(value) {
+        if (is.data.frame(value) && "file_label" %in% names(value)) {
+            value$file_label <- rep(as.character(file_label %||% basename(p)), nrow(value))
+        }
+        value
+    }
+    if (nzchar(cache_key) && exists(cache_key, envir = .partial_gene_suggestion_cache, inherits = FALSE)) {
+        cached <- get(cache_key, envir = .partial_gene_suggestion_cache, inherits = FALSE)
+        if (is.data.frame(cached)) {
+            if (nrow(cached) > max_suggestions) {
+                cached <- cached[seq_len(max_suggestions), , drop = FALSE]
+            }
+            return(apply_suggestion_label(cached))
+        }
+    }
+    cache_and_return <- function(value) {
+        if (nzchar(cache_key) && is.data.frame(value)) {
+            assign(cache_key, value, envir = .partial_gene_suggestion_cache)
+        }
+        apply_suggestion_label(value)
+    }
+
+    grep_suggestions <- tryCatch(
+        find_partial_gene_suggestions_grep(
+            file_path = p,
+            query = q,
+            file_label = file_label,
+            max_suggestions = max_suggestions,
+            min_query_chars = min_query_chars
+        ),
+        error = function(e) NULL
+    )
+    if (is.data.frame(grep_suggestions)) {
+        return(cache_and_return(grep_suggestions))
+    }
+
+    streamed <- tryCatch(
+        find_partial_gene_suggestions_streaming(
+            file_path = p,
+            query = q,
+            file_label = file_label,
+            max_suggestions = max_suggestions,
+            min_query_chars = min_query_chars
+        ),
+        error = function(e) NULL
+    )
+    if (is.data.frame(streamed)) {
+        return(cache_and_return(streamed))
+    }
+
+    idx <- tryCatch(build_gff_gene_light_index(p), error = function(e) NULL)
+    if (is.null(idx) || !is.list(idx) || is.null(idx$genes_df) || !is.data.frame(idx$genes_df) || nrow(idx$genes_df) == 0L) {
+        return(cache_and_return(data.frame(
+            gene_name = character(0),
+            file_label = character(0),
+            match_type = character(0),
+            score = numeric(0),
+            source_count = integer(0),
+            stringsAsFactors = FALSE
+        )))
+    }
+
+    attrs <- as.character(idx$genes_df$attributes %||% rep("", nrow(idx$genes_df)))
+    display <- vapply(attrs, extract_partial_gene_display_name, character(1))
+    display <- trimws(display)
+    keep <- !is.na(display) & nzchar(display) & nchar(display) <= 80
+    if (!any(keep)) {
+        return(data.frame(
+            gene_name = character(0),
+            file_label = character(0),
+            match_type = character(0),
+            score = numeric(0),
+            source_count = integer(0),
+            stringsAsFactors = FALSE
+        ))
+    }
+
+    display <- display[keep]
+    comp <- vapply(display, normalize_partial_gene_query, character(1))
+    hit_prefix <- startsWith(comp, q_comp)
+    hit_contains <- !hit_prefix & grepl(q_comp, comp, fixed = TRUE)
+    hit <- hit_prefix | hit_contains
+    if (!any(hit)) {
+        return(data.frame(
+            gene_name = character(0),
+            file_label = character(0),
+            match_type = character(0),
+            score = numeric(0),
+            source_count = integer(0),
+            stringsAsFactors = FALSE
+        ))
+    }
+
+    out <- data.frame(
+        gene_name = display[hit],
+        file_label = rep(as.character(file_label %||% basename(p)), sum(hit)),
+        match_type = ifelse(hit_prefix[hit], "prefix", "contains"),
+        score = ifelse(hit_prefix[hit], 100, 60) - pmax(0, nchar(comp[hit]) - nchar(q_comp)),
+        source_count = rep(1L, sum(hit)),
+        stringsAsFactors = FALSE
+    )
+    out <- out[!duplicated(tolower(out$gene_name)), , drop = FALSE]
+    ord <- order(-out$score, nchar(out$gene_name), tolower(out$gene_name))
+    out <- out[ord, , drop = FALSE]
+    if (nrow(out) > max_suggestions) {
+        out <- out[seq_len(max_suggestions), , drop = FALSE]
+    }
+    rownames(out) <- NULL
+    cache_and_return(out)
+}
+
+find_partial_gene_suggestions <- function(annotation_paths, query, file_labels = NULL,
+                                          max_per_file = 10L, max_total = 15L,
+                                          min_query_chars = 2L) {
+    paths <- as.character(annotation_paths %||% character(0))
+    paths <- paths[nzchar(paths)]
+    if (length(paths) == 0L) {
+        return(data.frame(
+            gene_name = character(0),
+            file_label = character(0),
+            match_type = character(0),
+            score = numeric(0),
+            source_count = integer(0),
+            stringsAsFactors = FALSE
+        ))
+    }
+    labels <- as.character(file_labels %||% basename(paths))
+    if (length(labels) != length(paths)) {
+        labels <- basename(paths)
+    }
+    max_total <- suppressWarnings(as.integer(max_total %||% 15L))
+    if (!is.finite(max_total) || is.na(max_total) || max_total < 1L) {
+        max_total <- 15L
+    }
+
+    rows <- lapply(seq_along(paths), function(i) {
+        find_partial_gene_suggestions_in_file(
+            file_path = paths[[i]],
+            query = query,
+            file_label = labels[[i]],
+            max_suggestions = max_per_file,
+            min_query_chars = min_query_chars
+        )
+    })
+    rows <- rows[vapply(rows, function(x) is.data.frame(x) && nrow(x) > 0L, logical(1))]
+    if (length(rows) == 0L) {
+        return(data.frame(
+            gene_name = character(0),
+            file_label = character(0),
+            match_type = character(0),
+            score = numeric(0),
+            source_count = integer(0),
+            stringsAsFactors = FALSE
+        ))
+    }
+
+    all_rows <- do.call(rbind,  rows)
+    all_rows$gene_key <- tolower(normalize_gene_compact(all_rows$gene_name))
+    split_rows <- split(all_rows, all_rows$gene_key)
+    grouped <- do.call(rbind,  lapply(split_rows, function(df) {
+        df <- df[order(-df$score, nchar(df$gene_name), tolower(df$gene_name)), , drop = FALSE]
+        best <- df[1, , drop = FALSE]
+        best$file_label <- paste(unique(df$file_label), collapse = ", ")
+        best$source_count <- length(unique(df$file_label))
+        best$score <- max(df$score, na.rm = TRUE) + (best$source_count * 5)
+        best$match_type <- if (any(df$match_type == "prefix")) "prefix" else "contains"
+        best
+    }))
+    grouped$gene_key <- NULL
+    grouped <- grouped[order(-grouped$source_count, -grouped$score, nchar(grouped$gene_name), tolower(grouped$gene_name)), , drop = FALSE]
+    if (nrow(grouped) > max_total) {
+        grouped <- grouped[seq_len(max_total), , drop = FALSE]
+    }
+    rownames(grouped) <- NULL
+    grouped
+}
+
+find_cross_species_gene_suggestions <- function(annotation_paths, query, file_labels = NULL,
+                                                max_per_file = 10L, max_total = 15L,
+                                                min_query_chars = 2L,
+                                                source_label_preview = 4L) {
+    suggestions <- find_partial_gene_suggestions(
+        annotation_paths = annotation_paths,
+        query = query,
+        file_labels = file_labels,
+        max_per_file = max_per_file,
+        max_total = max_total,
+        min_query_chars = min_query_chars
+    )
+    if (!is.data.frame(suggestions) || nrow(suggestions) == 0L) {
+        return(data.frame(
+            gene_name = character(0),
+            file_label = character(0),
+            source_labels = character(0),
+            match_type = character(0),
+            score = numeric(0),
+            source_count = integer(0),
+            stringsAsFactors = FALSE
+        ))
+    }
+
+    if (!"source_labels" %in% names(suggestions)) {
+        suggestions$source_labels <- as.character(suggestions$file_label %||% "")
+    }
+    suggestions$source_labels <- vapply(strsplit(as.character(suggestions$source_labels %||% ""), ",", fixed = TRUE), function(x) {
+        labels <- unique(trimws(as.character(x %||% character(0))))
+        labels <- labels[nzchar(labels)]
+        paste(labels, collapse = ", ")
+    }, character(1))
+    suggestions$file_label <- suggestions$source_labels
+    suggestions$source_count <- suppressWarnings(as.integer(suggestions$source_count %||% 1L))
+    suggestions$source_count[is.na(suggestions$source_count) | suggestions$source_count < 1L] <- 1L
+
+    is_prefix <- as.character(suggestions$match_type %||% "") == "prefix"
+    if (length(is_prefix) != nrow(suggestions)) {
+        is_prefix <- rep(FALSE, nrow(suggestions))
+    }
+    suggestions <- suggestions[order(
+        -suggestions$source_count,
+        -as.integer(is_prefix),
+        -suppressWarnings(as.numeric(suggestions$score %||% 0)),
+        nchar(as.character(suggestions$gene_name %||% "")),
+        tolower(as.character(suggestions$gene_name %||% ""))
+    ), , drop = FALSE]
+
+    source_label_preview <- suppressWarnings(as.integer(source_label_preview %||% 4L))
+    if (!is.finite(source_label_preview) || is.na(source_label_preview) || source_label_preview < 1L) {
+        source_label_preview <- 4L
+    }
+    suggestions$source_label_preview <- vapply(strsplit(as.character(suggestions$source_labels %||% ""), ",", fixed = TRUE), function(x) {
+        labels <- unique(trimws(as.character(x %||% character(0))))
+        labels <- labels[nzchar(labels)]
+        if (length(labels) == 0L) return("")
+        if (length(labels) <= source_label_preview) return(paste(labels, collapse = ", "))
+        paste0(paste(labels[seq_len(source_label_preview)], collapse = ", "), sprintf(" +%d more", length(labels) - source_label_preview))
+    }, character(1))
+
+    max_total <- suppressWarnings(as.integer(max_total %||% 15L))
+    if (!is.finite(max_total) || is.na(max_total) || max_total < 1L) {
+        max_total <- 15L
+    }
+    if (nrow(suggestions) > max_total) {
+        suggestions <- suggestions[seq_len(max_total), , drop = FALSE]
+    }
+    rownames(suggestions) <- NULL
+    suggestions
+}
+
+find_cross_species_alias_family_suggestions <- function(annotation_paths, query, file_labels = NULL,
+                                                        det_list = NULL, max_per_file = 12L,
+                                                        max_total = 20L, min_query_chars = 2L,
+                                                        source_label_preview = 4L) {
+    q_comp <- normalize_partial_gene_query(query)
+    min_query_chars <- suppressWarnings(as.integer(min_query_chars %||% 2L))
+    if (!is.finite(min_query_chars) || is.na(min_query_chars) || min_query_chars < 1L) {
+        min_query_chars <- 2L
+    }
+    if (nchar(q_comp) < min_query_chars || !exists("load_alias_index", mode = "function")) {
+        return(data.frame(
+            gene_name = character(0),
+            file_label = character(0),
+            source_labels = character(0),
+            source_label_preview = character(0),
+            match_type = character(0),
+            score = numeric(0),
+            source_count = integer(0),
+            stringsAsFactors = FALSE
+        ))
+    }
+
+    paths <- as.character(annotation_paths %||% character(0))
+    paths <- paths[nzchar(paths)]
+    if (length(paths) == 0L) {
+        return(data.frame(
+            gene_name = character(0),
+            file_label = character(0),
+            source_labels = character(0),
+            source_label_preview = character(0),
+            match_type = character(0),
+            score = numeric(0),
+            source_count = integer(0),
+            stringsAsFactors = FALSE
+        ))
+    }
+    labels <- as.character(file_labels %||% basename(paths))
+    if (length(labels) != length(paths)) {
+        labels <- basename(paths)
+    }
+    max_per_file <- suppressWarnings(as.integer(max_per_file %||% 12L))
+    if (!is.finite(max_per_file) || is.na(max_per_file) || max_per_file < 1L) {
+        max_per_file <- 12L
+    }
+
+    preferred_types <- c(
+        "name", "gene_name", "gene", "gene_symbol", "alias", "gene_synonym",
+        "gene_synonyms", "synonym", "external_gene_name", "locus_tag",
+        "id", "dbxref", "entrezgene_id"
+    )
+    confidence_rank <- c(HIGH = 30L, MEDIUM = 20L, LOW = 10L)
+
+    rows <- lapply(seq_along(paths), function(i) {
+        det <- tryCatch(det_list[[i]], error = function(e) NULL)
+        det <- det %||% list()
+        idx <- tryCatch(
+            load_alias_index(
+                organism_id = as.character(det$species_id %||% det$preloaded_id %||% ""),
+                annotation_path = paths[[i]],
+                organism_name = as.character(det$organism %||% labels[[i]] %||% ""),
+                taxid = as.character(det$taxid %||% ""),
+                base_dir = ".",
+                allow_gff_fallback = TRUE
+            ),
+            error = function(e) NULL
+        )
+        if (is.null(idx)) {
+            return(NULL)
+        }
+
+        alias_rows <- if (inherits(idx, "SQLiteConnection")) {
+            if (!requireNamespace("DBI", quietly = TRUE)) {
+                return(NULL)
+            }
+            like_param <- paste0("%", q_comp, "%")
+            tryCatch(
+                DBI::dbGetQuery(
+                    idx,
+                    paste0(
+                        "SELECT * FROM alias_index WHERE ",
+                        "(LOWER(query_term_clean_strict) LIKE ?1 OR LOWER(local_symbol) LIKE ?1 OR LOWER(description) LIKE ?1) ",
+                        "AND LENGTH(query_term_original) <= 180 LIMIT 250"
+                    ),
+                    params = list(like_param)
+                ),
+                error = function(e) data.frame()
+            )
+        } else {
+            idx <- normalize_alias_index_df(idx)
+            if (nrow(idx) == 0L) {
+                return(NULL)
+            }
+            key <- tolower(as.character(idx$query_term_clean_strict %||% ""))
+            sym <- normalize_partial_gene_query(idx$local_symbol %||% "")
+            desc <- normalize_partial_gene_query(idx$description %||% "")
+            idx[grepl(q_comp, key, fixed = TRUE) |
+                grepl(q_comp, sym, fixed = TRUE) |
+                grepl(q_comp, desc, fixed = TRUE), , drop = FALSE]
+        }
+        alias_rows <- normalize_alias_index_df(alias_rows)
+        if (nrow(alias_rows) == 0L) {
+            return(NULL)
+        }
+
+        term_comp <- normalize_partial_gene_query(alias_rows$query_term_original)
+        sym_comp <- normalize_partial_gene_query(alias_rows$local_symbol)
+        desc_comp <- normalize_partial_gene_query(alias_rows$description)
+        hit_prefix <- startsWith(term_comp, q_comp) | startsWith(sym_comp, q_comp)
+        hit_contains <- !hit_prefix & (
+            grepl(q_comp, term_comp, fixed = TRUE) |
+            grepl(q_comp, sym_comp, fixed = TRUE) |
+            grepl(q_comp, desc_comp, fixed = TRUE)
+        )
+        hit <- hit_prefix | hit_contains
+        alias_rows <- alias_rows[hit, , drop = FALSE]
+        if (nrow(alias_rows) == 0L) {
+            return(NULL)
+        }
+        term_comp <- term_comp[hit]
+        sym_comp <- sym_comp[hit]
+        hit_prefix <- hit_prefix[hit]
+
+        alias_rows$display_gene <- trimws(as.character(alias_rows$local_symbol %||% ""))
+        loc_like <- grepl("^LOC[0-9]+$", alias_rows$display_gene, ignore.case = TRUE)
+        term_gene_like <- grepl("[A-Za-z]", alias_rows$query_term_original) &
+            grepl(q_comp, normalize_partial_gene_query(alias_rows$query_term_original), fixed = TRUE) &
+            nchar(as.character(alias_rows$query_term_original %||% "")) <= 40L
+        replace_display <- !nzchar(alias_rows$display_gene) | loc_like
+        alias_rows$display_gene[replace_display & term_gene_like] <- trimws(as.character(alias_rows$query_term_original[replace_display & term_gene_like]))
+        alias_rows$display_gene[!nzchar(alias_rows$display_gene)] <- trimws(as.character(alias_rows$local_gene_id[!nzchar(alias_rows$display_gene)] %||% ""))
+        alias_rows <- alias_rows[nzchar(alias_rows$display_gene), , drop = FALSE]
+        if (nrow(alias_rows) == 0L) {
+            return(NULL)
+        }
+
+        conf <- toupper(trimws(as.character(alias_rows$confidence %||% "")))
+        cr <- unname(confidence_rank[conf])
+        cr[is.na(cr)] <- 1L
+        type_rank <- match(tolower(trimws(as.character(alias_rows$term_type %||% ""))), preferred_types)
+        type_rank[is.na(type_rank)] <- length(preferred_types) + 1L
+        score <- cr + ifelse(hit_prefix, 60, 30) - type_rank - pmax(0, nchar(term_comp) - nchar(q_comp))
+        gene_key <- trimws(as.character(alias_rows$local_gene_id %||% ""))
+        alias_rows$.score <- score
+        alias_rows$.match_type <- ifelse(hit_prefix, "prefix", "contains")
+        alias_rows$.gene_key <- gene_key
+        alias_rows <- alias_rows[order(-alias_rows$.score, nchar(alias_rows$display_gene), tolower(alias_rows$display_gene)), , drop = FALSE]
+        alias_rows <- alias_rows[!duplicated(alias_rows$.gene_key), , drop = FALSE]
+        if (nrow(alias_rows) > max_per_file) {
+            alias_rows <- alias_rows[seq_len(max_per_file), , drop = FALSE]
+        }
+        data.frame(
+            gene_name = alias_rows$display_gene,
+            file_label = rep(labels[[i]], nrow(alias_rows)),
+            source_labels = rep(labels[[i]], nrow(alias_rows)),
+            match_type = alias_rows$.match_type,
+            score = alias_rows$.score,
+            source_count = rep(1L, nrow(alias_rows)),
+            stringsAsFactors = FALSE
+        )
+    })
+    rows <- rows[vapply(rows, function(x) is.data.frame(x) && nrow(x) > 0L, logical(1))]
+    if (length(rows) == 0L) {
+        return(data.frame(
+            gene_name = character(0),
+            file_label = character(0),
+            source_labels = character(0),
+            source_label_preview = character(0),
+            match_type = character(0),
+            score = numeric(0),
+            source_count = integer(0),
+            stringsAsFactors = FALSE
+        ))
+    }
+
+    all_rows <- do.call(rbind,  rows)
+    all_rows$group_key <- normalize_partial_gene_query(all_rows$gene_name)
+    grouped <- do.call(rbind,  lapply(split(all_rows, all_rows$group_key), function(df) {
+        df <- df[order(-df$score, nchar(df$gene_name), tolower(df$gene_name)), , drop = FALSE]
+        best <- df[1, , drop = FALSE]
+        labels_u <- unique(trimws(as.character(df$file_label %||% "")))
+        labels_u <- labels_u[nzchar(labels_u)]
+        best$file_label <- paste(labels_u, collapse = ", ")
+        best$source_labels <- best$file_label
+        best$source_count <- length(labels_u)
+        best$score <- max(df$score, na.rm = TRUE) + best$source_count * 8
+        best$match_type <- if (any(df$match_type == "prefix")) "prefix" else "contains"
+        best
+    }))
+    grouped$group_key <- NULL
+    grouped <- grouped[order(-grouped$source_count, -grouped$score, nchar(grouped$gene_name), tolower(grouped$gene_name)), , drop = FALSE]
+
+    source_label_preview <- suppressWarnings(as.integer(source_label_preview %||% 4L))
+    if (!is.finite(source_label_preview) || is.na(source_label_preview) || source_label_preview < 1L) {
+        source_label_preview <- 4L
+    }
+    grouped$source_label_preview <- vapply(strsplit(as.character(grouped$source_labels %||% ""), ",", fixed = TRUE), function(x) {
+        labels_u <- unique(trimws(as.character(x %||% character(0))))
+        labels_u <- labels_u[nzchar(labels_u)]
+        if (length(labels_u) == 0L) return("")
+        if (length(labels_u) <= source_label_preview) return(paste(labels_u, collapse = ", "))
+        paste0(paste(labels_u[seq_len(source_label_preview)], collapse = ", "), sprintf(" +%d more", length(labels_u) - source_label_preview))
+    }, character(1))
+
+    max_total <- suppressWarnings(as.integer(max_total %||% 20L))
+    if (!is.finite(max_total) || is.na(max_total) || max_total < 1L) {
+        max_total <- 20L
+    }
+    if (nrow(grouped) > max_total) {
+        grouped <- grouped[seq_len(max_total), , drop = FALSE]
+    }
+    rownames(grouped) <- NULL
+    grouped
+}
+
+should_route_to_partial_gene_suggestions <- function(file_path, query, min_query_chars = 2L) {
+    q_comp <- normalize_partial_gene_query(query)
+    min_query_chars <- suppressWarnings(as.integer(min_query_chars %||% 2L))
+    if (!is.finite(min_query_chars) || is.na(min_query_chars) || min_query_chars < 1L) {
+        min_query_chars <- 2L
+    }
+    if (nchar(q_comp) < min_query_chars) return(FALSE)
+    suggestions <- find_partial_gene_suggestions_in_index(
+        file_path = file_path,
+        query = query,
+        max_suggestions = 10L,
+        min_query_chars = min_query_chars,
+        allow_build_index = TRUE
+    )
+    if (!is.data.frame(suggestions) || nrow(suggestions) == 0L) {
+        return(FALSE)
+    }
+    suggestion_comp <- normalize_partial_gene_query(suggestions$gene_name)
+    any(startsWith(suggestion_comp, q_comp) | grepl(q_comp, suggestion_comp, fixed = TRUE))
 }
 
 load_gff_cached <- function(file_path) {
@@ -2366,8 +4266,8 @@ load_gff_cached <- function(file_path) {
 
 normalize_chr_id <- function(x) {
     x <- tolower(trimws(as.character(x %||% "")))
-    x <- str_remove(x, "^chromosome[:_ ]*")
-    x <- str_remove(x, "^chr")
+    x <- stringr::str_remove(x, "^chromosome[:_ ]*")
+    x <- stringr::str_remove(x, "^chr")
     trimws(x)
 }
 
@@ -2389,7 +4289,7 @@ get_chromosome_name_map <- function(annotation_file_path) {
     tryCatch(
         {
             con <- if (grepl("\\.gz$", annotation_file_path)) gzfile(annotation_file_path, "r") else file(annotation_file_path, "r")
-            lines <- readLines(con, n = 20000, warn = FALSE)
+            lines <- readLines(con, n = 2000, warn = FALSE)
             close(con)
 
             region_lines <- grep("\\tregion\\t", lines, value = TRUE, ignore.case = TRUE)
@@ -2435,27 +4335,54 @@ get_short_chromosome_name <- function(chr_id, annotation_file_path, use_report_m
         return(chr_id)
     }
 
+    # Fast path: if the chromosome name is already short and readable, skip expensive lookups
+    if (nchar(chr_id) <= 7 && !grepl("^NC_|^NT_|^NW_|^NZ_|^AC_|^CM", chr_id)) {
+        return(chr_id)
+    }
+
+    if (!exists(".short_chr_label_cache", envir = .GlobalEnv, inherits = FALSE)) {
+        assign(".short_chr_label_cache", new.env(parent = emptyenv()), envir = .GlobalEnv)
+    }
+    short_chr_cache <- get(".short_chr_label_cache", envir = .GlobalEnv, inherits = FALSE)
+    cache_key <- paste(
+        normalizePath(as.character(annotation_file_path %||% ""), winslash = "/", mustWork = FALSE),
+        tolower(trimws(chr_id)),
+        as.character(isTRUE(use_report_map)),
+        normalizePath(as.character(report_path %||% ""), winslash = "/", mustWork = FALSE),
+        sep = "||"
+    )
+    cached_short <- cache_env_get(short_chr_cache, cache_key, default = NULL)
+    if (!is.null(cached_short) && nzchar(as.character(cached_short %||% ""))) {
+        return(as.character(cached_short))
+    }
+
+    resolved_chr <- chr_id
     if (isTRUE(use_report_map)) {
         rp <- as.character(report_path %||% "")
         if (!nzchar(rp)) {
             rp <- get_assembly_report_path_for_annotation(annotation_file_path, base_dir = ".")
         }
         if (nzchar(rp) && file.exists(rp)) {
-            rep_info <- parse_assembly_report_file(rp)
-            rep_map <- rep_info$chr_map
-            if (is.list(rep_map) && length(rep_map) > 0) {
-                lookup_keys <- unique(c(
-                    tolower(trimws(chr_id)),
-                    tolower(trimws(sub("\\.\\d+$", "", chr_id))),
-                    normalize_chr_id(chr_id)
-                ))
-                for (kk in lookup_keys) {
-                    if (!nzchar(kk)) next
-                    hit <- rep_map[[kk]]
-                    if (!is.null(hit)) {
-                        hit_txt <- trimws(as.character(hit %||% ""))
-                        if (nzchar(hit_txt)) {
-                            return(hit_txt)
+            rep_key <- normalizePath(rp, winslash = "/", mustWork = FALSE)
+            if (exists(rep_key, envir = .assembly_report_cache, inherits = FALSE)) {
+                rep_info <- get(rep_key, envir = .assembly_report_cache, inherits = FALSE)
+                rep_map <- rep_info$chr_map
+                if (is.list(rep_map) && length(rep_map) > 0) {
+                    lookup_keys <- unique(c(
+                        tolower(trimws(chr_id)),
+                        tolower(trimws(sub("\\.\\d+$", "", chr_id))),
+                        normalize_chr_id(chr_id)
+                    ))
+                    for (kk in lookup_keys) {
+                        if (!nzchar(kk)) next
+                        hit <- rep_map[[kk]]
+                        if (!is.null(hit)) {
+                            hit_txt <- trimws(as.character(hit %||% ""))
+                            if (nzchar(hit_txt)) {
+                                resolved_chr <- hit_txt
+                                cache_env_set(short_chr_cache, cache_key, resolved_chr, max_size = 12000L)
+                                return(resolved_chr)
+                            }
                         }
                     }
                 }
@@ -2463,18 +4390,28 @@ get_short_chromosome_name <- function(chr_id, annotation_file_path, use_report_m
         }
     }
 
-    name_map <- get_chromosome_name_map(annotation_file_path)
+    chr_map_key <- gff_cache_key(annotation_file_path)
+    if (exists(chr_map_key, envir = .gff_chr_name_map_cache, inherits = FALSE)) {
+        name_map <- get(chr_map_key, envir = .gff_chr_name_map_cache, inherits = FALSE)
+    } else {
+        name_map <- get_chromosome_name_map(annotation_file_path)
+    }
     if (!is.null(name_map[[chr_id]])) {
-        return(as.character(name_map[[chr_id]]))
+        resolved_chr <- as.character(name_map[[chr_id]])
+        cache_env_set(short_chr_cache, cache_key, resolved_chr, max_size = 12000L)
+        return(resolved_chr)
     }
 
     # Simple regex fallback if mapping not found, but it has NC_ format
     if (grepl("^NC_0+(\\d+)\\.\\d+$", chr_id)) {
         num <- sub("^NC_0+(\\d+)\\.\\d+$", "\\1", chr_id)
-        return(paste("Chr", num))
+        resolved_chr <- paste("Chr", num)
+        cache_env_set(short_chr_cache, cache_key, resolved_chr, max_size = 12000L)
+        return(resolved_chr)
     }
 
-    return(chr_id)
+    cache_env_set(short_chr_cache, cache_key, resolved_chr, max_size = 12000L)
+    return(resolved_chr)
 }
 
 get_chromosome_length_map <- function(annotation_file_path) {
@@ -2514,21 +4451,21 @@ get_chromosome_length_map <- function(annotation_file_path) {
         if (is_tabix_annotation_file(annotation_file_path)) {
             genes_df <- get_genes_table_from_annotation(annotation_file_path)
             if (!is.null(genes_df) && nrow(genes_df) > 0) {
-                inferred <- genes_df %>%
-                    transmute(seqid = as.character(chr), end = as.numeric(end)) %>%
-                    filter(is.finite(end), !is.na(seqid), nzchar(seqid)) %>%
-                    group_by(seqid) %>%
-                    summarise(chr_len = max(end, na.rm = TRUE), .groups = "drop")
+                inferred <- genes_df |>
+                    dplyr::transmute(seqid = as.character(chr), end = as.numeric(end)) |>
+                    dplyr::filter(is.finite(end), !is.na(seqid), nzchar(seqid)) |>
+                    dplyr::group_by(seqid) |>
+                    dplyr::summarise(chr_len = max(end, na.rm = TRUE), .groups = "drop")
                 if (nrow(inferred) > 0) raw_map <- stats::setNames(as.numeric(inferred$chr_len), inferred$seqid)
             }
         } else {
             df <- load_gff_cached(annotation_file_path)
             if (!is.null(df) && nrow(df) > 0) {
-                inferred <- df %>%
-                    transmute(seqid = as.character(seqid), end = as.numeric(end)) %>%
-                    filter(is.finite(end), !is.na(seqid), nzchar(seqid)) %>%
-                    group_by(seqid) %>%
-                    summarise(chr_len = max(end, na.rm = TRUE), .groups = "drop")
+                inferred <- df |>
+                    dplyr::transmute(seqid = as.character(seqid), end = as.numeric(end)) |>
+                    dplyr::filter(is.finite(end), !is.na(seqid), nzchar(seqid)) |>
+                    dplyr::group_by(seqid) |>
+                    dplyr::summarise(chr_len = max(end, na.rm = TRUE), .groups = "drop")
                 if (nrow(inferred) > 0) {
                     raw_map <- stats::setNames(as.numeric(inferred$chr_len), inferred$seqid)
                 }
@@ -2541,9 +4478,9 @@ get_chromosome_length_map <- function(annotation_file_path) {
         norm_names <- normalize_chr_id(names(raw_map))
         keep <- nzchar(norm_names)
         if (any(keep)) {
-            tmp <- data.frame(norm = norm_names[keep], len = as.numeric(raw_map[keep]), stringsAsFactors = FALSE) %>%
-                group_by(norm) %>%
-                summarise(len = max(len, na.rm = TRUE), .groups = "drop")
+            tmp <- data.frame(norm = norm_names[keep], len = as.numeric(raw_map[keep]), stringsAsFactors = FALSE) |>
+                dplyr::group_by(norm) |>
+                dplyr::summarise(len = max(len, na.rm = TRUE), .groups = "drop")
             norm_map <- stats::setNames(as.numeric(tmp$len), tmp$norm)
         }
     }
@@ -2929,6 +4866,8 @@ run_local_locus_alignment <- function(reference_ctx,
                                       out_path = "",
                                       format_name = "general",
                                       extra_args = character(0)) {
+    lastz_perf <- app_perf_new_run("LASTZ_GENERAL")
+    app_perf_mark(lastz_perf, "start", "LASTZ")
     engine_txt <- tolower(trimws(as.character(engine %||% "lastz")))
     if (!engine_txt %in% c("lastz")) {
         return(list(
@@ -3031,6 +4970,11 @@ run_local_locus_alignment <- function(reference_ctx,
         },
         error = function(e) list(status = 1L, stdout = character(0), stderr = as.character(e$message %||% "unknown error"))
     )
+    app_perf_mark(
+        lastz_perf,
+        sprintf("system_done ref_bp=%d query_bp=%d", as.integer(nchar(ref_seq)), as.integer(nchar(qry_seq))),
+        "LASTZ"
+    )
     exit_status <- suppressWarnings(as.integer(run_res$status[1L] %||% 1L))
     if (length(exit_status) == 0L || is.na(exit_status)) exit_status <- 1L
     raw_lines <- character(0)
@@ -3043,6 +4987,11 @@ run_local_locus_alignment <- function(reference_ctx,
         exit_status <- 1L
     }
     status_txt <- if (exit_status == 0L) "ok" else "engine_error"
+    app_perf_mark(
+        lastz_perf,
+        sprintf("finish status=%s exit=%d blocks=%d", status_txt, as.integer(exit_status), as.integer(nrow(parsed_blocks %||% data.frame()))),
+        "LASTZ"
+    )
     list(
         status = status_txt,
         engine = engine_txt,
@@ -3226,7 +5175,7 @@ parse_lastz_lav_output <- function(raw_lines,
         }
     }
 
-    out_df <- do.call(rbind, out_rows)
+    out_df <- do.call(rbind,  out_rows)
     if (!is.data.frame(out_df) || nrow(out_df) == 0L) {
         return(data.frame(stringsAsFactors = FALSE))
     }
@@ -3297,7 +5246,7 @@ prune_reference_overlaps_per_query <- function(df_segments) {
                     }
                 }
             }
-            pending <- if (length(next_pending) > 0L) do.call(rbind, next_pending) else data.frame(start = numeric(0), end = numeric(0))
+            pending <- if (length(next_pending) > 0L) do.call(rbind,  next_pending) else data.frame(start = numeric(0), end = numeric(0))
         }
         pending
     }
@@ -3394,7 +5343,7 @@ prune_reference_overlaps_per_query <- function(df_segments) {
             NULL
         })
 
-    out_df <- do.call(rbind, out_rows)
+    out_df <- do.call(rbind,  out_rows)
     if (!is.data.frame(out_df) || nrow(out_df) == 0L) {
         return(data.frame(stringsAsFactors = FALSE))
     }
@@ -3469,6 +5418,8 @@ run_local_locus_alignment_multipip <- function(reference_ctx,
                                                out_path = "",
                                                format_name = "lav",
                                                extra_args = character(0)) {
+    lastz_perf <- app_perf_new_run("LASTZ_MULTIPIP")
+    app_perf_mark(lastz_perf, "start", "LASTZ")
     engine_txt <- tolower(trimws(as.character(engine %||% "lastz")))
     if (!engine_txt %in% c("lastz")) {
         return(list(
@@ -3561,6 +5512,11 @@ run_local_locus_alignment_multipip <- function(reference_ctx,
         },
         error = function(e) list(status = 1L, stdout = character(0), stderr = as.character(e$message %||% "unknown error"))
     )
+    app_perf_mark(
+        lastz_perf,
+        sprintf("system_done ref_bp=%d query_bp=%d", as.integer(nchar(ref_seq)), as.integer(nchar(qry_seq))),
+        "LASTZ"
+    )
     exit_status <- suppressWarnings(as.integer(run_res$status[1L] %||% 1L))
     if (length(exit_status) == 0L || is.na(exit_status)) exit_status <- 1L
     raw_lines <- character(0)
@@ -3575,6 +5531,11 @@ run_local_locus_alignment_multipip <- function(reference_ctx,
         exit_status <- 1L
     }
     status_txt <- if (exit_status == 0L) "ok" else "engine_error"
+    app_perf_mark(
+        lastz_perf,
+        sprintf("finish status=%s exit=%d segments=%d", status_txt, as.integer(exit_status), as.integer(nrow(parsed_segments %||% data.frame()))),
+        "LASTZ"
+    )
     list(
         status = status_txt,
         engine = engine_txt,
@@ -3612,7 +5573,7 @@ get_fasta_header_map <- function(fasta_path) {
         if (header_count < 3) {
             header_count <- header_count + 1
         }
-        chr_m <- str_match(header, regex("chromosome\\s+([0-9a-z]+)", ignore_case = TRUE))
+        chr_m <- stringr::str_match(header, stringr::regex("chromosome\\s+([0-9a-z]+)", ignore_case = TRUE))
         if (!all(is.na(chr_m))) {
             chrk <- tolower(chr_m[1, 2])
             if (nzchar(chrk) && is.null(chrom_to_seqname[[chrk]])) chrom_to_seqname[[chrk]] <- token
@@ -3759,13 +5720,119 @@ cache_sequence_extract_result <- function(fasta_path, seqid, start_pos, end_pos,
     invisible(seq_val)
 }
 
-get_twobit_seqnames <- function(two_bit_path) {
+twobit_seqnames_cache_root <- function(base_dir = ".") {
+    root <- file.path(get_cgv_cache_root(base_dir = base_dir), "genome_seqnames")
+    if (!dir.exists(root)) {
+        dir.create(root, recursive = TRUE, showWarnings = FALSE)
+    }
+    normalizePath(root, winslash = "/", mustWork = FALSE)
+}
+
+twobit_seqnames_cache_key <- function(two_bit_path, base_dir = ".") {
+    p <- normalizePath(as.character(two_bit_path %||% ""), winslash = "/", mustWork = FALSE)
+    info <- if (nzchar(p) && file.exists(p)) file.info(p) else NULL
+    identity <- canonical_cache_identity_path(p, base_dir = base_dir)
+    if (requireNamespace("digest", quietly = TRUE)) {
+        return(digest::digest(
+            list("twobit-seqnames", .twobit_seqnames_sidecar_version, identity),
+            algo = "xxhash64"
+        ))
+    }
+    sanitize_cache_key(paste(
+        "twobit-seqnames",
+        .twobit_seqnames_sidecar_version,
+        identity,
+        sep = "||"
+    ))
+}
+
+twobit_seqnames_sidecar_path <- function(two_bit_path, base_dir = ".") {
+    file.path(
+        twobit_seqnames_cache_root(base_dir = base_dir),
+        paste0(twobit_seqnames_cache_key(two_bit_path, base_dir = base_dir), ".seqnames.rds")
+    )
+}
+
+twobit_file_fingerprint <- function(two_bit_path) {
+    p <- normalizePath(as.character(two_bit_path %||% ""), winslash = "/", mustWork = FALSE)
+    if (!nzchar(p) || !file.exists(p)) {
+        return(NULL)
+    }
+    info <- file.info(p)
+    list(
+        path = p,
+        size = suppressWarnings(as.numeric(info$size[1] %||% NA_real_)),
+        mtime = suppressWarnings(as.numeric(info$mtime[1] %||% NA_real_))
+    )
+}
+
+read_twobit_seqnames_sidecar <- function(two_bit_path, base_dir = ".") {
+    fp <- twobit_file_fingerprint(two_bit_path)
+    if (is.null(fp) || !is.finite(fp$size) || !is.finite(fp$mtime)) {
+        return(NULL)
+    }
+
+    candidates <- unique(c(
+        paste0(fp$path, ".seqnames.rds"),
+        twobit_seqnames_sidecar_path(fp$path, base_dir = base_dir)
+    ))
+    candidates <- candidates[nzchar(candidates) & file.exists(candidates)]
+    if (length(candidates) == 0L) {
+        return(NULL)
+    }
+
+    for (path in candidates) {
+        obj <- tryCatch(readRDS(path), error = function(e) NULL)
+        valid <- is.list(obj) &&
+            identical(as.integer(obj$schema_version %||% NA_integer_), .twobit_seqnames_sidecar_version) &&
+            is.character(obj$seqnames) &&
+            length(obj$seqnames) > 0L &&
+            is.finite(as.numeric(obj$source_size %||% NA_real_)) &&
+            is.finite(as.numeric(obj$source_mtime %||% NA_real_)) &&
+            identical(as.numeric(obj$source_size), as.numeric(fp$size)) &&
+            abs(as.numeric(obj$source_mtime) - as.numeric(fp$mtime)) < 1e-6
+        if (isTRUE(valid)) {
+            return(as.character(obj$seqnames))
+        }
+    }
+    NULL
+}
+
+write_twobit_seqnames_sidecar <- function(two_bit_path, seqnames, base_dir = ".") {
+    fp <- twobit_file_fingerprint(two_bit_path)
+    vals <- as.character(seqnames %||% character(0))
+    vals <- vals[!is.na(vals) & nzchar(vals)]
+    if (is.null(fp) || length(vals) == 0L) {
+        return(invisible(FALSE))
+    }
+    obj <- list(
+        schema_version = .twobit_seqnames_sidecar_version,
+        source_path = canonical_cache_identity_path(fp$path, base_dir = base_dir),
+        source_size = as.numeric(fp$size),
+        source_mtime = as.numeric(fp$mtime),
+        seqnames = vals,
+        created_at = as.numeric(Sys.time())
+    )
+    invisible(atomic_save_rds(
+        obj,
+        twobit_seqnames_sidecar_path(fp$path, base_dir = base_dir),
+        compress = "gzip"
+    ))
+}
+
+get_twobit_seqnames <- function(two_bit_path, base_dir = ".") {
     if (is.null(two_bit_path) || !nzchar(two_bit_path) || !file.exists(two_bit_path)) {
         return(character(0))
     }
     key <- normalizePath(two_bit_path, winslash = "/", mustWork = FALSE)
     if (exists(key, envir = .twobit_seqinfo_cache, inherits = FALSE)) {
         return(get(key, envir = .twobit_seqinfo_cache, inherits = FALSE))
+    }
+
+    sidecar <- read_twobit_seqnames_sidecar(key, base_dir = base_dir)
+    if (!is.null(sidecar) && length(sidecar) > 0L) {
+        assign(key, sidecar, envir = .twobit_seqinfo_cache)
+        return(sidecar)
     }
 
     out <- tryCatch(
@@ -3787,6 +5854,9 @@ get_twobit_seqnames <- function(two_bit_path) {
         error = function(e) character(0)
     )
     assign(key, out, envir = .twobit_seqinfo_cache)
+    if (length(out) > 0L) {
+        tryCatch(write_twobit_seqnames_sidecar(key, out, base_dir = base_dir), error = function(e) FALSE)
+    }
     out
 }
 
@@ -3864,6 +5934,33 @@ extract_sequence_from_fasta <- function(fasta_path, seqid, start_pos, end_pos) {
     seq_cache_key <- get_seq_extract_cache_key(fasta_path, seqid, start_pos, end_pos)
     if (exists(seq_cache_key, envir = .seq_extract_cache, inherits = FALSE)) {
         return(get(seq_cache_key, envir = .seq_extract_cache, inherits = FALSE))
+    }
+
+    # Buscar en caché una región más amplia que cubra el rango solicitado.
+    norm_path <- normalizePath(as.character(fasta_path %||% ""), winslash = "/", mustWork = FALSE)
+    seqid_txt <- as.character(seqid %||% "")
+    if (nzchar(norm_path) && nzchar(seqid_txt)) {
+        prefix <- paste0(norm_path, "::", seqid_txt, "::")
+        cache_keys <- ls(envir = .seq_extract_cache, all.names = TRUE)
+        matching <- cache_keys[startsWith(cache_keys, prefix)]
+        for (ck in matching) {
+            parts <- strsplit(ck, "::", fixed = TRUE)[[1]]
+            if (length(parts) >= 4L) {
+                ck_start <- suppressWarnings(as.integer(parts[3L]))
+                ck_end <- suppressWarnings(as.integer(parts[4L]))
+                if (is.finite(ck_start) && is.finite(ck_end) &&
+                    ck_start <= start_pos && ck_end >= end_pos) {
+                    cached_seq <- get(ck, envir = .seq_extract_cache, inherits = FALSE)
+                    if (is.character(cached_seq) && nzchar(cached_seq) && nchar(cached_seq) >= (end_pos - ck_start + 1L)) {
+                        rel_start <- start_pos - ck_start + 1L
+                        rel_end <- end_pos - ck_start + 1L
+                        sub_seq <- substr(cached_seq, rel_start, rel_end)
+                        assign(seq_cache_key, sub_seq, envir = .seq_extract_cache)
+                        return(sub_seq)
+                    }
+                }
+            }
+        }
     }
 
     if (is_twobit_file(fasta_path)) {
@@ -4247,6 +6344,335 @@ extract_spliced_exon_sequence <- function(fasta_path, seqid, exon_ranges, strand
     seq_spliced
 }
 
+get_transcript_composition_cache_key <- function(genome_path, seqid, exon_ranges, strand = "+") {
+    gp <- normalizePath(as.character(genome_path %||% ""), winslash = "/", mustWork = FALSE)
+    fi_sig <- ""
+    if (nzchar(gp) && file.exists(gp)) {
+        fi <- file.info(gp)
+        fi_sig <- paste(as.character(fi$size[1] %||% ""), as.character(as.numeric(fi$mtime[1] %||% NA_real_)), sep = ":")
+    }
+    ex <- normalize_exon_ranges(exon_ranges)
+    exon_sig <- if (nrow(ex) > 0L) {
+        paste(paste0(as.integer(round(ex$start)), "-", as.integer(round(ex$end))), collapse = ";")
+    } else {
+        ""
+    }
+    paste(gp, fi_sig, as.character(seqid %||% ""), toupper(trimws(as.character(strand %||% "+"))), exon_sig, sep = "||")
+}
+
+get_transcript_composition_cached <- function(genome_path, seqid, exon_ranges, strand = "+") {
+    key <- get_transcript_composition_cache_key(genome_path, seqid, exon_ranges, strand = strand)
+    cached <- cache_env_get(.transcript_composition_cache, key, default = NULL)
+    if (!is.null(cached) && is.list(cached) && nzchar(as.character(cached$composition %||% ""))) {
+        return(cached)
+    }
+
+    seq_txt <- extract_spliced_exon_sequence(genome_path, seqid, exon_ranges, strand = strand)
+    seq_clean <- toupper(gsub("\\s+", "", as.character(seq_txt %||% "")))
+    counts <- c(
+        A = nchar(gsub("[^A]", "", seq_clean)),
+        T = nchar(gsub("[^T]", "", seq_clean)),
+        C = nchar(gsub("[^C]", "", seq_clean)),
+        G = nchar(gsub("[^G]", "", seq_clean))
+    )
+    counts <- as.integer(counts)
+    names(counts) <- c("A", "T", "C", "G")
+    known_total <- sum(counts, na.rm = TRUE)
+    out <- list(
+        composition = format_sequence_composition_from_counts(counts, denominator = known_total),
+        length = nchar(seq_clean),
+        known_total = as.integer(known_total),
+        counts = counts,
+        sequence_optional = NULL
+    )
+    cache_env_set(.transcript_composition_cache, key, out, max_size = 2000L, max_bytes = 16 * 1024^2)
+    out
+}
+
+wrap_fasta_sequence <- function(seq_txt, width = 80L) {
+    s <- toupper(gsub("[^ACGTN]", "", as.character(seq_txt %||% "")))
+    if (!nzchar(s)) {
+        return("")
+    }
+    w <- max(1L, as.integer(width %||% 80L))
+    n <- nchar(s)
+    starts <- seq.int(1L, n, by = w)
+    ends <- pmin(starts + w - 1L, n)
+    paste(vapply(seq_along(starts), function(i) {
+        substr(s, starts[i], ends[i])
+    }, character(1)), collapse = "\n")
+}
+
+normalize_sequence_download_type <- function(sequence_type, default = "transcript") {
+    typ <- as.character(sequence_type %||% default)
+    if (length(typ) == 0L || is.na(typ[1]) || !nzchar(trimws(typ[1]))) {
+        typ <- as.character(default %||% "transcript")
+    }
+    typ <- tolower(trimws(typ[1]))
+    typ <- gsub("[^a-z_]+", "_", typ)
+    typ <- switch(
+        typ,
+        "gene" = "gene",
+        "gen" = "gene",
+        "full_gene" = "gene",
+        "transcript" = "transcript",
+        "transcrito" = "transcript",
+        "mrna" = "transcript",
+        "cds" = "cds",
+        "coding_sequence" = "cds",
+        "intron" = "introns",
+        "introns" = "introns",
+        "intrones" = "introns",
+        default
+    )
+    if (!typ %in% c("gene", "transcript", "cds", "introns")) {
+        typ <- default
+    }
+    typ
+}
+
+sequence_download_extract_title_field <- function(title_txt, field_name) {
+    txt <- as.character(title_txt %||% "")
+    if (length(txt) == 0L || !nzchar(txt)) {
+        return("")
+    }
+    field <- as.character(field_name %||% "")
+    if (length(field) == 0L || !nzchar(field[1])) {
+        return("")
+    }
+    field <- gsub("([.^$|()\\[\\]{}*+?\\\\-])", "\\\\\\1", field[1], perl = TRUE)
+    m <- stringr::str_match(txt, sprintf("\\b%s\\s*:\\s*([^|]+)", field))
+    out <- trimws(as.character(m[1, 2] %||% ""))
+    if (is.na(out)) "" else safe_url_decode(out)
+}
+
+sequence_download_clean_id <- function(x, fallback = "sequence") {
+    out <- trimws(safe_url_decode(as.character(x %||% "")))
+    if (length(out) == 0L) {
+        out <- ""
+    }
+    out <- out[1]
+    out <- stringr::str_remove(out, stringr::regex("^(transcript|gene)\\s*:\\s*", ignore_case = TRUE))
+    out <- trimws(out)
+    if (!nzchar(out) || is.na(out)) {
+        out <- as.character(fallback %||% "sequence")
+    }
+    out
+}
+
+sequence_download_tx_types <- function() {
+    c(
+        "mrna", "transcript", "lnc_rna", "trna", "rrna", "snorna", "snrna", "mirna",
+        "ncrna", "primary_transcript", "pre_mirna", "guide_rna", "rnase_p_rna",
+        "rnase_mrp_rna", "telomerase_rna", "antisense_rna", "srp_rna", "scarna",
+        "vault_rna", "y_rna", "antisense_lncrna", "lncrna"
+    )
+}
+
+sequence_download_model <- function(plot_data) {
+    if (is.null(plot_data) || nrow(plot_data) == 0L) {
+        empty <- data.frame()
+        return(list(df = empty, df_gene = empty, df_transcript = empty, raw = empty))
+    }
+    raw <- as.data.frame(plot_data, stringsAsFactors = FALSE)
+    if (exists("process_gene_data", mode = "function")) {
+        processed <- tryCatch(process_gene_data(raw), error = function(e) NULL)
+        if (!is.null(processed) && !is.null(processed$df)) {
+            processed$raw <- raw
+            return(processed)
+        }
+    }
+    row_type <- tolower(trimws(as.character(raw$V3 %||% rep("", nrow(raw)))))
+    df_gene <- raw[row_type == "gene", , drop = FALSE]
+    df_transcript <- raw[row_type %in% sequence_download_tx_types(), , drop = FALSE]
+    df <- data.frame(
+        xstart = suppressWarnings(as.numeric(raw$V4)),
+        xend = suppressWarnings(as.numeric(raw$V5)),
+        feature_type = row_type,
+        seqid = as.character(raw$V1 %||% ""),
+        strand = as.character(raw$V7 %||% ""),
+        attributes_raw = as.character(raw$V9 %||% ""),
+        stringsAsFactors = FALSE
+    )
+    list(df = df, df_gene = df_gene, df_transcript = df_transcript, raw = raw)
+}
+
+sequence_download_span <- function(df, preferred_types = character(0), fallback_types = character(0)) {
+    if (is.null(df) || nrow(df) == 0L) {
+        return(list(start = NA_real_, end = NA_real_, seqid = "", strand = ""))
+    }
+    if (all(c("V3", "V4", "V5") %in% names(df)) && exists("compute_feature_block_span", mode = "function")) {
+        return(compute_feature_block_span(df, preferred_types = preferred_types, fallback_types = fallback_types))
+    }
+    row_type <- tolower(trimws(as.character(df$feature_type %||% rep("", nrow(df)))))
+    pick <- row_type %in% tolower(preferred_types)
+    if (!any(pick)) pick <- row_type %in% tolower(fallback_types)
+    if (!any(pick)) pick <- rep(TRUE, nrow(df))
+    span_df <- df[pick, , drop = FALSE]
+    starts <- suppressWarnings(as.numeric(span_df$xstart %||% span_df$V4))
+    ends <- suppressWarnings(as.numeric(span_df$xend %||% span_df$V5))
+    start_val <- suppressWarnings(min(starts, na.rm = TRUE))
+    end_val <- suppressWarnings(max(ends, na.rm = TRUE))
+    if (!is.finite(start_val) || !is.finite(end_val) || end_val < start_val) {
+        start_val <- NA_real_
+        end_val <- NA_real_
+    }
+    list(
+        start = start_val,
+        end = end_val,
+        seqid = as.character((span_df$seqid %||% span_df$V1 %||% "")[1] %||% ""),
+        strand = as.character((span_df$strand %||% span_df$V7 %||% "")[1] %||% "")
+    )
+}
+
+sequence_download_ranges <- function(df_plot, feature_type) {
+    if (is.null(df_plot) || nrow(df_plot) == 0L) {
+        return(data.frame(start = numeric(0), end = numeric(0)))
+    }
+    ft <- tolower(trimws(as.character(df_plot$feature_type %||% rep("", nrow(df_plot)))))
+    idx <- which(ft == tolower(feature_type))
+    if (length(idx) == 0L) {
+        return(data.frame(start = numeric(0), end = numeric(0)))
+    }
+    normalize_exon_ranges(data.frame(
+        start = suppressWarnings(as.numeric(df_plot$xstart[idx])),
+        end = suppressWarnings(as.numeric(df_plot$xend[idx])),
+        stringsAsFactors = FALSE
+    ))
+}
+
+sequence_download_intron_ranges <- function(exon_ranges) {
+    ex <- normalize_exon_ranges(exon_ranges)
+    if (nrow(ex) < 2L) {
+        return(data.frame(start = numeric(0), end = numeric(0)))
+    }
+    starts <- as.integer(round(ex$end[-nrow(ex)] + 1L))
+    ends <- as.integer(round(ex$start[-1] - 1L))
+    out <- data.frame(start = starts, end = ends, stringsAsFactors = FALSE)
+    out <- out[is.finite(out$start) & is.finite(out$end) & out$end >= out$start, , drop = FALSE]
+    normalize_exon_ranges(out)
+}
+
+build_selected_sequence_fasta_content <- function(sequence_type = "transcript",
+                                                  plot_data,
+                                                  gene_meta = NULL,
+                                                  title_txt = "",
+                                                  genome_path = NULL,
+                                                  fallback_id = "sequence") {
+    typ <- normalize_sequence_download_type(sequence_type)
+    gp <- trimws(as.character(genome_path %||% ""))
+    model <- sequence_download_model(plot_data)
+    df_plot <- model$df
+    raw <- model$raw
+
+    tx_types <- sequence_download_tx_types()
+    feature_types <- c("exon", "cds", "start_codon", "stop_codon")
+    gene_span <- sequence_download_span(raw, preferred_types = "gene", fallback_types = c(tx_types, feature_types))
+    tx_span <- sequence_download_span(raw, preferred_types = tx_types, fallback_types = c(feature_types, "gene"))
+
+    meta <- gene_meta %||% list()
+    seqid_txt <- trimws(as.character(meta$seqid %||% gene_span$seqid %||% tx_span$seqid %||% ""))
+    strand_txt <- trimws(as.character(tx_span$strand %||% meta$strand %||% gene_span$strand %||% "+"))
+    if (!strand_txt %in% c("+", "-")) {
+        strand_txt <- "+"
+    }
+
+    gene_label <- sequence_download_clean_id(
+        meta$display_gene_name %||% meta$matched_gene_name %||% sequence_download_extract_title_field(title_txt, "Gene"),
+        fallback = fallback_id
+    )
+    tx_label <- sequence_download_clean_id(
+        sequence_download_extract_title_field(title_txt, "Transcript"),
+        fallback = gene_label
+    )
+    if (identical(tx_label, gene_label) && !is.null(plot_data)) {
+        labels <- tryCatch(extract_plot_labels(plot_data), error = function(e) NULL)
+        tx_label <- sequence_download_clean_id(labels$transcript %||% tx_label, fallback = tx_label)
+    }
+    header_id <- if (identical(typ, "gene")) gene_label else tx_label
+    if (!nzchar(header_id)) {
+        header_id <- as.character(fallback_id %||% "sequence")
+    }
+
+    seq_txt <- ""
+    range_start <- NA_real_
+    range_end <- NA_real_
+    segments_n <- 0L
+
+    if (identical(typ, "gene")) {
+        g_start <- suppressWarnings(as.numeric(meta$gene_start_bp %||% gene_span$start))
+        g_end <- suppressWarnings(as.numeric(meta$gene_end_bp %||% gene_span$end))
+        if (!is.finite(g_start) || !is.finite(g_end)) {
+            g_start <- suppressWarnings(as.numeric(tx_span$start))
+            g_end <- suppressWarnings(as.numeric(tx_span$end))
+        }
+        range_start <- g_start
+        range_end <- g_end
+        segments_n <- if (is.finite(g_start) && is.finite(g_end)) 1L else 0L
+        if (nzchar(gp) && file.exists(gp) && nzchar(seqid_txt) &&
+            is.finite(g_start) && is.finite(g_end) && g_end >= g_start) {
+            seq_txt <- tryCatch(
+                extract_sequence_from_fasta(gp, seqid_txt, as.integer(round(g_start)), as.integer(round(g_end))),
+                error = function(e) ""
+            )
+            if (nzchar(seq_txt) && identical(strand_txt, "-")) {
+                seq_txt <- tryCatch(reverse_complement_dna(seq_txt), error = function(e) seq_txt)
+            }
+        }
+    } else {
+        exon_ranges <- sequence_download_ranges(df_plot, "exon")
+        cds_ranges <- sequence_download_ranges(df_plot, "cds")
+        ranges <- switch(
+            typ,
+            "transcript" = if (nrow(exon_ranges) > 0L) exon_ranges else cds_ranges,
+            "cds" = cds_ranges,
+            "introns" = sequence_download_intron_ranges(exon_ranges),
+            data.frame(start = numeric(0), end = numeric(0))
+        )
+        segments_n <- nrow(ranges)
+        if (segments_n > 0L) {
+            range_start <- min(ranges$start, na.rm = TRUE)
+            range_end <- max(ranges$end, na.rm = TRUE)
+        } else if (identical(typ, "transcript")) {
+            range_start <- suppressWarnings(as.numeric(tx_span$start))
+            range_end <- suppressWarnings(as.numeric(tx_span$end))
+        }
+        if (nzchar(gp) && file.exists(gp) && nzchar(seqid_txt)) {
+            if (segments_n > 0L) {
+                seq_txt <- tryCatch(
+                    extract_spliced_exon_sequence(gp, seqid_txt, exon_ranges = ranges, strand = strand_txt),
+                    error = function(e) ""
+                )
+            } else if (identical(typ, "transcript") &&
+                is.finite(range_start) && is.finite(range_end) && range_end >= range_start) {
+                seq_txt <- tryCatch(
+                    extract_sequence_from_fasta(gp, seqid_txt, as.integer(round(range_start)), as.integer(round(range_end))),
+                    error = function(e) ""
+                )
+                if (nzchar(seq_txt) && identical(strand_txt, "-")) {
+                    seq_txt <- tryCatch(reverse_complement_dna(seq_txt), error = function(e) seq_txt)
+                }
+            }
+        }
+    }
+
+    meta_bits <- c(paste0("type=", typ))
+    if (nzchar(seqid_txt)) meta_bits <- c(meta_bits, paste0("chr=", seqid_txt))
+    if (is.finite(range_start)) meta_bits <- c(meta_bits, paste0("start=", as.integer(round(range_start))))
+    if (is.finite(range_end)) meta_bits <- c(meta_bits, paste0("end=", as.integer(round(range_end))))
+    meta_bits <- c(meta_bits, paste0("strand=", strand_txt))
+    if (identical(typ, "introns") || segments_n > 1L) {
+        meta_bits <- c(meta_bits, paste0("segments=", as.integer(segments_n)))
+    }
+
+    seq_wrapped <- wrap_fasta_sequence(seq_txt, width = 80L)
+    header <- paste0(">", header_id, " | ", paste(meta_bits, collapse = " | "))
+    if (!nzchar(seq_wrapped)) {
+        return(paste0(header, "\n"))
+    }
+    paste0(header, "\n", seq_wrapped)
+}
+
 extract_plot_labels <- function(data_df) {
     if (is.null(data_df) || nrow(data_df) == 0) {
         return(list(transcript = "N/A", chromosome = "N/A"))
@@ -4315,7 +6741,7 @@ split_gene_data_by_transcript <- function(data_df) {
         if (length(x) == 0) {
             return(character(0))
         }
-        clean <- trimws(str_remove(x, regex("^(transcript|gene)\\s*:\\s*", ignore_case = TRUE)))
+        clean <- trimws(stringr::str_remove(x, stringr::regex("^(transcript|gene)\\s*:\\s*", ignore_case = TRUE)))
         clean <- clean[nzchar(clean)]
         unique(c(x, clean, paste0("transcript:", clean), paste0("gene:", clean)))
     }
@@ -4359,13 +6785,13 @@ split_gene_data_by_transcript <- function(data_df) {
         tid <- ids[i]
         if (!nzchar(tid)) {
             raw <- safe_url_decode(attrs_raw[i] %||% "")
-            tid <- str_extract(raw, "(^|;)ID=[^;]+") %>% str_remove("(^|;)ID=")
+            tid <- stringr::str_extract(raw, "(^|;)ID=[^;]+") |> stringr::str_remove("(^|;)ID=")
         }
         as.character(tid %||% "")
     }, character(1))
     tx_ids_display <- vapply(tx_ids_raw, function(tid) {
         t <- trimws(safe_url_decode(tid %||% ""))
-        t <- str_remove(t, regex("^(transcript|gene)\\s*:\\s*", ignore_case = TRUE))
+        t <- stringr::str_remove(t, stringr::regex("^(transcript|gene)\\s*:\\s*", ignore_case = TRUE))
         trimws(t)
     }, character(1))
 
@@ -4377,8 +6803,8 @@ split_gene_data_by_transcript <- function(data_df) {
     tx_rows_valid <- tx_rows[valid_tx]
     tx_raw_valid <- tx_ids_raw[valid_tx]
     tx_disp_valid <- tx_ids_display[valid_tx]
-    tx_base <- str_remove(tolower(tx_disp_valid), "(?:[-_.]|\\b)\\d+$")
-    tx_num <- suppressWarnings(as.numeric(str_match(tx_disp_valid, "(?:[-_.]|\\b)(\\d+)$")[, 2]))
+    tx_base <- stringr::str_remove(tolower(tx_disp_valid), "(?:[-_.]|\\b)\\d+$")
+    tx_num <- suppressWarnings(as.numeric(stringr::str_match(tx_disp_valid, "(?:[-_.]|\\b)(\\d+)$")[, 2]))
     tx_num_ord <- ifelse(is.na(tx_num), Inf, tx_num)
     ord <- order(tx_base, tx_num_ord, tolower(tx_disp_valid), tx_rows_valid)
 
@@ -4424,6 +6850,17 @@ split_gene_data_by_transcript <- function(data_df) {
 }
 
 # --- 5. BÚSQUEDA DE GENES (ACTUALIZADA: CONTROL PARALELO) ---
+
+order_external_alias_sources_for_speed <- function(sources) {
+    src <- unique(tolower(trimws(as.character(sources %||% character(0)))))
+    preferred <- c("mygene", "uniprot", "ncbi", "ensembl")
+    preferred[preferred %in% src]
+}
+
+external_alias_source_latency_group <- function(source) {
+    src <- tolower(trimws(as.character(source %||% "")))
+    if (src %in% c("mygene", "uniprot")) "fast" else "slow"
+}
 
 build_gene_query_candidates <- function(gene_name, organism = NULL, taxid = NULL, status_callback = NULL, max_aliases = 40, alias_lookup_timeout_sec = 0, use_parallel = TRUE, alias_sources = c("mygene", "ncbi", "uniprot", "ensembl")) {
     expand_local <- function(q) {
@@ -4522,7 +6959,7 @@ build_gene_query_candidates <- function(gene_name, organism = NULL, taxid = NULL
     return(all_candidates)
 }
 
-search_gene_in_file <- function(file_path, gene_names, show_diagnostics = TRUE, match_mode = c("flex", "exact"), return_meta = FALSE, include_bridge_tokens = FALSE) {
+search_gene_in_file <- function(file_path, gene_names, show_diagnostics = TRUE, match_mode = c("flex", "exact"), return_meta = FALSE, include_bridge_tokens = FALSE, bridge_sqlite_con = NULL) {
     tryCatch(
         {
             match_mode <- match.arg(match_mode)
@@ -4538,7 +6975,12 @@ search_gene_in_file <- function(file_path, gene_names, show_diagnostics = TRUE, 
                 }
                 target_row_ids <- search_gene_rows_with_index(idx, gene_names, match_mode = match_mode)
                 if (length(target_row_ids) == 0 && identical(match_mode, "exact") && isTRUE(include_bridge_tokens)) {
-                    target_row_ids <- search_gene_rows_via_bridge_descriptions(genes_df$attributes, gene_names)
+                    if (!is.null(bridge_sqlite_con) && exists("resolve_bridge_via_sqlite", mode = "function")) {
+                        target_row_ids <- resolve_bridge_via_sqlite(bridge_sqlite_con, gene_names, idx)
+                    }
+                    if (length(target_row_ids) == 0) {
+                        target_row_ids <- search_gene_rows_via_bridge_descriptions(genes_df$attributes, gene_names)
+                    }
                 }
                 target_gene_rows <- if (length(target_row_ids) > 0) genes_df[target_row_ids, , drop = FALSE] else genes_df[0, , drop = FALSE]
             } else {
@@ -4552,10 +6994,15 @@ search_gene_in_file <- function(file_path, gene_names, show_diagnostics = TRUE, 
                 }
                 target_row_ids <- search_gene_rows_with_index(idx, gene_names, match_mode = match_mode)
                 if (length(target_row_ids) == 0 && identical(match_mode, "exact") && isTRUE(include_bridge_tokens)) {
-                    attr_subset <- df$attributes[idx$gene_rows]
-                    bridge_rel <- search_gene_rows_via_bridge_descriptions(attr_subset, gene_names)
-                    if (length(bridge_rel) > 0) {
-                        target_row_ids <- idx$gene_rows[bridge_rel]
+                    if (!is.null(bridge_sqlite_con) && exists("resolve_bridge_via_sqlite", mode = "function")) {
+                        target_row_ids <- resolve_bridge_via_sqlite(bridge_sqlite_con, gene_names, idx)
+                    }
+                    if (length(target_row_ids) == 0) {
+                        attr_subset <- df$attributes[idx$gene_rows]
+                        bridge_rel <- search_gene_rows_via_bridge_descriptions(attr_subset, gene_names)
+                        if (length(bridge_rel) > 0) {
+                            target_row_ids <- idx$gene_rows[bridge_rel]
+                        }
                     }
                 }
                 target_gene_rows <- if (length(target_row_ids) > 0) df[target_row_ids, , drop = FALSE] else df[0, , drop = FALSE]
@@ -4600,9 +7047,9 @@ search_gene_in_file <- function(file_path, gene_names, show_diagnostics = TRUE, 
             matched_name <- if (length(matched_name_candidates) > 0) matched_name_candidates[1] else gene_id
 
             if (is.na(gene_id) || !nzchar(gene_id)) {
-                gene_id <- str_extract(safe_url_decode(target_gene_rows$attributes[1]), 'gene_id "[^"]+"') %>%
-                    str_remove('gene_id "') %>%
-                    str_remove('"')
+                gene_id <- stringr::str_extract(safe_url_decode(target_gene_rows$attributes[1]), 'gene_id "[^"]+"') |>
+                    stringr::str_remove('gene_id "') |>
+                    stringr::str_remove('"')
             }
             can_extract_block <- !is.na(gene_id) && nzchar(gene_id)
             if (!can_extract_block) {
@@ -4626,7 +7073,17 @@ search_gene_in_file <- function(file_path, gene_names, show_diagnostics = TRUE, 
                     colnames(result_df) <- paste0("V", 1:9)
                 }
             } else {
-                result_df <- if (can_extract_block) extract_gene_block_from_df(df, gene_id) else data.frame()
+                result_df <- data.frame()
+                if (can_extract_block) {
+                    block_source_df <- df
+                    if (first_type %in% c("gene", "pseudogene")) {
+                        block_source_df <- subset_gff_df_to_gene_region(df, target_gene_rows[1, , drop = FALSE])
+                    }
+                    result_df <- extract_gene_block_from_df(block_source_df, gene_id)
+                    if (nrow(result_df) == 0 && !identical(block_source_df, df)) {
+                        result_df <- extract_gene_block_from_df(df, gene_id)
+                    }
+                }
                 if (nrow(result_df) == 0) {
                     fallback_gene <- target_gene_rows[, c("seqid", "source", "type", "start", "end", "score", "strand", "phase", "attributes"), drop = FALSE]
                     result_df <- fallback_gene
@@ -4644,6 +7101,536 @@ search_gene_in_file <- function(file_path, gene_names, show_diagnostics = TRUE, 
     )
 }
 
+run_lookup_pipeline_pure <- function(file_path, input_gene, det_info = NULL, diagnostics = FALSE,
+                                     use_parallel = FALSE, file_label = NULL,
+                                     enabled_external_sources = c("mygene", "ncbi", "uniprot", "ensembl"),
+                                     allow_partial_suggestions = TRUE) {
+    lookup_t0 <- app_perf_now()
+    query_candidates_used <- normalize_lookup_query_candidates(c(input_gene))
+    enabled_external_sources <- unique(tolower(trimws(as.character(enabled_external_sources %||% character(0)))))
+    enabled_external_sources <- enabled_external_sources[enabled_external_sources %in% c("mygene", "ncbi", "uniprot", "ensembl")]
+
+    alias_index_preflight <- function(det_resolved) {
+        det <- det_resolved %||% list()
+        org_id <- trimws(as.character(det$species_id %||% det$preloaded_id %||% ""))
+        if (!nzchar(org_id) ||
+            !exists("search_alias_index_for_context", mode = "function") ||
+            !exists("alias_index_match_to_lookup", mode = "function")) {
+            return(NULL)
+        }
+        alias_index_res <- tryCatch(
+            search_alias_index_for_context(
+                query = input_gene,
+                file_path = file_path,
+                det_info = det,
+                file_label = file_label,
+                base_dir = "."
+            ),
+            error = function(e) NULL
+        )
+        alias_index_status <- as.character((alias_index_res %||% list())$status %||% "no_match")
+        alias_index_matches <- (alias_index_res %||% list())$matches
+        if (startsWith(alias_index_status, "multiple") &&
+            is.data.frame(alias_index_matches) && nrow(alias_index_matches) > 0L) {
+            nohit <- attach_lookup_result_meta(
+                list(data = NULL, matched_gene_id = NA_character_, matched_gene_name = NA_character_),
+                query_candidates = query_candidates_used,
+                best_alias_used = "",
+                input_gene = input_gene
+            )
+            nohit$external_lookup_had_errors <- FALSE
+            nohit$det_resolved <- det
+            nohit$lookup_elapsed_ms <- app_perf_elapsed_ms(lookup_t0)
+            nohit$lookup_stage <- "alias_index_ambiguous"
+            nohit$alias_index_status <- alias_index_status
+            nohit$alias_index_matches <- alias_index_matches
+            return(nohit)
+        } else if (startsWith(alias_index_status, "unique") &&
+            is.data.frame(alias_index_matches) && nrow(alias_index_matches) > 0L) {
+            selected_alias_match <- alias_index_matches[1, , drop = FALSE]
+            selected_role <- as.character(selected_alias_match$match_role[1] %||% "")
+            if (identical(selected_role, "stable_id")) {
+                alias_lookup <- tryCatch(
+                    alias_index_match_to_lookup(selected_alias_match, file_path = file_path, input_gene = input_gene),
+                    error = function(e) NULL
+                )
+                if (!is.null(alias_lookup$data) && is.data.frame(alias_lookup$data) && nrow(alias_lookup$data) > 0L) {
+                    query_candidates_used <<- normalize_lookup_query_candidates(c(
+                        query_candidates_used,
+                        selected_alias_match$query_term_original,
+                        selected_alias_match$local_gene_id,
+                        selected_alias_match$local_symbol
+                    ))
+                    out <- attach_lookup_result_meta(
+                        alias_lookup,
+                        query_candidates = query_candidates_used,
+                        best_alias_used = as.character(selected_alias_match$query_term_original[1] %||% ""),
+                        input_gene = input_gene
+                    )
+                    out$external_lookup_had_errors <- FALSE
+                    out$det_resolved <- det
+                    out$lookup_elapsed_ms <- app_perf_elapsed_ms(lookup_t0)
+                    out$lookup_stage <- "alias_index"
+                    out$alias_index_status <- alias_index_status
+                    out$alias_index_match <- selected_alias_match
+                    return(out)
+                }
+            }
+        }
+        NULL
+    }
+
+    preflight_lookup <- alias_index_preflight(det_info)
+    if (!is.null(preflight_lookup)) {
+        return(preflight_lookup)
+    }
+
+    res <- search_gene_in_file(file_path, input_gene, show_diagnostics = FALSE, match_mode = "exact", return_meta = TRUE)
+    if (!is.null(res$data) && nrow(res$data) > 0) {
+        out <- attach_lookup_result_meta(
+            res,
+            query_candidates = query_candidates_used,
+            best_alias_used = "",
+            input_gene = input_gene
+        )
+        out$lookup_elapsed_ms <- app_perf_elapsed_ms(lookup_t0)
+        out$lookup_stage <- "local_exact"
+        return(out)
+    }
+
+    det_resolved <- det_info
+    det_has_info <- !is.null(det_resolved) && (!is.null(det_resolved$organism) || !is.null(det_resolved$taxid))
+    if (!det_has_info) {
+        det_resolved <- tryCatch(
+            detect_organism_from_gff(file_path, original_name = file_label %||% basename(file_path)),
+            error = function(e) list(organism = NULL, taxid = NULL, source = "none")
+        )
+    }
+    org <- if (!is.null(det_resolved)) det_resolved$organism else NULL
+    tx <- if (!is.null(det_resolved)) det_resolved$taxid else NULL
+
+    partial_suggestions_for_query <- if (isTRUE(allow_partial_suggestions)) {
+        find_deterministic_partial_gene_suggestions(
+            annotation_paths = file_path,
+            query = input_gene,
+            file_labels = file_label %||% basename(file_path),
+            det_list = list(det_resolved %||% list()),
+            max_per_file = 20L,
+            max_total = 20L,
+            min_query_chars = 2L,
+            min_shared_organisms = 1L,
+            include_alias_sql = TRUE,
+            base_dir = "."
+        )
+    } else {
+        empty_partial_gene_suggestions_df(source_labels = TRUE, source_label_preview = TRUE)
+    }
+    route_to_partial_suggestions <- isTRUE(allow_partial_suggestions) &&
+        ((is.data.frame(partial_suggestions_for_query) && nrow(partial_suggestions_for_query) > 0L) ||
+            should_route_to_partial_gene_suggestions(file_path, input_gene))
+    if (isTRUE(route_to_partial_suggestions)) {
+        nohit <- attach_lookup_result_meta(
+            list(data = NULL, matched_gene_id = NA_character_, matched_gene_name = NA_character_),
+            query_candidates = query_candidates_used,
+            best_alias_used = "",
+            input_gene = input_gene
+        )
+        nohit$external_lookup_had_errors <- FALSE
+        nohit$det_resolved <- det_resolved
+        nohit$lookup_elapsed_ms <- app_perf_elapsed_ms(lookup_t0)
+        nohit$lookup_stage <- "partial_suggestions"
+        nohit$partial_gene_suggestions <- partial_suggestions_for_query
+        return(nohit)
+    }
+
+    if (isTRUE(allow_partial_suggestions)) {
+        res <- search_gene_in_file(file_path, input_gene, show_diagnostics = diagnostics, match_mode = "flex", return_meta = TRUE)
+        if (!is.null(res$data) && nrow(res$data) > 0) {
+            out <- attach_lookup_result_meta(
+                res,
+                query_candidates = query_candidates_used,
+                best_alias_used = "",
+                input_gene = input_gene
+            )
+            out$external_lookup_had_errors <- FALSE
+            out$det_resolved <- det_resolved
+            out$lookup_elapsed_ms <- app_perf_elapsed_ms(lookup_t0)
+            out$lookup_stage <- "local_flex"
+            return(out)
+        }
+    }
+
+    alias_bridge <- list(found = FALSE, alias_candidates = character(0))
+    external_lookup_had_errors <- FALSE
+    alias_index_checked <- FALSE
+
+    if (exists("search_alias_index_for_context", mode = "function") &&
+        exists("alias_index_match_to_lookup", mode = "function")) {
+        alias_index_checked <- TRUE
+        alias_index_res <- tryCatch(
+            search_alias_index_for_context(
+                query = input_gene,
+                file_path = file_path,
+                det_info = det_resolved,
+                file_label = file_label,
+                base_dir = "."
+            ),
+            error = function(e) NULL
+        )
+        alias_index_status <- as.character((alias_index_res %||% list())$status %||% "no_match")
+        alias_index_matches <- (alias_index_res %||% list())$matches
+        if (startsWith(alias_index_status, "multiple") &&
+            is.data.frame(alias_index_matches) && nrow(alias_index_matches) > 0L) {
+            nohit <- attach_lookup_result_meta(
+                list(data = NULL, matched_gene_id = NA_character_, matched_gene_name = NA_character_),
+                query_candidates = query_candidates_used,
+                best_alias_used = "",
+                input_gene = input_gene
+            )
+            nohit$external_lookup_had_errors <- FALSE
+            nohit$det_resolved <- det_resolved
+            nohit$lookup_elapsed_ms <- app_perf_elapsed_ms(lookup_t0)
+            nohit$lookup_stage <- "alias_index_ambiguous"
+            nohit$alias_index_status <- alias_index_status
+            nohit$alias_index_matches <- alias_index_matches
+            return(nohit)
+        }
+        if (startsWith(alias_index_status, "unique") &&
+            is.data.frame(alias_index_matches) && nrow(alias_index_matches) > 0L) {
+            selected_alias_match <- alias_index_matches[1, , drop = FALSE]
+            selected_conf <- toupper(as.character(selected_alias_match$confidence[1] %||% ""))
+            if (selected_conf %in% c("HIGH", "MEDIUM") ||
+                isTRUE(is_verified_local_description_alias_match(selected_alias_match))) {
+                alias_lookup <- tryCatch(
+                    alias_index_match_to_lookup(selected_alias_match, file_path = file_path, input_gene = input_gene),
+                    error = function(e) NULL
+                )
+                if (!is.null(alias_lookup$data) && is.data.frame(alias_lookup$data) && nrow(alias_lookup$data) > 0L) {
+                    query_candidates_used <- normalize_lookup_query_candidates(c(
+                        query_candidates_used,
+                        selected_alias_match$query_term_original,
+                        selected_alias_match$local_gene_id,
+                        selected_alias_match$local_symbol
+                    ))
+                    out <- attach_lookup_result_meta(
+                        alias_lookup,
+                        query_candidates = query_candidates_used,
+                        best_alias_used = as.character(selected_alias_match$query_term_original[1] %||% ""),
+                        input_gene = input_gene
+                    )
+                    out$external_lookup_had_errors <- FALSE
+                    out$det_resolved <- det_resolved
+                    out$lookup_elapsed_ms <- app_perf_elapsed_ms(lookup_t0)
+                    out$lookup_stage <- "alias_index"
+                    out$alias_index_status <- alias_index_status
+                    out$alias_index_match <- selected_alias_match
+                    return(out)
+                }
+            }
+        }
+    }
+
+    local_bridge_candidates <- build_gene_query_candidates(
+        gene_name = input_gene,
+        organism = org,
+        taxid = tx,
+        status_callback = NULL,
+        max_aliases = 100,
+        use_parallel = FALSE,
+        alias_sources = character(0)
+    )
+    local_bridge_new_candidates <- setdiff(
+        normalize_lookup_query_candidates(c(local_bridge_candidates)),
+        query_candidates_used
+    )
+    if (length(local_bridge_new_candidates) > 0L) {
+        alias_bridge <- resolve_external_alias_bridge(
+            input_gene = input_gene,
+            query_candidates = local_bridge_new_candidates,
+            file_path = file_path,
+            organism = org,
+            taxid = tx,
+            search_fun = search_gene_in_file
+        )
+        query_candidates_used <- normalize_lookup_query_candidates(c(query_candidates_used, local_bridge_candidates))
+        if (isTRUE(alias_bridge$found)) {
+            out <- attach_lookup_result_meta(
+                alias_bridge$result,
+                query_candidates = query_candidates_used,
+                best_alias_used = alias_bridge$best_alias_used,
+                input_gene = input_gene
+            )
+            out$external_lookup_had_errors <- FALSE
+            out$det_resolved <- det_resolved
+            out$lookup_elapsed_ms <- app_perf_elapsed_ms(lookup_t0)
+            out$lookup_stage <- "local_bridge"
+            return(out)
+        }
+    }
+
+    if (!isTRUE(alias_index_checked) &&
+        exists("search_alias_index_for_context", mode = "function") &&
+        exists("alias_index_match_to_lookup", mode = "function")) {
+        alias_index_res <- tryCatch(
+            search_alias_index_for_context(
+                query = input_gene,
+                file_path = file_path,
+                det_info = det_resolved,
+                file_label = file_label,
+                base_dir = "."
+            ),
+            error = function(e) NULL
+        )
+        alias_index_status <- as.character((alias_index_res %||% list())$status %||% "no_match")
+        alias_index_matches <- (alias_index_res %||% list())$matches
+        if (startsWith(alias_index_status, "multiple") &&
+            is.data.frame(alias_index_matches) && nrow(alias_index_matches) > 0L) {
+            nohit <- attach_lookup_result_meta(
+                list(data = NULL, matched_gene_id = NA_character_, matched_gene_name = NA_character_),
+                query_candidates = query_candidates_used,
+                best_alias_used = "",
+                input_gene = input_gene
+            )
+            nohit$external_lookup_had_errors <- FALSE
+            nohit$det_resolved <- det_resolved
+            nohit$lookup_elapsed_ms <- app_perf_elapsed_ms(lookup_t0)
+            nohit$lookup_stage <- "alias_index_ambiguous"
+            nohit$alias_index_status <- alias_index_status
+            nohit$alias_index_matches <- alias_index_matches
+            return(nohit)
+        }
+        if (startsWith(alias_index_status, "unique") &&
+            is.data.frame(alias_index_matches) && nrow(alias_index_matches) > 0L) {
+            selected_alias_match <- alias_index_matches[1, , drop = FALSE]
+            selected_conf <- toupper(as.character(selected_alias_match$confidence[1] %||% ""))
+            if (selected_conf %in% c("HIGH", "MEDIUM") ||
+                isTRUE(is_verified_local_description_alias_match(selected_alias_match))) {
+                alias_lookup <- tryCatch(
+                    alias_index_match_to_lookup(selected_alias_match, file_path = file_path, input_gene = input_gene),
+                    error = function(e) NULL
+                )
+                if (!is.null(alias_lookup$data) && is.data.frame(alias_lookup$data) && nrow(alias_lookup$data) > 0L) {
+                    query_candidates_used <- normalize_lookup_query_candidates(c(
+                        query_candidates_used,
+                        selected_alias_match$query_term_original,
+                        selected_alias_match$local_gene_id,
+                        selected_alias_match$local_symbol
+                    ))
+                    out <- attach_lookup_result_meta(
+                        alias_lookup,
+                        query_candidates = query_candidates_used,
+                        best_alias_used = as.character(selected_alias_match$query_term_original[1] %||% ""),
+                        input_gene = input_gene
+                    )
+                    out$external_lookup_had_errors <- FALSE
+                    out$det_resolved <- det_resolved
+                    out$lookup_elapsed_ms <- app_perf_elapsed_ms(lookup_t0)
+                    out$lookup_stage <- "alias_index"
+                    out$alias_index_status <- alias_index_status
+                    out$alias_index_match <- selected_alias_match
+                    return(out)
+                }
+            }
+        }
+    }
+
+    fast_sources <- intersect(c("mygene", "uniprot"), enabled_external_sources)
+    slow_sources <- intersect(c("ncbi", "ensembl"), enabled_external_sources)
+    streaming_phases <- list()
+    for (src in fast_sources) streaming_phases <- c(streaming_phases, list(src))
+    for (src in slow_sources) streaming_phases <- c(streaming_phases, list(src))
+
+    if (length(streaming_phases) > 0 && (!is.null(org) || !is.null(tx))) {
+        for (phase_idx in seq_along(streaming_phases)) {
+            phase_sources <- streaming_phases[[phase_idx]]
+            query_candidates_phase <- build_gene_query_candidates(
+                gene_name = input_gene,
+                organism = org,
+                taxid = tx,
+                status_callback = NULL,
+                max_aliases = 100,
+                use_parallel = use_parallel,
+                alias_sources = phase_sources
+            )
+            phase_lookup_meta <- attr(query_candidates_phase, "external_lookup_meta", exact = TRUE)
+            if (isTRUE((phase_lookup_meta %||% list())$had_errors)) {
+                external_lookup_had_errors <- TRUE
+            }
+            previous_candidates <- query_candidates_used
+            query_candidates_used <- normalize_lookup_query_candidates(c(query_candidates_used, query_candidates_phase))
+            if (length(query_candidates_used) == 0) {
+                query_candidates_used <- normalize_lookup_query_candidates(c(input_gene))
+            }
+            new_alias_candidates <- setdiff(query_candidates_used, previous_candidates)
+            if (length(new_alias_candidates) == 0L) {
+                next
+            }
+
+            alias_bridge <- resolve_external_alias_bridge(
+                input_gene = input_gene,
+                query_candidates = new_alias_candidates,
+                file_path = file_path,
+                organism = org,
+                taxid = tx,
+                search_fun = search_gene_in_file
+            )
+            if (isTRUE(alias_bridge$found)) {
+                out <- attach_lookup_result_meta(
+                    alias_bridge$result,
+                    query_candidates = query_candidates_used,
+                    best_alias_used = alias_bridge$best_alias_used,
+                    input_gene = input_gene
+                )
+                out$external_lookup_had_errors <- isTRUE(external_lookup_had_errors)
+                out$det_resolved <- det_resolved
+                out$lookup_elapsed_ms <- app_perf_elapsed_ms(lookup_t0)
+                out$lookup_stage <- "external_alias"
+                out$external_alias_source <- phase_sources
+                return(out)
+            }
+        }
+    }
+
+    nohit <- attach_lookup_result_meta(
+        list(data = NULL, matched_gene_id = NA_character_, matched_gene_name = NA_character_),
+        query_candidates = query_candidates_used,
+        best_alias_used = "",
+        input_gene = input_gene
+    )
+    nohit$external_lookup_had_errors <- isTRUE(external_lookup_had_errors)
+    nohit$det_resolved <- det_resolved
+    nohit$lookup_elapsed_ms <- app_perf_elapsed_ms(lookup_t0)
+    nohit$lookup_stage <- "no_match"
+    nohit
+}
+
+run_orthologous_lookup_job_pure <- function(job) {
+    j <- suppressWarnings(as.integer(job$file_idx %||% NA_integer_))
+    file <- as.character(job$file_path %||% "")
+    file_label <- as.character(job$file_label %||% basename(file))
+    gene_name <- as.character(job$gene_name %||% "")
+    forced_genome <- tryCatch(as.character(job$forced_genome %||% ""), error = function(e) "")
+    if (length(forced_genome) == 0L || is.na(forced_genome[1])) {
+        forced_genome <- ""
+    } else {
+        forced_genome <- forced_genome[1]
+    }
+
+    local_only <- length(as.character(job$enabled_external_sources %||% character(0))) == 0L &&
+        !isTRUE(job$allow_partial_suggestions %||% TRUE)
+    lookup_cache_key <- ""
+    if (isTRUE(local_only) && nzchar(file) && file.exists(file) && nzchar(trimws(gene_name))) {
+        lookup_cache_key <- paste(
+            "ortho-local-v1",
+            gff_cache_key(file),
+            normalize_gene_compact(gene_name),
+            sep = "|"
+        )
+        cached_lookup <- cache_env_get(.orthologous_local_lookup_cache, lookup_cache_key, default = NULL)
+        if (!is.null(cached_lookup)) {
+            return(cached_lookup)
+        }
+    }
+
+    result <- tryCatch(
+        {
+            det_local <- job$det
+            if (is.null(det_local)) {
+                det_local <- detect_organism_from_gff(file, file_label)
+            }
+            lookup <- run_lookup_pipeline_pure(
+                file_path = file,
+                input_gene = gene_name,
+                det_info = det_local,
+                diagnostics = FALSE,
+                use_parallel = FALSE,
+                file_label = file_label,
+                enabled_external_sources = as.character(job$enabled_external_sources %||% character(0)),
+                allow_partial_suggestions = isTRUE(job$allow_partial_suggestions %||% TRUE)
+            )
+            det_final <- lookup$det_resolved %||% det_local
+            data <- lookup$data
+            if (is.null(data) || nrow(data) == 0) {
+                lookup_stage_txt <- as.character((lookup %||% list())$lookup_stage %||% "")
+                list(
+                    found = FALSE,
+                    data = NULL,
+                    det = det_final,
+                    lookup = lookup,
+                    file_idx = j,
+                    file_path = file,
+                    file_label = file_label,
+                    forced_genome = forced_genome,
+                    reason = if (identical(lookup_stage_txt, "alias_index_ambiguous")) {
+                        "Alias matched multiple genes; user selection required"
+                    } else {
+                        "No match found"
+                    }
+                )
+            } else {
+                neighbor_context <- tryCatch(
+                    compute_neighbor_context_from_plot_data(
+                        annotation_file_path = file,
+                        plot_data = data,
+                        fallback_gene_id = as.character(lookup$matched_gene_id %||% "")
+                    ),
+                    error = function(e) NULL
+                )
+                list(
+                    found = TRUE,
+                    data = data,
+                    det = det_final,
+                    lookup = lookup,
+                    file_idx = j,
+                    file_path = file,
+                    file_label = file_label,
+                    forced_genome = forced_genome,
+                    neighbor_context = neighbor_context
+                )
+            }
+        },
+        error = function(e) {
+            list(
+                found = FALSE,
+                data = NULL,
+                det = NULL,
+                lookup = NULL,
+                file_idx = j,
+                file_path = file,
+                file_label = file_label,
+                forced_genome = forced_genome,
+                reason = paste0("Error: ", e$message)
+            )
+        }
+    )
+    if (nzchar(lookup_cache_key)) {
+        cache_env_set(
+            .orthologous_local_lookup_cache,
+            lookup_cache_key,
+            result,
+            max_size = parse_positive_int_env("APP_ORTHO_LOCAL_LOOKUP_CACHE_MAX_ENTRIES", 256L),
+            max_bytes = parse_positive_bytes_env_mb("APP_ORTHO_LOCAL_LOOKUP_CACHE_MAX_MB", 192)
+        )
+    }
+    result
+}
+
+run_orthologous_lookup_job_worker <- function(job) {
+    worker_env <- globalenv()
+    libs_key <- ".cgv_lookup_worker_libs_loaded_v1"
+    if (!isTRUE(get0(libs_key, envir = worker_env, inherits = FALSE, ifnotfound = FALSE))) {
+        if (file.exists(file.path("R", "alias_resolution.R"))) {
+            sys.source(file.path("R", "alias_resolution.R"), envir = worker_env)
+        }
+        sys.source(file.path("R", "utils.R"), envir = worker_env)
+        if (file.exists("gene_search_lib.R")) {
+            sys.source("gene_search_lib.R", envir = worker_env)
+        }
+        assign(libs_key, TRUE, envir = worker_env)
+    }
+    run_orthologous_lookup_job_pure(job)
+}
+
 fetch_gene_data_sync <- function(chr_name, gene_coords, fasta_path = NULL, fasta_id = NULL, exon_ranges = NULL, strand = "+") {
     fetch_perf <- app_perf_new_run("SEQ_FETCH")
     app_perf_mark(fetch_perf, "start", "SEQ")
@@ -4657,6 +7644,33 @@ fetch_gene_data_sync <- function(chr_name, gene_coords, fasta_path = NULL, fasta
             if (!nzchar(seq_str) && is.finite(start_pos) && is.finite(end_pos)) {
                 seq_str <- extract_sequence_from_fasta(fasta_path, chr_name, start_pos, end_pos)
                 app_perf_mark(fetch_perf, sprintf("after fallback len=%d", as.integer(nchar(seq_str %||% ""))), "SEQ")
+            }
+            comp_info <- NULL
+            if (!is.null(fasta_path) && nzchar(as.character(fasta_path %||% "")) && file.exists(fasta_path) &&
+                !is.null(exon_ranges) && nrow(normalize_exon_ranges(exon_ranges)) > 0L) {
+                comp_info <- tryCatch(
+                    get_transcript_composition_cached(fasta_path, chr_name, exon_ranges, strand = strand),
+                    error = function(e) NULL
+                )
+            }
+            if (is.null(comp_info) && nzchar(seq_str)) {
+                comp_calc <- calculate_sequence_composition(seq_str)
+                raw_seq <- toupper(gsub("\\s+", "", as.character(seq_str %||% "")))
+                counts <- c(
+                    A = nchar(gsub("[^A]", "", raw_seq)),
+                    T = nchar(gsub("[^T]", "", raw_seq)),
+                    C = nchar(gsub("[^C]", "", raw_seq)),
+                    G = nchar(gsub("[^G]", "", raw_seq))
+                )
+                counts <- as.integer(counts)
+                names(counts) <- c("A", "T", "C", "G")
+                comp_info <- list(
+                    composition = comp_calc$composition,
+                    length = comp_calc$length,
+                    known_total = as.integer(sum(counts, na.rm = TRUE)),
+                    counts = counts,
+                    sequence_optional = NULL
+                )
             }
 
             fasta_id <- safe_url_decode(as.character(fasta_id %||% ""))
@@ -4677,7 +7691,14 @@ fetch_gene_data_sync <- function(chr_name, gene_coords, fasta_path = NULL, fasta
 
             file_content <- if (nzchar(seq_str)) paste0(header, "\n", seq_str) else ""
             app_perf_mark(fetch_perf, "done", "SEQ")
-            list(title = chr_name, sequence = seq_str, file_content = file_content, fasta_id = fasta_id)
+            list(
+                title = chr_name,
+                sequence = seq_str,
+                file_content = file_content,
+                fasta_id = fasta_id,
+                composition = comp_info,
+                composition_blob = if (!is.null(comp_info)) make_sequence_composition_blob(comp_info) else ""
+            )
         },
         error = function(e) {
             app_perf_mark(fetch_perf, sprintf("error: %s", as.character(e$message %||% "unknown")), "SEQ")
@@ -4718,7 +7739,7 @@ extract_primary_gene_id <- function(attr) {
         }
     if (is.null(gid) || is.na(gid) || !nzchar(gid)) {
         raw <- safe_url_decode(attr %||% "")
-        gid <- str_extract(raw, "(^|;)ID=[^;]+") %>% str_remove("(^|;)ID=")
+        gid <- stringr::str_extract(raw, "(^|;)ID=[^;]+") |> stringr::str_remove("(^|;)ID=")
     }
     gid %||% NA_character_
 }
@@ -4730,7 +7751,7 @@ sanitize_gene_display_name <- function(x) {
     }
     y <- safe_url_decode(y)
     y <- trimws(y)
-    y <- str_remove(y, regex("^(gene|transcript|mrna)\\s*:\\s*", ignore_case = TRUE))
+    y <- stringr::str_remove(y, stringr::regex("^(gene|transcript|mrna)\\s*:\\s*", ignore_case = TRUE))
     if (length(y) == 0 || !nzchar(y)) {
         return(NA_character_)
     }
@@ -4753,17 +7774,17 @@ extract_primary_gene_name <- function(attr) {
 extract_primary_gene_id_batch <- function(attrs) {
     attrs <- as.character(attrs %||% "")
     # Try GFF3 ID= first
-    gid <- str_match(attrs, "(?:^|;)\\s*ID=([^;]+)")[, 2]
+    gid <- stringr::str_match(attrs, "(?:^|;)\\s*ID=([^;]+)")[, 2]
     # Try GTF gene_id
     miss <- is.na(gid)
     if (any(miss)) {
-        gid2 <- str_match(attrs[miss], '(?:^|;|\\t)\\s*gene_id\\s*[= ]\\s*"?([^;"\\t]+)')[, 2]
+        gid2 <- stringr::str_match(attrs[miss], '(?:^|;|\\t)\\s*gene_id\\s*[= ]\\s*"?([^;"\\t]+)')[, 2]
         gid[miss] <- gid2
     }
     # Try locus_tag
     miss <- is.na(gid)
     if (any(miss)) {
-        gid3 <- str_match(attrs[miss], "(?:^|;)\\s*locus_tag=([^;]+)")[, 2]
+        gid3 <- stringr::str_match(attrs[miss], "(?:^|;)\\s*locus_tag=([^;]+)")[, 2]
         gid[miss] <- gid3
     }
     # Only decode non-NA values.
@@ -4789,7 +7810,7 @@ extract_primary_gene_name_batch <- function(attrs) {
     miss <- rep(TRUE, length(attrs))
     for (pat in patterns) {
         if (!any(miss)) break
-        m <- str_match(attrs[miss], pat)
+        m <- stringr::str_match(attrs[miss], pat)
         found <- !is.na(m[, 2])
         idx_miss <- which(miss)
         gname[idx_miss[found]] <- m[found, 2]
@@ -4808,7 +7829,7 @@ sanitize_gene_display_name_batch <- function(x) {
     if (any(valid)) {
         y[valid] <- safe_url_decode(y[valid])
         y[valid] <- trimws(y[valid])
-        y[valid] <- str_remove(y[valid], regex("^(gene|transcript|mrna)\\s*:\\s*", ignore_case = TRUE))
+        y[valid] <- stringr::str_remove(y[valid], stringr::regex("^(gene|transcript|mrna)\\s*:\\s*", ignore_case = TRUE))
         y[valid] <- ifelse(nzchar(y[valid]), y[valid], NA_character_)
     }
     y
@@ -4873,9 +7894,9 @@ get_genes_table_from_annotation <- function(file_path) {
         strand = as.character(genes_raw[[strand_col]]),
         type = as.character(genes_raw[[type_col]]),
         stringsAsFactors = FALSE
-    ) %>%
-        filter(is.finite(start), is.finite(end), !is.na(chr), nzchar(chr)) %>%
-        arrange(chr, start, end)
+    ) |>
+        dplyr::filter(is.finite(start), is.finite(end), !is.na(chr), nzchar(chr)) |>
+        dplyr::arrange(chr, start, end)
 
     cache_env_set(
         .gff_genes_table_cache,
@@ -5088,6 +8109,128 @@ get_nearest_neighbors <- function(gene_target, genes_df, chr_index = NULL) {
     )
 }
 
+get_nearest_neighbors_from_light_index <- function(gene_target, genes_df) {
+    empty_neighbor <- list(
+        neighbor_id = NA_character_,
+        neighbor_name = NA_character_,
+        neighbor_label = NA_character_,
+        neighbor_start = NA_real_,
+        neighbor_end = NA_real_,
+        neighbor_chr = NA_character_,
+        neighbor_strand = NA_character_,
+        dist_bp = NA_real_
+    )
+
+    empty_context <- list(
+        upstream = empty_neighbor,
+        downstream = empty_neighbor,
+        flags = list(has_up = FALSE, has_down = FALSE, overlap_up = FALSE, overlap_down = FALSE)
+    )
+
+    if (is.null(gene_target) || is.null(genes_df) || !is.data.frame(genes_df) || nrow(genes_df) == 0) {
+        return(empty_context)
+    }
+
+    get_col <- function(df, primary, fallback = NULL, default = NULL) {
+        if (primary %in% colnames(df)) return(df[[primary]])
+        if (!is.null(fallback) && fallback %in% colnames(df)) return(df[[fallback]])
+        default %||% rep(NA, nrow(df))
+    }
+
+    target_chr <- as.character(gene_target$chr[1] %||% "")
+    target_start <- suppressWarnings(as.numeric(gene_target$start[1] %||% NA_real_))
+    target_end <- suppressWarnings(as.numeric(gene_target$end[1] %||% NA_real_))
+    if (!nzchar(target_chr) || !is.finite(target_start) || !is.finite(target_end)) {
+        return(empty_context)
+    }
+
+    chr_vec <- as.character(get_col(genes_df, "seqid", "V1", ""))
+    start_vec <- suppressWarnings(as.numeric(get_col(genes_df, "start", "V4", NA_real_)))
+    end_vec <- suppressWarnings(as.numeric(get_col(genes_df, "end", "V5", NA_real_)))
+    valid <- is.finite(start_vec) & is.finite(end_vec) & !is.na(chr_vec) & nzchar(chr_vec)
+    idx_chr <- which(valid & chr_vec == target_chr)
+    if (length(idx_chr) == 0) {
+        return(empty_context)
+    }
+
+    start_chr <- start_vec[idx_chr]
+    end_chr <- end_vec[idx_chr]
+    keep_non_self <- !(start_chr == target_start & end_chr == target_end)
+    idx_chr <- idx_chr[keep_non_self]
+    start_chr <- start_chr[keep_non_self]
+    end_chr <- end_chr[keep_non_self]
+    if (length(idx_chr) == 0) {
+        return(empty_context)
+    }
+
+    idx_up_overlap <- which(start_chr < target_start & end_chr >= target_start)
+    idx_up_non_overlap <- which(end_chr < target_start)
+    up_idx <- if (length(idx_up_overlap) > 0) {
+        idx_chr[idx_up_overlap[which.max(end_chr[idx_up_overlap])]]
+    } else if (length(idx_up_non_overlap) > 0) {
+        idx_chr[idx_up_non_overlap[which.max(end_chr[idx_up_non_overlap])]]
+    } else {
+        NA_integer_
+    }
+
+    idx_down_overlap <- which(start_chr <= target_end & end_chr > target_end)
+    idx_down_non_overlap <- which(start_chr > target_end)
+    down_idx <- if (length(idx_down_overlap) > 0) {
+        idx_chr[idx_down_overlap[which.min(start_chr[idx_down_overlap])]]
+    } else if (length(idx_down_non_overlap) > 0) {
+        idx_chr[idx_down_non_overlap[which.min(start_chr[idx_down_non_overlap])]]
+    } else {
+        NA_integer_
+    }
+
+    attrs_vec <- as.character(get_col(genes_df, "attributes", "V9", ""))
+    strand_vec <- as.character(get_col(genes_df, "strand", "V7", ""))
+
+    build_neighbor <- function(idx_one) {
+        if (!is.finite(idx_one) || is.na(idx_one) || idx_one < 1L || idx_one > nrow(genes_df)) {
+            return(empty_neighbor)
+        }
+        attr <- as.character(attrs_vec[idx_one] %||% "")
+        nb_id <- sanitize_gene_display_name(extract_primary_gene_id(attr))
+        nb_name <- sanitize_gene_display_name(extract_primary_gene_name(attr))
+        nb_label <- nb_name %|||% nb_id %|||% "Unknown"
+        nb_id <- nb_id %|||% nb_label
+        nb_name <- nb_name %|||% nb_label
+        nb_start <- suppressWarnings(as.numeric(start_vec[idx_one]))
+        nb_end <- suppressWarnings(as.numeric(end_vec[idx_one]))
+        dist_val <- if (nb_end < target_start) {
+            as.numeric(target_start - nb_end - 1)
+        } else if (nb_start > target_end) {
+            as.numeric(nb_start - target_end - 1)
+        } else {
+            as.numeric(min(target_start - nb_end - 1, nb_start - target_end - 1))
+        }
+        list(
+            neighbor_id = nb_id,
+            neighbor_name = nb_name,
+            neighbor_label = nb_label,
+            neighbor_start = nb_start,
+            neighbor_end = nb_end,
+            neighbor_chr = as.character(chr_vec[idx_one] %||% target_chr),
+            neighbor_strand = as.character(strand_vec[idx_one] %||% ""),
+            dist_bp = dist_val
+        )
+    }
+
+    upstream <- build_neighbor(up_idx)
+    downstream <- build_neighbor(down_idx)
+    list(
+        upstream = upstream,
+        downstream = downstream,
+        flags = list(
+            has_up = !is.na(upstream$dist_bp),
+            has_down = !is.na(downstream$dist_bp),
+            overlap_up = !is.na(upstream$dist_bp) && upstream$dist_bp < 0,
+            overlap_down = !is.na(downstream$dist_bp) && downstream$dist_bp < 0
+        )
+    )
+}
+
 format_distance <- function(d_bp) {
     if (is.null(d_bp) || is.na(d_bp) || !is.finite(d_bp)) {
         return(list(label_short = "N/A", label_exact = "N/A"))
@@ -5147,6 +8290,14 @@ get_neighbor_context_for_target <- function(annotation_file_path, gene_target) {
         return(get(key, envir = .neighbor_context_cache, inherits = FALSE))
     }
 
+    idx_light <- tryCatch(build_gff_gene_light_index(annotation_file_path), error = function(e) NULL)
+    if (is.list(idx_light) && is.data.frame(idx_light$genes_df) && nrow(idx_light$genes_df) > 0) {
+        out <- get_nearest_neighbors_from_light_index(gene_target, idx_light$genes_df)
+        assign(key, out, envir = .neighbor_context_cache)
+        trim_cache_env(.neighbor_context_cache, max_size = 5000L)
+        return(out)
+    }
+
     genes_df <- get_genes_table_from_annotation(annotation_file_path)
     if (nrow(genes_df) == 0) {
         return(NULL)
@@ -5156,6 +8307,36 @@ get_neighbor_context_for_target <- function(annotation_file_path, gene_target) {
     assign(key, out, envir = .neighbor_context_cache)
     trim_cache_env(.neighbor_context_cache, max_size = 5000L)
     out
+}
+
+compute_neighbor_context_from_plot_data <- function(annotation_file_path, plot_data, fallback_gene_id = "") {
+    if (is.null(annotation_file_path) || !nzchar(annotation_file_path) ||
+        is.null(plot_data) || !is.data.frame(plot_data) || nrow(plot_data) == 0) {
+        return(NULL)
+    }
+    row_types <- tolower(trimws(as.character(plot_data$V3 %||% rep("", nrow(plot_data)))))
+    gene_rows <- plot_data[row_types == "gene", , drop = FALSE]
+    span_df <- if (nrow(gene_rows) > 0) gene_rows else plot_data
+    tgt_chr <- as.character(span_df$V1[1] %||% plot_data$V1[1] %||% NA_character_)
+    tgt_start <- suppressWarnings(as.numeric(min(span_df$V4, na.rm = TRUE)))
+    tgt_end <- suppressWarnings(as.numeric(max(span_df$V5, na.rm = TRUE)))
+    if (!is.finite(tgt_start) || !is.finite(tgt_end) || tgt_end < tgt_start) {
+        return(NULL)
+    }
+    tgt_attr <- as.character(span_df$V9[1] %||% plot_data$V9[1] %||% "")
+    gid <- trimws(as.character(fallback_gene_id %||% ""))
+    if (!nzchar(gid)) {
+        gid <- extract_primary_gene_id(tgt_attr)
+    }
+    target_gene <- data.frame(
+        gene_id = gid,
+        chr = tgt_chr,
+        start = tgt_start,
+        end = tgt_end,
+        strand = as.character(span_df$V7[1] %||% plot_data$V7[1] %||% NA_character_),
+        stringsAsFactors = FALSE
+    )
+    get_neighbor_context_for_target(annotation_file_path, target_gene)
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -5478,7 +8659,7 @@ compute_protein_guided_correspondence <- function(df1, df2, df1e, df2e,
     }
 
     if (length(events) == 0L) return(NULL)
-    do.call(rbind, events)
+    do.call(rbind,  events)
 }
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -154,7 +154,7 @@ const doc = new Document({
         new Paragraph({
           alignment: AlignmentType.CENTER,
           spacing: { after: 80 },
-          children: [new TextRun({ text: "Autor: Rodrigo Rojas", font: "Arial", size: 22 })],
+          children: [new TextRun({ text: "Autor: Raul Rojas", font: "Arial", size: 22 })],
         }),
         new Paragraph({
           alignment: AlignmentType.CENTER,
@@ -236,7 +236,7 @@ const doc = new Document({
           [5000, 2180, 2180]
         ),
         para(""),
-        para("Nota: El genoma m\u00E1s pesado es Triticum aestivum (trigo) con 3.7 GB. El genoma humano (GRCh38) ocupa 916 MB.", { bold: false, size: 20 }),
+        para("Nota: El genoma humano (GRCh38) ocupa 916 MB; Brachypodium distachyon reduce sustancialmente el paquete vegetal de referencia.", { bold: false, size: 20 }),
 
         // ── 3. REQUISITOS DE RAM ──
         new Paragraph({ children: [new PageBreak()] }),
@@ -319,7 +319,7 @@ const doc = new Document({
 
         heading2("6.1 Almacenamiento"),
         bulletItem("Se recomienda SSD sobre HDD. Los genomas en formato .2bit se leen con acceso aleatorio; un SSD reduce la latencia de alineamientos de ~30 segundos a ~5 segundos.", "bullets"),
-        bulletItem("Configurar 2-4 GB de swap como respaldo ante picos de consumo de memoria en an\u00E1lisis de genomas grandes (e.g., Triticum aestivum).", "bullets"),
+        bulletItem("Configurar 2-4 GB de swap como respaldo ante picos de consumo de memoria en an\u00E1lisis de genomas grandes.", "bullets"),
 
         heading2("6.2 Red y seguridad"),
         bulletItem("La aplicaci\u00F3n requiere acceso saliente a internet para consultar APIs externas: NCBI E-utilities, UniProt, MyGene.info.", "bullets"),

@@ -71,7 +71,8 @@ init_plot_lifecycle_domain <- function(
     sanitize_fasta_filename_token_fn = NULL,
     build_sequence_blob_from_plot_fn = NULL,
     build_transcript_fasta_content_fn = NULL,
-    build_gene_sequence_content_fn = NULL
+    build_gene_sequence_content_fn = NULL,
+    build_selected_sequence_fasta_content_fn = NULL
 ) {
     set_named_value <- function(rv, key, value) {
         x <- rv()
@@ -96,6 +97,28 @@ init_plot_lifecycle_domain <- function(
         invisible(NULL)
     }
 
+    selected_sequence_download_type <- function(input_prefix, id_chr, default_type = "transcript") {
+        input_id <- paste0(as.character(input_prefix %||% ""), "_type_", as.character(id_chr %||% ""))
+        raw <- tryCatch(input[[input_id]], error = function(e) NULL)
+        if (exists("normalize_sequence_download_type", mode = "function")) {
+            normalize_sequence_download_type(raw, default = default_type)
+        } else {
+            typ <- tolower(trimws(as.character(raw %||% default_type)))
+            if (!typ %in% c("gene", "transcript", "cds", "introns")) default_type else typ
+        }
+    }
+
+    sequence_download_filename <- function(base_name, selected_type, default_type, fallback = "sequence") {
+        stem <- if (is.function(sanitize_fasta_filename_token_fn)) {
+            sanitize_fasta_filename_token_fn(base_name, fallback = fallback)
+        } else {
+            gsub("[^A-Za-z0-9._-]+", "_", as.character(base_name %||% fallback))
+        }
+        if (!nzchar(stem)) stem <- fallback
+        suffix <- if (identical(selected_type, default_type)) "" else paste0("_", selected_type)
+        paste0(stem, suffix, ".fasta")
+    }
+
     remove_plot_card_dom <- function(panel = c("homologous", "orthologous"), id_chr = "") {
         panel <- match.arg(panel)
         id_chr <- as.character(id_chr %||% "")
@@ -110,7 +133,10 @@ init_plot_lifecycle_domain <- function(
             paste0(
                 "['%s%s','%s%s'].forEach(function(eid){",
                 " var node=document.getElementById(eid);",
-                " if(node && node.parentNode){ node.parentNode.removeChild(node); }",
+                " if(node && node.parentNode){",
+                "  if(window.Shiny&&Shiny.unbindAll){Shiny.unbindAll(node);}",
+                "  node.parentNode.removeChild(node);",
+                " }",
                 "});"
             ),
             card_prefix, id_chr,
@@ -189,19 +215,31 @@ init_plot_lifecycle_domain <- function(
         )
     }
 
+    update_numeric_reactive <- function(rv, value) {
+        old <- suppressWarnings(as.numeric(isolate(rv()) %||% NA_real_))
+        new <- suppressWarnings(as.numeric(value %||% NA_real_))
+        same <- length(old) == 1L && length(new) == 1L &&
+            ((is.na(old) && is.na(new)) || identical(old, new))
+        if (!isTRUE(same)) {
+            rv(new)
+            return(invisible(TRUE))
+        }
+        invisible(FALSE)
+    }
+
     recalc_plot_ranges_homologous <- function() {
         ranges <- compute_plot_ranges(fileDataHomologous_rv())
-        max_gene_length_homo_rv(ranges$max_len)
-        min_gene_coord_homo_rv(ranges$min_coord)
-        max_gene_coord_homo_rv(ranges$max_coord)
+        update_numeric_reactive(max_gene_length_homo_rv, ranges$max_len)
+        update_numeric_reactive(min_gene_coord_homo_rv, ranges$min_coord)
+        update_numeric_reactive(max_gene_coord_homo_rv, ranges$max_coord)
         invisible(NULL)
     }
 
     recalc_plot_ranges_orthologous <- function() {
         ranges <- compute_plot_ranges(fileDataOrthologous_rv())
-        max_gene_length_ortho_rv(ranges$max_len)
-        min_gene_coord_ortho_rv(ranges$min_coord)
-        max_gene_coord_ortho_rv(ranges$max_coord)
+        update_numeric_reactive(max_gene_length_ortho_rv, ranges$max_len)
+        update_numeric_reactive(min_gene_coord_ortho_rv, ranges$min_coord)
+        update_numeric_reactive(max_gene_coord_ortho_rv, ranges$max_coord)
         invisible(NULL)
     }
 
@@ -238,34 +276,43 @@ init_plot_lifecycle_domain <- function(
         if (!nzchar(id_chr)) {
             return(invisible(NULL))
         }
-        local({
+        for (sequence_type in c("gene", "transcript", "cds", "introns")) local({
             id_local <- id_chr
-            output[[paste0("download_homo_", id_local)]] <- downloadHandler(
+            selected_type_local <- sequence_type
+            output[[paste0("download_homo_", id_local, "_", selected_type_local)]] <- downloadHandler(
                 filename = function() {
                     gene_meta <- tryCatch(plotGeneMetaHomologous_rv()[[id_local]], error = function(e) NULL)
                     is_gene   <- isTRUE(gene_meta$is_canonical)
+                    default_type <- if (is_gene) "gene" else "transcript"
+                    selected_type <- selected_type_local
                     if (is_gene) {
                         gene_name <- as.character(gene_meta$display_gene_name %||% gene_meta$matched_gene_name %||% "gene")
-                        if (is.function(sanitize_fasta_filename_token_fn)) {
-                            paste0(sanitize_fasta_filename_token_fn(gene_name, fallback = paste0("gene_", id_local)), ".fasta")
-                        } else {
-                            paste0("gene_", id_local, ".fasta")
-                        }
+                        sequence_download_filename(gene_name, selected_type, default_type, fallback = paste0("gene_", id_local))
                     } else {
                         ttl    <- tryCatch(titlesHomologous_rv()[[id_local]], error = function(e) "")
                         tx_name <- if (is.function(extract_title_field_fn)) extract_title_field_fn(ttl, "Transcript") else ""
-                        if (is.function(sanitize_fasta_filename_token_fn)) {
-                            paste0(sanitize_fasta_filename_token_fn(tx_name, fallback = paste0("transcript_", id_local)), ".fasta")
-                        } else {
-                            paste0("transcript_", id_local, ".fasta")
-                        }
+                        sequence_download_filename(tx_name, selected_type, default_type, fallback = paste0("transcript_", id_local))
                     }
                 },
                 content = function(file) {
                     gene_meta <- tryCatch(plotGeneMetaHomologous_rv()[[id_local]], error = function(e) NULL)
                     is_gene   <- isTRUE(gene_meta$is_canonical)
-                    if (is_gene && is.function(build_gene_sequence_content_fn)) {
-                        genome_path <- tryCatch(genomePathsHomologous_rv()[[id_local]], error = function(e) NULL)
+                    default_type <- if (is_gene) "gene" else "transcript"
+                    selected_type <- selected_type_local
+                    plot_data <- tryCatch(fileDataHomologous_rv()[[id_local]], error = function(e) NULL)
+                    ttl       <- tryCatch(titlesHomologous_rv()[[id_local]], error = function(e) "")
+                    genome_path <- tryCatch(genomePathsHomologous_rv()[[id_local]], error = function(e) NULL)
+                    if (is.function(build_selected_sequence_fasta_content_fn)) {
+                        fasta_txt <- build_selected_sequence_fasta_content_fn(
+                            sequence_type = selected_type,
+                            plot_data = plot_data,
+                            gene_meta = gene_meta,
+                            title_txt = ttl,
+                            genome_path = genome_path,
+                            fallback_id = paste0(default_type, "_", id_local)
+                        )
+                        writeLines(fasta_txt, file)
+                    } else if (is_gene && is.function(build_gene_sequence_content_fn)) {
                         fasta_txt <- build_gene_sequence_content_fn(
                             genome_path = genome_path,
                             gene_name   = as.character(gene_meta$display_gene_name %||% gene_meta$matched_gene_name %||% "gene"),
@@ -278,10 +325,7 @@ init_plot_lifecycle_domain <- function(
                     } else {
                         seqs      <- genSequencesHomologous_rv()
                         seq_blob  <- as.character(seqs[[id_local]] %||% "")
-                        plot_data <- tryCatch(fileDataHomologous_rv()[[id_local]], error = function(e) NULL)
-                        ttl       <- tryCatch(titlesHomologous_rv()[[id_local]], error = function(e) "")
-                        if (!nzchar(trimws(seq_blob)) && is.function(build_sequence_blob_from_plot_fn)) {
-                            genome_path <- tryCatch(genomePathsHomologous_rv()[[id_local]], error = function(e) NULL)
+                        if ((!nzchar(trimws(seq_blob)) || (exists("is_sequence_composition_blob", mode = "function") && isTRUE(is_sequence_composition_blob(seq_blob)))) && is.function(build_sequence_blob_from_plot_fn)) {
                             seq_blob <- build_sequence_blob_from_plot_fn(
                                 plot_data   = plot_data,
                                 title_txt   = ttl,
@@ -313,17 +357,15 @@ init_plot_lifecycle_domain <- function(
     register_homologous_transcript_download <- function(tx_plot_id, id_chr, tx_id) {
         tx_plot_id <- as.character(tx_plot_id %||% "")
         if (!nzchar(tx_plot_id)) return(invisible(NULL))
-        local({
+        for (sequence_type in c("gene", "transcript", "cds", "introns")) local({
             tx_local_id <- tx_plot_id
             parent_id <- id_chr
             t_id <- tx_id
-            output[[paste0("download_homo_", tx_local_id)]] <- downloadHandler(
+            selected_type_local <- sequence_type
+            output[[paste0("download_homo_", tx_local_id, "_", selected_type_local)]] <- downloadHandler(
                 filename = function() {
-                    if (is.function(sanitize_fasta_filename_token_fn)) {
-                        paste0(sanitize_fasta_filename_token_fn(t_id, fallback = paste0("transcript_", tx_local_id)), ".fasta")
-                    } else {
-                        paste0("transcript_", tx_local_id, ".fasta")
-                    }
+                    selected_type <- selected_type_local
+                    sequence_download_filename(t_id, selected_type, "transcript", fallback = paste0("transcript_", tx_local_id))
                 },
                 content = function(file) {
                     seqs <- genSequencesHomologous_rv()
@@ -331,9 +373,22 @@ init_plot_lifecycle_domain <- function(
                     plot_data <- tryCatch(fileDataHomologous_rv()[[parent_id]], error = function(e) NULL)
                     # Fake a title so build_transcript_fasta_content_fn picks up OUR tx_id
                     fake_ttl <- paste0("Transcript: ", t_id)
+                    selected_type <- selected_type_local
+                    genome_path <- tryCatch(genomePathsHomologous_rv()[[parent_id]], error = function(e) NULL)
                     
-                    if (!nzchar(trimws(seq_blob)) && is.function(build_sequence_blob_from_plot_fn)) {
-                        genome_path <- tryCatch(genomePathsHomologous_rv()[[parent_id]], error = function(e) NULL)
+                    if (is.function(build_selected_sequence_fasta_content_fn)) {
+                        gene_meta <- tryCatch(plotGeneMetaHomologous_rv()[[parent_id]], error = function(e) NULL)
+                        fasta_txt <- build_selected_sequence_fasta_content_fn(
+                            sequence_type = selected_type,
+                            plot_data = plot_data,
+                            gene_meta = gene_meta,
+                            title_txt = fake_ttl,
+                            genome_path = genome_path,
+                            fallback_id = paste0("transcript_", tx_local_id)
+                        )
+                        writeLines(fasta_txt, file)
+                    } else {
+                    if ((!nzchar(trimws(seq_blob)) || (exists("is_sequence_composition_blob", mode = "function") && isTRUE(is_sequence_composition_blob(seq_blob)))) && is.function(build_sequence_blob_from_plot_fn)) {
                         seq_blob <- build_sequence_blob_from_plot_fn(
                             plot_data = plot_data,
                             title_txt = fake_ttl,
@@ -355,6 +410,7 @@ init_plot_lifecycle_domain <- function(
                     } else {
                         writeLines("", file)
                     }
+                    }
                 }
             )
         })
@@ -367,34 +423,43 @@ init_plot_lifecycle_domain <- function(
         if (!nzchar(id_chr)) {
             return(invisible(NULL))
         }
-        local({
+        for (sequence_type in c("gene", "transcript", "cds", "introns")) local({
             id_local <- id_chr
-            output[[paste0("download_ortho_", id_local)]] <- downloadHandler(
+            selected_type_local <- sequence_type
+            output[[paste0("download_ortho_", id_local, "_", selected_type_local)]] <- downloadHandler(
                 filename = function() {
                     gene_meta <- tryCatch(plotGeneMetaOrthologous_rv()[[id_local]], error = function(e) NULL)
                     is_gene   <- isTRUE(gene_meta$is_canonical)
+                    default_type <- if (is_gene) "gene" else "transcript"
+                    selected_type <- selected_type_local
                     if (is_gene) {
                         gene_name <- as.character(gene_meta$display_gene_name %||% gene_meta$matched_gene_name %||% "gene")
-                        if (is.function(sanitize_fasta_filename_token_fn)) {
-                            paste0(sanitize_fasta_filename_token_fn(gene_name, fallback = paste0("gene_", id_local)), ".fasta")
-                        } else {
-                            paste0("gene_", id_local, ".fasta")
-                        }
+                        sequence_download_filename(gene_name, selected_type, default_type, fallback = paste0("gene_", id_local))
                     } else {
                         ttl    <- tryCatch(titlesOrthologous_rv()[[id_local]], error = function(e) "")
                         tx_name <- if (is.function(extract_title_field_fn)) extract_title_field_fn(ttl, "Transcript") else ""
-                        if (is.function(sanitize_fasta_filename_token_fn)) {
-                            paste0(sanitize_fasta_filename_token_fn(tx_name, fallback = paste0("transcript_", id_local)), ".fasta")
-                        } else {
-                            paste0("transcript_", id_local, ".fasta")
-                        }
+                        sequence_download_filename(tx_name, selected_type, default_type, fallback = paste0("transcript_", id_local))
                     }
                 },
                 content = function(file) {
                     gene_meta <- tryCatch(plotGeneMetaOrthologous_rv()[[id_local]], error = function(e) NULL)
                     is_gene   <- isTRUE(gene_meta$is_canonical)
-                    if (is_gene && is.function(build_gene_sequence_content_fn)) {
-                        genome_path <- tryCatch(genomePathsOrthologous_rv()[[id_local]], error = function(e) NULL)
+                    default_type <- if (is_gene) "gene" else "transcript"
+                    selected_type <- selected_type_local
+                    plot_data <- tryCatch(fileDataOrthologous_rv()[[id_local]], error = function(e) NULL)
+                    ttl       <- tryCatch(titlesOrthologous_rv()[[id_local]], error = function(e) "")
+                    genome_path <- tryCatch(genomePathsOrthologous_rv()[[id_local]], error = function(e) NULL)
+                    if (is.function(build_selected_sequence_fasta_content_fn)) {
+                        fasta_txt <- build_selected_sequence_fasta_content_fn(
+                            sequence_type = selected_type,
+                            plot_data = plot_data,
+                            gene_meta = gene_meta,
+                            title_txt = ttl,
+                            genome_path = genome_path,
+                            fallback_id = paste0(default_type, "_", id_local)
+                        )
+                        writeLines(fasta_txt, file)
+                    } else if (is_gene && is.function(build_gene_sequence_content_fn)) {
                         fasta_txt <- build_gene_sequence_content_fn(
                             genome_path = genome_path,
                             gene_name   = as.character(gene_meta$display_gene_name %||% gene_meta$matched_gene_name %||% "gene"),
@@ -407,10 +472,7 @@ init_plot_lifecycle_domain <- function(
                     } else {
                         seqs      <- genSequencesOrthologous_rv()
                         seq_blob  <- as.character(seqs[[id_local]] %||% "")
-                        plot_data <- tryCatch(fileDataOrthologous_rv()[[id_local]], error = function(e) NULL)
-                        ttl       <- tryCatch(titlesOrthologous_rv()[[id_local]], error = function(e) "")
-                        if (!nzchar(trimws(seq_blob)) && is.function(build_sequence_blob_from_plot_fn)) {
-                            genome_path <- tryCatch(genomePathsOrthologous_rv()[[id_local]], error = function(e) NULL)
+                        if ((!nzchar(trimws(seq_blob)) || (exists("is_sequence_composition_blob", mode = "function") && isTRUE(is_sequence_composition_blob(seq_blob)))) && is.function(build_sequence_blob_from_plot_fn)) {
                             seq_blob <- build_sequence_blob_from_plot_fn(
                                 plot_data   = plot_data,
                                 title_txt   = ttl,
@@ -442,17 +504,15 @@ init_plot_lifecycle_domain <- function(
     register_orthologous_transcript_download <- function(tx_plot_id, id_chr, tx_id) {
         tx_plot_id <- as.character(tx_plot_id %||% "")
         if (!nzchar(tx_plot_id)) return(invisible(NULL))
-        local({
+        for (sequence_type in c("gene", "transcript", "cds", "introns")) local({
             tx_local_id <- tx_plot_id
             parent_id <- id_chr
             t_id <- tx_id
-            output[[paste0("download_ortho_", tx_local_id)]] <- downloadHandler(
+            selected_type_local <- sequence_type
+            output[[paste0("download_ortho_", tx_local_id, "_", selected_type_local)]] <- downloadHandler(
                 filename = function() {
-                    if (is.function(sanitize_fasta_filename_token_fn)) {
-                        paste0(sanitize_fasta_filename_token_fn(t_id, fallback = paste0("transcript_", tx_local_id)), ".fasta")
-                    } else {
-                        paste0("transcript_", tx_local_id, ".fasta")
-                    }
+                    selected_type <- selected_type_local
+                    sequence_download_filename(t_id, selected_type, "transcript", fallback = paste0("transcript_", tx_local_id))
                 },
                 content = function(file) {
                     seqs <- genSequencesOrthologous_rv()
@@ -460,9 +520,22 @@ init_plot_lifecycle_domain <- function(
                     plot_data <- tryCatch(fileDataOrthologous_rv()[[parent_id]], error = function(e) NULL)
                     # Fake a title so build_transcript_fasta_content_fn picks up OUR tx_id
                     fake_ttl <- paste0("Transcript: ", t_id)
+                    selected_type <- selected_type_local
+                    genome_path <- tryCatch(genomePathsOrthologous_rv()[[parent_id]], error = function(e) NULL)
                     
-                    if (!nzchar(trimws(seq_blob)) && is.function(build_sequence_blob_from_plot_fn)) {
-                        genome_path <- tryCatch(genomePathsOrthologous_rv()[[parent_id]], error = function(e) NULL)
+                    if (is.function(build_selected_sequence_fasta_content_fn)) {
+                        gene_meta <- tryCatch(plotGeneMetaOrthologous_rv()[[parent_id]], error = function(e) NULL)
+                        fasta_txt <- build_selected_sequence_fasta_content_fn(
+                            sequence_type = selected_type,
+                            plot_data = plot_data,
+                            gene_meta = gene_meta,
+                            title_txt = fake_ttl,
+                            genome_path = genome_path,
+                            fallback_id = paste0("transcript_", tx_local_id)
+                        )
+                        writeLines(fasta_txt, file)
+                    } else {
+                    if ((!nzchar(trimws(seq_blob)) || (exists("is_sequence_composition_blob", mode = "function") && isTRUE(is_sequence_composition_blob(seq_blob)))) && is.function(build_sequence_blob_from_plot_fn)) {
                         seq_blob <- build_sequence_blob_from_plot_fn(
                             plot_data = plot_data,
                             title_txt = fake_ttl,
@@ -484,6 +557,7 @@ init_plot_lifecycle_domain <- function(
                     } else {
                         writeLines("", file)
                     }
+                    }
                 }
             )
         })
@@ -495,7 +569,9 @@ init_plot_lifecycle_domain <- function(
         if (!nzchar(id_chr)) {
             return(invisible(NULL))
         }
-        clear_dynamic_output_binding(paste0("download_homo_", id_chr))
+        for (sequence_type in c("gene", "transcript", "cds", "introns")) {
+            clear_dynamic_output_binding(paste0("download_homo_", id_chr, "_", sequence_type))
+        }
         bound_now <- as.character(homoDownloadOutputsBound_rv() %||% character(0))
         bound_keep <- setdiff(bound_now, id_chr)
         if (!identical(bound_now, bound_keep)) {
@@ -509,7 +585,9 @@ init_plot_lifecycle_domain <- function(
         if (!nzchar(id_chr)) {
             return(invisible(NULL))
         }
-        clear_dynamic_output_binding(paste0("download_ortho_", id_chr))
+        for (sequence_type in c("gene", "transcript", "cds", "introns")) {
+            clear_dynamic_output_binding(paste0("download_ortho_", id_chr, "_", sequence_type))
+        }
         bound_now <- as.character(orthoDownloadOutputsBound_rv() %||% character(0))
         bound_keep <- setdiff(bound_now, id_chr)
         if (!identical(bound_now, bound_keep)) {
@@ -585,6 +663,7 @@ init_plot_lifecycle_domain <- function(
         plotSignaturesHomologous_rv(list())
         annotationPathsHomologous_rv(list())
         genomePathsHomologous_rv(list())
+        organismInfoHomologous_rv(list())
         plotMetricsHomologous_rv(list())
         plotGeneMetaHomologous_rv(list())
         closeObserversBoundHomologous_rv(character())
@@ -595,7 +674,7 @@ init_plot_lifecycle_domain <- function(
         homoPlotTimingTracker_rv(empty_plot_timing_tracker_fn())
         clear_summary_cache_scope_fn("homo", drop_rows = TRUE)
         clear_analytics_cache_scope_fn("homo")
-        shinyjs::runjs("var el=document.getElementById('homo-plot-cards-container'); if(el){el.innerHTML='';}")
+        shinyjs::runjs("var el=document.getElementById('homo-plot-cards-container'); if(el){if(window.Shiny&&Shiny.unbindAll){Shiny.unbindAll(el);} el.innerHTML='';}")
         homoVisibleCount_rv(homoInitialVisibleCount)
         recalc_plot_ranges_homologous()
     }
@@ -619,6 +698,7 @@ init_plot_lifecycle_domain <- function(
         plotSignaturesOrthologous_rv(list())
         annotationPathsOrthologous_rv(list())
         genomePathsOrthologous_rv(list())
+        organismInfoOrthologous_rv(list())
         plotMetricsOrthologous_rv(list())
         plotGeneMetaOrthologous_rv(list())
         closeObserversBoundOrthologous_rv(character())
@@ -654,7 +734,7 @@ init_plot_lifecycle_domain <- function(
         if (length(hom_keys) > 0L) {
             rm(list = hom_keys, envir = orthoHomologyCache_env)
         }
-        shinyjs::runjs("var el=document.getElementById('ortho-plot-cards-container'); if(el){el.innerHTML='';}")
+        shinyjs::runjs("var el=document.getElementById('ortho-plot-cards-container'); if(el){if(window.Shiny&&Shiny.unbindAll){Shiny.unbindAll(el);} el.innerHTML='';}")
         orthoVisibleCount_rv(orthoInitialVisibleCount)
         recalc_plot_ranges_orthologous()
     }
@@ -881,6 +961,8 @@ init_plot_lifecycle_domain <- function(
             (if (is.function(extract_title_field_fn)) extract_title_field_fn(titlesHomologous_rv()[[id_txt]] %||% "", "Gene") else NA_character_) %||%
             "Gene")
         if (!nzchar(trimws(gene_name))) gene_name <- "Gene"
+        precomputed_neighbor_context <- tryCatch(gene_meta$precomputed_neighbor_context, error = function(e) NULL)
+        plot_sig <- as.character(tryCatch(plotSignaturesHomologous_rv()[[id_txt]], error = function(e) "") %||% "")
 
         module_handle <- local({
             this_id <- id_txt
@@ -891,6 +973,7 @@ init_plot_lifecycle_domain <- function(
             this_org <- org_name
             this_use_report <- use_report_map
             this_report <- report_path
+            this_plot_sig <- plot_sig
             plot_args <- list(
                 paste0("plot_homo_", this_id),
                 this_data,
@@ -919,6 +1002,12 @@ init_plot_lifecycle_domain <- function(
                     isTRUE(input$colorblind_mode)
                 })
             )
+            if ("plot_signature" %in% names(formals(plotServerHomologous))) {
+                plot_args$plot_signature <- this_plot_sig
+            }
+            if ("precomputed_neighbor_context" %in% names(formals(plotServerHomologous)) && !is.null(precomputed_neighbor_context)) {
+                plot_args$precomputed_neighbor_context <- precomputed_neighbor_context
+            }
             if ("on_plot_ready" %in% names(formals(plotServerHomologous))) {
                 plot_args$on_plot_ready <- function(pid = NULL) {
                     pid_chr <- as.character(pid %||% this_id)
@@ -971,6 +1060,8 @@ init_plot_lifecycle_domain <- function(
             (if (is.function(extract_title_field_fn)) extract_title_field_fn(titlesOrthologous_rv()[[id_txt]] %||% "", "Gene") else NA_character_) %||%
             "Gene")
         if (!nzchar(trimws(gene_name))) gene_name <- "Gene"
+        precomputed_neighbor_context <- tryCatch(gene_meta$precomputed_neighbor_context, error = function(e) NULL)
+        plot_sig <- as.character(tryCatch(plotSignaturesOrthologous_rv()[[id_txt]], error = function(e) "") %||% "")
 
         module_handle <- local({
             this_id <- id_txt
@@ -981,6 +1072,7 @@ init_plot_lifecycle_domain <- function(
             this_org <- org_name
             this_use_report <- use_report_map
             this_report <- report_path
+            this_plot_sig <- plot_sig
             plot_args <- list(
                 paste0("plot_ortho_", this_id),
                 this_data,
@@ -1009,11 +1101,17 @@ init_plot_lifecycle_domain <- function(
                     isTRUE(input$colorblind_mode)
                 })
             )
+            if ("plot_signature" %in% names(formals(plotServerOrtologous))) {
+                plot_args$plot_signature <- this_plot_sig
+            }
             if ("prefetch_sequence" %in% names(formals(plotServerOrtologous))) {
-                plot_args$prefetch_sequence <- FALSE
+                plot_args$prefetch_sequence <- TRUE
             }
             if ("prefetch_neighbor_context" %in% names(formals(plotServerOrtologous))) {
-                plot_args$prefetch_neighbor_context <- FALSE
+                plot_args$prefetch_neighbor_context <- TRUE
+            }
+            if ("precomputed_neighbor_context" %in% names(formals(plotServerOrtologous)) && !is.null(precomputed_neighbor_context)) {
+                plot_args$precomputed_neighbor_context <- precomputed_neighbor_context
             }
             if ("on_plot_ready" %in% names(formals(plotServerOrtologous))) {
                 plot_args$on_plot_ready <- function(pid = NULL) {

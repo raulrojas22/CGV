@@ -17,8 +17,6 @@ library(vroom)
 library(future)
 library(promises)
 library(httr2)
-library(furrr)
-library(rbioapi)
 library(visNetwork)
 
 load_project_env_file <- function(path) {
@@ -61,6 +59,8 @@ load_project_env_file <- function(path) {
 
 load_project_env_file(".Renviron")
 load_project_env_file(".env")
+
+cgv_release_version <- "1.1.0"
 
 compute_app_asset_version <- function() {
     env_version <- trimws(Sys.getenv("APP_ASSET_VERSION", unset = ""))
@@ -114,6 +114,43 @@ if (is.na(Sys.getenv("APP_PERF_TIMING", unset = NA_character_))) {
 if (is.na(Sys.getenv("APP_FUTURE_MODE", unset = NA_character_))) {
     Sys.setenv(APP_FUTURE_MODE = "multisession")
 }
+if (is.na(Sys.getenv("APP_SHINY_JSON_DIGITS", unset = NA_character_))) {
+    Sys.setenv(APP_SHINY_JSON_DIGITS = "12")
+}
+if (is.na(Sys.getenv("APP_GIRAFE_COMPACT_SVG", unset = NA_character_))) {
+    Sys.setenv(APP_GIRAFE_COMPACT_SVG = "1")
+}
+if (is.na(Sys.getenv("APP_GIRAFE_SVG_DECIMALS", unset = NA_character_))) {
+    Sys.setenv(APP_GIRAFE_SVG_DECIMALS = "2")
+}
+if (is.na(Sys.getenv("APP_ALIGNED_RIBBON_POINTS", unset = NA_character_))) {
+    Sys.setenv(APP_ALIGNED_RIBBON_POINTS = "25")
+}
+if (is.na(Sys.getenv("APP_MULTIPIP_VISUAL_MERGE_FROM", unset = NA_character_))) {
+    Sys.setenv(APP_MULTIPIP_VISUAL_MERGE_FROM = "350")
+}
+
+configure_app_transport_options <- function() {
+    options(shiny.minified = TRUE)
+
+    raw_digits <- tolower(trimws(as.character(Sys.getenv("APP_SHINY_JSON_DIGITS", "12") %||% "12")))
+    if (raw_digits %in% c("na", "max", "full", "none")) {
+        options(shiny.json.digits = NA)
+        return(invisible(NULL))
+    }
+
+    digits <- suppressWarnings(as.integer(raw_digits))
+    if (!is.finite(digits) || is.na(digits) || digits < 7L) {
+        digits <- 12L
+    }
+    if (digits > 16L) {
+        digits <- 16L
+    }
+    options(shiny.json.digits = I(digits))
+    invisible(NULL)
+}
+
+configure_app_transport_options()
 
 # ── Helper: info-tooltip for chart containers ────────────────────────
 chart_info_tip <- function(body_html) {
@@ -148,15 +185,75 @@ configure_app_future_plan <- function() {
     if (identical(mode, "multisession")) {
         detected <- suppressWarnings(as.integer(parallel::detectCores(logical = FALSE)))
         if (!is.finite(detected) || is.na(detected) || detected < 1L) {
-            detected <- 2L
+            detected <- suppressWarnings(as.integer(parallel::detectCores(logical = TRUE)))
         }
-        default_workers <- max(1L, min(2L, detected - 1L))
-        raw_workers <- trimws(as.character(Sys.getenv("APP_FUTURE_WORKERS", as.character(default_workers)) %||% as.character(default_workers)))
+        available <- tryCatch(
+            {
+                if (requireNamespace("parallelly", quietly = TRUE)) {
+                    suppressWarnings(as.integer(parallelly::availableCores(omit = 0L)[1L]))
+                } else {
+                    detected
+                }
+            },
+            error = function(e) detected
+        )
+        if (!is.finite(available) || is.na(available) || available < 1L) {
+            available <- detected
+        }
+        if (!is.finite(detected) || is.na(detected) || detected < 1L) {
+            detected <- available
+        }
+        if (!is.finite(available) || is.na(available) || available < 1L) {
+            available <- 2L
+        }
+        default_workers <- max(1L, min(2L, available))
+        raw_workers <- trimws(as.character(Sys.getenv("APP_FUTURE_WORKERS", unset = "") %||% ""))
+        has_explicit_workers <- nzchar(raw_workers)
+        if (!has_explicit_workers) {
+            raw_workers <- as.character(default_workers)
+        }
         workers <- suppressWarnings(as.integer(raw_workers))
         if (!is.finite(workers) || is.na(workers) || workers < 1L) {
             workers <- default_workers
         }
-        future::plan(future::multisession, workers = workers)
+        # Respect an explicit APP_FUTURE_WORKERS value. In some desktop/container
+        # launches parallelly::availableCores() reports 1 despite the host having
+        # more cores, which silently collapses Cross-Species lookups to a single
+        # worker.
+        max_workers <- if (isTRUE(has_explicit_workers)) {
+            max(1L, workers)
+        } else {
+            max(1L, available)
+        }
+        if (workers > max_workers) {
+            message(sprintf(
+                "[Future] Capping APP_FUTURE_WORKERS from %d to %d available core(s).",
+                workers,
+                max_workers
+            ))
+            workers <- max_workers
+        }
+        if (isTRUE(has_explicit_workers) && workers > available) {
+            options(parallelly.maxWorkers.localhost = Inf)
+            message(sprintf(
+                "[Future] Respecting explicit APP_FUTURE_WORKERS=%d although availableCores() reported %d.",
+                workers,
+                available
+            ))
+        }
+        tryCatch(
+            future::plan(future::multisession, workers = workers),
+            error = function(e) {
+                fallback_workers <- max(1L, min(default_workers, available))
+                message(sprintf(
+                    "[Future] Could not start %d multisession worker(s): %s. Falling back to %d worker(s).",
+                    workers,
+                    as.character(e$message %||% "unknown error"),
+                    fallback_workers
+                ))
+                future::plan(future::multisession, workers = fallback_workers)
+            }
+        )
     } else {
         future::plan(future::sequential)
     }
@@ -190,14 +287,20 @@ options(shiny.maxRequestSize = 500 * 1024^2)
 lib_env <- new.env(parent = parent.env(.GlobalEnv))
 
 # Cargamos los scripts DENTRO de este entorno limpio usando sys.source
+if (file.exists("R/alias_resolution.R")) {
+    sys.source("R/alias_resolution.R", envir = lib_env)
+}
 sys.source("R/utils.R", envir = lib_env)
 sys.source("R/modules.R", envir = lib_env)
 sys.source("R/server_cache_warm.R", envir = lib_env)
 sys.source("R/server_go_domain.R", envir = lib_env)
+sys.source("R/string_cache.R", envir = lib_env)
+sys.source("R/string_worker.R", envir = lib_env)
 sys.source("R/server_analytics_domain.R", envir = lib_env)
 sys.source("R/server_autocomplete_domain.R", envir = lib_env)
 sys.source("R/server_plot_lifecycle_domain.R", envir = lib_env)
 sys.source("R/server_state_helpers_domain.R", envir = lib_env)
+sys.source("R/server_source_history_domain.R", envir = lib_env)
 sys.source("R/server_popup_status_domain.R", envir = lib_env)
 sys.source("R/server_session_snapshot_domain.R", envir = lib_env)
 sys.source("R/server_ncbi_download_domain.R", envir = lib_env)
@@ -238,5 +341,22 @@ theme_custom <- bs_theme(
     "btn-success" = "#28a745",
     "input-border-color" = "#ced4da",
     "border-radius" = ".25rem"
-) %>%
-    bs_add_rules(sass::sass_file("custom.scss"))
+)
+
+# Cargar CSS pre-compilado si existe y está al día; si no, compilar SCSS en caliente.
+.cgv_compiled_css_path <- file.path("www", "css", "cgv_compiled.css")
+.cgv_scss_path <- "custom.scss"
+.cgv_use_compiled <- FALSE
+if (file.exists(.cgv_compiled_css_path) && file.exists(.cgv_scss_path)) {
+    .cgv_css_mtime <- file.info(.cgv_compiled_css_path)$mtime
+    .cgv_scss_mtime <- file.info(.cgv_scss_path)$mtime
+    if (!is.na(.cgv_css_mtime) && !is.na(.cgv_scss_mtime) && .cgv_css_mtime >= .cgv_scss_mtime) {
+        .cgv_use_compiled <- TRUE
+    }
+}
+if (.cgv_use_compiled) {
+    theme_custom <- theme_custom %>% bs_add_rules(readLines(.cgv_compiled_css_path, warn = FALSE))
+} else {
+    theme_custom <- theme_custom %>% bs_add_rules(sass::sass_file(.cgv_scss_path))
+}
+rm(.cgv_compiled_css_path, .cgv_scss_path, .cgv_use_compiled, .cgv_css_mtime, .cgv_scss_mtime)

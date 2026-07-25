@@ -1,0 +1,43 @@
+# Esta imagen cambia sólo cuando cambian R, las librerías del sistema o
+# docker/install_packages.R. Se etiqueta y persiste en el host de despliegue.
+# La etiqueta de Rocker se fija por digest para que una actualización remota
+# de `r-ver:4.5` no dispare reinstalaciones imprevistas de R.
+FROM docker.io/rocker/r-ver@sha256:35394dcbf419ac29056848522006de3cd33c33191377abed182acaecd48eba37
+
+ARG DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    bash \
+    ca-certificates \
+    curl \
+    wget \
+    build-essential \
+    g++ \
+    gfortran \
+    make \
+    libcurl4-openssl-dev \
+    libssl-dev \
+    libxml2-dev \
+    zlib1g-dev \
+    libbz2-dev \
+    liblzma-dev \
+    libuv1-dev \
+    libicu-dev \
+    libfontconfig1-dev \
+    libcairo2-dev \
+    libfreetype6-dev \
+    libpng-dev \
+    libtiff5-dev \
+    libjpeg-dev \
+    libharfbuzz-dev \
+    libfribidi-dev \
+    libgit2-dev \
+    libxt-dev \
+    cmake \
+    lastz \
+    samtools \
+    tabix \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY docker/install_packages.R /tmp/install_packages.R
+RUN Rscript /tmp/install_packages.R && rm -f /tmp/install_packages.R

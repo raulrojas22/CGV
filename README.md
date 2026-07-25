@@ -6,6 +6,8 @@
 [![Language](https://img.shields.io/badge/R-Shiny-276DC3?style=flat-square)](https://www.r-project.org/)
 [![License](https://img.shields.io/badge/License-MIT-black?style=flat-square)](LICENSE)
 
+## Code signing policy
+
 Windows release signing follows the [CGV Desktop code signing policy](desktop/legal/CODE_SIGNING_POLICY.md). Free code signing is intended to be provided by [SignPath.io](https://about.signpath.io/), certificate by [SignPath Foundation](https://signpath.org/), once the project is accepted. See also the [privacy policy](desktop/legal/PRIVACY.md) and [third-party notices](desktop/legal/THIRD_PARTY_NOTICES.md).
 
 ![CGV architecture](paper/figure1_panel_A_architecture.svg)
@@ -32,7 +34,7 @@ Large biological resources are **not versioned in GitHub**:
 
 - reference genomes (`genomes/`)
 - annotation files (`annotations/`)
-- species-specific GO annotation files (`go_annotations/`)
+- GO annotation files and ontology assets (`go_annotations/`)
 - generated caches (`cache/`)
 
 This separation keeps the repository lightweight, reproducible, and aligned with GitHub's file and repository size recommendations.

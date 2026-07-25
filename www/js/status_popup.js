@@ -2,7 +2,14 @@
   if (window.__statusPopupInitialized) return;
   window.__statusPopupInitialized = true;
   var AUTO_CLOSE_MS = 4000;
+  var MAX_HISTORY = 80;
   var autoCloseTimer = null;
+  var historyEntries = [];
+  var unreadCount = 0;
+  var manualOpen = false;
+  var loadingContext = '';
+  var loadingStartedAt = null;
+  var loadingTimer = null;
 
   function escapeHtml(v) {
     return String(v)
@@ -29,7 +36,7 @@
     'Cucumis sativus', 'Fragaria vesca', 'Lotus japonicus',
     'Nicotiana benthamiana', 'Nicotiana tabacum', 'Phaseolus vulgaris',
     'Pisum sativum', 'Selaginella moellendorffii', 'Spinacia oleracea',
-    'Triticum aestivum', 'Triticum urartu', 'Manihot esculenta',
+    'Brachypodium distachyon', 'Triticum urartu', 'Manihot esculenta',
     // Mammals
     'Homo sapiens', 'Mus musculus', 'Rattus norvegicus',
     'Canis lupus familiaris', 'Canis lupus', 'Felis catus',
@@ -113,6 +120,30 @@
     return String(n).padStart(2, '0');
   }
 
+  function formatClock(date) {
+    return pad2(date.getHours()) + ':' + pad2(date.getMinutes()) + ':' + pad2(date.getSeconds());
+  }
+
+  function formatElapsed(ms) {
+    var total = Math.max(0, Math.round(Number(ms || 0) / 1000));
+    if (total < 60) {
+      return total + 's';
+    }
+    var mins = Math.floor(total / 60);
+    var secs = total % 60;
+    if (mins < 60) {
+      return mins + 'm ' + pad2(secs) + 's';
+    }
+    var hrs = Math.floor(mins / 60);
+    mins = mins % 60;
+    return hrs + 'h ' + pad2(mins) + 'm';
+  }
+
+  function getLoadingElapsedText() {
+    if (!loadingStartedAt) return '';
+    return formatElapsed(Date.now() - loadingStartedAt.getTime());
+  }
+
   function clearAutoCloseTimer() {
     if (autoCloseTimer) {
       clearTimeout(autoCloseTimer);
@@ -185,9 +216,6 @@
 
   function resetPopupState(popup, logEl, loaderTextEl) {
     clearAutoCloseTimer();
-    if (logEl) {
-      logEl.innerHTML = '';
-    }
     if (loaderTextEl) {
       loaderTextEl.textContent = txt('Working...');
     }
@@ -196,11 +224,133 @@
     }
   }
 
+  function getNotificationToggles() {
+    return Array.prototype.slice.call(document.querySelectorAll('.app-notification-center-toggle'));
+  }
+
+  function getNotificationBadges() {
+    return Array.prototype.slice.call(document.querySelectorAll('.app-notification-center-badge'));
+  }
+
+  function setUnreadCount(count) {
+    unreadCount = Math.max(0, Number(count || 0));
+    getNotificationBadges().forEach(function (badge) {
+      badge.textContent = unreadCount > 99 ? '99+' : String(unreadCount);
+      badge.classList.toggle('is-visible', unreadCount > 0);
+    });
+    getNotificationToggles().forEach(function (toggle) {
+      toggle.classList.toggle('has-unread', unreadCount > 0);
+    });
+  }
+
+  function markNotificationsRead() {
+    setUnreadCount(0);
+  }
+
+  function setToggleExpanded(open) {
+    getNotificationToggles().forEach(function (toggle) {
+      toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+      toggle.classList.toggle('is-active', !!open);
+    });
+  }
+
+  function setLoadingActive(active) {
+    getNotificationToggles().forEach(function (toggle) {
+      toggle.classList.toggle('is-loading', !!active);
+    });
+  }
+
+  function renderLatestNotice(entry, logEl) {
+    var target = logEl || document.getElementById('app-status-popup-log');
+    if (!target || !entry) return;
+    var durationHtml = entry.duration
+      ? '<span class="app-status-popup-entry-duration">' + escapeHtml(entry.duration) + '</span>'
+      : '';
+    target.innerHTML =
+      '<div class="app-status-popup-entry tone-' + escapeHtml(entry.tone || 'info') + '">' +
+      '<div class="app-status-popup-entry-head">' +
+      '<span class="app-status-popup-entry-context">' + escapeHtml(entry.context || 'Status') + '</span>' +
+      '<span class="app-status-popup-entry-meta">' +
+      durationHtml +
+      '<span class="app-status-popup-entry-time">' + escapeHtml(entry.time || '') + '</span>' +
+      '</span>' +
+      '</div>' +
+      '<div class="app-status-popup-entry-text">' + escapeAndFormatHtml(entry.text || '') + '</div>' +
+      '</div>';
+  }
+
+  function renderHistory(logEl) {
+    var target = logEl || document.getElementById('app-status-popup-log');
+    if (!target) return;
+
+    if (!historyEntries.length) {
+      target.innerHTML =
+        '<div class="app-status-popup-empty">' +
+        '<span class="app-status-popup-empty-icon">i</span>' +
+        '<span>No notification history yet.</span>' +
+        '</div>';
+      return;
+    }
+
+    var html = '';
+    for (var i = 0; i < historyEntries.length; i++) {
+      var item = historyEntries[i] || {};
+      var durationHtml = item.duration
+        ? '<span class="app-status-popup-entry-duration">' + escapeHtml(item.duration) + '</span>'
+        : '';
+      html +=
+        '<div class="app-status-popup-entry tone-' + escapeHtml(item.tone || 'info') + '">' +
+        '<div class="app-status-popup-entry-head">' +
+        '<span class="app-status-popup-entry-context">' + escapeHtml(item.context || 'Status') + '</span>' +
+        '<span class="app-status-popup-entry-meta">' +
+        durationHtml +
+        '<span class="app-status-popup-entry-time">' + escapeHtml(item.time || '') + '</span>' +
+        '</span>' +
+        '</div>' +
+        '<div class="app-status-popup-entry-text">' + escapeAndFormatHtml(item.text || '') + '</div>' +
+        '</div>';
+    }
+    target.innerHTML = html;
+  }
+
+  function pushHistory(entry) {
+    historyEntries.unshift(entry);
+    if (historyEntries.length > MAX_HISTORY) {
+      historyEntries.length = MAX_HISTORY;
+    }
+    if (manualOpen) {
+      renderHistory();
+    }
+  }
+
+  function openPopup(popup, options) {
+    if (!popup) return;
+    var opts = options || {};
+    if (opts.manual) {
+      manualOpen = true;
+      markNotificationsRead();
+    }
+    popup.classList.add('open');
+    syncPopupBounds(popup);
+    setToggleExpanded(true);
+  }
+
+  function closePopup(popup) {
+    var target = popup || document.getElementById('app-status-popup');
+    clearAutoCloseTimer();
+    manualOpen = false;
+    if (target) {
+      target.classList.remove('open');
+    }
+    setToggleExpanded(false);
+  }
+
   function scheduleAutoClose(popup) {
     clearAutoCloseTimer();
     autoCloseTimer = setTimeout(function () {
-      if (popup) {
+      if (popup && !manualOpen) {
         popup.classList.remove('open');
+        setToggleExpanded(false);
       }
     }, AUTO_CLOSE_MS);
   }
@@ -222,23 +372,35 @@
     var contextTxt = txt(context);
 
     var now = new Date();
-    var timeTxt = pad2(now.getHours()) + ':' + pad2(now.getMinutes()) + ':' + pad2(now.getSeconds());
-    var row = document.createElement('div');
-    row.className = 'app-status-popup-entry tone-' + tone;
-    row.innerHTML =
-      '<div class="app-status-popup-entry-head">' +
-      '<span class="app-status-popup-entry-context">' + escapeHtml(contextTxt) + '</span>' +
-      '<span class="app-status-popup-entry-time">' + escapeHtml(timeTxt) + '</span>' +
-      '</div>' +
-      '<div class="app-status-popup-entry-text">' + escapeAndFormatHtml(line) + '</div>';
-    logEl.innerHTML = '';
-    logEl.appendChild(row);
+    var durationText = '';
+    if (loadingStartedAt && (!loadingContext || loadingContext === contextTxt)) {
+      durationText = formatElapsed(now.getTime() - loadingStartedAt.getTime());
+      loadingStartedAt = null;
+      loadingContext = '';
+    }
+    var entry = {
+      context: contextTxt,
+      tone: tone,
+      text: line,
+      time: formatClock(now),
+      duration: durationText
+    };
+    pushHistory(entry);
+    if (!manualOpen) {
+      setUnreadCount(unreadCount + 1);
+    }
 
     popup.classList.remove('tone-info', 'tone-success', 'tone-warning', 'tone-error');
     popup.classList.add('tone-' + tone);
-    popup.classList.add('open');
-    syncPopupBounds(popup);
-    scheduleAutoClose(popup);
+    if (manualOpen) {
+      renderHistory(logEl);
+      syncPopupBounds(popup);
+    } else {
+      popup.classList.remove('loading');
+      renderLatestNotice(entry, logEl);
+      openPopup(popup, { manual: false });
+      scheduleAutoClose(popup);
+    }
   });
 
   Shiny.addCustomMessageHandler('app_status_popup_loading', function (message) {
@@ -255,25 +417,52 @@
     var isStartingNewRun = active && !popup.classList.contains('loading');
     if (isStartingNewRun) {
       resetPopupState(popup, logEl, loaderTextEl);
+      loadingStartedAt = new Date();
+    }
+    if (active) {
+      loadingContext = (message && message.context) ? String(message.context) : 'Status';
     }
 
     if (loaderTextEl && (headlineTranslated.length || textTranslated.length)) {
+      var elapsed = active ? getLoadingElapsedText() : '';
+      var elapsedHtml = elapsed
+        ? '<span class="app-status-popup-loader-elapsed">' + escapeHtml(elapsed) + '</span>'
+        : '';
       if (headlineTranslated.length && textTranslated.length) {
-        loaderTextEl.innerHTML = escapeAndFormatHtml(headlineTranslated) + '<br>' + escapeAndFormatHtml(textTranslated);
+        loaderTextEl.innerHTML = escapeAndFormatHtml(headlineTranslated) + '<br>' + escapeAndFormatHtml(textTranslated) + elapsedHtml;
       } else if (headlineTranslated.length) {
-        loaderTextEl.innerHTML = escapeAndFormatHtml(headlineTranslated);
+        loaderTextEl.innerHTML = escapeAndFormatHtml(headlineTranslated) + elapsedHtml;
       } else {
-        loaderTextEl.innerHTML = escapeAndFormatHtml(textTranslated);
+        loaderTextEl.innerHTML = escapeAndFormatHtml(textTranslated) + elapsedHtml;
       }
     }
 
     if (active) {
       clearAutoCloseTimer();
-      popup.classList.add('open');
-      popup.classList.add('loading');
-      syncPopupBounds(popup);
+      if (manualOpen) {
+        popup.classList.add('open');
+        syncPopupBounds(popup);
+      }
+      setLoadingActive(true);
+      if (loadingTimer) clearInterval(loadingTimer);
+      loadingTimer = setInterval(function () {
+        if (!loaderTextEl) return;
+        var elapsed = getLoadingElapsedText();
+        var existing = loaderTextEl.querySelector('.app-status-popup-loader-elapsed');
+        if (existing) {
+          existing.textContent = elapsed;
+        }
+      }, 1000);
     } else {
       popup.classList.remove('loading');
+      setLoadingActive(false);
+      if (loadingTimer) {
+        clearInterval(loadingTimer);
+        loadingTimer = null;
+      }
+      if (window.cgvEndSearchFeedback) {
+        window.cgvEndSearchFeedback();
+      }
     }
   });
 
@@ -283,13 +472,17 @@
     var loaderTextEl = document.getElementById('app-status-popup-loader-text');
     if (!popup) return;
 
-    clearAutoCloseTimer();
-    popup.classList.remove('open', 'loading', 'tone-info', 'tone-success', 'tone-warning', 'tone-error');
+    closePopup(popup);
+    popup.classList.remove('loading', 'tone-info', 'tone-success', 'tone-warning', 'tone-error');
+    setLoadingActive(false);
+    loadingStartedAt = null;
+    loadingContext = '';
+    if (loadingTimer) {
+      clearInterval(loadingTimer);
+      loadingTimer = null;
+    }
 
     if (message && message.clear) {
-      if (logEl) {
-        logEl.innerHTML = '';
-      }
       if (loaderTextEl) {
         loaderTextEl.textContent = txt('Working...');
       }
@@ -297,25 +490,39 @@
   });
 
   $(document).on('click', '#app-status-popup-close', function () {
-    clearAutoCloseTimer();
-    $('#app-status-popup').removeClass('open');
+    closePopup(document.getElementById('app-status-popup'));
   });
 
   $(document).on('click', '#app-status-popup-clear', function () {
     var logEl = document.getElementById('app-status-popup-log');
     var popup = document.getElementById('app-status-popup');
-    if (logEl) {
-      logEl.innerHTML = '';
-    }
+    historyEntries = [];
+    renderHistory(logEl);
+    setUnreadCount(0);
     if (popup) {
       popup.classList.remove('tone-info', 'tone-success', 'tone-warning', 'tone-error');
     }
     clearAutoCloseTimer();
   });
 
+  $(document).on('click', '.app-notification-center-toggle', function (evt) {
+    evt.preventDefault();
+    evt.stopPropagation();
+    var popup = document.getElementById('app-status-popup');
+    if (!popup) return;
+    if (popup.classList.contains('open') && manualOpen) {
+      closePopup(popup);
+      return;
+    }
+    renderHistory();
+    openPopup(popup, { manual: true });
+  });
+
   function initPopupBounds() {
     var popup = document.getElementById('app-status-popup');
     if (popup) syncPopupBounds(popup);
+    renderHistory();
+    setUnreadCount(0);
   }
 
   if (document.readyState === 'loading') {

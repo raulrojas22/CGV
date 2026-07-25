@@ -18,7 +18,7 @@ echo "This will run $TRIALS trial(s): FAST ON then FAST OFF."
 echo "Fixed envs:" 
 echo "  APP_HOMO_PLOT_CACHE=1 APP_ORTHO_PLOT_CACHE=1"
 echo "  APP_HOMO_INITIAL_VISIBLE=1 APP_ORTHO_INITIAL_VISIBLE=1"
-echo "  APP_ORTHO_ALIGNED_KMER_K=${APP_ORTHO_ALIGNED_KMER_K:-8}"
+echo "  APP_ORTHO_ALIGNED_FAST=${APP_ORTHO_ALIGNED_FAST:-1}"
 echo "For each run: do the same Orthologous flow and switch to Comparative Aligned, then Ctrl+C."
 echo
 
@@ -44,7 +44,7 @@ run_one() {
 
   APP_HOMO_PLOT_CACHE=1 APP_ORTHO_PLOT_CACHE=1 \
   APP_HOMO_INITIAL_VISIBLE=1 APP_ORTHO_INITIAL_VISIBLE=1 \
-  APP_ORTHO_ALIGNED_FAST="$fast" APP_ORTHO_ALIGNED_KMER_K="${APP_ORTHO_ALIGNED_KMER_K:-8}" \
+  APP_ORTHO_ALIGNED_FAST="$fast" \
   APP_PERF_TIMING=1 APP_DEBUG_LOGS=1 \
     Rscript -e "shiny::runApp('.', launch.browser=TRUE)" 2>&1 | tee "$logfile"
   rc=${PIPESTATUS[0]}
