@@ -48,6 +48,7 @@ jobs:
           npm run verify:config
 
       - name: Build Linux scientific runtime
+        shell: micromamba-shell {0}
         working-directory: desktop
         run: npm run runtime:linux:x64
 
