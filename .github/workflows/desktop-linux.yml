@@ -61,14 +61,14 @@ jobs:
         run: |
           set -euo pipefail
           shopt -s nullglob
-          appimages=(desktop/dist/*-Linux-x64.AppImage)
-          debs=(desktop/dist/*-Linux-x64.deb)
+          appimages=(desktop/dist/*-Linux-x86_64.AppImage)
+          debs=(desktop/dist/*-Linux-amd64.deb)
           if [[ ${#appimages[@]} -ne 1 ]]; then
-            echo "Expected exactly one Linux x64 AppImage; found ${#appimages[@]}." >&2
+            echo "Expected exactly one Linux x86_64 AppImage; found ${#appimages[@]}." >&2
             exit 1
           fi
           if [[ ${#debs[@]} -ne 1 ]]; then
-            echo "Expected exactly one Linux x64 DEB; found ${#debs[@]}." >&2
+            echo "Expected exactly one Linux amd64 DEB; found ${#debs[@]}." >&2
             exit 1
           fi
 
@@ -109,7 +109,7 @@ jobs:
           if-no-files-found: error
           retention-days: 14
           path: |
-            desktop/dist/CGV-Desktop-1.1.0-Linux-x64.AppImage
-            desktop/dist/CGV-Desktop-1.1.0-Linux-x64.deb
+            desktop/dist/CGV-Desktop-1.1.0-Linux-x86_64.AppImage
+            desktop/dist/CGV-Desktop-1.1.0-Linux-amd64.deb
             desktop/dist/latest-linux.yml
             desktop/dist/SHA256SUMS-linux-x64.txt
