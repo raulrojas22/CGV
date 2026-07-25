@@ -83,6 +83,11 @@ write_mode <- has_flag("write")
 go_dir <- resolve_path(root, go_dir_rel)
 ann_registry_path <- resolve_path(root, ann_registry_rel)
 out_path <- resolve_path(root, out_rel)
+existing_registry <- if (file.exists(out_path)) {
+  tryCatch(read.delim(out_path, sep = "\t", stringsAsFactors = FALSE, check.names = FALSE), error = function(e) data.frame())
+} else {
+  data.frame()
+}
 
 rel_path <- function(abs_path, root_path) {
   ap <- normalizePath(abs_path, winslash = "/", mustWork = FALSE)
@@ -291,13 +296,17 @@ if (length(gaf_files) == 0) {
         date_generated = character(),
         priority = integer(),
         is_primary = logical(),
+        index_file = character(),
+        index_schema_version = integer(),
+        index_fingerprint = character(),
         notes = character(),
         stringsAsFactors = FALSE
       ),
       file = out_path,
       sep = "\t",
       row.names = FALSE,
-      quote = FALSE
+      quote = FALSE,
+      na = ""
     )
     cat("Wrote empty registry: ", out_path, "\n", sep = "")
   }
@@ -348,13 +357,26 @@ rows <- lapply(gaf_files, function(path) {
   if (identical(method, "filename_alias")) prio <- prio + 5L
   if (!has_match) prio <- 999L
 
+  rel_gaf <- rel_path(path, root)
+  old_hit <- if (nrow(existing_registry) > 0L && "gaf_file" %in% names(existing_registry)) {
+    which(as.character(existing_registry$gaf_file) == rel_gaf)[1]
+  } else {
+    NA_integer_
+  }
+  old_value <- function(column, fallback = "") {
+    if (!is.finite(old_hit) || is.na(old_hit) || !column %in% names(existing_registry)) return(fallback)
+    value <- safe_chr(existing_registry[[column]][old_hit])[1]
+    if (is.na(value) || identical(toupper(trimws(value)), "NA")) return(fallback)
+    value
+  }
+
   data.frame(
     species_id = safe_chr(sid),
     organism = safe_chr(org),
     taxid = suppressWarnings(as.integer(tid)),
     source = safe_chr(src),
     db_namespace = safe_chr(parsed$db_namespace),
-    gaf_file = rel_path(path, root),
+    gaf_file = rel_gaf,
     file_name = safe_chr(fbase),
     gcf_accession = safe_chr(gcf),
     taxon_from_gaf = suppressWarnings(as.integer(tax_raw)),
@@ -363,6 +385,9 @@ rows <- lapply(gaf_files, function(path) {
     date_generated = safe_chr(parsed$date_generated),
     priority = prio,
     is_primary = FALSE,
+    index_file = old_value("index_file"),
+    index_schema_version = suppressWarnings(as.integer(old_value("index_schema_version", NA_character_))),
+    index_fingerprint = old_value("index_fingerprint"),
     notes = safe_chr(note),
     stringsAsFactors = FALSE
   )
@@ -385,6 +410,9 @@ if (nrow(out) == 0) {
     date_generated = character(),
     priority = integer(),
     is_primary = logical(),
+    index_file = character(),
+    index_schema_version = integer(),
+    index_fingerprint = character(),
     notes = character(),
     stringsAsFactors = FALSE
   )
@@ -407,7 +435,7 @@ row.names(out) <- NULL
 
 if (write_mode) {
   dir.create(dirname(out_path), recursive = TRUE, showWarnings = FALSE)
-  write.table(out, file = out_path, sep = "\t", row.names = FALSE, quote = FALSE)
+  write.table(out, file = out_path, sep = "\t", row.names = FALSE, quote = FALSE, na = "")
   cat("Wrote GO registry: ", out_path, "\n", sep = "")
 } else {
   cat("Dry-run preview (top 30 rows):\n")

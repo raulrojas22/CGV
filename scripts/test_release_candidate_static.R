@@ -1,0 +1,63 @@
+#!/usr/bin/env Rscript
+
+read_text <- function(path) {
+  paste(readLines(path, warn = FALSE, encoding = "UTF-8"), collapse = "\n")
+}
+
+release_version <- "1.1.0"
+manual_version <- "1.1"
+
+global_txt <- read_text("global.R")
+ui_txt <- read_text("ui.R")
+studio_js <- read_text(file.path("www", "js", "figure_studio.js"))
+studio_css <- read_text(file.path("www", "css", "figure_studio.css"))
+desktop_package <- jsonlite::fromJSON(file.path("desktop", "package.json"))
+desktop_lock <- jsonlite::fromJSON(file.path("desktop", "package-lock.json"))
+desktop_lock_txt <- read_text(file.path("desktop", "package-lock.json"))
+manual_config <- jsonlite::fromJSON(file.path("docs", "user_manual", "manual_config.json"))
+manual_metadata <- jsonlite::fromJSON(file.path("www", "docs", "manual.json"))
+citation_txt <- read_text("CITATION.cff")
+zenodo <- jsonlite::fromJSON(".zenodo.json")
+dockerfile_txt <- read_text("Dockerfile")
+shinyproxy_txt <- read_text("docker-compose.shinyproxy.yml")
+release_notes <- sprintf("RELEASE_NOTES_v%s.md", release_version)
+release_checklist <- sprintf("RELEASE_CHECKLIST_v%s.md", release_version)
+desktop_scripts <- desktop_package$scripts
+
+stopifnot(
+  grepl(sprintf('cgv_release_version <- "%s"', release_version), global_txt, fixed = TRUE),
+  grepl("`data-figure-studio-version` = cgv_release_version", ui_txt, fixed = TRUE),
+  grepl('paste0("v", cgv_release_version)', ui_txt, fixed = TRUE),
+  identical(desktop_package$version, release_version),
+  identical(desktop_lock$version, release_version),
+  grepl(
+    sprintf('"packages"[[:space:]]*:[[:space:]]*\\{[[:space:]]*""[[:space:]]*:[[:space:]]*\\{[[:space:]]*"name"[[:space:]]*:[[:space:]]*"cgv-desktop",[[:space:]]*"version"[[:space:]]*:[[:space:]]*"%s"', release_version),
+    desktop_lock_txt,
+    perl = TRUE
+  ),
+  identical(manual_config$product_version, release_version),
+  identical(manual_config$manual_version, manual_version),
+  identical(manual_metadata$product_version, release_version),
+  identical(manual_metadata$manual_version, manual_version),
+  grepl(sprintf("version: %s", release_version), citation_txt, fixed = TRUE),
+  identical(zenodo$version, release_version),
+  grepl(sprintf('org.opencontainers.image.version="%s"', release_version), dockerfile_txt, fixed = TRUE),
+  grepl(sprintf("cgv:%s", release_version), shinyproxy_txt, fixed = TRUE),
+  file.exists(release_notes),
+  file.exists(release_checklist),
+  identical(desktop_scripts[["runtime:mac:arm64"]], "bash scripts/build-runtime-macos-arm64.sh"),
+  identical(desktop_scripts[["runtime:mac:x64"]], "bash scripts/build-runtime-macos-x64.sh"),
+  identical(desktop_scripts[["runtime:linux:x64"]], "bash scripts/build-runtime-linux-x64.sh"),
+  all(vapply(
+    desktop_scripts[c(
+      "build", "build:mac", "build:mac:arm64", "build:mac:x64",
+      "build:linux", "build:linux:x64", "build:win", "build:store"
+    )],
+    function(command) grepl("--publish never", command, fixed = TRUE),
+    logical(1)
+  )),
+  grepl('generator: "CGV Figure Studio " + studioVersion', studio_js, fixed = TRUE),
+  !grepl("\\bbeta\\b", paste(ui_txt, studio_js, studio_css), ignore.case = TRUE, perl = TRUE)
+)
+
+message(sprintf("CGV v%s release-candidate metadata is consistent.", release_version))

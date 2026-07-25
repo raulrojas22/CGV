@@ -7,17 +7,17 @@ const yaml = require("js-yaml");
 const packageJson = require("../package.json");
 const { refreshSignedWindowsUpdate, sha512Base64 } = require("../scripts/refresh-signed-windows-update");
 
-function withTempDirectory(callback) {
+async function withTempDirectory(callback) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "cgv-signed-update-"));
   try {
-    return callback(directory);
+    return await callback(directory);
   } finally {
     fs.rmSync(directory, { recursive: true, force: true });
   }
 }
 
-test("regenerates Windows updater metadata from the signed installer bytes", () => {
-  withTempDirectory((directory) => {
+test("regenerates Windows updater metadata from the signed installer bytes", async () => {
+  await withTempDirectory(async (directory) => {
     const installerName = `CGV-Desktop-${packageJson.version}-Windows-x64-Setup.exe`;
     const installerPath = path.join(directory, installerName);
     const updateInfoPath = path.join(directory, "latest.yml");
@@ -30,7 +30,7 @@ test("regenerates Windows updater metadata from the signed installer bytes", () 
       releaseDate: "2026-07-15T00:00:00.000Z"
     }));
 
-    const result = refreshSignedWindowsUpdate({
+    const result = await refreshSignedWindowsUpdate({
       installerPath,
       updateInfoPath,
       createBlockmap: (_input, output) => fs.writeFileSync(output, Buffer.from("signed-blockmap"))
@@ -44,8 +44,8 @@ test("regenerates Windows updater metadata from the signed installer bytes", () 
   });
 });
 
-test("rejects updater metadata for a different version", () => {
-  withTempDirectory((directory) => {
+test("rejects updater metadata for a different version", async () => {
+  await withTempDirectory(async (directory) => {
     const installerName = `CGV-Desktop-${packageJson.version}-Windows-x64-Setup.exe`;
     const installerPath = path.join(directory, installerName);
     const updateInfoPath = path.join(directory, "latest.yml");
@@ -56,8 +56,8 @@ test("rejects updater metadata for a different version", () => {
       path: installerName
     }));
 
-    assert.throws(
-      () => refreshSignedWindowsUpdate({ installerPath, updateInfoPath, createBlockmap: () => {} }),
+    await assert.rejects(
+      refreshSignedWindowsUpdate({ installerPath, updateInfoPath, createBlockmap: () => {} }),
       /version must match/
     );
   });

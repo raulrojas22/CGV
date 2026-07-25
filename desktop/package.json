@@ -1,6 +1,6 @@
 {
   "name": "cgv-desktop",
-  "version": "0.1.1",
+  "version": "1.1.0",
   "description": "CGV Desktop wrapper for running the Shiny app locally with portable data roots.",
   "main": "src/main.js",
   "author": {
@@ -17,23 +17,32 @@
     "start": "electron .",
     "test": "node --test test/*.test.js",
     "prepare:lite": "node scripts/prepare-lite-data.js",
-    "prepare:go": "node scripts/prepare-common-go.js",
-    "build": "npm run prepare:lite && npm run prepare:go && npm run verify:config && npm run verify && electron-builder && npm run fix:mac-update-manifest",
-    "build:mac": "npm run prepare:lite && npm run prepare:go && npm run verify:config && npm run verify && electron-builder --mac && npm run fix:mac-update-manifest",
-    "build:linux": "npm run prepare:lite && npm run prepare:go && npm run verify:config && npm run verify && electron-builder --linux",
+    "prepare:demo": "node scripts/build-demo-data.js",
+    "runtime:mac:arm64": "bash scripts/build-runtime-macos-arm64.sh",
+    "runtime:mac:x64": "bash scripts/build-runtime-macos-x64.sh",
+    "runtime:linux:x64": "bash scripts/build-runtime-linux-x64.sh",
+    "build": "npm run prepare:lite && npm run verify:config && npm run verify && electron-builder --publish never && npm run fix:mac-update-manifest",
+    "build:mac": "npm run prepare:lite && npm run verify:config && npm run verify && electron-builder --mac --publish never && npm run fix:mac-update-manifest",
+    "build:mac:arm64": "npm run prepare:lite && npm run verify:config && npm run verify && electron-builder --mac --arm64 --publish never && npm run fix:mac-update-manifest",
+    "build:mac:x64": "npm run prepare:lite && npm run verify:config && npm run verify && electron-builder --mac --x64 --publish never && npm run fix:mac-update-manifest",
+    "build:linux": "npm run prepare:lite && npm run verify:config && npm run verify && electron-builder --linux --publish never",
+    "build:linux:x64": "npm run prepare:lite && npm run verify:config && npm run verify && electron-builder --linux --x64 --publish never",
     "runtime:win": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-runtime-windows-x64.ps1",
-    "build:win": "npm run prepare:lite && npm run prepare:go && npm run verify:config && npm run verify && electron-builder --win nsis --x64 --publish never",
-    "build:store": "npm run prepare:lite && npm run prepare:go && npm run verify:config && npm run verify && electron-builder --config electron-builder.store.js --win appx --x64 --publish never",
+    "build:win": "npm run prepare:lite && npm run verify:config && npm run verify && electron-builder --win nsis --x64 --publish never",
+    "build:store": "npm run prepare:lite && npm run verify:config && npm run verify && electron-builder --config electron-builder.store.js --win appx --x64 --publish never",
     "refresh:win-update": "node scripts/refresh-signed-windows-update.js",
     "fix:mac-update-manifest": "node scripts/fix-mac-update-manifest.js",
     "verify": "node scripts/verify-desktop-runtime.js",
     "verify:config": "node scripts/verify-desktop-package-config.js",
     "dataset:package": "node scripts/build-dataset-package.js",
-    "dataset:catalog": "node scripts/build-catalog.js"
+    "dataset:catalog": "node scripts/build-catalog.js",
+    "dataset:verify": "node scripts/verify-dataset-package.js",
+    "dataset:smoke": "node scripts/smoke-installed-dataset.js",
+    "dataset:benchmark": "node scripts/benchmark-cache.js"
   },
   "devDependencies": {
     "electron": "42.6.1",
-    "electron-builder": "26.11.1",
+    "electron-builder": "26.15.3",
     "js-yaml": "4.3.0",
     "yazl": "3.3.1"
   },
@@ -59,20 +68,13 @@
           "gene_search_lib.R",
           "R/**",
           "scripts/*.R",
+          "go_annotations/go-basic.obo",
+          "go_annotations/go_term_map.rds",
           "www/**",
           "!www/screencasts.orig/**",
           "docker/run-app.sh",
           "!desktop/resources/bundled-data/**",
           "!desktop/resources/demo-data/**"
-        ]
-      },
-      {
-        "from": "resources/common-go",
-        "to": "app/go_annotations",
-        "filter": [
-          "go-basic.obo",
-          "go_term_map.rds",
-          "manifest.json"
         ]
       },
       {
@@ -161,7 +163,7 @@
     }
   },
   "dependencies": {
-    "electron-updater": "6.8.5",
+    "electron-updater": "6.8.9",
     "yauzl": "3.4.0"
   }
 }

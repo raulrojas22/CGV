@@ -120,7 +120,7 @@ ncbi_search_assemblies <- function(query,
         )
     })
 
-    result <- do.call(rbind, rows)
+    result <- do.call(rbind,  rows)
     if (is.null(result) || nrow(result) == 0) return(data.frame())
 
     result$genome_size_mb <- round(result$genome_size_bp / 1e6, 1)
@@ -231,8 +231,8 @@ ncbi_find_in_preloaded <- function(preloaded_registry, organism_name = NULL,
 # ══════════════════════════════════════════════════════════════════════
 
 ncbi_cache_max_bytes <- function() {
-    max_gb <- as.numeric(Sys.getenv("CGV_NCBI_CACHE_MAX_GB", "5"))
-    if (is.na(max_gb) || max_gb <= 0) max_gb <- 5
+    max_gb <- as.numeric(Sys.getenv("CGV_NCBI_CACHE_MAX_GB", "50"))
+    if (is.na(max_gb) || max_gb <= 0) max_gb <- 50
     max_gb * 1024^3
 }
 
@@ -240,7 +240,7 @@ ncbi_cache_dir_size <- function(cache_dir = NULL) {
     if (is.null(cache_dir)) cache_dir <- ncbi_downloads_dir()
     if (!dir.exists(cache_dir)) return(0)
     files <- list.files(cache_dir, recursive = TRUE, full.names = TRUE)
-    files <- files[!grepl("registry\\.tsv$", files)]
+    files <- files[!grepl("(registry|usage_log|usage_summary)\\.tsv$", files)]
     sum(file.info(files)$size, na.rm = TRUE)
 }
 
@@ -252,6 +252,212 @@ ncbi_touch_access_time <- function(accession) {
     }
 }
 
+ncbi_normalize_accession_id <- function(x) {
+    tolower(gsub("[^a-z0-9]+", "", trimws(as.character(x %||% ""))))
+}
+
+ncbi_atomic_write_tsv <- function(df, path) {
+    dir.create(dirname(path), recursive = TRUE, showWarnings = FALSE)
+    tmp <- paste0(
+        path,
+        ".tmp.",
+        Sys.getpid(),
+        ".",
+        as.integer(as.numeric(Sys.time())),
+        ".",
+        sample.int(1000000L, 1)
+    )
+    on.exit(if (file.exists(tmp)) unlink(tmp, force = TRUE), add = TRUE)
+    vroom::vroom_write(df, tmp, delim = "\t")
+    if (!file.rename(tmp, path)) {
+        if (file.exists(path)) unlink(path, force = TRUE)
+        if (!file.rename(tmp, path)) {
+            stop("Failed to atomically update ", path)
+        }
+    }
+    invisible(path)
+}
+
+ncbi_usage_logging_enabled <- function() {
+    value <- tolower(trimws(Sys.getenv("CGV_NCBI_USAGE_LOG_ENABLED", "true")))
+    !value %in% c("0", "false", "no", "off")
+}
+
+ncbi_usage_log_path <- function() {
+    file.path(ncbi_downloads_dir(), "usage_log.tsv")
+}
+
+ncbi_usage_summary_path <- function() {
+    file.path(ncbi_downloads_dir(), "usage_summary.tsv")
+}
+
+ncbi_usage_session_hash <- function(session_token = NULL) {
+    token <- trimws(as.character(session_token %||% ""))
+    if (!nzchar(token)) return("")
+    if (requireNamespace("digest", quietly = TRUE)) {
+        return(substr(digest::digest(token, algo = "sha256", serialize = FALSE), 1L, 16L))
+    }
+    ints <- utf8ToInt(token)
+    weights <- seq_along(ints)
+    sprintf("%016x", as.integer(sum(as.numeric(ints) * weights) %% 2147483647))
+}
+
+ncbi_acquire_usage_log_lock <- function(wait_seconds = 0.05, stale_seconds = 30) {
+    lock_dir <- file.path(ncbi_downloads_dir(), ".usage_log.lock")
+    started <- Sys.time()
+    repeat {
+        if (isTRUE(dir.create(lock_dir, showWarnings = FALSE))) return(lock_dir)
+        age <- suppressWarnings(as.numeric(difftime(
+            Sys.time(), file.info(lock_dir)$mtime[1], units = "secs"
+        )))
+        if (is.finite(age) && !is.na(age) && age > stale_seconds) {
+            unlink(lock_dir, recursive = TRUE, force = TRUE)
+            next
+        }
+        waited <- suppressWarnings(as.numeric(difftime(Sys.time(), started, units = "secs")))
+        if (!is.finite(waited) || is.na(waited) || waited >= wait_seconds) return(NULL)
+        Sys.sleep(0.025)
+    }
+}
+
+ncbi_record_usage_event <- function(accession, organism = "", taxid = "", event,
+                                    context = "", cache_hit = NA,
+                                    session_token = NULL) {
+    if (!ncbi_usage_logging_enabled()) return(invisible(FALSE))
+
+    tryCatch({
+        accession <- trimws(as.character(accession %||% ""))
+        event <- trimws(as.character(event %||% ""))
+        if (!nzchar(accession) || !nzchar(event)) return(invisible(FALSE))
+
+        lock_dir <- ncbi_acquire_usage_log_lock()
+        if (is.null(lock_dir)) return(invisible(FALSE))
+        on.exit(unlink(lock_dir, recursive = TRUE, force = TRUE), add = TRUE)
+
+        clean_field <- function(x) {
+            gsub("[\t\r\n]+", " ", trimws(as.character(x %||% "")))
+        }
+        row <- data.frame(
+            timestamp_utc = format(Sys.time(), "%Y-%m-%dT%H:%M:%SZ", tz = "UTC"),
+            accession = clean_field(accession),
+            organism = clean_field(organism),
+            taxid = clean_field(taxid),
+            event = clean_field(event),
+            context = clean_field(context),
+            cache_hit = if (is.na(cache_hit)) "" else tolower(as.character(isTRUE(cache_hit))),
+            session_hash = ncbi_usage_session_hash(session_token),
+            stringsAsFactors = FALSE
+        )
+        log_path <- ncbi_usage_log_path()
+        write.table(
+            row,
+            file = log_path,
+            sep = "\t",
+            row.names = FALSE,
+            col.names = !file.exists(log_path),
+            append = file.exists(log_path),
+            quote = TRUE,
+            qmethod = "double",
+            fileEncoding = "UTF-8"
+        )
+        invisible(TRUE)
+    }, error = function(e) {
+        message("[NCBI Usage] Metric skipped: ", conditionMessage(e))
+        invisible(FALSE)
+    })
+}
+
+ncbi_build_usage_summary <- function(write_file = TRUE) {
+    empty <- data.frame(
+        accession = character(0), organism = character(0), taxid = character(0),
+        total_loads = integer(0), unique_sessions = integer(0),
+        downloads = integer(0), cache_loads = integer(0),
+        single_species_loads = integer(0), cross_species_loads = integer(0),
+        first_used_utc = character(0), last_used_utc = character(0),
+        stringsAsFactors = FALSE
+    )
+    lock_dir <- ncbi_acquire_usage_log_lock(wait_seconds = 2)
+    if (is.null(lock_dir)) stop("NCBI usage log is busy; try generating the summary again.")
+    on.exit(unlink(lock_dir, recursive = TRUE, force = TRUE), add = TRUE)
+
+    log_path <- ncbi_usage_log_path()
+    if (!file.exists(log_path)) {
+        if (isTRUE(write_file)) ncbi_atomic_write_tsv(empty, ncbi_usage_summary_path())
+        return(empty)
+    }
+
+    events <- tryCatch(
+        vroom::vroom(
+            log_path, delim = "\t", show_col_types = FALSE,
+            col_types = vroom::cols(.default = "c")
+        ),
+        error = function(e) data.frame()
+    )
+    required <- c("timestamp_utc", "accession", "organism", "taxid", "event",
+                  "context", "cache_hit", "session_hash")
+    if (nrow(events) == 0 || !all(required %in% names(events))) {
+        if (isTRUE(write_file)) ncbi_atomic_write_tsv(empty, ncbi_usage_summary_path())
+        return(empty)
+    }
+
+    accessions <- unique(as.character(events$accession))
+    accessions <- accessions[nzchar(accessions)]
+    rows <- lapply(accessions, function(acc) {
+        x <- events[as.character(events$accession) == acc, , drop = FALSE]
+        loads <- x[as.character(x$event) == "organism_loaded", , drop = FALSE]
+        sessions <- unique(as.character(loads$session_hash))
+        sessions <- sessions[nzchar(sessions)]
+        latest_name <- tail(as.character(x$organism[nzchar(as.character(x$organism))]), 1)
+        latest_taxid <- tail(as.character(x$taxid[nzchar(as.character(x$taxid))]), 1)
+        data.frame(
+            accession = acc,
+            organism = if (length(latest_name)) latest_name else "",
+            taxid = if (length(latest_taxid)) latest_taxid else "",
+            total_loads = nrow(loads),
+            unique_sessions = length(sessions),
+            downloads = sum(as.character(x$event) == "download_complete"),
+            cache_loads = sum(tolower(as.character(loads$cache_hit)) == "true"),
+            single_species_loads = sum(as.character(loads$context) == "single_species"),
+            cross_species_loads = sum(as.character(loads$context) == "cross_species"),
+            first_used_utc = min(as.character(x$timestamp_utc)),
+            last_used_utc = max(as.character(x$timestamp_utc)),
+            stringsAsFactors = FALSE
+        )
+    })
+    summary <- do.call(rbind, rows)
+    summary <- summary[order(-summary$total_loads, -summary$unique_sessions, summary$organism), , drop = FALSE]
+    rownames(summary) <- NULL
+    if (isTRUE(write_file)) ncbi_atomic_write_tsv(summary, ncbi_usage_summary_path())
+    summary
+}
+
+ncbi_resolve_cached_path <- function(path) {
+    p <- trimws(as.character(path %||% ""))
+    if (!nzchar(p) || is.na(p)) return("")
+    if (grepl("^(/|~)", p)) return(path.expand(p))
+    p_norm <- sub("^\\./", "", p)
+    if (file.exists(p)) return(p)
+    if (file.exists(p_norm)) return(p_norm)
+    file.path(getwd(), p_norm)
+}
+
+ncbi_validate_cache_entry <- function(entry) {
+    if (is.null(entry)) return(list(ok = FALSE, reason = "missing registry entry"))
+    if (is.data.frame(entry)) {
+        if (nrow(entry) == 0) return(list(ok = FALSE, reason = "empty registry entry"))
+        entry <- as.list(entry[1, , drop = FALSE])
+    }
+    ann_path <- ncbi_resolve_cached_path(entry$annotation_tabix %||% entry$annotation %||% "")
+    genome_path <- ncbi_resolve_cached_path(entry$genome_2bit %||% "")
+    if (!nzchar(ann_path) || !file.exists(ann_path)) {
+        return(list(ok = FALSE, reason = "annotation file is missing", annotation_path = ann_path))
+    }
+    if (!nzchar(genome_path) || !file.exists(genome_path)) {
+        return(list(ok = FALSE, reason = "genome 2bit file is missing", genome_path = genome_path))
+    }
+    list(ok = TRUE, annotation_path = ann_path, genome_path = genome_path)
+}
+
 ncbi_cache_evict_lru <- function(needed_bytes = 0) {
     cache_dir <- ncbi_downloads_dir()
     max_bytes <- ncbi_cache_max_bytes()
@@ -259,8 +465,21 @@ ncbi_cache_evict_lru <- function(needed_bytes = 0) {
 
     if (current_size + needed_bytes <= max_bytes) return(invisible(NULL))
 
+    reg <- read_ncbi_downloads_registry()
+    ncbi_accessions <- character(0)
+    restrict_to_registry_ncbi <- nrow(reg) > 0 && "source" %in% names(reg)
+    if (nrow(reg) > 0 && "accession" %in% names(reg)) {
+        source_col <- as.character(reg$source %||% "ncbi_download")
+        ncbi_accessions <- as.character(reg$accession[source_col == "ncbi_download"] %||% character(0))
+        ncbi_accessions <- ncbi_accessions[nzchar(ncbi_accessions)]
+    }
+
     # List all accession directories
     acc_dirs <- list.dirs(cache_dir, recursive = FALSE, full.names = TRUE)
+    if (isTRUE(restrict_to_registry_ncbi)) {
+        acc_norm <- ncbi_normalize_accession_id(ncbi_accessions)
+        acc_dirs <- acc_dirs[ncbi_normalize_accession_id(basename(acc_dirs)) %in% acc_norm]
+    }
     if (length(acc_dirs) == 0) return(invisible(NULL))
 
     # Get access times
@@ -296,8 +515,13 @@ ncbi_cache_evict_lru <- function(needed_bytes = 0) {
         tryCatch({
             reg <- read_ncbi_downloads_registry()
             if (nrow(reg) > 0 && "species_id" %in% names(reg)) {
-                reg <- reg[!grepl(accession_name, reg$species_id, fixed = TRUE), , drop = FALSE]
-                vroom::vroom_write(reg, ncbi_downloads_registry_path(), delim = "\t")
+                acc_norm <- ncbi_normalize_accession_id(accession_name)
+                row_acc <- if ("accession" %in% names(reg)) ncbi_normalize_accession_id(reg$accession) else rep("", nrow(reg))
+                row_sid <- ncbi_normalize_accession_id(reg$species_id)
+                source_col <- as.character(reg$source %||% "ncbi_download")
+                keep <- !(source_col == "ncbi_download" & (row_acc == acc_norm | grepl(acc_norm, row_sid, fixed = TRUE)))
+                reg <- reg[keep, , drop = FALSE]
+                ncbi_atomic_write_tsv(reg, ncbi_downloads_registry_path())
             }
         }, error = function(e) NULL)
     }
@@ -311,7 +535,11 @@ ncbi_cache_evict_lru <- function(needed_bytes = 0) {
 # ══════════════════════════════════════════════════════════════════════
 
 ncbi_downloads_dir <- function() {
-    d <- Sys.getenv("CGV_NCBI_DOWNLOADS_DIR", "ncbi_downloads")
+    default_dir <- {
+        data_root <- trimws(as.character(Sys.getenv("CGV_DATA_ROOT", "") %||% ""))
+        if (nzchar(data_root)) file.path(data_root, "ncbi_downloads") else "ncbi_downloads"
+    }
+    d <- Sys.getenv("CGV_NCBI_DOWNLOADS_DIR", default_dir)
     if (!dir.exists(d)) dir.create(d, recursive = TRUE, showWarnings = FALSE)
     d
 }
@@ -333,11 +561,25 @@ read_ncbi_downloads_registry <- function() {
 ncbi_check_already_downloaded <- function(accession) {
     reg <- read_ncbi_downloads_registry()
     if (nrow(reg) == 0 || !"species_id" %in% names(reg)) return(NULL)
-    acc_clean <- tolower(trimws(accession))
-    match_idx <- which(tolower(reg$species_id) == acc_clean |
-                       grepl(acc_clean, tolower(reg$species_id), fixed = TRUE))
+    acc_clean <- ncbi_normalize_accession_id(accession)
+    if (!nzchar(acc_clean)) return(NULL)
+
+    match_idx <- integer(0)
+    if ("accession" %in% names(reg)) {
+        match_idx <- which(ncbi_normalize_accession_id(reg$accession) == acc_clean)
+    }
+    if (length(match_idx) == 0) {
+        sid_norm <- ncbi_normalize_accession_id(reg$species_id)
+        match_idx <- which(sid_norm == acc_clean | grepl(acc_clean, sid_norm, fixed = TRUE))
+    }
     if (length(match_idx) == 0) return(NULL)
-    as.list(reg[match_idx[1], , drop = FALSE])
+    entry <- as.list(reg[match_idx[1], , drop = FALSE])
+    validation <- ncbi_validate_cache_entry(entry)
+    if (!isTRUE(validation$ok)) {
+        message("[NCBI Cache] Ignoring broken cached entry for ", accession, ": ", validation$reason)
+        return(NULL)
+    }
+    entry
 }
 
 # ══════════════════════════════════════════════════════════════════════
@@ -369,11 +611,12 @@ ncbi_download_package <- function(accession, dest_dir = NULL,
 
     path <- paste0("genome/accession/", utils::URLencode(accession, reserved = TRUE),
                     "/download")
-    query_params <- list(
-        include_annotation_type = paste(include_types[include_types == "GENOME_GFF"], collapse = ",")
-    )
-    if (isTRUE(include_sequence)) {
-        query_params$include_sequence <- "GENOME_FASTA"
+    query_params <- list()
+    if (length(include_types) > 0) {
+        query_params <- stats::setNames(
+            as.list(include_types),
+            rep("include_annotation_type", length(include_types))
+        )
     }
 
     url <- paste0(NCBI_DATASETS_BASE, path)
@@ -472,6 +715,24 @@ ncbi_download_package <- function(accession, dest_dir = NULL,
         final_stats <- file.path(acc_dir, paste0(accession, "_assembly_stats.txt"))
         file.copy(found_files$stats, final_stats, overwrite = TRUE)
         final$assembly_stats <- final_stats
+    }
+
+    if (isTRUE(include_sequence) && is.null(found_files$fasta)) {
+        catalog_path <- file.path(acc_dir, "ncbi_dataset", "data", "dataset_catalog.json")
+        catalog_hint <- ""
+        if (file.exists(catalog_path)) {
+            catalog_txt <- tryCatch(
+                paste(readLines(catalog_path, warn = FALSE), collapse = " "),
+                error = function(e) ""
+            )
+            if (nzchar(catalog_txt)) {
+                catalog_hint <- paste0(" Dataset catalog: ", catalog_txt)
+            }
+        }
+        stop(
+            "Downloaded NCBI package did not include genome sequence (GENOME_FASTA).",
+            catalog_hint
+        )
     }
 
     ncbi_data_dir <- file.path(acc_dir, "ncbi_dataset")
@@ -646,6 +907,19 @@ ncbi_postprocess_files <- function(download_result, progress_callback = NULL) {
         processed$assembly_stats <- download_result$assembly_stats
     }
 
+    annotation_ready <- as.character(processed$annotation_tabix %||% "")
+    if (nzchar(annotation_ready) && file.exists(annotation_ready) &&
+        exists("precompute_annotation_index_cache", mode = "function")) {
+        emit(93, "Preparing local gene search indexes...")
+        tryCatch(
+            precompute_annotation_index_cache(annotation_ready, base_dir = "."),
+            error = function(e) {
+                message("[NCBI Post-process] Annotation cache preparation failed: ", conditionMessage(e))
+                NULL
+            }
+        )
+    }
+
     # ── Write metadata.json ──────────────────────────────────────
     emit(95, "Saving metadata...")
     metadata <- list(
@@ -770,8 +1044,106 @@ ncbi_update_downloads_registry <- function(processed, organism_name, taxid) {
         combined <- entry
     }
 
-    vroom::vroom_write(combined, reg_path, delim = "\t")
+    ncbi_atomic_write_tsv(combined, reg_path)
     invisible(entry)
+}
+
+# ══════════════════════════════════════════════════════════════════════
+# 7b. Shared-cache download locks
+# ══════════════════════════════════════════════════════════════════════
+
+ncbi_lock_ttl_seconds <- function() {
+    ttl_min <- suppressWarnings(as.numeric(Sys.getenv("APP_NCBI_LOCK_TTL_MIN", "120")))
+    if (!is.finite(ttl_min) || is.na(ttl_min) || ttl_min <= 0) ttl_min <- 120
+    ttl_min * 60
+}
+
+ncbi_lock_wait_seconds <- function() {
+    wait_sec <- suppressWarnings(as.numeric(Sys.getenv("APP_NCBI_LOCK_WAIT_SEC", "1800")))
+    if (!is.finite(wait_sec) || is.na(wait_sec) || wait_sec < 0) wait_sec <- 1800
+    wait_sec
+}
+
+ncbi_lock_dir <- function(accession) {
+    file.path(ncbi_downloads_dir(), trimws(as.character(accession %||% "")), ".downloading")
+}
+
+ncbi_write_lock_owner <- function(lock_dir, accession) {
+    owner <- c(
+        paste0("accession=", accession),
+        paste0("pid=", Sys.getpid()),
+        paste0("host=", Sys.info()[["nodename"]] %||% ""),
+        paste0("time=", format(Sys.time(), "%Y-%m-%dT%H:%M:%S%z"))
+    )
+    tryCatch(writeLines(owner, file.path(lock_dir, "owner")), error = function(e) NULL)
+    invisible(NULL)
+}
+
+ncbi_lock_age_seconds <- function(lock_dir) {
+    owner <- file.path(lock_dir, "owner")
+    info <- file.info(if (file.exists(owner)) owner else lock_dir)
+    age <- as.numeric(difftime(Sys.time(), info$mtime[1], units = "secs"))
+    if (!is.finite(age) || is.na(age)) Inf else age
+}
+
+ncbi_acquire_download_lock <- function(accession, progress_callback = NULL) {
+    accession <- trimws(as.character(accession %||% ""))
+    if (!nzchar(accession)) stop("Accession is required")
+
+    acc_dir <- file.path(ncbi_downloads_dir(), accession)
+    dir.create(acc_dir, recursive = TRUE, showWarnings = FALSE)
+    lock_dir <- ncbi_lock_dir(accession)
+    ttl_sec <- ncbi_lock_ttl_seconds()
+    wait_sec <- ncbi_lock_wait_seconds()
+    started <- Sys.time()
+
+    emit_wait <- function(msg) {
+        if (is.function(progress_callback)) {
+            tryCatch(progress_callback(NA_real_, msg), error = function(e) NULL)
+        }
+    }
+
+    repeat {
+        if (isTRUE(dir.create(lock_dir, showWarnings = FALSE))) {
+            ncbi_write_lock_owner(lock_dir, accession)
+            return(list(acquired = TRUE, lock_dir = lock_dir))
+        }
+
+        cached <- ncbi_check_already_downloaded(accession)
+        if (!is.null(cached)) {
+            return(list(acquired = FALSE, completed = cached, lock_dir = lock_dir))
+        }
+
+        age <- ncbi_lock_age_seconds(lock_dir)
+        if (is.finite(age) && age > ttl_sec) {
+            message("[NCBI Cache] Reclaiming stale download lock for ", accession)
+            unlink(lock_dir, recursive = TRUE, force = TRUE)
+            next
+        }
+
+        waited <- as.numeric(difftime(Sys.time(), started, units = "secs"))
+        if (wait_sec > 0 && is.finite(waited) && waited >= wait_sec) {
+            stop("Another session is still preparing this organism. Please retry in a few minutes.")
+        }
+
+        emit_wait("Another session is downloading this organism; waiting for the shared cache...")
+        Sys.sleep(2)
+    }
+}
+
+ncbi_release_download_lock <- function(lock, success = FALSE) {
+    if (is.null(lock) || !isTRUE(lock$acquired)) return(invisible(NULL))
+    lock_dir <- as.character(lock$lock_dir %||% "")
+    if (!nzchar(lock_dir)) return(invisible(NULL))
+    acc_dir <- dirname(lock_dir)
+    if (isTRUE(success)) {
+        tryCatch(writeLines(format(Sys.time(), "%Y-%m-%dT%H:%M:%S%z"), file.path(acc_dir, ".complete")), error = function(e) NULL)
+    } else {
+        complete_path <- file.path(acc_dir, ".complete")
+        if (file.exists(complete_path)) unlink(complete_path, force = TRUE)
+    }
+    unlink(lock_dir, recursive = TRUE, force = TRUE)
+    invisible(NULL)
 }
 
 # ══════════════════════════════════════════════════════════════════════
@@ -790,8 +1162,24 @@ ncbi_full_download_pipeline <- function(accession, organism_name = NULL, taxid =
     if (!is.null(existing)) {
         ncbi_touch_access_time(accession)
         emit(100, "Organism already in cache. Loading...")
+        existing$cache_hit <- TRUE
+        existing$downloaded_now <- FALSE
         return(existing)
     }
+
+    lock <- ncbi_acquire_download_lock(accession, progress_callback = progress_callback)
+    if (!isTRUE(lock$acquired)) {
+        existing_after_wait <- lock$completed %||% ncbi_check_already_downloaded(accession)
+        if (!is.null(existing_after_wait)) {
+            ncbi_touch_access_time(accession)
+            emit(100, "Organism already in shared cache. Loading...")
+            existing_after_wait$cache_hit <- TRUE
+            existing_after_wait$downloaded_now <- FALSE
+            return(existing_after_wait)
+        }
+    }
+    lock_success <- FALSE
+    on.exit(ncbi_release_download_lock(lock, success = lock_success), add = TRUE)
 
     if (is.null(organism_name) || is.null(taxid)) {
         detail <- ncbi_get_assembly_detail(accession)
@@ -815,9 +1203,20 @@ ncbi_full_download_pipeline <- function(accession, organism_name = NULL, taxid =
     if (!is.null(go_path)) processed$go_annotation <- go_path
 
     entry <- ncbi_update_downloads_registry(processed, organism_name, taxid)
+    lock_success <- TRUE
 
     result <- as.list(entry)
     result$acc_dir <- download_result$acc_dir
     result$go_annotation <- go_path
+    result$cache_hit <- FALSE
+    result$downloaded_now <- TRUE
+    ncbi_record_usage_event(
+        accession = accession,
+        organism = organism_name,
+        taxid = taxid,
+        event = "download_complete",
+        context = "shared_cache",
+        cache_hit = FALSE
+    )
     result
 }

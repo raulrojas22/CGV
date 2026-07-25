@@ -53,35 +53,46 @@ init_autocomplete_domain <- function(
             '(?:^|;|\\t)\\s*gene_name\\s*[= ]\\s*"?([^;"\\t]+)'
         )[, 2]
         name_fallback <- stringr::str_match(attrs, "(?:^|;)\\s*Name=([^;]+)")[, 2]
+        gene_field <- stringr::str_match(attrs, "(?:^|;)\\s*gene=([^;]+)")[, 2]
+        alias_field <- stringr::str_match(attrs, "(?:^|;)\\s*Alias=([^;]+)")[, 2]
+        synonym_field <- stringr::str_match(attrs, "(?:^|;)\\s*gene_synonym=([^;]+)")[, 2]
+
         gene_name <- sanitize_gene_display_name_batch(gene_name)
         name_fallback <- sanitize_gene_display_name_batch(name_fallback)
+        gene_field <- sanitize_gene_display_name_batch(gene_field)
+        alias_field <- sanitize_gene_display_name_batch(alias_field)
+        synonym_field <- sanitize_gene_display_name_batch(synonym_field)
 
         has_primary <- !is.na(gene_name) & nzchar(trimws(gene_name))
         name_fallback[has_primary] <- NA_character_
 
+        has_name_fb <- !is.na(name_fallback) & nzchar(trimws(name_fallback))
+        gene_field[has_primary | has_name_fb] <- NA_character_
+
+        has_gene <- !is.na(gene_field) & nzchar(trimws(gene_field))
+        alias_field[has_primary | has_name_fb | has_gene] <- NA_character_
+
         primary <- gene_name[has_primary]
-        fallback <- name_fallback[!is.na(name_fallback) & nzchar(trimws(name_fallback))]
+        fallback <- c(
+            name_fallback[!is.na(name_fallback) & nzchar(trimws(name_fallback))],
+            gene_field[!is.na(gene_field) & nzchar(trimws(gene_field))],
+            alias_field[!is.na(alias_field) & nzchar(trimws(alias_field))]
+        )
+
+        has_synonym <- !is.na(synonym_field) & nzchar(trimws(synonym_field))
+        if (any(has_synonym)) {
+            synonym_vals <- synonym_field[has_synonym]
+            synonym_split <- trimws(unlist(strsplit(synonym_vals, ",", fixed = TRUE)))
+            synonym_split <- synonym_split[nzchar(synonym_split) & !is.na(synonym_split) & nchar(synonym_split) >= 2L]
+            synonym_split <- sanitize_gene_display_name_batch(synonym_split)
+            synonym_split <- synonym_split[!is.na(synonym_split)]
+            fallback <- c(fallback, synonym_split)
+        }
+
         list(
             primary = as.character(primary %||% character(0)),
             fallback = as.character(fallback %||% character(0))
         )
-    }
-
-    sanitize_autocomplete_choices <- function(choices, max_total = 20000L) {
-        vals <- as.character(choices %||% character(0))
-        vals <- gsub("[\u00A0\u2007\u202F]", " ", vals, perl = TRUE)
-        vals <- trimws(vals)
-        vals <- vals[!is.na(vals) & nzchar(vals)]
-        vals <- vals[nchar(vals) <= 80]
-        vals <- unique(vals)
-        max_cap <- suppressWarnings(as.integer(max_total))
-        if (!is.finite(max_cap) || max_cap <= 0L) {
-            max_cap <- 20000L
-        }
-        if (length(vals) > max_cap) {
-            vals <- vals[seq_len(max_cap)]
-        }
-        vals
     }
 
     next_quick_scan_token <- function(input_id) {
@@ -142,13 +153,9 @@ init_autocomplete_domain <- function(
             return(character(0))
         }
 
-        attrs <- as.character(idx$genes_df$attributes %||% rep("", nrow(idx$genes_df)))
-        names_lists <- extract_autocomplete_name_lists(attrs)
-        suggestions <- c(names_lists$primary, names_lists$fallback)
-        suggestions <- trimws(utils::URLdecode(as.character(suggestions)))
-        suggestions <- suggestions[!is.na(suggestions) & nzchar(suggestions)]
-        suggestions <- suggestions[nchar(suggestions) <= 80]
-        suggestions <- unique(suggestions)
+        ac <- tryCatch(ensure_gff_autocomplete_cache(p, idx, base_dir = "."), error = function(e) NULL)
+        suggestions <- if (is.list(ac)) as.character(ac$display %||% character(0)) else character(0)
+        suggestions <- sanitize_autocomplete_choices(suggestions, max_total = max_suggestions)
         if (length(suggestions) > max_suggestions) suggestions <- suggestions[seq_len(max_suggestions)]
 
         cache_map[[ckey]] <- suggestions
@@ -170,18 +177,47 @@ init_autocomplete_domain <- function(
             return(NULL)
         }
 
-        idx <- tryCatch(load_gff_index_from_disk(p, cache_kind = "gene_light", base_dir = "."), error = function(e) NULL)
-        if (is.null(idx) || !is.list(idx) || is.null(idx$genes_df) || !is.data.frame(idx$genes_df)) {
-            return(NULL)
+        if (!isTRUE(app_env_flag("APP_FAST_ORGANISM_SYNC", TRUE))) {
+            idx <- tryCatch(load_gff_index_from_disk(p, cache_kind = "gene_light", base_dir = "."), error = function(e) NULL)
+            if (is.null(idx) || !is.list(idx) || is.null(idx$genes_df) || !is.data.frame(idx$genes_df)) {
+                return(NULL)
+            }
+            if (exists("cache_env_set", mode = "function") &&
+                exists(".gff_gene_light_index_cache", inherits = TRUE) &&
+                exists("annotation_memory_cache_limits", inherits = TRUE)) {
+                tryCatch(
+                    cache_env_set(
+                        .gff_gene_light_index_cache,
+                        gff_cache_key(p),
+                        idx,
+                        max_size = annotation_memory_cache_limits$gene_light_max_entries,
+                        max_bytes = annotation_memory_cache_limits$gene_light_max_bytes
+                    ),
+                    error = function(e) NULL
+                )
+            }
+            attrs <- as.character(idx$genes_df$attributes %||% rep("", nrow(idx$genes_df)))
+            suggestions <- extract_partial_gene_display_names(attrs)
+            suggestions <- sanitize_autocomplete_choices(suggestions, max_total = max_suggestions)
+            cache_map <- geneAutocompleteCache_rv()
+            cache_map[[ckey]] <- suggestions
+            geneAutocompleteCache_rv(trim_autocomplete_cache_map(cache_map))
+            return(suggestions)
         }
 
-        attrs <- as.character(idx$genes_df$attributes %||% rep("", nrow(idx$genes_df)))
-        names_lists <- extract_autocomplete_name_lists(attrs)
-        suggestions <- c(names_lists$primary, names_lists$fallback)
-        suggestions <- trimws(utils::URLdecode(as.character(suggestions)))
-        suggestions <- suggestions[!is.na(suggestions) & nzchar(suggestions)]
-        suggestions <- suggestions[nchar(suggestions) <= 80]
-        suggestions <- unique(suggestions)
+        ac <- tryCatch(load_gff_autocomplete_cache(p, base_dir = "."), error = function(e) NULL)
+        if (!is.list(ac)) {
+            idx <- tryCatch(load_gff_index_from_disk(p, cache_kind = "gene_light", base_dir = "."), error = function(e) NULL)
+            if (is.null(idx) || !is.list(idx) || is.null(idx$genes_df) || !is.data.frame(idx$genes_df)) {
+                return(NULL)
+            }
+            ac <- tryCatch(ensure_gff_autocomplete_cache(p, idx, base_dir = "."), error = function(e) NULL)
+        }
+        if (!is.list(ac)) {
+            return(NULL)
+        }
+        suggestions <- as.character(ac$display %||% character(0))
+        suggestions <- sanitize_autocomplete_choices(suggestions, max_total = max_suggestions)
         if (length(suggestions) > max_suggestions) {
             suggestions <- suggestions[seq_len(max_suggestions)]
         }
@@ -253,6 +289,86 @@ init_autocomplete_domain <- function(
             quickGeneAutocompleteCache_rv(trim_autocomplete_cache_map(cache_map, max_entries = 48L))
         }
         clean_suggestions
+    }
+
+    autocomplete_keys_for_choices <- function(annotation_path, choices) {
+        vals <- as.character(choices %||% character(0))
+        if (length(vals) == 0L) {
+            return(character(0))
+        }
+        ac <- tryCatch(load_gff_autocomplete_cache(annotation_path, base_dir = "."), error = function(e) NULL)
+        if (is.list(ac) && length(ac$display) >= length(vals) &&
+            identical(vals, as.character(ac$display[seq_len(length(vals))]))) {
+            return(as.character(ac$keys[seq_len(length(vals))]))
+        }
+        as.character(normalize_partial_gene_query(vals))
+    }
+
+    aggregate_shared_gene_suggestions <- function(suggestions_by_path, keys_by_path = NULL, min_shared_organisms = 1L, max_total = 20000L) {
+        min_shared <- suppressWarnings(as.integer(min_shared_organisms %||% 1L))
+        if (!is.finite(min_shared) || is.na(min_shared) || min_shared < 1L) {
+            min_shared <- 1L
+        }
+        if (min_shared <= 1L) {
+            return(sanitize_autocomplete_choices(unique(unlist(suggestions_by_path, use.names = FALSE)), max_total = max_total))
+        }
+        if (!is.list(suggestions_by_path) || length(suggestions_by_path) == 0L) {
+            return(character(0))
+        }
+
+        prepared <- lapply(seq_along(suggestions_by_path), function(i) {
+            vals <- sanitize_autocomplete_choices(suggestions_by_path[[i]], max_total = max_total)
+            if (length(vals) == 0L) {
+                return(NULL)
+            }
+            supplied_keys <- if (is.list(keys_by_path) && length(keys_by_path) >= i) {
+                as.character(keys_by_path[[i]] %||% character(0))
+            } else {
+                character(0)
+            }
+            keys <- if (length(supplied_keys) == length(vals)) {
+                supplied_keys
+            } else if (exists("normalize_partial_gene_query", mode = "function")) {
+                vapply(vals, normalize_partial_gene_query, character(1))
+            } else if (exists("normalize_gene_compact", mode = "function")) {
+                tolower(vapply(vals, normalize_gene_compact, character(1)))
+            } else {
+                tolower(gsub("[^[:alnum:]]+", "", vals, perl = TRUE))
+            }
+            keep <- !is.na(keys) & nzchar(keys)
+            vals <- vals[keep]
+            keys <- keys[keep]
+            if (length(vals) == 0L) {
+                return(NULL)
+            }
+            list(names = vals, keys = keys)
+        })
+        prepared <- Filter(Negate(is.null), prepared)
+        if (length(prepared) == 0L) {
+            return(character(0))
+        }
+        key_counts <- table(unlist(lapply(prepared, function(x) unique(x$keys)), use.names = FALSE))
+        kept_keys <- names(key_counts)[as.integer(key_counts) >= min_shared]
+        if (length(kept_keys) == 0L) {
+            return(character(0))
+        }
+        all_keys <- unlist(lapply(prepared, `[[`, "keys"), use.names = FALSE)
+        all_names <- unlist(lapply(prepared, `[[`, "names"), use.names = FALSE)
+        keep <- all_keys %in% kept_keys
+        names_by_key <- split(
+            all_names[keep],
+            factor(all_keys[keep], levels = kept_keys)
+        )
+        display <- vapply(names_by_key, function(values) {
+            name_tab <- sort(table(values), decreasing = TRUE)
+            names(name_tab)[[1L]]
+        }, character(1))
+        if (length(display) == 0L) {
+            return(character(0))
+        }
+        source_count <- as.integer(key_counts[names(display)])
+        ord <- order(-source_count, nchar(display), tolower(display))
+        sanitize_autocomplete_choices(unname(display[ord]), max_total = max_total)
     }
 
     init_quick_gene_scan_state <- function(annotation_path, max_suggestions = 1200L, max_lines = 180000L, max_seconds = 0.45, chunk_lines = 1000L) {
@@ -385,7 +501,10 @@ init_autocomplete_domain <- function(
         quick_gene_scan_state_suggestions(state)
     }
 
-    schedule_quick_gene_autocomplete_scan <- function(input_id, quick_specs, request_token, max_total = 20000L, delay_sec = 0.02) {
+    schedule_quick_gene_autocomplete_scan <- function(input_id, quick_specs, request_token, max_total = 20000L, delay_sec = 0.02,
+                                                      min_shared_organisms = 1L,
+                                                      initial_suggestions_by_path = NULL,
+                                                      initial_keys_by_path = NULL) {
         if (!requireNamespace("later", quietly = TRUE)) {
             return(invisible(FALSE))
         }
@@ -393,39 +512,51 @@ init_autocomplete_domain <- function(
         if (!is.list(specs) || length(specs) == 0L) {
             return(invisible(FALSE))
         }
-        states <- lapply(specs, function(spec) {
-            init_quick_gene_scan_state(
+        scan_pairs <- lapply(specs, function(spec) {
+            state <- init_quick_gene_scan_state(
                 annotation_path = spec$path,
                 max_suggestions = spec$max_suggestions,
                 max_lines = spec$max_lines,
                 max_seconds = spec$max_seconds,
                 chunk_lines = spec$chunk_lines %||% 1000L
             )
+            if (is.null(state)) {
+                return(NULL)
+            }
+            list(state = state, spec = spec)
         })
-        states <- Filter(Negate(is.null), states)
-        if (length(states) == 0L) {
+        scan_pairs <- Filter(Negate(is.null), scan_pairs)
+        if (length(scan_pairs) == 0L) {
             return(invisible(FALSE))
         }
         max_total <- suppressWarnings(as.integer(max_total))
         if (!is.finite(max_total) || max_total <= 0L) {
             max_total <- 20000L
         }
+        min_shared <- suppressWarnings(as.integer(min_shared_organisms %||% 1L))
+        if (!is.finite(min_shared) || is.na(min_shared) || min_shared < 1L) {
+            min_shared <- 1L
+        }
         delay_val <- suppressWarnings(as.numeric(delay_sec))
         if (!is.finite(delay_val) || delay_val < 0) {
             delay_val <- 0.02
         }
-        accumulated <- character(0)
+        suggestions_by_path <- if (is.list(initial_suggestions_by_path)) initial_suggestions_by_path else list()
+        keys_by_path <- if (is.list(initial_keys_by_path)) initial_keys_by_path else list()
+        if (length(keys_by_path) < length(suggestions_by_path)) {
+            length(keys_by_path) <- length(suggestions_by_path)
+        }
         current_idx <- 1L
         publish_accumulated <- function() {
-            src <- globalGeneSuggestionSources_rv()
-            if (!is.list(src)) {
-                src <- list()
-            }
-            current_choices <- as.character(src[[as.character(input_id %||% "")]] %||% character(0))
-            merged <- sanitize_autocomplete_choices(unique(c(current_choices, accumulated)), max_total = max_total)
+            choices <- aggregate_shared_gene_suggestions(
+                suggestions_by_path,
+                keys_by_path = keys_by_path,
+                min_shared_organisms = min_shared,
+                max_total = max_total
+            )
             publish_gene_autocomplete(
                 input_id = input_id,
-                choices = merged,
+                choices = choices,
                 source_id = input_id,
                 max_total = max_total
             )
@@ -434,16 +565,17 @@ init_autocomplete_domain <- function(
         run_next <- NULL
         run_next <- function() {
             if (!quick_scan_token_is_current(input_id, request_token)) {
-                invisible(lapply(states, close_quick_gene_scan_state))
+                invisible(lapply(scan_pairs, function(pair) close_quick_gene_scan_state(pair$state)))
                 return(invisible(FALSE))
             }
-            if (current_idx > length(states)) {
+            if (current_idx > length(scan_pairs)) {
                 return(invisible(TRUE))
             }
-            state <- states[[current_idx]]
+            pair <- scan_pairs[[current_idx]]
+            state <- pair$state
             step <- step_quick_gene_scan_state(state)
             if (isTRUE(step$done)) {
-                spec <- specs[[current_idx]]
+                spec <- pair$spec
                 suggestions <- store_cached_quick_gene_suggestions(
                     spec$path,
                     step$suggestions,
@@ -452,8 +584,31 @@ init_autocomplete_domain <- function(
                     max_seconds = spec$max_seconds
                 )
                 if (length(suggestions) > 0) {
-                    accumulated <<- unique(c(accumulated, suggestions))
-                    publish_accumulated()
+                    path_key <- normalize_annotation_key_safe(spec$path)
+                    list_names <- names(suggestions_by_path)
+                    slot <- if (length(list_names) > 0L) match(path_key, list_names) else NA_integer_
+                    if (!is.finite(slot) || is.na(slot)) {
+                        slot <- length(suggestions_by_path) + 1L
+                    }
+                    suggestions_by_path[[slot]] <<- suggestions
+                    keys_by_path[[slot]] <<- autocomplete_keys_for_choices(spec$path, suggestions)
+                    suggestion_names <- names(suggestions_by_path)
+                    key_names <- names(keys_by_path)
+                    if (length(suggestion_names) < slot) length(suggestion_names) <- slot
+                    if (length(key_names) < slot) length(key_names) <- slot
+                    suggestion_names[slot] <- path_key
+                    key_names[slot] <- path_key
+                    names(suggestions_by_path) <<- suggestion_names
+                    names(keys_by_path) <<- key_names
+                    current_choices <- aggregate_shared_gene_suggestions(
+                        suggestions_by_path,
+                        keys_by_path = keys_by_path,
+                        min_shared_organisms = min_shared,
+                        max_total = max_total
+                    )
+                    if (min_shared <= 1L || length(current_choices) > 0L) {
+                        publish_accumulated()
+                    }
                 }
                 close_quick_gene_scan_state(state)
                 current_idx <<- current_idx + 1L
@@ -492,14 +647,15 @@ init_autocomplete_domain <- function(
         invisible(cleaned)
     }
 
-    update_gene_autocomplete <- function(input_id, annotation_paths, status_rv = NULL, max_files = Inf, max_total = 20000L, allow_build = TRUE, allow_quick_scan = TRUE) {
+    update_gene_autocomplete <- function(input_id, annotation_paths, status_rv = NULL, max_files = Inf, max_total = 20000L, allow_build = TRUE, allow_quick_scan = TRUE, allow_disk_index = TRUE, min_shared_organisms = 1L) {
         auto_perf <- app_perf_new_run(sprintf("AUTO-%s", as.character(input_id %||% "input")))
         app_perf_mark(
             auto_perf,
             sprintf(
-                "start allow_build=%s allow_quick_scan=%s",
+                "start allow_build=%s allow_quick_scan=%s allow_disk_index=%s",
                 as.character(isTRUE(allow_build)),
-                as.character(isTRUE(allow_quick_scan))
+                as.character(isTRUE(allow_quick_scan)),
+                as.character(isTRUE(allow_disk_index))
             ),
             "AUTO"
         )
@@ -534,12 +690,37 @@ init_autocomplete_domain <- function(
         request_token <- next_quick_scan_token(input_id)
         cache_map_check <- geneAutocompleteCache_rv()
         all_suggestions <- character(0)
+        suggestions_by_path <- list()
+        keys_by_path <- list()
         quick_scan_specs <- list()
+        last_published_key <- "\001__unset__"
         path_count <- max(length(paths), 1L)
         per_path_cap <- as.integer(max(600L, min(10000L, ceiling(max_total / path_count))))
 
+        publish_current_suggestions <- function(reason = "partial") {
+            current_choices <- aggregate_shared_gene_suggestions(
+                suggestions_by_path,
+                keys_by_path = keys_by_path,
+                min_shared_organisms = min_shared_organisms,
+                max_total = max_total
+            )
+            publish_key <- paste(current_choices, collapse = "\r")
+            if (identical(publish_key, last_published_key)) {
+                return(invisible(current_choices))
+            }
+            last_published_key <<- publish_key
+            publish_gene_autocomplete(
+                input_id = input_id,
+                choices = current_choices,
+                source_id = input_id,
+                max_total = max_total
+            )
+            app_perf_mark(auto_perf, sprintf("publish_%s choices=%d", reason, as.integer(length(current_choices))), "AUTO")
+            invisible(current_choices)
+        }
+
         for (p in paths) {
-            if (length(all_suggestions) >= max_total) {
+            if (as.integer(min_shared_organisms %||% 1L) <= 1L && length(all_suggestions) >= max_total) {
                 app_perf_mark(auto_perf, "max_total reached before finishing paths", "AUTO")
                 break
             }
@@ -554,7 +735,11 @@ init_autocomplete_domain <- function(
                 ),
                 "AUTO"
             )
-            remaining <- as.integer(max_total - length(all_suggestions))
+            remaining <- if (as.integer(min_shared_organisms %||% 1L) > 1L) {
+                as.integer(max_total)
+            } else {
+                as.integer(max_total - length(all_suggestions))
+            }
             if (remaining <= 0L) {
                 break
             }
@@ -572,14 +757,19 @@ init_autocomplete_domain <- function(
                     cache_map_check <- geneAutocompleteCache_rv()
                     app_perf_mark(auto_perf, sprintf("build mode done n=%d", as.integer(length(cached %||% character(0)))), "AUTO")
                 } else {
-                    app_perf_mark(auto_perf, sprintf("disk index lookup start cap=%d", as.integer(suggestion_cap)), "AUTO")
-                    cached <- get_gene_suggestions_from_disk_index(
-                        p,
-                        max_suggestions = suggestion_cap
-                    )
-                    cache_map_check <- geneAutocompleteCache_rv()
-                    if (!is.null(cached)) {
-                        app_perf_mark(auto_perf, sprintf("disk index hit n=%d", as.integer(length(cached %||% character(0)))), "AUTO")
+                    if (isTRUE(allow_disk_index)) {
+                        app_perf_mark(auto_perf, sprintf("disk index lookup start cap=%d", as.integer(suggestion_cap)), "AUTO")
+                        cached <- get_gene_suggestions_from_disk_index(
+                            p,
+                            max_suggestions = suggestion_cap
+                        )
+                        cache_map_check <- geneAutocompleteCache_rv()
+                        if (!is.null(cached)) {
+                            app_perf_mark(auto_perf, sprintf("disk index hit n=%d", as.integer(length(cached %||% character(0)))), "AUTO")
+                        }
+                    } else {
+                        cached <- NULL
+                        app_perf_mark(auto_perf, "disk index lookup skipped", "AUTO")
                     }
                     if (isTRUE(allow_quick_scan)) {
                         if (is.null(cached)) {
@@ -669,15 +859,24 @@ init_autocomplete_domain <- function(
             if (length(cached) > 0) {
                 all_suggestions <- unique(c(all_suggestions, cached))
             }
+            path_key <- normalize_annotation_key_safe(p)
+            suggestions_by_path[[length(suggestions_by_path) + 1L]] <- cached
+            keys_by_path[[length(keys_by_path) + 1L]] <- autocomplete_keys_for_choices(p, cached)
+            names(suggestions_by_path)[length(suggestions_by_path)] <- path_key
+            names(keys_by_path)[length(keys_by_path)] <- path_key
+            if (length(cached) > 0 &&
+                (as.integer(min_shared_organisms %||% 1L) <= 1L ||
+                    length(aggregate_shared_gene_suggestions(
+                        suggestions_by_path,
+                        keys_by_path = keys_by_path,
+                        min_shared_organisms = min_shared_organisms,
+                        max_total = max_total
+                    )) > 0L)) {
+                publish_current_suggestions(reason = sprintf("path_%d", as.integer(length(suggestions_by_path))))
+            }
         }
 
-        all_suggestions <- sanitize_autocomplete_choices(all_suggestions, max_total = max_total)
-        publish_gene_autocomplete(
-            input_id = input_id,
-            choices = all_suggestions,
-            source_id = input_id,
-            max_total = max_total
-        )
+        all_suggestions <- publish_current_suggestions(reason = "final")
         app_perf_mark(
             auto_perf,
             sprintf("done choices=%d", as.integer(length(all_suggestions))),
@@ -689,14 +888,17 @@ init_autocomplete_domain <- function(
                 quick_specs = quick_scan_specs,
                 request_token = request_token,
                 max_total = max_total,
-                delay_sec = 0.02
+                delay_sec = 0.02,
+                min_shared_organisms = min_shared_organisms,
+                initial_suggestions_by_path = suggestions_by_path,
+                initial_keys_by_path = keys_by_path
             )
             app_perf_mark(auto_perf, sprintf("async quick scan queued paths=%d", as.integer(length(quick_scan_specs))), "AUTO")
         }
         invisible(NULL)
     }
 
-    schedule_gene_autocomplete_build <- function(input_id, annotation_paths, max_total = 20000L, delay_sec = 0.8, still_valid = NULL) {
+    schedule_gene_autocomplete_build <- function(input_id, annotation_paths, max_total = 20000L, delay_sec = 0.8, still_valid = NULL, min_shared_organisms = 1L) {
         sched_perf <- app_perf_new_run(sprintf("AUTO_BG-%s", as.character(input_id %||% "input")))
         app_perf_mark(sched_perf, "start", "AUTO_BG")
         if (!requireNamespace("later", quietly = TRUE)) {
@@ -727,26 +929,63 @@ init_autocomplete_domain <- function(
         per_path_cap <- as.integer(max(600L, min(10000L, ceiling(max_total / path_count))))
         cache_map_check <- geneAutocompleteCache_rv()
         all_suggestions <- character(0)
+        suggestions_by_path <- list()
+        keys_by_path <- list()
         next_idx <- 1L
         run_next <- NULL
-        # Helper: extract suggestions from a GFF light index (pure, no reactives)
         extract_suggestions_from_index <- function(idx, max_suggestions) {
             if (is.null(idx) || !is.list(idx) || is.null(idx$genes_df) || nrow(idx$genes_df) == 0) {
                 return(character(0))
             }
             attrs <- as.character(idx$genes_df$attributes %||% rep("", nrow(idx$genes_df)))
-            names_lists <- extract_autocomplete_name_lists(attrs)
-            suggestions <- c(names_lists$primary, names_lists$fallback)
-            suggestions <- trimws(utils::URLdecode(as.character(suggestions)))
-            suggestions <- suggestions[!is.na(suggestions) & nzchar(suggestions)]
-            suggestions <- suggestions[nchar(suggestions) <= 80]
-            suggestions <- unique(suggestions)
+            suggestions <- if (exists("extract_partial_gene_display_names", mode = "function")) {
+                extract_partial_gene_display_names(attrs)
+            } else {
+                names_lists <- extract_autocomplete_name_lists(attrs)
+                c(names_lists$primary, names_lists$fallback)
+            }
+            suggestions <- sanitize_autocomplete_choices(suggestions, max_total = max_suggestions)
             if (length(suggestions) > max_suggestions) suggestions <- suggestions[seq_len(max_suggestions)]
             suggestions
         }
 
+        last_published_key <- "\001__unset__"
+        publish_current_build_suggestions <- function(reason = "partial") {
+            current_choices <- aggregate_shared_gene_suggestions(
+                suggestions_by_path,
+                keys_by_path = keys_by_path,
+                min_shared_organisms = min_shared_organisms,
+                max_total = max_total
+            )
+            publish_key <- paste(current_choices, collapse = "\r")
+            if (identical(publish_key, last_published_key)) {
+                return(invisible(current_choices))
+            }
+            last_published_key <<- publish_key
+            publish_gene_autocomplete(
+                input_id = input_id,
+                choices = current_choices,
+                source_id = input_id,
+                max_total = max_total
+            )
+            app_perf_mark(sched_perf, sprintf("publish_%s choices=%d", reason, as.integer(length(current_choices))), "AUTO_BG")
+            invisible(current_choices)
+        }
+
         continue_after_build <- function(cached, p, remaining) {
             cached <- sanitize_autocomplete_choices(cached, max_total = remaining)
+            path_key <- normalize_annotation_key_safe(p)
+            suggestions_by_path[[length(suggestions_by_path) + 1L]] <<- cached
+            keys_by_path[[length(keys_by_path) + 1L]] <<- autocomplete_keys_for_choices(p, cached)
+            slot <- length(suggestions_by_path)
+            suggestion_names <- names(suggestions_by_path)
+            key_names <- names(keys_by_path)
+            if (length(suggestion_names) < slot) length(suggestion_names) <- slot
+            if (length(key_names) < slot) length(key_names) <- slot
+            suggestion_names[slot] <- path_key
+            key_names[slot] <- path_key
+            names(suggestions_by_path) <<- suggestion_names
+            names(keys_by_path) <<- key_names
             if (length(cached) > 0) {
                 all_suggestions <<- unique(c(all_suggestions, cached))
             }
@@ -759,6 +998,16 @@ init_autocomplete_domain <- function(
                     geneAutocompleteCache_rv(trim_autocomplete_cache_map(cm))
                 }
                 cache_map_check <<- geneAutocompleteCache_rv()
+            }
+            if (length(cached) > 0 &&
+                (as.integer(min_shared_organisms %||% 1L) <= 1L ||
+                    length(aggregate_shared_gene_suggestions(
+                        suggestions_by_path,
+                        keys_by_path = keys_by_path,
+                        min_shared_organisms = min_shared_organisms,
+                        max_total = max_total
+                    )) > 0L)) {
+                publish_current_build_suggestions(reason = sprintf("path_%d", as.integer(length(suggestions_by_path))))
             }
             later::later(run_next, delay = 0.04)
             invisible(TRUE)
@@ -773,14 +1022,8 @@ init_autocomplete_domain <- function(
                 }
             }
 
-            if (next_idx > length(paths) || length(all_suggestions) >= max_total) {
-                final_choices <- sanitize_autocomplete_choices(all_suggestions, max_total = max_total)
-                publish_gene_autocomplete(
-                    input_id = input_id,
-                    choices = final_choices,
-                    source_id = input_id,
-                    max_total = max_total
-                )
+            if (next_idx > length(paths) || (as.integer(min_shared_organisms %||% 1L) <= 1L && length(all_suggestions) >= max_total)) {
+                final_choices <- publish_current_build_suggestions(reason = "final")
                 app_perf_mark(sched_perf, sprintf("done final_choices=%d", as.integer(length(final_choices))), "AUTO_BG")
                 return(invisible(TRUE))
             }
@@ -788,7 +1031,11 @@ init_autocomplete_domain <- function(
             p <- paths[[next_idx]]
             next_idx <<- next_idx + 1L
             app_perf_mark(sched_perf, sprintf("build %d/%d %s", as.integer(next_idx - 1L), as.integer(length(paths)), basename(as.character(p %||% ""))), "AUTO_BG")
-            remaining <- as.integer(max_total - length(all_suggestions))
+            remaining <- if (as.integer(min_shared_organisms %||% 1L) > 1L) {
+                as.integer(max_total)
+            } else {
+                as.integer(max_total - length(all_suggestions))
+            }
             if (remaining > 0L) {
                 ckey <- gene_autocomplete_cache_key(p)
                 cached <- if (nzchar(ckey)) cache_map_check[[ckey]] else NULL
@@ -835,6 +1082,28 @@ init_autocomplete_domain <- function(
                 if (length(cached) > 0) {
                     all_suggestions <<- unique(c(all_suggestions, cached))
                 }
+                path_key <- normalize_annotation_key_safe(p)
+                suggestions_by_path[[length(suggestions_by_path) + 1L]] <<- cached
+                keys_by_path[[length(keys_by_path) + 1L]] <<- autocomplete_keys_for_choices(p, cached)
+                slot <- length(suggestions_by_path)
+                suggestion_names <- names(suggestions_by_path)
+                key_names <- names(keys_by_path)
+                if (length(suggestion_names) < slot) length(suggestion_names) <- slot
+                if (length(key_names) < slot) length(key_names) <- slot
+                suggestion_names[slot] <- path_key
+                key_names[slot] <- path_key
+                names(suggestions_by_path) <<- suggestion_names
+                names(keys_by_path) <<- key_names
+                if (length(cached) > 0 &&
+                    (as.integer(min_shared_organisms %||% 1L) <= 1L ||
+                        length(aggregate_shared_gene_suggestions(
+                            suggestions_by_path,
+                            keys_by_path = keys_by_path,
+                            min_shared_organisms = min_shared_organisms,
+                            max_total = max_total
+                        )) > 0L)) {
+                    publish_current_build_suggestions(reason = sprintf("cache_%d", as.integer(length(suggestions_by_path))))
+                }
             }
             later::later(run_next, delay = 0.04)
             invisible(TRUE)
@@ -848,10 +1117,12 @@ init_autocomplete_domain <- function(
         trim_autocomplete_cache_map = trim_autocomplete_cache_map,
         extract_autocomplete_name_lists = extract_autocomplete_name_lists,
         sanitize_autocomplete_choices = sanitize_autocomplete_choices,
+        autocomplete_keys_for_choices = autocomplete_keys_for_choices,
         get_gene_suggestions_for_annotation = get_gene_suggestions_for_annotation,
         get_gene_suggestions_from_disk_index = get_gene_suggestions_from_disk_index,
         get_cached_quick_gene_suggestions = get_cached_quick_gene_suggestions,
         store_cached_quick_gene_suggestions = store_cached_quick_gene_suggestions,
+        aggregate_shared_gene_suggestions = aggregate_shared_gene_suggestions,
         init_quick_gene_scan_state = init_quick_gene_scan_state,
         close_quick_gene_scan_state = close_quick_gene_scan_state,
         step_quick_gene_scan_state = step_quick_gene_scan_state,

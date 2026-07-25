@@ -1,3 +1,256 @@
+.go_index_schema_version <- 1L
+.go_file_fingerprint_cache <- new.env(parent = emptyenv())
+
+go_optional_text <- function(value) {
+    txt <- trimws(as.character(value %||% ""))
+    txt[is.na(txt) | toupper(txt) == "NA"] <- ""
+    txt
+}
+
+go_file_fingerprint <- function(path) {
+    p <- normalizePath(as.character(path %||% ""), winslash = "/", mustWork = FALSE)
+    if (!nzchar(p) || !file.exists(p)) return("")
+    info <- file.info(p)
+    signature <- paste(p, as.character(info$size[1]), as.character(as.numeric(info$mtime[1])), sep = "::")
+    cached <- get0(signature, envir = .go_file_fingerprint_cache, inherits = FALSE, ifnotfound = NULL)
+    if (is.character(cached) && length(cached) == 1L && nzchar(cached)) return(cached)
+    hash <- if (requireNamespace("digest", quietly = TRUE)) {
+        digest::digest(file = p, algo = "sha256")
+    } else {
+        paste(as.character(info$size[1]), as.character(as.numeric(info$mtime[1])), sep = "-")
+    }
+    assign(signature, hash, envir = .go_file_fingerprint_cache)
+    hash
+}
+
+go_index_default_path <- function(gaf_path, root = file.path("go_annotations", "index")) {
+    stem <- sub("\\.gaf(?:\\.gz)?$", "", basename(as.character(gaf_path %||% "")), ignore.case = TRUE)
+    file.path(root, paste0(stem, ".go.sqlite"))
+}
+
+go_index_cache_path <- function(gaf_path, base_dir = ".") {
+    key <- if (requireNamespace("digest", quietly = TRUE)) {
+        digest::digest(
+            list(
+                normalizePath(as.character(gaf_path %||% ""), winslash = "/", mustWork = FALSE),
+                go_file_fingerprint(gaf_path),
+                .go_index_schema_version
+            ),
+            algo = "xxhash64"
+        )
+    } else {
+        sanitize_cache_key(basename(as.character(gaf_path %||% "")))
+    }
+    dir_path <- file.path(get_cgv_cache_root(base_dir), "go_index")
+    if (!dir.exists(dir_path)) dir.create(dir_path, recursive = TRUE, showWarnings = FALSE)
+    file.path(dir_path, paste0(key, ".go.sqlite"))
+}
+
+go_index_metadata <- function(index_path) {
+    if (!requireNamespace("DBI", quietly = TRUE) ||
+        !requireNamespace("RSQLite", quietly = TRUE) ||
+        !file.exists(index_path)) {
+        return(list())
+    }
+    con <- tryCatch(DBI::dbConnect(RSQLite::SQLite(), index_path, flags = RSQLite::SQLITE_RO), error = function(e) NULL)
+    if (is.null(con)) return(list())
+    on.exit(try(DBI::dbDisconnect(con), silent = TRUE), add = TRUE)
+    if (!"go_index_meta" %in% DBI::dbListTables(con)) return(list())
+    rows <- tryCatch(DBI::dbGetQuery(con, "SELECT key, value FROM go_index_meta"), error = function(e) data.frame())
+    if (nrow(rows) == 0L) return(list())
+    stats::setNames(as.list(as.character(rows$value)), as.character(rows$key))
+}
+
+go_index_is_valid <- function(index_path, gaf_path, expected_fingerprint = "") {
+    meta <- go_index_metadata(index_path)
+    if (length(meta) == 0L) return(FALSE)
+    schema_ok <- identical(suppressWarnings(as.integer(meta$schema_version %||% NA_integer_)), .go_index_schema_version)
+    expected <- go_optional_text(expected_fingerprint)[1]
+    if (!nzchar(expected)) expected <- go_file_fingerprint(gaf_path)
+    isTRUE(schema_ok) && nzchar(expected) && identical(as.character(meta$gaf_fingerprint %||% ""), expected)
+}
+
+resolve_go_index_path <- function(gaf_path, configured_index = "", expected_fingerprint = "", base_dir = ".") {
+    configured_txt <- go_optional_text(configured_index)[1]
+    candidates <- unique(c(
+        if (nzchar(configured_txt)) normalizePath(configured_txt, winslash = "/", mustWork = FALSE) else character(0),
+        normalizePath(go_index_cache_path(gaf_path, base_dir = base_dir), winslash = "/", mustWork = FALSE)
+    ))
+    candidates <- candidates[nzchar(candidates)]
+    for (candidate in candidates) {
+        if (go_index_is_valid(candidate, gaf_path, expected_fingerprint = expected_fingerprint)) {
+            return(candidate)
+        }
+    }
+    ""
+}
+
+scan_gaf_indexed <- function(index_path,
+                             db_namespace = "",
+                             candidate_object_ids = character(0),
+                             candidate_symbols = character(0),
+                             max_hits = 1200L) {
+    empty <- data.frame(
+        db = character(), object_id = character(), symbol = character(),
+        qualifier = character(), go_id = character(), reference = character(),
+        evidence = character(), aspect = character(), assigned_by = character(),
+        date = character(), stringsAsFactors = FALSE
+    )
+    if (!requireNamespace("DBI", quietly = TRUE) ||
+        !requireNamespace("RSQLite", quietly = TRUE) ||
+        !nzchar(as.character(index_path %||% "")) ||
+        !file.exists(index_path)) {
+        return(empty)
+    }
+    ids <- unique(trimws(as.character(candidate_object_ids %||% character(0))))
+    ids <- ids[nzchar(ids)]
+    symbols <- unique(tolower(trimws(as.character(candidate_symbols %||% character(0)))))
+    symbols <- symbols[nzchar(symbols)]
+    if (length(ids) == 0L && length(symbols) == 0L) return(empty)
+
+    con <- tryCatch(DBI::dbConnect(RSQLite::SQLite(), index_path, flags = RSQLite::SQLITE_RO), error = function(e) NULL)
+    if (is.null(con)) return(empty)
+    on.exit(try(DBI::dbDisconnect(con), silent = TRUE), add = TRUE)
+    try(DBI::dbExecute(con, "PRAGMA query_only = ON"), silent = TRUE)
+
+    clauses <- character(0)
+    params <- list()
+    if (length(ids) > 0L) {
+        clauses <- c(clauses, paste0("object_id IN (", paste(rep("?", length(ids)), collapse = ","), ")"))
+        params <- c(params, as.list(ids))
+    }
+    if (length(symbols) > 0L) {
+        clauses <- c(clauses, paste0("symbol_normalized IN (", paste(rep("?", length(symbols)), collapse = ","), ")"))
+        params <- c(params, as.list(symbols))
+    }
+    ns <- trimws(as.character(db_namespace %||% ""))
+    ns_clause <- if (nzchar(ns)) " AND lower(db_namespace) = lower(?)" else ""
+    params_preferred <- if (nzchar(ns)) c(params, list(ns)) else params
+    sql_base <- paste0(
+        "SELECT db_namespace AS db, object_id, symbol, qualifier, go_id, reference, ",
+        "evidence, aspect, assigned_by, annotation_date AS date FROM gaf WHERE (",
+        paste(clauses, collapse = " OR "), ")"
+    )
+    query <- paste0(sql_base, ns_clause, " LIMIT ", as.integer(max_hits))
+    out <- tryCatch(DBI::dbGetQuery(con, query, params = params_preferred), error = function(e) empty)
+    if (nrow(out) == 0L && nzchar(ns)) {
+        out <- tryCatch(
+            DBI::dbGetQuery(con, paste0(sql_base, " LIMIT ", as.integer(max_hits)), params = params),
+            error = function(e) empty
+        )
+    }
+    if (nrow(out) == 0L) return(empty)
+    out %>%
+        dplyr::filter(grepl("^GO:[0-9]+$", go_id)) %>%
+        dplyr::distinct(db, object_id, symbol, qualifier, go_id, reference, evidence, aspect, assigned_by, date, .keep_all = TRUE)
+}
+
+build_go_gaf_index <- function(gaf_path, index_path, force = FALSE, chunk_size = 50000L) {
+    if (!requireNamespace("DBI", quietly = TRUE) || !requireNamespace("RSQLite", quietly = TRUE)) {
+        stop("DBI and RSQLite are required to build GO indexes.")
+    }
+    gaf <- normalizePath(as.character(gaf_path %||% ""), winslash = "/", mustWork = FALSE)
+    target <- normalizePath(as.character(index_path %||% ""), winslash = "/", mustWork = FALSE)
+    if (!file.exists(gaf)) stop("GAF file not found: ", gaf)
+    if (!nzchar(target)) stop("Missing GO index output path.")
+    fingerprint <- go_file_fingerprint(gaf)
+    if (!isTRUE(force) && go_index_is_valid(target, gaf, expected_fingerprint = fingerprint)) {
+        return(list(path = target, fingerprint = fingerprint, skipped = TRUE))
+    }
+
+    dir.create(dirname(target), recursive = TRUE, showWarnings = FALSE)
+    lock_dir <- paste0(target, ".lock")
+    if (!dir.create(lock_dir, showWarnings = FALSE)) {
+        stop("GO index build already in progress: ", target)
+    }
+    on.exit(unlink(lock_dir, recursive = TRUE, force = TRUE), add = TRUE)
+    tmp <- tempfile(pattern = paste0(".", basename(target), "."), tmpdir = dirname(target), fileext = ".part")
+    backup <- paste0(target, ".bak")
+    on.exit(unlink(tmp, force = TRUE), add = TRUE)
+
+    con <- DBI::dbConnect(RSQLite::SQLite(), tmp)
+    on.exit(try(DBI::dbDisconnect(con), silent = TRUE), add = TRUE)
+    DBI::dbExecute(con, "PRAGMA journal_mode = OFF")
+    DBI::dbExecute(con, "PRAGMA synchronous = OFF")
+    DBI::dbExecute(con, "PRAGMA temp_store = MEMORY")
+    DBI::dbExecute(con, paste(
+        "CREATE TABLE gaf (",
+        "db_namespace TEXT NOT NULL, object_id TEXT NOT NULL, symbol TEXT,",
+        "symbol_normalized TEXT, qualifier TEXT, go_id TEXT NOT NULL,",
+        "reference TEXT, evidence TEXT, aspect TEXT, assigned_by TEXT, annotation_date TEXT)"
+    ))
+
+    input <- if (grepl("\\.gz$", gaf, ignore.case = TRUE)) gzfile(gaf, open = "rt") else file(gaf, open = "rt")
+    on.exit(close(input), add = TRUE)
+    total_rows <- 0L
+    repeat {
+        lines <- readLines(input, n = as.integer(chunk_size), warn = FALSE)
+        if (length(lines) == 0L) break
+        lines <- lines[nzchar(lines) & !startsWith(lines, "!")]
+        if (length(lines) == 0L) next
+        parsed <- strsplit(lines, "\t", fixed = TRUE)
+        parsed <- parsed[vapply(parsed, length, integer(1)) >= 9L]
+        if (length(parsed) == 0L) next
+        rows <- data.frame(
+            db_namespace = vapply(parsed, function(x) trimws(x[1]), character(1)),
+            object_id = vapply(parsed, function(x) trimws(x[2]), character(1)),
+            symbol = vapply(parsed, function(x) trimws(x[3]), character(1)),
+            qualifier = vapply(parsed, function(x) trimws(x[4]), character(1)),
+            go_id = vapply(parsed, function(x) trimws(x[5]), character(1)),
+            reference = vapply(parsed, function(x) trimws(x[6]), character(1)),
+            evidence = vapply(parsed, function(x) trimws(x[7]), character(1)),
+            aspect = vapply(parsed, function(x) toupper(trimws(x[9])), character(1)),
+            assigned_by = vapply(parsed, function(x) if (length(x) >= 15L) trimws(x[15]) else "", character(1)),
+            annotation_date = vapply(parsed, function(x) if (length(x) >= 14L) trimws(x[14]) else "", character(1)),
+            stringsAsFactors = FALSE
+        )
+        rows$symbol_normalized <- tolower(rows$symbol)
+        rows <- rows[grepl("^GO:[0-9]+$", rows$go_id), , drop = FALSE]
+        if (nrow(rows) == 0L) next
+        DBI::dbWriteTable(con, "gaf", rows, append = TRUE)
+        total_rows <- total_rows + nrow(rows)
+    }
+
+    DBI::dbExecute(con, "CREATE INDEX idx_gaf_ns_object ON gaf(db_namespace, object_id)")
+    DBI::dbExecute(con, "CREATE INDEX idx_gaf_ns_symbol ON gaf(db_namespace, symbol_normalized)")
+    DBI::dbExecute(con, "CREATE INDEX idx_gaf_object ON gaf(object_id)")
+    DBI::dbExecute(con, "CREATE INDEX idx_gaf_symbol ON gaf(symbol_normalized)")
+    DBI::dbExecute(con, "CREATE TABLE go_index_meta (key TEXT PRIMARY KEY, value TEXT)")
+    metadata <- data.frame(
+        key = c("schema_version", "gaf_fingerprint", "source_basename", "row_count", "built_at"),
+        value = c(
+            as.character(.go_index_schema_version),
+            fingerprint,
+            basename(gaf),
+            as.character(total_rows),
+            format(Sys.time(), "%Y-%m-%dT%H:%M:%SZ", tz = "UTC")
+        ),
+        stringsAsFactors = FALSE
+    )
+    DBI::dbWriteTable(con, "go_index_meta", metadata, append = TRUE)
+    DBI::dbExecute(con, "ANALYZE")
+    DBI::dbDisconnect(con)
+    con <- NULL
+
+    verify_con <- DBI::dbConnect(RSQLite::SQLite(), tmp, flags = RSQLite::SQLITE_RO)
+    integrity <- DBI::dbGetQuery(verify_con, "PRAGMA integrity_check")[[1]][1]
+    count <- DBI::dbGetQuery(verify_con, "SELECT COUNT(*) AS n FROM gaf")$n[1]
+    DBI::dbDisconnect(verify_con)
+    if (!identical(as.character(integrity), "ok") || !is.finite(as.numeric(count))) {
+        stop("GO index validation failed: ", target)
+    }
+
+    if (file.exists(backup)) unlink(backup, force = TRUE)
+    had_target <- file.exists(target)
+    if (had_target && !file.rename(target, backup)) stop("Could not stage previous GO index.")
+    if (!file.rename(tmp, target)) {
+        if (had_target && file.exists(backup)) file.rename(backup, target)
+        stop("Could not install GO index: ", target)
+    }
+    if (file.exists(backup)) unlink(backup, force = TRUE)
+    list(path = target, fingerprint = fingerprint, rows = as.integer(count), skipped = FALSE)
+}
+
 init_go_domain <- function(
     goRegistry_rv,
     goRegistryStamp_rv,
@@ -20,6 +273,22 @@ init_go_domain <- function(
     )
     go_term_map_cache_file <- file.path("cache", "go_term_map.rds")
     go_term_map_cache_file_legacy <- file.path("go_annotations", "go_term_map.rds")
+    go_term_map_schema_version <- 2L
+    go_taxid_cache <- new.env(parent = emptyenv())
+
+    resolve_go_asset_path <- function(path_value) {
+        p <- as.character(path_value %||% "")
+        if (!nzchar(p)) {
+            return("")
+        }
+        if (grepl("^/", p) || grepl("^[A-Za-z]:[/\\\\]", p)) {
+            return(normalizePath(p, winslash = "/", mustWork = FALSE))
+        }
+        if (exists("resolve_catalog_path", mode = "function")) {
+            return(resolve_catalog_path(p, base_dir = "."))
+        }
+        normalizePath(file.path(".", p), winslash = "/", mustWork = FALSE)
+    }
 
     normalize_annotation_key_safe <- function(annotation_path) {
         if (is.function(normalize_annotation_key_fn)) {
@@ -68,7 +337,7 @@ init_go_domain <- function(
     }
 
     load_go_registry_cached <- function(force = FALSE) {
-        reg_path <- normalizePath(go_registry_file, winslash = "/", mustWork = FALSE)
+        reg_path <- resolve_go_asset_path(go_registry_file)
         if (!file.exists(reg_path)) {
             goRegistry_rv(data.frame())
             goRegistryStamp_rv(NA_real_)
@@ -94,7 +363,8 @@ init_go_domain <- function(
 
         required_cols <- c(
             "species_id", "organism", "taxid", "source", "db_namespace",
-            "gaf_file", "file_name", "gcf_accession", "priority", "is_primary"
+            "gaf_file", "file_name", "gcf_accession", "priority", "is_primary",
+            "index_file", "index_schema_version", "index_fingerprint"
         )
         for (nm in setdiff(required_cols, colnames(reg))) {
             reg[[nm]] <- NA_character_
@@ -110,20 +380,28 @@ init_go_domain <- function(
         reg$priority[!is.finite(reg$priority)] <- 999L
         reg$is_primary <- tolower(trimws(as.character(reg$is_primary %||% ""))) %in% c("true", "t", "1", "yes", "y")
 
-        reg$gaf_abs_path <- vapply(as.character(reg$gaf_file %||% ""), function(p) {
-            p <- trimws(as.character(p %||% ""))
+        reg$gaf_abs_path <- vapply(go_optional_text(reg$gaf_file), function(p) {
             if (!nzchar(p)) {
                 return("")
             }
             if (grepl("^/", p) || grepl("^[A-Za-z]:[/\\\\]", p)) {
                 return(normalizePath(p, winslash = "/", mustWork = FALSE))
             }
-            normalizePath(file.path(".", p), winslash = "/", mustWork = FALSE)
+            resolve_go_asset_path(p)
         }, character(1))
         reg$available <- vapply(reg$gaf_abs_path, function(p) {
             p <- as.character(p %||% "")
             nzchar(p) && file.exists(p)
         }, logical(1))
+        reg$index_abs_path <- vapply(go_optional_text(reg$index_file), function(p) {
+            if (!nzchar(p)) return("")
+            if (grepl("^/", p) || grepl("^[A-Za-z]:[/\\\\]", p)) {
+                return(normalizePath(p, winslash = "/", mustWork = FALSE))
+            }
+            resolve_go_asset_path(p)
+        }, character(1))
+        reg$index_schema_version <- suppressWarnings(as.integer(reg$index_schema_version))
+        reg$index_fingerprint <- go_optional_text(reg$index_fingerprint)
 
         reg <- reg[order(!reg$is_primary, reg$priority, reg$file_name), , drop = FALSE]
         row.names(reg) <- NULL
@@ -138,7 +416,7 @@ init_go_domain <- function(
 
     resolve_go_ontology_path <- function() {
         for (p in go_ontology_candidates) {
-            p_abs <- normalizePath(p, winslash = "/", mustWork = FALSE)
+            p_abs <- resolve_go_asset_path(p)
             if (file.exists(p_abs)) {
                 return(p_abs)
             }
@@ -219,7 +497,8 @@ init_go_domain <- function(
         }
 
         obo_mtime <- suppressWarnings(as.numeric(file.info(obo_path)$mtime[1]))
-        stamp <- paste0(obo_path, "::", obo_mtime)
+        obo_fingerprint <- go_file_fingerprint(obo_path)
+        stamp <- paste0("v", go_term_map_schema_version, "::", obo_fingerprint)
         old_stamp <- as.character(goTermNameMapStamp_rv() %||% "")
         if (!isTRUE(force) && identical(old_stamp, stamp)) {
             return(goTermNameMap_rv())
@@ -228,8 +507,8 @@ init_go_domain <- function(
         loaded_from_rds <- FALSE
         map <- character(0)
         cache_candidates <- unique(c(
-            normalizePath(go_term_map_cache_file, winslash = "/", mustWork = FALSE),
-            normalizePath(go_term_map_cache_file_legacy, winslash = "/", mustWork = FALSE)
+            resolve_go_asset_path(go_term_map_cache_file),
+            resolve_go_asset_path(go_term_map_cache_file_legacy)
         ))
         for (rds_path in cache_candidates) {
             if (!file.exists(rds_path)) {
@@ -237,10 +516,17 @@ init_go_domain <- function(
             }
             rds_obj <- tryCatch(readRDS(rds_path), error = function(e) NULL)
             if (is.list(rds_obj) && !is.null(rds_obj$map)) {
-                src_file <- normalizePath(as.character(rds_obj$source_file %||% ""), winslash = "/", mustWork = FALSE)
-                src_mtime <- suppressWarnings(as.numeric(rds_obj$source_mtime %||% NA_real_))
-                if (identical(src_file, obo_path) && is.finite(src_mtime) && is.finite(obo_mtime) && identical(src_mtime, obo_mtime)) {
-                    map <- as.character(rds_obj$map %||% character(0))
+                schema_ok <- identical(
+                    suppressWarnings(as.integer(rds_obj$schema_version %||% NA_integer_)),
+                    go_term_map_schema_version
+                )
+                fingerprint_ok <- identical(
+                    as.character(rds_obj$source_fingerprint %||% ""),
+                    obo_fingerprint
+                )
+                if (isTRUE(schema_ok) && isTRUE(fingerprint_ok)) {
+                    raw_map <- rds_obj$map %||% character(0)
+                    map <- stats::setNames(as.character(raw_map), names(raw_map))
                     loaded_from_rds <- TRUE
                     break
                 }
@@ -249,15 +535,17 @@ init_go_domain <- function(
 
         if (!loaded_from_rds) {
             map <- parse_go_ontology_map(obo_path)
-            rds_path <- normalizePath(go_term_map_cache_file, winslash = "/", mustWork = FALSE)
+            rds_path <- resolve_go_asset_path(go_term_map_cache_file)
             cache_dir <- dirname(rds_path)
             dir.create(cache_dir, recursive = TRUE, showWarnings = FALSE)
             if (dir.exists(cache_dir) && file.access(cache_dir, mode = 2) == 0) {
                 suppressWarnings(tryCatch(
                     saveRDS(
                         list(
+                            schema_version = go_term_map_schema_version,
                             source_file = obo_path,
                             source_mtime = obo_mtime,
+                            source_fingerprint = obo_fingerprint,
                             map = map
                         ),
                         file = rds_path,
@@ -349,6 +637,11 @@ init_go_domain <- function(
 
     resolve_taxid_for_go_lookup <- function(annotation_path = "", organism_name = "") {
         ann_key <- normalize_annotation_key_safe(annotation_path)
+        cache_key <- paste0(ann_key, "::", normalize_go_text(organism_name))
+        cached_taxid <- cache_env_get(go_taxid_cache, cache_key, default = NULL)
+        if (!is.null(cached_taxid)) {
+            return(suppressWarnings(as.integer(cached_taxid)))
+        }
         if (nzchar(ann_key)) {
             pre <- preloadedRegistry_rv()
             if (!is.null(pre) && nrow(pre) > 0 && "annotation_path" %in% colnames(pre) && "taxid" %in% colnames(pre)) {
@@ -357,6 +650,7 @@ init_go_domain <- function(
                 if (length(hit) > 0) {
                     tid <- suppressWarnings(as.integer(pre$taxid[hit[1]] %||% NA_integer_))
                     if (is.finite(tid) && !is.na(tid) && tid > 0) {
+                        cache_env_set(go_taxid_cache, cache_key, tid, max_size = 32L)
                         return(tid)
                     }
                 }
@@ -372,8 +666,10 @@ init_go_domain <- function(
         )
         tid <- suppressWarnings(as.integer(det$taxid %||% NA_integer_))
         if (is.finite(tid) && !is.na(tid) && tid > 0) {
+            cache_env_set(go_taxid_cache, cache_key, tid, max_size = 32L)
             return(tid)
         }
+        cache_env_set(go_taxid_cache, cache_key, NA_integer_, max_size = 32L)
         NA_integer_
     }
 
@@ -410,6 +706,32 @@ init_go_domain <- function(
             return(NULL)
         }
         tryCatch(jsonlite::fromJSON(txt, simplifyVector = FALSE), error = function(e) NULL)
+    }
+
+    safe_mygene_query_batch <- function(qterms, species = "", timeout_sec = 5L) {
+        terms <- unique(trimws(as.character(qterms %||% character(0))))
+        terms <- terms[nzchar(terms)]
+        if (length(terms) == 0L) return(NULL)
+
+        form <- list(
+            q = paste(terms, collapse = ","),
+            scopes = "entrezgene,symbol",
+            fields = "symbol,name,taxid,entrezgene,go.BP,go.MF,go.CC"
+        )
+        species_txt <- trimws(as.character(species %||% ""))
+        if (nzchar(species_txt)) form$species <- species_txt
+
+        req <- httr2::request("https://mygene.info/v3/query") %>%
+            httr2::req_user_agent("CGV-GO-Fallback/1.0") %>%
+            httr2::req_body_form(!!!form) %>%
+            httr2::req_timeout(as.numeric(timeout_sec))
+        resp <- tryCatch(httr2::req_perform(req), error = function(e) NULL)
+        if (is.null(resp) || httr2::resp_status(resp) >= 400) return(NULL)
+        txt <- tryCatch(httr2::resp_body_string(resp), error = function(e) "")
+        if (!nzchar(txt)) return(NULL)
+        parsed <- tryCatch(jsonlite::fromJSON(txt, simplifyVector = FALSE), error = function(e) NULL)
+        if (!is.list(parsed)) return(NULL)
+        parsed
     }
 
     normalize_mygene_go_entries <- function(x) {
@@ -561,32 +883,56 @@ init_go_domain <- function(
         ))
         symbol_queries <- symbol_queries[nzchar(symbol_queries)]
 
-        query_list <- character(0)
-        if (length(numeric_ids) > 0) {
-            query_list <- c(query_list, paste0("entrezgene:", numeric_ids))
-        }
-        if (length(symbol_queries) > 0) {
-            query_list <- c(query_list, paste0("symbol:", symbol_queries))
-        }
-        query_list <- unique(query_list)
+        query_list <- unique(c(numeric_ids, symbol_queries))
         if (length(query_list) > 8L) {
             query_list <- query_list[seq_len(8L)]
         }
 
         collected <- list()
         idx <- 0L
-        for (q in query_list) {
-            payload <- safe_mygene_query(q = q, species = species_param, size = 6L, timeout_sec = 5L)
-            if (is.null(payload) || is.null(payload$hits) || !is.list(payload$hits) || length(payload$hits) == 0) {
-                next
-            }
-            for (hit in payload$hits) {
+        batch_payload <- safe_mygene_query_batch(query_list, species = species_param, timeout_sec = 5L)
+        if (is.list(batch_payload) && length(batch_payload) > 0L) {
+            query_rank <- stats::setNames(seq_along(query_list), tolower(query_list))
+            ranked_hits <- lapply(batch_payload, function(hit) {
+                query_txt <- tolower(trimws(as.character(hit$query %||% "")))
+                rank <- suppressWarnings(as.integer(query_rank[[query_txt]] %||% (length(query_list) + 1L)))
+                list(rank = rank, hit = hit)
+            })
+            ranked_hits <- ranked_hits[order(vapply(ranked_hits, function(x) x$rank, integer(1)))]
+            for (entry in ranked_hits) {
+                hit <- entry$hit
+                if (isTRUE(hit$notfound %||% FALSE)) next
+                hit_taxid <- suppressWarnings(as.integer(hit$taxid %||% NA_integer_))
+                if (is.finite(tid) && !is.na(tid) && tid > 0 &&
+                    (!is.finite(hit_taxid) || is.na(hit_taxid) || hit_taxid != tid)) {
+                    next
+                }
                 rows <- extract_go_rows_from_mygene_hit(hit)
-                if (nrow(rows) == 0) next
+                if (nrow(rows) == 0L) next
                 idx <- idx + 1L
                 collected[[idx]] <- rows
+                if (idx >= 6L) break
             }
-            if (idx >= 6L) break
+        }
+
+        if (idx == 0L && length(query_list) > 0L) {
+            fallback_queries <- query_list[seq_len(min(2L, length(query_list)))]
+            for (q in fallback_queries) {
+                q_expr <- if (grepl("^[0-9]+$", q)) paste0("entrezgene:", q) else paste0("symbol:", q)
+                payload <- safe_mygene_query(q = q_expr, species = species_param, size = 6L, timeout_sec = 5L)
+                if (is.null(payload) || is.null(payload$hits) || !is.list(payload$hits)) next
+                for (hit in payload$hits) {
+                    hit_taxid <- suppressWarnings(as.integer(hit$taxid %||% NA_integer_))
+                    if (is.finite(tid) && !is.na(tid) && tid > 0 &&
+                        (!is.finite(hit_taxid) || is.na(hit_taxid) || hit_taxid != tid)) next
+                    rows <- extract_go_rows_from_mygene_hit(hit)
+                    if (nrow(rows) == 0L) next
+                    idx <- idx + 1L
+                    collected[[idx]] <- rows
+                    if (idx >= 6L) break
+                }
+                if (idx >= 6L) break
+            }
         }
 
         out <- if (length(collected) == 0) {
@@ -747,6 +1093,8 @@ init_go_domain <- function(
 
         chunks <- list()
         idx_chunk <- 0L
+        preferred_chunks <- list()
+        preferred_idx <- 0L
         hit_count <- 0L
         repeat {
             lines <- readLines(con, n = 50000L, warn = FALSE)
@@ -762,7 +1110,6 @@ init_go_domain <- function(
                 fields <- strsplit(ln, "\t", fixed = TRUE)[[1]]
                 if (length(fields) < 9L) next
                 db <- trimws(as.character(fields[1] %||% ""))
-                if (nzchar(ns_filter) && tolower(db) != ns_filter) next
 
                 obj_id <- trimws(as.character(fields[2] %||% ""))
                 sym <- trimws(as.character(fields[3] %||% ""))
@@ -771,7 +1118,7 @@ init_go_domain <- function(
                 if (!match_obj && !match_sym) next
 
                 idx_chunk <- idx_chunk + 1L
-                chunks[[idx_chunk]] <- data.frame(
+                row_out <- data.frame(
                     db = db,
                     object_id = obj_id,
                     symbol = sym,
@@ -784,6 +1131,11 @@ init_go_domain <- function(
                     date = trimws(as.character(if (length(fields) >= 14L) fields[14] else "")),
                     stringsAsFactors = FALSE
                 )
+                chunks[[idx_chunk]] <- row_out
+                if (nzchar(ns_filter) && identical(tolower(db), ns_filter)) {
+                    preferred_idx <- preferred_idx + 1L
+                    preferred_chunks[[preferred_idx]] <- row_out
+                }
                 hit_count <- hit_count + 1L
                 if (hit_count >= max_hits) break
             }
@@ -793,7 +1145,8 @@ init_go_domain <- function(
         if (length(chunks) == 0) {
             return(out)
         }
-        out <- dplyr::bind_rows(chunks)
+        selected_chunks <- if (nzchar(ns_filter) && length(preferred_chunks) > 0L) preferred_chunks else chunks
+        out <- dplyr::bind_rows(selected_chunks)
         out %>%
             dplyr::filter(grepl("^GO:[0-9]+$", go_id)) %>%
             dplyr::distinct(db, object_id, symbol, qualifier, go_id, reference, evidence, aspect, assigned_by, date, .keep_all = TRUE)
@@ -844,16 +1197,23 @@ init_go_domain <- function(
             return(cached_terms)
         }
 
-        terms <- scan_gaf_for_candidates(
+        index_path <- resolve_go_index_path(
             gaf_path = gaf_path,
-            db_namespace = db_ns,
-            candidate_object_ids = obj_ids,
-            candidate_symbols = symbols
+            configured_index = as.character(go_entry_row$index_abs_path[1] %||% ""),
+            expected_fingerprint = as.character(go_entry_row$index_fingerprint[1] %||% ""),
+            base_dir = "."
         )
-        if (nrow(terms) == 0 && nzchar(db_ns)) {
+        terms <- if (nzchar(index_path)) {
+            scan_gaf_indexed(
+                index_path = index_path,
+                db_namespace = db_ns,
+                candidate_object_ids = obj_ids,
+                candidate_symbols = symbols
+            )
+        } else {
             terms <- scan_gaf_for_candidates(
                 gaf_path = gaf_path,
-                db_namespace = "",
+                db_namespace = db_ns,
                 candidate_object_ids = obj_ids,
                 candidate_symbols = symbols
             )
@@ -1016,5 +1376,40 @@ init_go_domain <- function(
         scan_gaf_for_candidates = scan_gaf_for_candidates,
         get_go_terms_with_cache = get_go_terms_with_cache,
         build_go_sections_payload = build_go_sections_payload
+    )
+}
+
+go_lookup_worker <- function(go_entry, candidates, base_dir = ".") {
+    make_cell <- function(value) {
+        current <- value
+        function(new_value) {
+            if (!missing(new_value)) current <<- new_value
+            current
+        }
+    }
+    domain <- init_go_domain(
+        goRegistry_rv = make_cell(data.frame()),
+        goRegistryStamp_rv = make_cell(NA_real_),
+        goQueryCache_env = new.env(parent = emptyenv()),
+        goOnlineQueryCache_env = new.env(parent = emptyenv()),
+        goSectionsPayloadCache_env = new.env(parent = emptyenv()),
+        goTermNameMap_rv = make_cell(character(0)),
+        goTermNameMapStamp_rv = make_cell(""),
+        preloadedRegistry_rv = make_cell(data.frame()),
+        normalize_annotation_key_fn = function(x) normalizePath(as.character(x %||% ""), winslash = "/", mustWork = FALSE)
+    )
+    terms <- domain$get_go_terms_with_cache(as.data.frame(go_entry, stringsAsFactors = FALSE), candidates)
+    gaf_path <- as.character(go_entry$gaf_abs_path[1] %||% "")
+    index_path <- resolve_go_index_path(
+        gaf_path,
+        configured_index = as.character(go_entry$index_abs_path[1] %||% ""),
+        expected_fingerprint = as.character(go_entry$index_fingerprint[1] %||% ""),
+        base_dir = base_dir
+    )
+    list(
+        terms = terms,
+        backend = if (nzchar(index_path)) "sqlite" else "stream",
+        index_path = index_path,
+        gaf_path = gaf_path
     )
 }

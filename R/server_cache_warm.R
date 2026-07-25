@@ -22,7 +22,26 @@ init_cache_warm_domain <- function(append_status_fn = NULL) {
         if (!nzchar(key)) {
             return(FALSE)
         }
-        exists(key, envir = warmed_annotation_keys, inherits = FALSE)
+        if (exists(key, envir = warmed_annotation_keys, inherits = FALSE)) {
+            return(TRUE)
+        }
+        cached_idx <- tryCatch(
+            {
+                if (exists("cache_env_get", mode = "function") &&
+                    exists("gff_cache_key", mode = "function") &&
+                    exists(".gff_gene_light_index_cache", inherits = TRUE)) {
+                    cache_env_get(.gff_gene_light_index_cache, gff_cache_key(key), default = NULL)
+                } else {
+                    NULL
+                }
+            },
+            error = function(e) NULL
+        )
+        if (!is.null(cached_idx) && is.list(cached_idx) && !is.null(cached_idx$genes_df)) {
+            mark_annotation_warmed(key)
+            return(TRUE)
+        }
+        FALSE
     }
 
     mark_annotation_warmed <- function(annotation_path) {
@@ -34,10 +53,58 @@ init_cache_warm_domain <- function(append_status_fn = NULL) {
         invisible(TRUE)
     }
 
+    warm_annotation_tabix_probe <- function(annotation_path, idx = NULL) {
+        p <- as.character(annotation_path %||% "")
+        if (!nzchar(p) || !file.exists(p) ||
+            !exists("is_tabix_annotation_file", mode = "function") ||
+            !isTRUE(is_tabix_annotation_file(p))) {
+            return(invisible(FALSE))
+        }
+        idx_obj <- idx
+        if (is.null(idx_obj) || !is.list(idx_obj) || is.null(idx_obj$genes_df)) {
+            idx_obj <- tryCatch(load_gff_gene_light_index_if_available(p, base_dir = "."), error = function(e) NULL)
+        }
+        genes_df <- idx_obj$genes_df %||% NULL
+        if (is.null(genes_df) || !is.data.frame(genes_df) || nrow(genes_df) == 0L) {
+            return(invisible(FALSE))
+        }
+        chr_col <- if ("seqid" %in% colnames(genes_df)) "seqid" else "V1"
+        start_col <- if ("start" %in% colnames(genes_df)) "start" else "V4"
+        end_col <- if ("end" %in% colnames(genes_df)) "end" else "V5"
+        chr <- as.character(genes_df[[chr_col]][1] %||% "")
+        st <- suppressWarnings(as.numeric(genes_df[[start_col]][1] %||% NA_real_))
+        en <- suppressWarnings(as.numeric(genes_df[[end_col]][1] %||% NA_real_))
+        if (!nzchar(chr) || !is.finite(st) || !is.finite(en)) {
+            return(invisible(FALSE))
+        }
+        tryCatch(scan_tabix_region_gff(p, chr, st, en), error = function(e) NULL)
+        invisible(TRUE)
+    }
+
     warm_annotation_cache <- function(annotation_path, status_rv = NULL, context_label = NULL) {
         p <- as.character(annotation_path %||% "")
         if (!nzchar(p) || !file.exists(p) || annotation_is_warmed(p)) {
             return(invisible(FALSE))
+        }
+        disk_idx <- tryCatch(
+            load_gff_index_from_disk(p, cache_kind = "gene_light", base_dir = "."),
+            error = function(e) NULL
+        )
+        if (!is.null(disk_idx) && is.list(disk_idx) && !is.null(disk_idx$genes_df)) {
+            tryCatch(
+                {
+                    cache_env_set(
+                        .gff_gene_light_index_cache,
+                        gff_cache_key(p),
+                        disk_idx,
+                        max_size = annotation_memory_cache_limits$gene_light_max_entries,
+                        max_bytes = annotation_memory_cache_limits$gene_light_max_bytes
+                    )
+                },
+                error = function(e) NULL
+            )
+            mark_annotation_warmed(p)
+            return(invisible(TRUE))
         }
         warmed_ok <- FALSE
         elapsed <- system.time({
@@ -56,14 +123,15 @@ init_cache_warm_domain <- function(append_status_fn = NULL) {
                         get_genes_chr_index_from_annotation(p, genes_df = genes_tbl),
                         error = function(e) NULL
                     )
-                    tryCatch(
-                        get_chromosome_name_map(p),
-                        error = function(e) NULL
-                    )
                     warmed_ok <- TRUE
                 } else {
                     warmed_ok <- TRUE
                 }
+                tryCatch(
+                    get_chromosome_name_map(p),
+                    error = function(e) NULL
+                )
+                warm_annotation_tabix_probe(p, idx)
             }
             if (isTRUE(warmed_ok)) {
                 mark_annotation_warmed(p)
@@ -111,10 +179,7 @@ init_cache_warm_domain <- function(append_status_fn = NULL) {
         }
         elapsed <- system.time({
             if (isTRUE(is_twobit_file(gp))) {
-                seq_names <- tryCatch(get_twobit_seqnames(gp), error = function(e) character(0))
-                if (length(seq_names) > 0) {
-                    try(extract_sequence_from_2bit(gp, seq_names[1], 1L, 1L), silent = TRUE)
-                }
+                tryCatch(get_twobit_seqnames(gp), error = function(e) character(0))
             } else {
                 try(get_fasta_index_seqnames(gp), silent = TRUE)
                 try(get_cached_fafile(gp), silent = TRUE)
@@ -152,6 +217,26 @@ init_cache_warm_domain <- function(append_status_fn = NULL) {
         invisible(TRUE)
     }
 
+    warm_alias_index_fn <- function(organism_id, base_dir = ".", status_rv = NULL, context_label = NULL) {
+        org <- trimws(as.character(organism_id %||% ""))
+        if (!nzchar(org)) return(invisible(FALSE))
+        if (!exists("warm_alias_index", mode = "function")) return(invisible(FALSE))
+
+        elapsed <- system.time({
+            ok <- tryCatch(warm_alias_index(org, base_dir = base_dir), error = function(e) FALSE)
+        })
+        if (!is.null(status_rv)) {
+            lbl <- as.character(context_label %||% org)
+            if (isTRUE(ok)) {
+                append_status_safe(
+                    status_rv,
+                    sprintf("Alias index warmed: %s (%.1fs)", lbl, as.numeric(elapsed[["elapsed"]]))
+                )
+            }
+        }
+        invisible(isTRUE(ok))
+    }
+
     list(
         normalize_annotation_key = normalize_annotation_key,
         annotation_is_warmed = annotation_is_warmed,
@@ -161,6 +246,8 @@ init_cache_warm_domain <- function(append_status_fn = NULL) {
         genome_is_warmed = genome_is_warmed,
         mark_genome_warmed = mark_genome_warmed,
         warm_genome_cache = warm_genome_cache,
-        warm_report_cache = warm_report_cache
+        warm_report_cache = warm_report_cache,
+        warm_annotation_tabix_probe = warm_annotation_tabix_probe,
+        warm_alias_index_fn = warm_alias_index_fn
     )
 }

@@ -28,5 +28,5 @@ Please cite the software metadata in `CITATION.cff` and the corresponding Zenodo
 
 ## Web deployment
 
-- Public application: <https://cgvapp.com>
+- Public application: <https://cgv.mobilomics.org>
 - Source code: <https://github.com/raulrojas22/CGV>

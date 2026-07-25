@@ -32,8 +32,21 @@ The script matches each GAF to a preloaded organism using:
 Recommended workflow:
 
 1. Copy GAF files into `go_annotations/raw/`
-2. Run the registry builder
-3. Review `go_annotations/registry.tsv` and check rows with empty `species_id` or `notes`
+2. Build the SQLite indexes:
+
+```bash
+Rscript scripts/build_gaf_index.R --root=. --all --write-registry
+Rscript scripts/verify_gaf_indexes.R --root=. --expected=24
+```
+
+3. Run the registry builder when organism mappings change
+4. Review `go_annotations/registry.tsv` and check rows with empty `species_id` or `notes`
+
+The generated `go_annotations/index/*.go.sqlite` files contain normalized GAF
+columns and indexed lookups by object ID and symbol. Downloadable Desktop
+datasets should include their corresponding SQLite file. If an older or
+external dataset has no packaged index, CGV returns the first result using the
+streaming fallback and builds an index later under `CGV_CACHE_DIR/go_index`.
 
 Optional (recommended): local GO term names
 

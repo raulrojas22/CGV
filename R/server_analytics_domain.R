@@ -56,6 +56,7 @@ init_analytics_domain <- function(
         clear_cache_env_prefix(analyticsPreparedCache_env, paste0("analytics-prep-v1||", scope_txt, "||"))
         clear_cache_env_prefix(analyticsMetricMatrixCache_env, paste0("analytics-mat-v1||", scope_txt, "||"))
         clear_cache_env_prefix(analyticsExonDistCache_env, paste0("analytics-exons-v1||", scope_txt, "||"))
+        clear_cache_env_prefix(analyticsExonDistCache_env, paste0("analytics-introns-v1||", scope_txt, "||"))
         clear_cache_env_prefix(analyticsScatterPrepCache_env, paste0("analytics-scatter-v1||", scope_txt, "||"))
         clear_cache_env_prefix(analyticsScatterRenderCache_env, paste0("analytics-scatter-render-v1||", scope_txt, "||"))
         clear_cache_env_prefix(analyticsRadarSceneCache_env, paste0("analytics-radar-scene-v1||", scope_txt, "||"))
@@ -384,6 +385,84 @@ init_analytics_domain <- function(
         out
     }
 
+    get_cached_intron_lengths_for_plot <- function(pid, mode = "homo", file_data = NULL) {
+        empty_introns <- function() {
+            data.frame(
+                plot_id_chr = character(0),
+                intron_n = integer(0),
+                intron_start = numeric(0),
+                intron_end = numeric(0),
+                intron_length = numeric(0),
+                stringsAsFactors = FALSE
+            )
+        }
+
+        pid_txt <- as.character(pid %||% "")
+        mode_txt <- tolower(trimws(as.character(mode %||% "homo")))
+        sig_map <- get_mode_plot_signatures(mode_txt)
+        plot_sig <- as.character(tryCatch(sig_map[[pid_txt]], error = function(e) "") %||% "")
+        if (!nzchar(plot_sig)) {
+            plot_sig <- summary_plot_data_fingerprint_safe(file_data)
+        }
+        cache_key <- paste("analytics-introns-v1", mode_txt, pid_txt, plot_sig, sep = "||")
+        if (exists(cache_key, envir = analyticsExonDistCache_env, inherits = FALSE)) {
+            cached <- get(cache_key, envir = analyticsExonDistCache_env, inherits = FALSE)
+            if (is.data.frame(cached)) {
+                return(cached)
+            }
+        }
+        if (is.null(file_data) || !is.data.frame(file_data) || nrow(file_data) == 0L) {
+            out <- empty_introns()
+            assign(cache_key, out, envir = analyticsExonDistCache_env)
+            trim_cache_env(analyticsExonDistCache_env, max_size = 128L)
+            return(out)
+        }
+
+        types <- tolower(trimws(as.character(file_data$V3)))
+        rows <- which(types == "exon")
+        if (length(rows) < 2L) {
+            out <- empty_introns()
+            assign(cache_key, out, envir = analyticsExonDistCache_env)
+            trim_cache_env(analyticsExonDistCache_env, max_size = 128L)
+            return(out)
+        }
+
+        ex <- unique(data.frame(
+            start = suppressWarnings(as.numeric(file_data$V4[rows])),
+            end = suppressWarnings(as.numeric(file_data$V5[rows])),
+            stringsAsFactors = FALSE
+        ))
+        ex <- ex[is.finite(ex$start) & is.finite(ex$end) & ex$end >= ex$start, , drop = FALSE]
+        if (nrow(ex) < 2L) {
+            out <- empty_introns()
+            assign(cache_key, out, envir = analyticsExonDistCache_env)
+            trim_cache_env(analyticsExonDistCache_env, max_size = 128L)
+            return(out)
+        }
+
+        ex <- ex[order(ex$start, ex$end), , drop = FALSE]
+        intron_start <- ex$end[-nrow(ex)] + 1
+        intron_end <- ex$start[-1] - 1
+        intron_length <- intron_end - intron_start + 1
+        ok <- is.finite(intron_length) & intron_length > 0
+
+        out <- if (any(ok)) {
+            data.frame(
+                plot_id_chr = pid_txt,
+                intron_n = seq_len(sum(ok)),
+                intron_start = intron_start[ok],
+                intron_end = intron_end[ok],
+                intron_length = intron_length[ok],
+                stringsAsFactors = FALSE
+            )
+        } else {
+            empty_introns()
+        }
+        assign(cache_key, out, envir = analyticsExonDistCache_env)
+        trim_cache_env(analyticsExonDistCache_env, max_size = 128L)
+        out
+    }
+
     get_cached_scatter_prepared_df <- function(df_prepared, order_mode = "load") {
         prep_key <- as.character(attr(df_prepared, "analytics_cache_key") %||% analytics_df_fingerprint(df_prepared))
         order_txt <- tolower(trimws(as.character(order_mode %||% "load")))
@@ -537,7 +616,7 @@ init_analytics_domain <- function(
         angles <- seq(pi / 2, pi / 2 + 2 * pi, length.out = n_metrics + 1)[seq_len(n_metrics)]
         grid_levels <- c(0.25, 0.5, 0.75, 1.0)
         grid_theta <- seq(0, 2 * pi, length.out = 200)
-        grid_df <- do.call(rbind, lapply(grid_levels, function(r) {
+        grid_df <- do.call(rbind,  lapply(grid_levels, function(r) {
             data.frame(
                 x = r * cos(grid_theta),
                 y = r * sin(grid_theta),
@@ -553,7 +632,7 @@ init_analytics_domain <- function(
             lbl_y = 1.28 * sin(angles),
             stringsAsFactors = FALSE
         )
-        poly_df <- do.call(rbind, lapply(seq_len(n_genes), function(i) {
+        poly_df <- do.call(rbind,  lapply(seq_len(n_genes), function(i) {
             lbl <- as.character(df_lab$radar_display[i] %||% df_lab$x_label[i] %||% paste0("Gene ", i))
             gene_txt <- as.character(df_lab$gene_full[i] %||% df_lab$x_label[i] %||% paste0("Gene ", i))
             organism_txt <- trimws(as.character(df_lab$organism_full[i] %||% ""))
@@ -763,6 +842,7 @@ init_analytics_domain <- function(
         get_cached_analytics_metric_matrix = get_cached_analytics_metric_matrix,
         get_mode_plot_signatures = get_mode_plot_signatures,
         get_cached_exon_lengths_for_plot = get_cached_exon_lengths_for_plot,
+        get_cached_intron_lengths_for_plot = get_cached_intron_lengths_for_plot,
         get_cached_scatter_prepared_df = get_cached_scatter_prepared_df,
         get_cached_radar_scene = get_cached_radar_scene,
         get_cached_corr_scene = get_cached_corr_scene

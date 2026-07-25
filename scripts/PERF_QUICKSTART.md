@@ -2,10 +2,22 @@
 
 Default startup values for first paint tuning:
 
+- `APP_FUTURE_MODE=multisession`
+- `APP_FUTURE_WORKERS=2`
 - `APP_HOMO_INITIAL_VISIBLE=1`
 - `APP_ORTHO_INITIAL_VISIBLE=1`
+- `APP_HOMO_UPFRONT_ISOFORMS=0`
+- `APP_ORTHO_UPFRONT_ISOFORMS=0`
+- `APP_ORTHO_SUSPEND_HIDDEN=1`
+- `APP_HOMO_DEFER_SEQUENCE=1` for Desktop first paint; use `0` when sequence composition must be ready before paint
+- `APP_ORTHO_DEFER_SEQUENCE=1` for Desktop first paint; use `0` when sequence composition must be ready before paint
+- `APP_FOOTER_DEFER_SEQUENCE=1` for Desktop first paint; use `0` when footer sequences must be ready before paint
+- `APP_DEFER_FEATURE_GC=1` for Desktop; small 2bit spans are included in the first render, while slower sources retain the deferred fallback
 - `APP_ORTHO_ALIGNED_FAST=1`
-- `APP_ORTHO_ALIGNED_KMER_K=8`
+
+These defaults prioritize first paint. Hidden isoforms are not instantiated
+upfront, hidden orthologous plots stay suspended, and expensive sequence/feature
+GC work is deferred and prefetched after the initial card renders.
 
 ## Recommended: run the suite wrapper
 
@@ -25,6 +37,13 @@ bash /Users/rarojas/Documents/A_FULLAPP/scripts/run_benchmark_suite.sh --trials 
 
 ```bash
 bash /Users/rarojas/Documents/A_FULLAPP/scripts/run_app_perf.sh on /tmp/fullapp_perf_on.log TRUE
+```
+
+To force a concurrency comparison:
+
+```bash
+APP_FUTURE_MODE=sequential APP_FUTURE_WORKERS=2 bash /Users/rarojas/Documents/A_FULLAPP/scripts/run_app_perf.sh on /tmp/fullapp_perf_seq.log TRUE
+APP_FUTURE_MODE=multisession APP_FUTURE_WORKERS=2 bash /Users/rarojas/Documents/A_FULLAPP/scripts/run_app_perf.sh on /tmp/fullapp_perf_multi.log TRUE
 ```
 
 ## Single run (cache OFF)

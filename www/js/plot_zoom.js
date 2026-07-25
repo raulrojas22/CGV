@@ -308,15 +308,21 @@
     }
   }
 
-  var responsiveRefitTimer = null;
+  var responsiveRefitTimers = { homo: null, ortho: null };
 
-  function scheduleResponsiveRefit() {
-    if (responsiveRefitTimer !== null) clearTimeout(responsiveRefitTimer);
-    responsiveRefitTimer = setTimeout(function () {
-      responsiveRefitTimer = null;
-      applyZoom('homo');
-      applyZoom('ortho');
-    }, 90);
+  function scheduleResponsiveRefit(mode) {
+    var modes = mode && state[mode] ? [mode] : ['homo', 'ortho'];
+    for (var i = 0; i < modes.length; i++) {
+      (function (targetMode) {
+        if (responsiveRefitTimers[targetMode] !== null) {
+          clearTimeout(responsiveRefitTimers[targetMode]);
+        }
+        responsiveRefitTimers[targetMode] = setTimeout(function () {
+          responsiveRefitTimers[targetMode] = null;
+          applyZoom(targetMode);
+        }, 90);
+      })(modes[i]);
+    }
   }
 
   // The scroll-wrapper (.plots-zoom-wrap) never changes width — use it as the
@@ -407,13 +413,18 @@
     var inv = 1 / factor;
 
     function applyCS(els, getCx) {
+      var pending = [];
       for (var i = 0; i < els.length; i++) {
         var el  = els[i];
         var cx  = getCx(el);
         var orig = el.getAttribute('transform') || '';
-        el.setAttribute('data-zoom-orig-tf', orig);
-        var cs = 'translate(' + cx + ',0) scale(' + inv + ',1) translate(' + (-cx) + ',0)';
-        el.setAttribute('transform', orig ? cs + ' ' + orig : cs);
+        pending.push({ el: el, cx: cx, orig: orig });
+      }
+      for (var j = 0; j < pending.length; j++) {
+        var item = pending[j];
+        var cs = 'translate(' + item.cx + ',0) scale(' + inv + ',1) translate(' + (-item.cx) + ',0)';
+        item.el.setAttribute('data-zoom-orig-tf', item.orig);
+        item.el.setAttribute('transform', item.orig ? cs + ' ' + item.orig : cs);
       }
     }
 
@@ -707,9 +718,17 @@
       scheduleFabSync();
       scheduleResponsiveRefit();
     });
-    document.addEventListener('shiny:value', function () {
+    document.addEventListener('shiny:value', function (e) {
+      var name = String((e && e.name) || (e && e.target && e.target.id) || '');
+      var mode = null;
+      if (name.indexOf('plot_homo_') !== -1 || name.indexOf('homo_') === 0) {
+        mode = 'homo';
+      } else if (name.indexOf('plot_ortho_') !== -1 || name.indexOf('ortho_') === 0) {
+        mode = 'ortho';
+      }
+      if (!mode) return;
       scheduleFabSync();
-      scheduleResponsiveRefit();
+      scheduleResponsiveRefit(mode);
     });
     document.addEventListener('visibilitychange', function () {
       if (document.hidden) {

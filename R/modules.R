@@ -6,7 +6,16 @@ plotUIModule <- function(id) {
     tagList(
         div(
             class = "promoter-plot-container",
-            style = "width: 100%; height: 110px; margin: 0;",
+            style = "width: 100%; height: 110px; margin: 0; position: relative;",
+            div(
+                class = "plot-loading-placeholder",
+                style = "position:absolute; inset:0; display:flex; align-items:center; justify-content:center; z-index:0; pointer-events:none; background:#FFFFFF;",
+                div(
+                    class = "app-dna-loader app-dna-loader--spinner-sm",
+                    div(class = "app-dna-wave app-dna-wave-top", lapply(seq_len(16), function(i) span(class = "app-dna-node", style = sprintf("--i:%d;", i - 1)))),
+                    div(class = "app-dna-wave app-dna-wave-bottom", lapply(seq_len(16), function(i) span(class = "app-dna-node", style = sprintf("--i:%d;", i - 1))))
+                )
+            ),
             girafeOutput(ns("plot"), height = "110px", width = "100%")
         )
     )
@@ -69,59 +78,168 @@ if (!exists("refresh_girafe_widget_uid", mode = "function")) {
     }
 }
 
+.cgv_girafe_plot_cache <- new.env(parent = emptyenv())
+.cgv_girafe_plot_cache_order <- character(0)
+
+get_girafe_plot_cache_max_entries <- function() {
+    raw <- suppressWarnings(as.integer(Sys.getenv("APP_GIRAFE_PLOT_CACHE_MAX_ENTRIES", "48")))
+    if (!is.finite(raw) || raw < 0L) {
+        return(48L)
+    }
+    raw
+}
+
+normalize_girafe_plot_signature <- function(plot_signature = NULL, fallback_id = NULL) {
+    sig <- trimws(as.character(plot_signature %||% ""))
+    sig <- sig[!is.na(sig) & nzchar(sig)]
+    if (length(sig) > 0L) {
+        return(sig[1])
+    }
+    paste0("plot_id:", as.character(fallback_id %||% ""))
+}
+
+make_girafe_plot_cache_key <- function(plot_context, plot_signature = NULL, fallback_id = NULL,
+                                       max_gene_length_key = 0, visual_mode = "compact",
+                                       theme_mode = "light", is_colorblind_mode = FALSE,
+                                       seq_len_key = 0L, has_neighbor_context = FALSE,
+                                       compact_feature_interactivity = NA) {
+    max_len_txt <- format(max_gene_length_key %||% 0, scientific = FALSE, trim = TRUE)
+    paste(
+        as.character(plot_context %||% "plot"),
+        normalize_girafe_plot_signature(plot_signature, fallback_id),
+        max_len_txt,
+        as.character(visual_mode %||% "compact"),
+        as.character(theme_mode %||% "light"),
+        as.character(isTRUE(is_colorblind_mode)),
+        as.character(seq_len_key %||% 0L),
+        as.character(isTRUE(has_neighbor_context)),
+        as.character(compact_feature_interactivity),
+        sep = "|"
+    )
+}
+
+get_shared_girafe_plot_cache <- function(cache_key) {
+    key <- as.character(cache_key %||% "")
+    if (!nzchar(key) || get_girafe_plot_cache_max_entries() <= 0L) {
+        return(NULL)
+    }
+    if (!exists(key, envir = .cgv_girafe_plot_cache, inherits = FALSE)) {
+        return(NULL)
+    }
+    .cgv_girafe_plot_cache_order <<- c(setdiff(.cgv_girafe_plot_cache_order, key), key)
+    get(key, envir = .cgv_girafe_plot_cache, inherits = FALSE)
+}
+
+set_shared_girafe_plot_cache <- function(cache_key, plot_obj) {
+    key <- as.character(cache_key %||% "")
+    max_entries <- get_girafe_plot_cache_max_entries()
+    if (!nzchar(key) || max_entries <= 0L || is.null(plot_obj)) {
+        return(invisible(FALSE))
+    }
+    assign(key, plot_obj, envir = .cgv_girafe_plot_cache)
+    .cgv_girafe_plot_cache_order <<- c(setdiff(.cgv_girafe_plot_cache_order, key), key)
+    overflow <- length(.cgv_girafe_plot_cache_order) - max_entries
+    if (overflow > 0L) {
+        stale <- head(.cgv_girafe_plot_cache_order, overflow)
+        rm(list = stale, envir = .cgv_girafe_plot_cache)
+        .cgv_girafe_plot_cache_order <<- setdiff(.cgv_girafe_plot_cache_order, stale)
+    }
+    invisible(TRUE)
+}
+
+is_compact_feature_interactivity_enabled <- function() {
+    TRUE
+}
+
+is_ortho_server_render_nudge_enabled <- function() {
+    raw <- tolower(trimws(as.character(Sys.getenv("APP_ORTHO_SERVER_RENDER_NUDGE", "0") %||% "0")))
+    !raw %in% c("", "0", "false", "no", "off")
+}
+
+is_ortho_suspend_hidden_enabled <- function() {
+    raw <- tolower(trimws(as.character(Sys.getenv("APP_ORTHO_SUSPEND_HIDDEN", "1") %||% "1")))
+    !raw %in% c("", "0", "false", "no", "off")
+}
+
+should_inline_fast_sequence_prefetch <- function(genome_path, start_pos, end_pos) {
+    if (!isTRUE(app_env_flag("APP_INLINE_FAST_SEQUENCE_PREFETCH", TRUE))) {
+        return(FALSE)
+    }
+    path <- trimws(as.character(genome_path %||% ""))
+    if (!nzchar(path) || !file.exists(path) || !grepl("\\.2bit$", path, ignore.case = TRUE)) {
+        return(FALSE)
+    }
+    start_num <- suppressWarnings(as.numeric(start_pos %||% NA_real_))
+    end_num <- suppressWarnings(as.numeric(end_pos %||% NA_real_))
+    span <- abs(end_num - start_num) + 1
+    max_span <- app_env_int(
+        "APP_INLINE_FAST_SEQUENCE_MAX_BP",
+        2000000L,
+        min_value = 1000L,
+        max_value = 50000000L
+    )
+    is.finite(span) && span > 0 && span <= max_span
+}
+
 # Función auxiliar para procesar datos del gen (compartida)
 process_gene_data <- function(data) {
-  # Eliminamos el tidyr::separate. Nos quedamos solo con lo necesario.
-  df_separated <- data %>%
-    mutate(V3_norm = tolower(stringr::str_trim(V3)))
-  
-  df_gene <- df_separated %>% filter(V3_norm == "gene")
-  
-  tx_level_types <- c(
-    "mrna", "transcript", "lnc_rna", "trna", "rrna", "snorna", "snrna", "mirna",
-    "ncrna", "primary_transcript", "pre_mirna", "guide_rna", "rnase_p_rna",
-    "rnase_mrp_rna", "telomerase_rna", "antisense_rna", "srp_rna", "scarna",
-    "vault_rna", "y_rna", "antisense_lncrna", "lncrna"
-  )
-  df_transcript <- df_separated %>% filter(V3_norm %in% tx_level_types)
-  
-  df_other <- df_separated %>%
-    filter(V3_norm %in% c("exon", "cds", "start_codon", "stop_codon") | grepl("utr", V3_norm)) %>%
-    mutate(
-      group = case_when(
-        V3_norm == "exon" ~ "exon",
-        V3_norm == "cds" ~ "cds",
-        V3_norm %in% c("start_codon", "stop_codon") ~ "codon",
-        grepl("utr", V3_norm) ~ "utr",
-        TRUE ~ "other"
-      ),
-      text = gsub(";", "\n", V9) 
+    df_separated <- as.data.frame(data, stringsAsFactors = FALSE)
+    df_separated$V3_norm <- tolower(trimws(as.character(df_separated$V3)))
+
+    df_gene <- df_separated[df_separated$V3_norm == "gene", , drop = FALSE]
+
+    tx_level_types <- c(
+        "mrna", "transcript", "lnc_rna", "trna", "rrna", "snorna", "snrna", "mirna",
+        "ncrna", "primary_transcript", "pre_mirna", "guide_rna", "rnase_p_rna",
+        "rnase_mrp_rna", "telomerase_rna", "antisense_rna", "srp_rna", "scarna",
+        "vault_rna", "y_rna", "antisense_lncrna", "lncrna"
     )
-  
-  if (nrow(df_other) == 0 && nrow(df_gene) > 0) {
-    df_other <- df_gene %>% mutate(group = "gene", V3_norm = "gene", text = gsub(";", "\n", V9))
-  }
-  
-  df <- data.frame(
-    y = rep(1, nrow(df_other)),
-    xstart = as.numeric(df_other$V4),
-    xend = as.numeric(df_other$V5),
-    group = factor(df_other$group),
-    text = df_other$text,
-    feature_type = as.character(df_other$V3_norm),
-    seqid = as.character(df_other$V1),
-    source = as.character(df_other$V2),
-    feature_raw = as.character(df_other$V3),
-    score = as.character(df_other$V6),
-    strand = as.character(df_other$V7),
-    phase = as.character(df_other$V8),
-    attributes_raw = as.character(df_other$V9) # Conservamos el V9 intacto aquí
-  )
-  
-  df$largo <- df$xend - df$xstart + 1
-  df_gene$largo <- as.numeric(df_gene$V5) - as.numeric(df_gene$V4) + 1
-  
-  list(df = df, df_gene = df_gene, df_transcript = df_transcript)
+    df_transcript <- df_separated[df_separated$V3_norm %in% tx_level_types, , drop = FALSE]
+
+    other_idx <- df_separated$V3_norm %in% c("exon", "cds", "start_codon", "stop_codon") |
+        grepl("utr", df_separated$V3_norm)
+    df_other <- df_separated[other_idx, , drop = FALSE]
+
+    if (nrow(df_other) > 0) {
+        group <- rep("other", nrow(df_other))
+        v3_other <- df_other$V3_norm
+        group[v3_other == "exon"] <- "exon"
+        group[v3_other == "cds"] <- "cds"
+        group[v3_other %in% c("start_codon", "stop_codon")] <- "codon"
+        group[grepl("utr", v3_other)] <- "utr"
+        df_other$group <- group
+        df_other$text <- gsub(";", "\n", as.character(df_other$V9))
+    } else if (nrow(df_gene) > 0) {
+        df_other <- df_gene
+        df_other$group <- "gene"
+        df_other$V3_norm <- "gene"
+        df_other$text <- gsub(";", "\n", as.character(df_other$V9))
+    } else {
+        df_other$group <- character(0)
+        df_other$text <- character(0)
+    }
+
+    df <- data.frame(
+        y = rep(1, nrow(df_other)),
+        xstart = as.numeric(df_other$V4),
+        xend = as.numeric(df_other$V5),
+        group = factor(df_other$group),
+        text = df_other$text,
+        feature_type = as.character(df_other$V3_norm),
+        seqid = as.character(df_other$V1),
+        source = as.character(df_other$V2),
+        feature_raw = as.character(df_other$V3),
+        score = as.character(df_other$V6),
+        strand = as.character(df_other$V7),
+        phase = as.character(df_other$V8),
+        attributes_raw = as.character(df_other$V9),
+        stringsAsFactors = FALSE
+    )
+
+    df$largo <- df$xend - df$xstart + 1
+    df_gene$largo <- as.numeric(df_gene$V5) - as.numeric(df_gene$V4) + 1
+
+    list(df = df, df_gene = df_gene, df_transcript = df_transcript)
 }
 
 truncate_neighbor_label <- function(x, max_chars = 18) {
@@ -153,22 +271,165 @@ extract_composition_percentages <- function(composition_label) {
     data.frame(base = bases, pct = vals, stringsAsFactors = FALSE)
 }
 
-# Función auxiliar para crear el gráfico (compartida)
-create_gene_plot <- function(df, df_gene, df_transcript = NULL, current_transcript_length, length_difference, composicion_secuencia, gene_length_label, transcript_length_label, neighbor_context = NULL, visual_mode = "compact", width_svg = 22, height_svg = 1.75, organism_label = NULL, annotation_file_path = NULL, use_report_map = FALSE, report_path = "", plot_id = NULL, plot_context = NULL, genome_fasta_path = NULL, is_dark_theme = FALSE, is_colorblind_mode = FALSE, gene_display_name = NULL) {
+.cgv_gene_plot_model_cache <- new.env(parent = emptyenv())
+.cgv_gene_plot_model_cache_order <- character(0)
+.cgv_gene_plot_model_version <- "v1"
+
+get_gene_plot_model_cache_max_entries <- function() {
+    raw <- suppressWarnings(as.integer(Sys.getenv("APP_GENE_PLOT_MODEL_CACHE_MAX_ENTRIES", "48")))
+    if (!is.finite(raw) || raw < 0L) 48L else raw
+}
+
+get_gene_plot_model_cache <- function(cache_key) {
+    key <- trimws(as.character(cache_key %||% ""))
+    if (!nzchar(key) || !exists(key, envir = .cgv_gene_plot_model_cache, inherits = FALSE)) {
+        return(NULL)
+    }
+    .cgv_gene_plot_model_cache_order <<- c(setdiff(.cgv_gene_plot_model_cache_order, key), key)
+    get(key, envir = .cgv_gene_plot_model_cache, inherits = FALSE)
+}
+
+set_gene_plot_model_cache <- function(cache_key, model) {
+    key <- trimws(as.character(cache_key %||% ""))
+    max_entries <- get_gene_plot_model_cache_max_entries()
+    if (!nzchar(key) || max_entries <= 0L || is.null(model)) {
+        return(invisible(FALSE))
+    }
+    assign(key, model, envir = .cgv_gene_plot_model_cache)
+    .cgv_gene_plot_model_cache_order <<- c(setdiff(.cgv_gene_plot_model_cache_order, key), key)
+    while (length(.cgv_gene_plot_model_cache_order) > max_entries) {
+        evict <- .cgv_gene_plot_model_cache_order[1]
+        .cgv_gene_plot_model_cache_order <<- .cgv_gene_plot_model_cache_order[-1]
+        if (exists(evict, envir = .cgv_gene_plot_model_cache, inherits = FALSE)) {
+            rm(list = evict, envir = .cgv_gene_plot_model_cache)
+        }
+    }
+    invisible(TRUE)
+}
+
+merge_gene_plot_ranges <- function(starts, ends) {
+    starts <- as.numeric(starts)
+    ends <- as.numeric(ends)
+    keep <- is.finite(starts) & is.finite(ends)
+    starts <- starts[keep]
+    ends <- ends[keep]
+    if (length(starts) == 0L) {
+        return(data.frame(xstart = numeric(0), xend = numeric(0), stringsAsFactors = FALSE))
+    }
+    ord <- order(starts, ends)
+    starts <- starts[ord]
+    ends <- ends[ord]
+    group_start <- c(TRUE, starts[-1] > cummax(ends)[-length(ends)])
+    group_id <- cumsum(group_start)
+    data.frame(
+        xstart = as.numeric(tapply(starts, group_id, min)),
+        xend = as.numeric(tapply(ends, group_id, max)),
+        stringsAsFactors = FALSE
+    )
+}
+
+assign_features_to_rects <- function(feature_starts, feature_ends, rect_starts, rect_ends, tolerance_bp = 2) {
+    n_rect <- length(rect_starts)
+    if (length(feature_starts) == 0L || n_rect == 0L) {
+        return(vector("list", n_rect))
+    }
+    feature_starts <- as.numeric(feature_starts)
+    feature_ends <- as.numeric(feature_ends)
+    rect_starts <- as.numeric(rect_starts)
+    rect_ends <- as.numeric(rect_ends)
+    tol <- as.numeric(tolerance_bp %||% 0)
+
+    pairs <- lapply(seq_along(feature_starts), function(j) {
+        first <- findInterval(feature_starts[j], rect_ends + tol + 1) + 1L
+        last <- findInterval(feature_ends[j] + tol, rect_starts)
+        if (first > n_rect || last < first) return(NULL)
+        cbind(rect = seq.int(first, min(last, n_rect)), feature = j)
+    })
+    pairs <- Filter(Negate(is.null), pairs)
+    if (length(pairs) == 0L) {
+        return(vector("list", n_rect))
+    }
+    pair_matrix <- do.call(rbind, pairs)
+    split_features <- split(pair_matrix[, "feature"], factor(pair_matrix[, "rect"], levels = seq_len(n_rect)))
+    unname(lapply(split_features, as.integer))
+}
+
+prepare_gene_plot_model <- function(df, df_gene, df_transcript = NULL, visual_mode = "compact",
+                                    compact_feature_interactivity = TRUE, overlap_tol_bp = 2) {
     visual_mode <- match.arg(visual_mode, c("compact", "detailed"))
-    plot_perf <- app_perf_new_run(sprintf("PLOT_BUILD-%s", as.character(plot_id %||% "NA")))
-    app_perf_mark(plot_perf, sprintf("start mode=%s", visual_mode), "PLOT_BUILD")
-    df <- df %>% filter(is.finite(xstart), is.finite(xend))
-    df_gene <- df_gene %>%
-        mutate(V4 = as.numeric(V4), V5 = as.numeric(V5)) %>%
-        filter(is.finite(V4), is.finite(V5))
-    if (is.null(df_transcript) || nrow(df_transcript) == 0) {
+    df <- as.data.frame(df, stringsAsFactors = FALSE)
+    df <- df[is.finite(df$xstart) & is.finite(df$xend), , drop = FALSE]
+    df_gene <- as.data.frame(df_gene, stringsAsFactors = FALSE)
+    df_gene$V4 <- suppressWarnings(as.numeric(df_gene$V4))
+    df_gene$V5 <- suppressWarnings(as.numeric(df_gene$V5))
+    df_gene <- df_gene[is.finite(df_gene$V4) & is.finite(df_gene$V5), , drop = FALSE]
+    if (is.null(df_transcript) || nrow(df_transcript) == 0L) {
         df_transcript <- data.frame()
     } else {
-        df_transcript <- df_transcript %>%
-            mutate(V4 = suppressWarnings(as.numeric(V4)), V5 = suppressWarnings(as.numeric(V5)))
+        df_transcript <- as.data.frame(df_transcript, stringsAsFactors = FALSE)
+        df_transcript$V4 <- suppressWarnings(as.numeric(df_transcript$V4))
+        df_transcript$V5 <- suppressWarnings(as.numeric(df_transcript$V5))
     }
-    app_perf_mark(plot_perf, "data normalize done", "PLOT_BUILD")
+
+    compact_rects <- data.frame(xstart = numeric(0), xend = numeric(0), stringsAsFactors = FALSE)
+    feature_to_rect <- list()
+    if (identical(visual_mode, "compact")) {
+        compact_rects <- merge_gene_plot_ranges(df$xstart, df$xend)
+        feature_to_rect <- if (isTRUE(compact_feature_interactivity)) {
+            assign_features_to_rects(
+                df$xstart, df$xend, compact_rects$xstart, compact_rects$xend, overlap_tol_bp
+            )
+        } else {
+            vector("list", nrow(compact_rects))
+        }
+    }
+
+    list(
+        version = .cgv_gene_plot_model_version,
+        df = df,
+        df_gene = df_gene,
+        df_transcript = df_transcript,
+        compact_rects = compact_rects,
+        feature_to_rect = feature_to_rect
+    )
+}
+
+# Función auxiliar para crear el gráfico (compartida)
+create_gene_plot <- function(df, df_gene, df_transcript = NULL, current_transcript_length, length_difference, composicion_secuencia, gene_length_label, transcript_length_label, neighbor_context = NULL, visual_mode = "compact", width_svg = 22, height_svg = 1.75, organism_label = NULL, annotation_file_path = NULL, use_report_map = FALSE, report_path = "", plot_id = NULL, plot_context = NULL, genome_fasta_path = NULL, is_dark_theme = FALSE, is_colorblind_mode = FALSE, gene_display_name = NULL, precomputed_genomic_span = NULL, model_cache_key = NULL) {
+    visual_mode <- match.arg(visual_mode, c("compact", "detailed"))
+    plot_perf <- app_perf_new_run(sprintf("PLOT_BUILD-%s", as.character(plot_id %||% "NA")))
+    plot_perf_context <- switch(
+        tolower(trimws(as.character(plot_context %||% ""))),
+        homologous = "HOMO_PLOT_BUILD",
+        orthologous = "ORTHO_PLOT_BUILD",
+        "PLOT_BUILD"
+    )
+    app_perf_mark(plot_perf, sprintf("start mode=%s", visual_mode), plot_perf_context)
+    model_t0 <- app_perf_now()
+    is_compact_mode <- identical(visual_mode, "compact")
+    compact_feature_interactivity <- !is_compact_mode || is_compact_feature_interactivity_enabled()
+    prepared_model_key <- trimws(as.character(model_cache_key %||% ""))
+    if (nzchar(prepared_model_key)) {
+        prepared_model_key <- paste(.cgv_gene_plot_model_version, prepared_model_key, sep = "|")
+    }
+    prepared_model <- get_gene_plot_model_cache(prepared_model_key)
+    model_cache_hit <- !is.null(prepared_model)
+    if (!model_cache_hit) {
+        prepared_model <- prepare_gene_plot_model(
+            df,
+            df_gene,
+            df_transcript,
+            visual_mode = visual_mode,
+            compact_feature_interactivity = compact_feature_interactivity,
+            overlap_tol_bp = 2
+        )
+        set_gene_plot_model_cache(prepared_model_key, prepared_model)
+    }
+    df <- prepared_model$df
+    df_gene <- prepared_model$df_gene
+    df_transcript <- prepared_model$df_transcript
+    app_perf_mark(plot_perf, "data normalize done", plot_perf_context)
+    app_perf_mark(plot_perf, sprintf("model_cache_hit=%d", as.integer(model_cache_hit)), plot_perf_context)
     is_dark_theme <- isTRUE(is_dark_theme)
     is_colorblind_mode <- isTRUE(is_colorblind_mode)
     gene_line_color <- if (is_dark_theme) "#C7D6E4" else "#2C3E50"
@@ -195,7 +456,6 @@ create_gene_plot <- function(df, df_gene, df_transcript = NULL, current_transcri
     }
     genome_fasta_path <- trimws(as.character(genome_fasta_path %||% ""))
     has_gc_source <- nzchar(genome_fasta_path) && file.exists(genome_fasta_path)
-    is_compact_mode <- identical(visual_mode, "compact")
     needs_feature_gc <- isTRUE(has_gc_source)
     format_gc_pct <- function(gc_pct) {
         if (!is.finite(gc_pct)) {
@@ -245,12 +505,17 @@ create_gene_plot <- function(df, df_gene, df_transcript = NULL, current_transcri
 
     full_transcript_seq <- ""
     if (isTRUE(needs_feature_gc) && is.finite(transcript_min) && is.finite(transcript_max)) {
-      full_transcript_seq <- tryCatch(
-        extract_sequence_from_fasta(genome_fasta_path, df$seqid[1], as.integer(transcript_min), as.integer(transcript_max)),
-        error = function(e) ""
-      )
+      precomp <- trimws(as.character(precomputed_genomic_span %||% ""))
+      if (nzchar(precomp)) {
+        full_transcript_seq <- precomp
+      } else {
+        full_transcript_seq <- tryCatch(
+          extract_sequence_from_fasta(genome_fasta_path, df$seqid[1], as.integer(transcript_min), as.integer(transcript_max)),
+          error = function(e) ""
+        )
+      }
     }
-    app_perf_mark(plot_perf, sprintf("gc source ready len=%d", as.integer(nchar(full_transcript_seq %||% ""))), "PLOT_BUILD")
+    app_perf_mark(plot_perf, sprintf("gc source ready len=%d", as.integer(nchar(full_transcript_seq %||% ""))), plot_perf_context)
 
     get_feature_gc_pct <- function(seqid, start_pos, end_pos) {
       if (!nzchar(full_transcript_seq)) return(NA_real_)
@@ -373,7 +638,7 @@ create_gene_plot <- function(df, df_gene, df_transcript = NULL, current_transcri
     } else {
         rep("N/A", nrow(df))
     }
-    if (isTRUE(needs_feature_gc) && !isTRUE(is_compact_mode)) {
+    if (isTRUE(needs_feature_gc)) {
         df$gc_pct <- batch_gc_pct(df$xstart, df$xend)
         df$gc_label <- ifelse(is.finite(df$gc_pct), sprintf("%.2f%%", df$gc_pct), "N/A")
     } else {
@@ -382,7 +647,8 @@ create_gene_plot <- function(df, df_gene, df_transcript = NULL, current_transcri
     }
 
     overlap_tol_bp <- 2
-    app_perf_mark(plot_perf, "feature typing done", "PLOT_BUILD")
+    app_perf_mark(plot_perf, "feature typing done", plot_perf_context)
+    app_perf_mark(plot_perf, sprintf("compact_feature_interactivity=%s", as.character(isTRUE(compact_feature_interactivity))), plot_perf_context)
     build_overlap_html <- function(idx) {
         idx <- as.integer(idx)
         idx <- idx[idx >= 1 & idx <= nrow(df)]
@@ -484,7 +750,7 @@ create_gene_plot <- function(df, df_gene, df_transcript = NULL, current_transcri
             shared_block
         )
     }
-    app_perf_mark(plot_perf, "tooltip builders ready", "PLOT_BUILD")
+    app_perf_mark(plot_perf, "tooltip builders ready", plot_perf_context)
 
     build_single_feature_attr_block <- function(attrs, attr_txt) {
         attr_lines <- format_attr_lines(attrs)
@@ -587,7 +853,7 @@ create_gene_plot <- function(df, df_gene, df_transcript = NULL, current_transcri
             }
         }
     }
-    app_perf_mark(plot_perf, sprintf("introns done n=%d", as.integer(nrow(intron_df))), "PLOT_BUILD")
+    app_perf_mark(plot_perf, sprintf("introns done n=%d", as.integer(nrow(intron_df))), plot_perf_context)
     if (nrow(intron_df) > 0) {
         intron_df$tooltip <- as.character(intron_df$tooltip)
         intron_df$data_id <- as.character(intron_df$data_id)
@@ -601,86 +867,35 @@ create_gene_plot <- function(df, df_gene, df_transcript = NULL, current_transcri
         intron_df <- intron_df[keep_intron, , drop = FALSE]
     }
 
-    merge_overlapping_ranges <- function(starts, ends) {
-        starts <- as.numeric(starts)
-        ends <- as.numeric(ends)
-        keep <- is.finite(starts) & is.finite(ends)
-        starts <- starts[keep]
-        ends <- ends[keep]
-        if (length(starts) == 0) {
-            return(data.frame(xstart = numeric(0), xend = numeric(0), stringsAsFactors = FALSE))
-        }
-        ord <- order(starts, ends)
-        starts <- starts[ord]
-        ends <- ends[ord]
-        merged_start <- numeric(0)
-        merged_end <- numeric(0)
-        cur_start <- starts[1]
-        cur_end <- ends[1]
-        if (length(starts) > 1) {
-            for (k in 2:length(starts)) {
-                if (starts[k] <= cur_end) {
-                    cur_end <- max(cur_end, ends[k])
-                } else {
-                    merged_start <- c(merged_start, cur_start)
-                    merged_end <- c(merged_end, cur_end)
-                    cur_start <- starts[k]
-                    cur_end <- ends[k]
-                }
-            }
-        }
-        merged_start <- c(merged_start, cur_start)
-        merged_end <- c(merged_end, cur_end)
-        data.frame(xstart = merged_start, xend = merged_end, stringsAsFactors = FALSE)
-    }
-
     structure_y_offset <- 0
     structure_y_base <- 1 + structure_y_offset
 
     df_rect <- if (visual_mode == "compact") {
-        compact_rects <- merge_overlapping_ranges(df$xstart, df$xend)
+        compact_rects <- prepared_model$compact_rects
         if (nrow(compact_rects) > 0) {
             compact_rects$plot_group <- "compact"
             compact_rects$ymin_feat <- 0.952
             compact_rects$ymax_feat <- 1.048
             compact_rects$feature_uid <- paste0("compact_region_", seq_len(nrow(compact_rects)))
-            # Pre-assign features to merged rects in O(n*m) but with vectorized ops
-            # instead of per-rect which() calls. For each feature, find which merged
-            # rect(s) it overlaps using vectorized comparisons.
-            feature_to_rect <- if (nrow(df) > 0 && nrow(compact_rects) > 0) {
-                # Use findInterval on sorted compact_rects$xstart for O(n log m)
-                # Each feature overlaps rect i if: df$xend >= compact_rects$xstart[i] - tol AND df$xstart <= compact_rects$xend[i] + tol
-                rect_assignments <- vector("list", nrow(compact_rects))
-                for (i in seq_len(nrow(compact_rects))) {
-                    rect_assignments[[i]] <- integer(0)
-                }
-                for (j in seq_len(nrow(df))) {
-                    # Binary search: find first rect whose xstart <= df$xend[j] + tol
-                    candidate <- findInterval(df$xstart[j], compact_rects$xend + overlap_tol_bp + 1L)
-                    start_rect <- candidate + 1L
-                    if (start_rect <= nrow(compact_rects)) {
-                        for (i in start_rect:nrow(compact_rects)) {
-                            if (compact_rects$xstart[i] - overlap_tol_bp > df$xend[j]) break
-                            rect_assignments[[i]] <- c(rect_assignments[[i]], j)
-                        }
-                    }
-                }
-                rect_assignments
+            if (isTRUE(compact_feature_interactivity)) {
+                # Pre-assign features to merged rects only when compact feature
+                # tooltips are enabled; otherwise girafe has far fewer SVG hooks.
+                feature_to_rect <- prepared_model$feature_to_rect
+                compact_rects$plot_tooltip <- vapply(seq_len(nrow(compact_rects)), function(i) {
+                    idx <- feature_to_rect[[i]]
+                    region_length <- as.numeric(compact_rects$xend[i] - compact_rects$xstart[i] + 1)
+                    paste0(
+                        "<b style='color:var(--app-message-accent);font-weight:700;'>Merged Gene Region</b><br/>",
+                        "<b>Start:</b> ", format_bp(compact_rects$xstart[i]), "<br/>",
+                        "<b>End:</b> ", format_bp(compact_rects$xend[i]), "<br/>",
+                        "<b>Length:</b> ", format_bp(region_length), " bp<br/>",
+                        "<hr style='border:none;border-top:1px solid #B6CCC6;margin:5px 0;'/>",
+                        build_overlap_html(idx)
+                    )
+                }, character(1))
             } else {
-                vector("list", nrow(compact_rects))
+                compact_rects$plot_tooltip <- rep("", nrow(compact_rects))
             }
-            compact_rects$plot_tooltip <- vapply(seq_len(nrow(compact_rects)), function(i) {
-                idx <- feature_to_rect[[i]]
-                region_length <- as.numeric(compact_rects$xend[i] - compact_rects$xstart[i] + 1)
-                paste0(
-                    "<b style='color:var(--app-message-accent);font-weight:700;'>Merged Gene Region</b><br/>",
-                    "<b>Start:</b> ", format_bp(compact_rects$xstart[i]), "<br/>",
-                    "<b>End:</b> ", format_bp(compact_rects$xend[i]), "<br/>",
-                    "<b>Length:</b> ", format_bp(region_length), " bp<br/>",
-                    "<hr style='border:none;border-top:1px solid #B6CCC6;margin:5px 0;'/>",
-                    build_overlap_html(idx)
-                )
-            }, character(1))
         } else {
             compact_rects <- data.frame(
                 xstart = numeric(0), xend = numeric(0),
@@ -723,7 +938,7 @@ create_gene_plot <- function(df, df_gene, df_transcript = NULL, current_transcri
             ) %>%
             arrange(feature_draw_rank, xstart, xend)
     }
-    app_perf_mark(plot_perf, sprintf("rectangles done n=%d", as.integer(nrow(df_rect))), "PLOT_BUILD")
+    app_perf_mark(plot_perf, sprintf("rectangles done n=%d", as.integer(nrow(df_rect))), plot_perf_context)
     if (nrow(df_rect) > 0) {
         df_rect$plot_tooltip <- as.character(df_rect$plot_tooltip)
         df_rect$feature_uid <- as.character(df_rect$feature_uid)
@@ -732,16 +947,19 @@ create_gene_plot <- function(df, df_gene, df_transcript = NULL, current_transcri
             is.finite(df_rect$ymin_feat) &
             is.finite(df_rect$ymax_feat) &
             (df_rect$xend > df_rect$xstart) &
-            !is.na(df_rect$plot_tooltip) &
-            nzchar(trimws(df_rect$plot_tooltip)) &
             !is.na(df_rect$feature_uid) &
             nzchar(trimws(df_rect$feature_uid))
+        if (isTRUE(compact_feature_interactivity)) {
+            keep_rect <- keep_rect &
+                !is.na(df_rect$plot_tooltip) &
+                nzchar(trimws(df_rect$plot_tooltip))
+        }
         df_rect <- df_rect[keep_rect, , drop = FALSE]
     }
     app_perf_mark(
         plot_perf,
         sprintf("features ready rect=%d intron=%d", as.integer(nrow(df_rect)), as.integer(nrow(intron_df))),
-        "PLOT_BUILD"
+        plot_perf_context
     )
 
     custom_colors <- get_transcript_feature_palette(
@@ -1051,7 +1269,7 @@ create_gene_plot <- function(df, df_gene, df_transcript = NULL, current_transcri
             linewidth = 0.15
         ) +
         {
-            if (nrow(intron_df) > 0) {
+            if (nrow(intron_df) > 0 && isTRUE(compact_feature_interactivity)) {
                 geom_segment_interactive(
                     data = intron_df,
                     aes(
@@ -1062,12 +1280,20 @@ create_gene_plot <- function(df, df_gene, df_transcript = NULL, current_transcri
                     linewidth = 0.8,
                     linetype = "solid"
                 )
+            } else if (nrow(intron_df) > 0) {
+                geom_segment(
+                    data = intron_df,
+                    aes(x = intron_start, xend = intron_end, y = 1, yend = 1),
+                    color = gene_line_color,
+                    linewidth = 0.8,
+                    linetype = "solid"
+                )
             } else {
                 NULL
             }
         } +
         {
-            if (nrow(df_rect) > 0) {
+            if (nrow(df_rect) > 0 && isTRUE(compact_feature_interactivity)) {
                 geom_rect_interactive(
                     data = df_rect,
                     aes(
@@ -1076,6 +1302,16 @@ create_gene_plot <- function(df, df_gene, df_transcript = NULL, current_transcri
                         fill = plot_group,
                         tooltip = plot_tooltip,
                         data_id = feature_uid
+                    ),
+                    alpha = 1
+                )
+            } else if (nrow(df_rect) > 0) {
+                geom_rect(
+                    data = df_rect,
+                    aes(
+                        xmin = xstart, xmax = xend,
+                        ymin = ymin_feat, ymax = ymax_feat,
+                        fill = plot_group
                     ),
                     alpha = 1
                 )
@@ -1423,7 +1659,9 @@ create_gene_plot <- function(df, df_gene, df_transcript = NULL, current_transcri
     # Disable hover restyling to avoid rapid style thrash in ultra-dense regions.
     hover_css_str <- ""
 
-    app_perf_mark(plot_perf, "girafe build start", "PLOT_BUILD")
+    app_perf_mark_ms(plot_perf, "model_build_ms", app_perf_elapsed_ms(model_t0), plot_perf_context)
+    girafe_t0 <- as.numeric(proc.time()[["elapsed"]])
+    app_perf_mark(plot_perf, "girafe build start", plot_perf_context)
     plot_widget <- withCallingHandlers(
         girafe(
             ggobj = gg_lines,
@@ -1462,28 +1700,55 @@ create_gene_plot <- function(df, df_gene, df_transcript = NULL, current_transcri
             }
         }
     )
-    app_perf_mark(plot_perf, "girafe build done", "PLOT_BUILD")
+    app_perf_mark(plot_perf, "girafe build done", plot_perf_context)
+    app_perf_mark_ms(plot_perf, "girafe_build_ms", app_perf_elapsed_ms(girafe_t0), plot_perf_context)
+    if (exists("compact_girafe_widget", mode = "function")) {
+        plot_widget <- compact_girafe_widget(
+            plot_widget,
+            label = paste0("gene_card:", as.character(plot_context %||% "plot"), ":", as.character(plot_id %||% "NA"))
+        )
+    }
+    plot_html_bytes <- tryCatch(
+        nchar(as.character(plot_widget$x$html %||% ""), type = "bytes"),
+        error = function(e) NA_integer_
+    )
+    if (is.finite(plot_html_bytes)) {
+        app_perf_mark(plot_perf, sprintf("plot_html_bytes=%d", as.integer(plot_html_bytes)), plot_perf_context)
+    }
     plot_widget
 }
 
 # Función server del módulo de Plot para homólogos
-plotServerHomologous <- function(id, data, max_gene_length, min_gene_coord, max_gene_coord, genSequences, plotIndex, gene_name, genome_fasta_path = NULL, annotation_file_path = NULL, visual_mode = NULL, organism_name = NULL, use_report_map = FALSE, report_path = "", app_theme = NULL, app_colorblind = NULL, precomputed_neighbor_context = NULL, prefetch_sequence = TRUE, prefetch_neighbor_context = FALSE, perf_run_id = NULL, on_plot_ready = NULL) {
+plotServerHomologous <- function(id, data, max_gene_length, min_gene_coord, max_gene_coord, genSequences, plotIndex, gene_name, genome_fasta_path = NULL, annotation_file_path = NULL, visual_mode = NULL, organism_name = NULL, use_report_map = FALSE, report_path = "", app_theme = NULL, app_colorblind = NULL, precomputed_neighbor_context = NULL, prefetch_sequence = TRUE, prefetch_neighbor_context = FALSE, perf_run_id = NULL, on_plot_ready = NULL, plot_signature = NULL) {
     moduleServer(
         id,
         function(input, output, session) {
             # OPT-4: Process data ONCE at module init (data is a static data.frame)
+            module_init_t0 <- app_perf_now()
             processed_cache <- process_gene_data(data)
 
             # Reactive value to store gene info
             gene_info <- reactiveVal(NULL)
+            genomic_span_seq <- reactiveVal("")
             neighbor_context <- reactiveVal(NULL)
             neighbor_context_resolved <- reactiveVal(FALSE)
             cached_plot_key <- reactiveVal("")
             cached_plot_obj <- reactiveVal(NULL)
+            render_nonce <- reactiveVal(0L)
+            deferred_sequence_prefetch_started <- reactiveVal(FALSE)
+            gc_span_prefetch_started <- reactiveVal(FALSE)
             plot_ready_notified <- FALSE
             module_destroyed <- FALSE
             is_homo_plot_cache_enabled <- function() {
                 raw <- tolower(trimws(as.character(Sys.getenv("APP_HOMO_PLOT_CACHE", "1") %||% "1")))
+                !raw %in% c("", "0", "false", "no", "off")
+            }
+            is_homo_sequence_deferred <- function() {
+                raw <- tolower(trimws(as.character(Sys.getenv("APP_HOMO_DEFER_SEQUENCE", "0") %||% "0")))
+                !raw %in% c("", "0", "false", "no", "off")
+            }
+            is_feature_gc_deferred <- function() {
+                raw <- tolower(trimws(as.character(Sys.getenv("APP_DEFER_FEATURE_GC", "0") %||% "0")))
                 !raw %in% c("", "0", "false", "no", "off")
             }
             notify_plot_ready <- function() {
@@ -1501,6 +1766,7 @@ plotServerHomologous <- function(id, data, max_gene_length, min_gene_coord, max_
                 module_perf$id <- paste0(perf_parent, "|plot=", as.character(plotIndex))
             }
             app_perf_mark(module_perf, "module init", "HOMO_MOD")
+            app_perf_mark_ms(module_perf, "module_init_ms", app_perf_elapsed_ms(module_init_t0), "HOMO_MOD")
             destroy_module <- function() {
                 if (isTRUE(module_destroyed)) {
                     return(invisible(FALSE))
@@ -1523,6 +1789,7 @@ plotServerHomologous <- function(id, data, max_gene_length, min_gene_coord, max_
             })
 
             resolve_neighbor_context_sync <- function(step_prefix = "neighbor context") {
+                neighbor_t0 <- app_perf_now()
                 df_gene <- processed_cache$df_gene
                 df_plot <- processed_cache$df
                 if (is.null(annotation_file_path) || !nzchar(annotation_file_path) || (nrow(df_gene) <= 0 && nrow(df_plot) <= 0)) {
@@ -1551,7 +1818,171 @@ plotServerHomologous <- function(id, data, max_gene_length, min_gene_coord, max_
                 )
                 out_ctx <- get_neighbor_context_for_target(annotation_file_path, target_gene)
                 app_perf_mark(module_perf, sprintf("%s done", as.character(step_prefix)), "HOMO_MOD")
+                app_perf_mark_ms(module_perf, "neighbor_context_ms", app_perf_elapsed_ms(neighbor_t0), "HOMO_MOD")
                 out_ctx
+            }
+
+            resolve_gene_info_sync <- function(step_prefix = "prefetch", composition_only = FALSE) {
+                df_gene <- processed_cache$df_gene
+                df_plot <- processed_cache$df
+                df_transcript <- processed_cache$df_transcript
+
+                tx_start <- suppressWarnings(min(as.numeric(df_transcript$V4), na.rm = TRUE))
+                tx_end <- suppressWarnings(max(as.numeric(df_transcript$V5), na.rm = TRUE))
+                if (!is.finite(tx_start) || !is.finite(tx_end) || tx_end <= tx_start) {
+                    tx_start <- suppressWarnings(min(df_plot$xstart, na.rm = TRUE))
+                    tx_end <- suppressWarnings(max(df_plot$xend, na.rm = TRUE))
+                }
+                if (!is.finite(tx_start) || !is.finite(tx_end) || tx_end <= tx_start) {
+                    tx_start <- suppressWarnings(min(df_gene$V4, na.rm = TRUE))
+                    tx_end <- suppressWarnings(max(df_gene$V5, na.rm = TRUE))
+                }
+                if (!is.finite(tx_start) || !is.finite(tx_end) || tx_end <= tx_start) {
+                    tx_start <- suppressWarnings(min(as.numeric(data$V4), na.rm = TRUE))
+                    tx_end <- suppressWarnings(max(data$V5, na.rm = TRUE))
+                }
+
+                tx_attr <- if (nrow(df_transcript) > 0) as.character(df_transcript$V9[1] %||% "") else ""
+                tx_attrs <- parse_gff_attributes(tx_attr %||% "")
+                gene_attr <- if (nrow(df_gene) > 0) as.character(df_gene$V9[1] %||% "") else ""
+                tx_label_candidates <- c(
+                    tx_attrs[["name"]][1],
+                    tx_attrs[["transcript"]][1],
+                    tx_attrs[["id"]][1],
+                    tx_attrs[["transcript_id"]][1],
+                    extract_primary_gene_name(gene_attr),
+                    extract_primary_gene_id(gene_attr)
+                )
+                tx_label_candidates <- as.character(tx_label_candidates %||% character(0))
+                tx_label_candidates <- tx_label_candidates[!is.na(tx_label_candidates) & nzchar(trimws(tx_label_candidates))]
+                tx_label <- if (length(tx_label_candidates) > 0) tx_label_candidates[1] else "transcript"
+                tx_label <- trimws(utils::URLdecode(tx_label))
+                if (!nzchar(tx_label)) tx_label <- "transcript"
+                tx_strand <- trimws(as.character(df_transcript$V7[1] %||% df_gene$V7[1] %||% data$V7[1] %||% "+"))
+                if (!nzchar(tx_strand)) tx_strand <- "+"
+                if (!tx_strand %in% c("+", "-")) tx_strand <- "+"
+
+                exon_idx <- which(tolower(as.character(df_plot$feature_type %||% rep("", nrow(df_plot)))) == "exon")
+                if (length(exon_idx) == 0) {
+                    exon_idx <- which(tolower(as.character(df_plot$feature_type %||% rep("", nrow(df_plot)))) == "cds")
+                }
+                exon_ranges <- if (length(exon_idx) > 0) {
+                    data.frame(
+                        start = suppressWarnings(as.numeric(df_plot$xstart[exon_idx])),
+                        end = suppressWarnings(as.numeric(df_plot$xend[exon_idx])),
+                        stringsAsFactors = FALSE
+                    )
+                } else {
+                    NULL
+                }
+                chr_for_fetch <- as.character(
+                    df_gene$V1[1] %||%
+                        df_transcript$V1[1] %||%
+                        df_plot$seqid[1] %||%
+                        data$V1[1] %||%
+                        ""
+                )
+
+                if (isTRUE(composition_only)) {
+                    comp_info <- NULL
+                    if (!is.null(genome_fasta_path) && nzchar(genome_fasta_path) && file.exists(genome_fasta_path) &&
+                        !is.null(exon_ranges) && nrow(normalize_exon_ranges(exon_ranges)) > 0L) {
+                        comp_info <- tryCatch(
+                            get_transcript_composition_cached(genome_fasta_path, chr_for_fetch, exon_ranges, strand = tx_strand),
+                            error = function(e) NULL
+                        )
+                    }
+                    comp_blob <- if (!is.null(comp_info)) make_sequence_composition_blob(comp_info) else ""
+                    current_genSequences <- isolate(genSequences())
+                    current_genSequences[[plotIndex]] <- comp_blob
+                    genSequences(current_genSequences)
+                    app_perf_mark(module_perf, sprintf("%s composition_only ready=%s", as.character(step_prefix), as.character(nzchar(comp_blob))), "HOMO_MOD")
+                    return(list(sequence = "", file_content = comp_blob, fasta_id = tx_label, composition = comp_info, composition_blob = comp_blob))
+                }
+
+                result <- list(sequence = "", file_content = "", fasta_id = tx_label, composition_blob = "")
+                if (!is.null(genome_fasta_path) && nzchar(genome_fasta_path) && file.exists(genome_fasta_path)) {
+                    result <- fetch_gene_data_sync(
+                        chr_for_fetch,
+                        list(start = as.numeric(tx_start), end = as.numeric(tx_end)),
+                        fasta_path = genome_fasta_path,
+                        fasta_id = tx_label,
+                        exon_ranges = exon_ranges,
+                        strand = tx_strand
+                    )
+                }
+                current_genSequences <- isolate(genSequences())
+                current_genSequences[[plotIndex]] <- result$file_content %||% ""
+                genSequences(current_genSequences)
+                seq_len <- nchar(as.character(result$sequence %||% ""))
+                app_perf_mark(module_perf, sprintf("%s resolved seq_len=%d", as.character(step_prefix), as.integer(seq_len)), "HOMO_MOD")
+                result
+            }
+
+            schedule_gc_span_prefetch <- function(df_plot) {
+                if (!isTRUE(is_feature_gc_deferred()) || isTRUE(gc_span_prefetch_started())) {
+                    return(invisible(FALSE))
+                }
+                current_span <- trimws(as.character(isolate(genomic_span_seq()) %||% ""))
+                if (nzchar(current_span)) {
+                    return(invisible(FALSE))
+                }
+                gs_source_ok <- nzchar(as.character(genome_fasta_path %||% "")) && file.exists(genome_fasta_path)
+                gs_start <- suppressWarnings(min(df_plot$xstart, na.rm = TRUE))
+                gs_end <- suppressWarnings(max(df_plot$xend, na.rm = TRUE))
+                gs_seqid <- as.character(df_plot$seqid[1] %||% "")
+                if (!isTRUE(gs_source_ok) || !is.finite(gs_start) || !is.finite(gs_end) ||
+                    gs_end <= gs_start || !nzchar(gs_seqid)) {
+                    return(invisible(FALSE))
+                }
+                gc_span_prefetch_started(TRUE)
+                run_prefetch <- function() {
+                    if (isTRUE(module_destroyed)) return(invisible(NULL))
+                    gc_t0 <- app_perf_now()
+                    app_perf_mark(module_perf, "feature GC span prefetch start", "HOMO_MOD")
+                    gs_seq <- tryCatch(
+                        extract_sequence_from_fasta(genome_fasta_path, gs_seqid, as.integer(gs_start), as.integer(gs_end)),
+                        error = function(e) ""
+                    )
+                    if (nzchar(gs_seq) && !isTRUE(module_destroyed)) {
+                        genomic_span_seq(gs_seq)
+                        render_nonce(as.integer(isolate(render_nonce()) %||% 0L) + 1L)
+                    }
+                    app_perf_mark(module_perf, sprintf("feature GC span prefetch done len=%d", as.integer(nchar(gs_seq %||% ""))), "HOMO_MOD")
+                    app_perf_mark_ms(module_perf, "feature_gc_span_prefetch_ms", app_perf_elapsed_ms(gc_t0), "HOMO_MOD")
+                    invisible(NULL)
+                }
+                if (requireNamespace("later", quietly = TRUE)) later::later(run_prefetch, delay = 0.15) else run_prefetch()
+                invisible(TRUE)
+            }
+
+            schedule_deferred_sequence_prefetch <- function() {
+                if (!isTRUE(is_homo_sequence_deferred()) || isTRUE(deferred_sequence_prefetch_started())) {
+                    return(invisible(FALSE))
+                }
+                if (!is.null(isolate(gene_info()))) {
+                    return(invisible(FALSE))
+                }
+                deferred_sequence_prefetch_started(TRUE)
+                run_prefetch <- function() {
+                    if (isTRUE(module_destroyed)) return(invisible(NULL))
+                    sequence_t0 <- app_perf_now()
+                    app_perf_mark(module_perf, "deferred sequence prefetch start", "HOMO_MOD")
+                    info <- tryCatch(
+                        resolve_gene_info_sync("deferred_sequence", composition_only = TRUE),
+                        error = function(e) {
+                            app_perf_mark(module_perf, sprintf("deferred sequence error: %s", as.character(e$message %||% "unknown")), "HOMO_MOD")
+                            list(sequence = "", file_content = "")
+                        }
+                    )
+                    if (!isTRUE(module_destroyed)) {
+                        gene_info(info)
+                    }
+                    app_perf_mark_ms(module_perf, "deferred_sequence_prefetch_ms", app_perf_elapsed_ms(sequence_t0), "HOMO_MOD")
+                    invisible(NULL)
+                }
+                if (requireNamespace("later", quietly = TRUE)) later::later(run_prefetch, delay = 0.25) else run_prefetch()
+                invisible(TRUE)
             }
 
             # Trigger data fetching
@@ -1562,6 +1993,8 @@ plotServerHomologous <- function(id, data, max_gene_length, min_gene_coord, max_
                 df_gene <- processed_cache$df_gene
                 df_plot <- processed_cache$df
                 df_transcript <- processed_cache$df_transcript
+                defer_sequence <- isTRUE(is_homo_sequence_deferred())
+                defer_feature_gc <- isTRUE(is_feature_gc_deferred())
 
                 if (!is.null(precomputed_neighbor_context)) {
                     neighbor_context(precomputed_neighbor_context)
@@ -1577,7 +2010,7 @@ plotServerHomologous <- function(id, data, max_gene_length, min_gene_coord, max_
                 }
 
                 if (isTRUE(prefetch_sequence)) {
-                    app_perf_mark(module_perf, "prefetch sequence start", "HOMO_MOD")
+                    app_perf_mark(module_perf, "async prefetch launch", "HOMO_MOD")
                     tx_start <- suppressWarnings(min(as.numeric(df_transcript$V4), na.rm = TRUE))
                     tx_end <- suppressWarnings(max(as.numeric(df_transcript$V5), na.rm = TRUE))
                     if (!is.finite(tx_start) || !is.finite(tx_end) || tx_end <= tx_start) {
@@ -1634,22 +2067,111 @@ plotServerHomologous <- function(id, data, max_gene_length, min_gene_coord, max_
                             ""
                     )
 
-                    result <- fetch_gene_data_sync(
-                        chr_for_fetch,
-                        list(start = as.numeric(tx_start), end = as.numeric(tx_end)),
-                        fasta_path = genome_fasta_path,
-                        fasta_id = tx_label,
-                        exon_ranges = exon_ranges,
-                        strand = tx_strand
-                    )
-                    gene_info(result)
+                    gs_source_ok <- nzchar(as.character(genome_fasta_path %||% "")) && file.exists(genome_fasta_path)
+                    gs_start <- suppressWarnings(min(df_plot$xstart, na.rm = TRUE))
+                    gs_end <- suppressWarnings(max(df_plot$xend, na.rm = TRUE))
+                    gs_seqid <- as.character(df_plot$seqid[1] %||% "")
 
-                    # Update shared sequences
-                    current_genSequences <- isolate(genSequences())
-                    current_genSequences[[plotIndex]] <- result$file_content
-                    genSequences(current_genSequences)
-                    seq_len <- nchar(as.character(result$sequence %||% ""))
-                    app_perf_mark(module_perf, sprintf("prefetch resolved seq_len=%d", as.integer(seq_len)), "HOMO_MOD")
+                    local_genome <- genome_fasta_path
+                    local_gs_seqid <- gs_seqid
+                    local_gs_start <- gs_start
+                    local_gs_end <- gs_end
+                    local_gs_ok <- isTRUE(gs_source_ok)
+                    local_chr <- chr_for_fetch
+                    local_tx_coords <- list(start = as.numeric(tx_start), end = as.numeric(tx_end))
+                    local_tx_label <- tx_label
+                    local_exon_ranges <- exon_ranges
+                    local_tx_strand <- tx_strand
+                    inline_fast <- should_inline_fast_sequence_prefetch(
+                        local_genome,
+                        min(c(local_gs_start, local_tx_coords$start), na.rm = TRUE),
+                        max(c(local_gs_end, local_tx_coords$end), na.rm = TRUE)
+                    )
+                    # A small 2bit span is cheaper to read now than to rebuild the
+                    # complete ggiraph widget after the deferred GC fetch.
+                    local_need_gc_span <- !isTRUE(defer_feature_gc) || isTRUE(inline_fast)
+                    local_need_sequence <- isTRUE(prefetch_sequence) && !isTRUE(defer_sequence)
+
+                    fn_extract_seq <- extract_sequence_from_fasta
+                    fn_fetch_gene <- fetch_gene_data_sync
+
+                    run_sequence_prefetch <- function() {
+                        gs_seq <- ""
+                        if (isTRUE(local_need_gc_span) && isTRUE(local_gs_ok) && is.finite(local_gs_start) && is.finite(local_gs_end) &&
+                            local_gs_end > local_gs_start && nzchar(local_gs_seqid)) {
+                            gs_seq <- tryCatch(
+                                fn_extract_seq(local_genome, local_gs_seqid, as.integer(local_gs_start), as.integer(local_gs_end)),
+                                error = function(e) ""
+                            )
+                        }
+                        seq_result <- list(sequence = "", file_content = "", fasta_id = local_tx_label)
+                        if (isTRUE(local_need_sequence) && !is.null(local_genome) && nzchar(local_genome) && file.exists(local_genome)) {
+                            seq_result <- tryCatch(
+                                fn_fetch_gene(local_chr, local_tx_coords,
+                                    fasta_path = local_genome, fasta_id = local_tx_label,
+                                    exon_ranges = local_exon_ranges, strand = local_tx_strand),
+                                error = function(e) list(sequence = "", file_content = "", fasta_id = local_tx_label)
+                            )
+                        }
+                        list(gs_seq = gs_seq, seq_result = seq_result)
+                    }
+                    apply_sequence_prefetch <- function(result, source_label = "async") {
+                        if (isTRUE(module_destroyed)) return(invisible(NULL))
+                        genomic_span_seq(result$gs_seq %||% "")
+                        if (isTRUE(local_need_sequence)) {
+                            gene_info(result$seq_result %||% list(sequence = "", file_content = ""))
+                            current_genSequences <- isolate(genSequences())
+                            current_genSequences[[plotIndex]] <- result$seq_result$file_content %||% ""
+                            genSequences(current_genSequences)
+                            seq_len <- nchar(as.character(result$seq_result$sequence %||% ""))
+                            app_perf_mark(
+                                module_perf,
+                                sprintf("%s prefetch done seq_len=%d", source_label, as.integer(seq_len)),
+                                "HOMO_MOD"
+                            )
+                        } else {
+                            gene_info(NULL)
+                            app_perf_mark(module_perf, sprintf("%s prefetch skipped sequence for first paint", source_label), "HOMO_MOD")
+                        }
+                        invisible(NULL)
+                    }
+                    handle_sequence_prefetch_error <- function(err, source_label = "async") {
+                        if (isTRUE(module_destroyed)) return(invisible(NULL))
+                        app_perf_mark(
+                            module_perf,
+                            sprintf("%s prefetch error: %s", source_label, as.character(err$message %||% "unknown")),
+                            "HOMO_MOD"
+                        )
+                        gene_info(list(sequence = "", file_content = ""))
+                        current_genSequences <- isolate(genSequences())
+                        current_genSequences[[plotIndex]] <- ""
+                        genSequences(current_genSequences)
+                        invisible(NULL)
+                    }
+
+                    if (isTRUE(inline_fast)) {
+                        inline_t0 <- app_perf_now()
+                        app_perf_mark(module_perf, "inline fast prefetch start", "HOMO_MOD")
+                        tryCatch(
+                            apply_sequence_prefetch(run_sequence_prefetch(), "inline fast"),
+                            error = function(err) handle_sequence_prefetch_error(err, "inline fast")
+                        )
+                        app_perf_mark_ms(
+                            module_perf,
+                            "inline_fast_prefetch_ms",
+                            app_perf_elapsed_ms(inline_t0),
+                            "HOMO_MOD"
+                        )
+                    } else {
+                        promises::future_promise(
+                            run_sequence_prefetch(),
+                            seed = FALSE
+                        ) %...>% (function(result) {
+                            apply_sequence_prefetch(result, "async")
+                        }) %...!% (function(err) {
+                            handle_sequence_prefetch_error(err, "async")
+                        })
+                    }
                 } else {
                     gene_info(NULL)
                     app_perf_mark(module_perf, "prefetch disabled", "HOMO_MOD")
@@ -1658,7 +2180,8 @@ plotServerHomologous <- function(id, data, max_gene_length, min_gene_coord, max_
 
             render_trigger <- reactive({
                 info_evt <- NULL
-                if (isTRUE(prefetch_sequence)) {
+                defer_sequence <- isTRUE(is_homo_sequence_deferred())
+                if (isTRUE(prefetch_sequence) && !isTRUE(defer_sequence)) {
                     info_evt <- gene_info()
                     if (is.null(info_evt)) {
                         return(NULL)
@@ -1666,8 +2189,6 @@ plotServerHomologous <- function(id, data, max_gene_length, min_gene_coord, max_
                 } else {
                     info_evt <- isolate(gene_info())
                 }
-                max_gene_length_evt <- suppressWarnings(as.numeric(max_gene_length() %||% 0))
-                if (!is.finite(max_gene_length_evt)) max_gene_length_evt <- 0
                 visual_mode_evt <- "compact"
                 if (!is.null(visual_mode)) {
                     visual_mode_evt <- tryCatch(as.character(visual_mode())[1], error = function(e) "compact")
@@ -1689,18 +2210,30 @@ plotServerHomologous <- function(id, data, max_gene_length, min_gene_coord, max_
                     seq_len_evt <- suppressWarnings(as.integer(nchar(as.character(info_evt$sequence %||% ""))))
                     if (!is.finite(seq_len_evt)) seq_len_evt <- 0L
                 }
+                max_gene_length_evt <- suppressWarnings(as.numeric(max_gene_length() %||% 0))
+                if (!is.finite(max_gene_length_evt) || is.na(max_gene_length_evt) || max_gene_length_evt < 0) {
+                    max_gene_length_evt <- 0
+                }
                 neighbor_evt <- if (isTRUE(prefetch_neighbor_context)) {
                     !is.null(neighbor_context())
                 } else {
                     !is.null(isolate(neighbor_context()))
                 }
+                gc_span_len_evt <- if (isTRUE(is_feature_gc_deferred())) {
+                    suppressWarnings(as.integer(nchar(as.character(genomic_span_seq() %||% ""))))
+                } else {
+                    0L
+                }
+                if (!is.finite(gc_span_len_evt)) gc_span_len_evt <- 0L
                 list(
-                    max_gene_length_evt,
                     visual_mode_evt,
                     theme_mode_evt,
                     colorblind_evt,
                     as.logical(neighbor_evt),
-                    seq_len_evt
+                    seq_len_evt,
+                    as.integer(gc_span_len_evt),
+                    as.integer(round(max_gene_length_evt)),
+                    render_nonce()
                 )
             })
 
@@ -1721,7 +2254,8 @@ plotServerHomologous <- function(id, data, max_gene_length, min_gene_coord, max_
                 }
                 current_neighbor_context <- if (isTRUE(prefetch_neighbor_context)) neighbor_context() else isolate(neighbor_context())
                 app_perf_mark(module_perf, sprintf("render start info_ready=%s", ifelse(is.null(info), "FALSE", "TRUE")), "HOMO_MOD")
-                if (isTRUE(prefetch_sequence)) {
+                defer_sequence <- isTRUE(is_homo_sequence_deferred())
+                if (isTRUE(prefetch_sequence) && !isTRUE(defer_sequence)) {
                     req(!is.null(info))
                 }
                 width_svg <- 16.7
@@ -1756,7 +2290,11 @@ plotServerHomologous <- function(id, data, max_gene_length, min_gene_coord, max_
                 }
                 current_transcript_length <- as.numeric(transcript_end - transcript_start + 1)
                 if (!is.finite(current_transcript_length) || current_transcript_length <= 0) current_transcript_length <- 1
-                length_difference <- max(0, max_gene_length() - current_transcript_length)
+                current_max_gene_length <- isolate(suppressWarnings(as.numeric(max_gene_length() %||% current_transcript_length)))
+                if (!is.finite(current_max_gene_length) || current_max_gene_length <= 0) {
+                    current_max_gene_length <- current_transcript_length
+                }
+                length_difference <- max(0, current_max_gene_length - current_transcript_length)
 
                 gene_length_bp <- if (nrow(df_gene) > 0) as.numeric(max(df_gene$V5) - min(df_gene$V4) + 1) else current_transcript_length
                 gene_length_label <- sprintf("Gene Length: %s pb", format(as.integer(round(gene_length_bp)), big.mark = ","))
@@ -1782,15 +2320,25 @@ plotServerHomologous <- function(id, data, max_gene_length, min_gene_coord, max_
                     if (!is.finite(seq_len_key)) seq_len_key <- 0L
                 }
                 has_neighbor_context <- !is.null(current_neighbor_context)
-                cache_key <- paste(
-                    as.character(plotIndex %||% ""),
-                    format(max_gene_length_key, scientific = FALSE, trim = TRUE),
-                    this_visual_mode,
-                    theme_mode,
-                    as.character(isTRUE(is_colorblind_mode)),
-                    as.character(seq_len_key),
-                    as.character(isTRUE(has_neighbor_context)),
-                    sep = "|"
+                gc_span_len_key <- suppressWarnings(as.integer(nchar(as.character(genomic_span_seq() %||% ""))))
+                if (!is.finite(gc_span_len_key)) gc_span_len_key <- 0L
+                defer_feature_gc <- isTRUE(is_feature_gc_deferred())
+                compact_feature_key <- paste(
+                    if (identical(this_visual_mode, "compact")) is_compact_feature_interactivity_enabled() else TRUE,
+                    if (isTRUE(defer_feature_gc)) gc_span_len_key else "eager",
+                    sep = ":gc="
+                )
+                cache_key <- make_girafe_plot_cache_key(
+                    "homologous",
+                    plot_signature = plot_signature,
+                    fallback_id = plotIndex,
+                    max_gene_length_key = max_gene_length_key,
+                    visual_mode = this_visual_mode,
+                    theme_mode = theme_mode,
+                    is_colorblind_mode = is_colorblind_mode,
+                    seq_len_key = seq_len_key,
+                    has_neighbor_context = has_neighbor_context,
+                    compact_feature_interactivity = compact_feature_key
                 )
 
                 if (cache_enabled) {
@@ -1801,6 +2349,13 @@ plotServerHomologous <- function(id, data, max_gene_length, min_gene_coord, max_
                             return(refresh_girafe_widget_uid(cached_plot))
                         }
                     }
+                    shared_plot <- get_shared_girafe_plot_cache(cache_key)
+                    if (!is.null(shared_plot)) {
+                        app_perf_mark(module_perf, "render shared cache hit", "HOMO_MOD")
+                        cached_plot_key(cache_key)
+                        cached_plot_obj(shared_plot)
+                        return(refresh_girafe_widget_uid(shared_plot))
+                    }
                     app_perf_mark(module_perf, "render cache miss", "HOMO_MOD")
                 } else {
                     app_perf_mark(module_perf, "render cache disabled", "HOMO_MOD")
@@ -1810,7 +2365,14 @@ plotServerHomologous <- function(id, data, max_gene_length, min_gene_coord, max_
                     }
                 }
 
+                create_t0 <- app_perf_now()
                 app_perf_mark(module_perf, "create_gene_plot start", "HOMO_MOD")
+                span_for_plot <- genomic_span_seq()
+                genome_for_plot <- if (isTRUE(defer_feature_gc) && !nzchar(trimws(as.character(span_for_plot %||% "")))) {
+                    ""
+                } else {
+                    genome_fasta_path
+                }
                 plot_obj <- create_gene_plot(
                     df, df_gene, df_transcript, current_transcript_length, length_difference,
                     composicion_secuencia, gene_length_label, transcript_length_label,
@@ -1824,23 +2386,59 @@ plotServerHomologous <- function(id, data, max_gene_length, min_gene_coord, max_
                     report_path = report_path,
                     plot_id = as.character(plotIndex),
                     plot_context = "homologous",
-                    genome_fasta_path = genome_fasta_path,
+                    genome_fasta_path = genome_for_plot,
                     is_dark_theme = is_dark_theme,
                     is_colorblind_mode = is_colorblind_mode,
-                    gene_display_name = gene_name
+                    gene_display_name = gene_name,
+                    precomputed_genomic_span = span_for_plot,
+                    model_cache_key = cache_key
                 )
+                if (isTRUE(defer_feature_gc) && !nzchar(trimws(as.character(span_for_plot %||% "")))) {
+                    schedule_gc_span_prefetch(df)
+                }
+                if (isTRUE(defer_sequence) && is.null(info)) {
+                    schedule_deferred_sequence_prefetch()
+                }
                 app_perf_mark(module_perf, "create_gene_plot done", "HOMO_MOD")
+                app_perf_mark_ms(module_perf, "create_gene_plot_ms", app_perf_elapsed_ms(create_t0), "HOMO_MOD")
                 if (cache_enabled) {
                     cached_plot_key(cache_key)
                     cached_plot_obj(plot_obj)
+                    set_shared_girafe_plot_cache(cache_key, plot_obj)
                 }
                 plot_obj
             }), render_trigger(), ignoreNULL = TRUE)
             outputOptions(output, "plot", suspendWhenHidden = TRUE)
+            nudge_render_nonce <- function(reason = "manually") {
+                if (isTRUE(module_destroyed)) {
+                    return(invisible(FALSE))
+                }
+                current_nonce <- isolate(render_nonce())
+                if (!is.finite(suppressWarnings(as.numeric(current_nonce)))) {
+                    current_nonce <- 0L
+                }
+                render_nonce(as.integer(current_nonce) + 1L)
+                app_perf_mark(module_perf, sprintf("render nonce nudged %s", reason), "HOMO_MOD")
+                invisible(TRUE)
+            }
             list(
                 destroy = destroy_module,
                 is_destroyed = function() {
                     isTRUE(module_destroyed)
+                },
+                nudge_render = function() {
+                    nudge_render_nonce("manually")
+                },
+                set_background_render = function(enabled = TRUE) {
+                    if (isTRUE(module_destroyed)) {
+                        return(invisible(FALSE))
+                    }
+                    enabled <- isTRUE(enabled)
+                    outputOptions(output, "plot", suspendWhenHidden = !enabled)
+                    if (enabled) {
+                        nudge_render_nonce("for Figure Studio")
+                    }
+                    invisible(TRUE)
                 }
             )
         }
@@ -1848,23 +2446,121 @@ plotServerHomologous <- function(id, data, max_gene_length, min_gene_coord, max_
 }
 
 # Función server del módulo de Plot para ortólogos
-plotServerOrtologous <- function(id, data, max_gene_length, min_gene_coord, max_gene_coord, genSequences, plotIndex, gene_name, genome_fasta_path = NULL, annotation_file_path = NULL, visual_mode = NULL, organism_name = NULL, use_report_map = FALSE, report_path = "", app_theme = NULL, app_colorblind = NULL, precomputed_neighbor_context = NULL, prefetch_sequence = TRUE, prefetch_neighbor_context = FALSE, perf_run_id = NULL, on_plot_ready = NULL) {
+plotServerOrtologous <- function(id, data, max_gene_length, min_gene_coord, max_gene_coord, genSequences, plotIndex, gene_name, genome_fasta_path = NULL, annotation_file_path = NULL, visual_mode = NULL, organism_name = NULL, use_report_map = FALSE, report_path = "", app_theme = NULL, app_colorblind = NULL, precomputed_neighbor_context = NULL, prefetch_sequence = TRUE, prefetch_neighbor_context = FALSE, perf_run_id = NULL, on_plot_ready = NULL, plot_signature = NULL) {
     moduleServer(
         id,
         function(input, output, session) {
             # OPT-4: Process data ONCE at module init (data is a static data.frame)
+            module_init_t0 <- app_perf_now()
             processed_cache <- process_gene_data(data)
 
             gene_info <- reactiveVal(NULL)
+            genomic_span_seq <- reactiveVal("")
             neighbor_context <- reactiveVal(NULL)
             neighbor_context_resolved <- reactiveVal(FALSE)
             cached_plot_key <- reactiveVal("")
             cached_plot_obj <- reactiveVal(NULL)
+            render_nonce <- reactiveVal(0L)
+            deferred_sequence_prefetch_started <- reactiveVal(FALSE)
+            gc_span_prefetch_started <- reactiveVal(FALSE)
             plot_ready_notified <- FALSE
             module_destroyed <- FALSE
             is_ortho_plot_cache_enabled <- function() {
                 raw <- tolower(trimws(as.character(Sys.getenv("APP_ORTHO_PLOT_CACHE", "1") %||% "1")))
                 !raw %in% c("", "0", "false", "no", "off")
+            }
+            is_ortho_sequence_deferred <- function() {
+                raw <- tolower(trimws(as.character(Sys.getenv("APP_ORTHO_DEFER_SEQUENCE", "0") %||% "0")))
+                !raw %in% c("", "0", "false", "no", "off")
+            }
+            is_feature_gc_deferred <- function() {
+                raw <- tolower(trimws(as.character(Sys.getenv("APP_DEFER_FEATURE_GC", "0") %||% "0")))
+                !raw %in% c("", "0", "false", "no", "off")
+            }
+            schedule_gc_span_prefetch <- function(df_plot) {
+                if (!isTRUE(is_feature_gc_deferred()) || isTRUE(gc_span_prefetch_started())) {
+                    return(invisible(FALSE))
+                }
+                current_span <- trimws(as.character(isolate(genomic_span_seq()) %||% ""))
+                if (nzchar(current_span)) {
+                    return(invisible(FALSE))
+                }
+                gs_source_ok <- nzchar(as.character(genome_fasta_path %||% "")) && file.exists(genome_fasta_path)
+                gs_start <- suppressWarnings(min(df_plot$xstart, na.rm = TRUE))
+                gs_end <- suppressWarnings(max(df_plot$xend, na.rm = TRUE))
+                gs_seqid <- as.character(df_plot$seqid[1] %||% "")
+                if (!isTRUE(gs_source_ok) || !is.finite(gs_start) || !is.finite(gs_end) ||
+                    gs_end <= gs_start || !nzchar(gs_seqid)) {
+                    return(invisible(FALSE))
+                }
+                gc_span_prefetch_started(TRUE)
+                run_prefetch <- function() {
+                    if (isTRUE(module_destroyed)) {
+                        return(invisible(NULL))
+                    }
+                    gc_t0 <- app_perf_now()
+                    app_perf_mark(module_perf, "feature GC span prefetch start", "ORTHO_MOD")
+                    gs_seq <- tryCatch(
+                        extract_sequence_from_fasta(
+                            genome_fasta_path,
+                            gs_seqid,
+                            as.integer(gs_start),
+                            as.integer(gs_end)
+                        ),
+                        error = function(e) ""
+                    )
+                    if (nzchar(gs_seq) && !isTRUE(module_destroyed)) {
+                        genomic_span_seq(gs_seq)
+                        render_nonce(as.integer(isolate(render_nonce()) %||% 0L) + 1L)
+                    }
+                    app_perf_mark(
+                        module_perf,
+                        sprintf("feature GC span prefetch done len=%d", as.integer(nchar(gs_seq %||% ""))),
+                        "ORTHO_MOD"
+                    )
+                    app_perf_mark_ms(module_perf, "feature_gc_span_prefetch_ms", app_perf_elapsed_ms(gc_t0), "ORTHO_MOD")
+                    invisible(NULL)
+                }
+                if (requireNamespace("later", quietly = TRUE)) {
+                    later::later(run_prefetch, delay = 0.15)
+                } else {
+                    run_prefetch()
+                }
+                invisible(TRUE)
+            }
+            schedule_deferred_sequence_prefetch <- function() {
+                if (!isTRUE(is_ortho_sequence_deferred()) || isTRUE(deferred_sequence_prefetch_started())) {
+                    return(invisible(FALSE))
+                }
+                if (!is.null(isolate(gene_info()))) {
+                    return(invisible(FALSE))
+                }
+                deferred_sequence_prefetch_started(TRUE)
+                run_prefetch <- function() {
+                    if (isTRUE(module_destroyed)) {
+                        return(invisible(NULL))
+                    }
+                    sequence_t0 <- app_perf_now()
+                    app_perf_mark(module_perf, "deferred sequence prefetch start", "ORTHO_MOD")
+                    info <- tryCatch(
+                        resolve_gene_info_sync("deferred_sequence", composition_only = TRUE),
+                        error = function(e) {
+                            app_perf_mark(module_perf, sprintf("deferred sequence error: %s", as.character(e$message %||% "unknown")), "ORTHO_MOD")
+                            list(sequence = "", file_content = "")
+                        }
+                    )
+                    if (!isTRUE(module_destroyed)) {
+                        gene_info(info)
+                    }
+                    app_perf_mark_ms(module_perf, "deferred_sequence_prefetch_ms", app_perf_elapsed_ms(sequence_t0), "ORTHO_MOD")
+                    invisible(NULL)
+                }
+                if (requireNamespace("later", quietly = TRUE)) {
+                    later::later(run_prefetch, delay = 0.25)
+                } else {
+                    run_prefetch()
+                }
+                invisible(TRUE)
             }
             notify_plot_ready <- function() {
                 if (!isTRUE(plot_ready_notified)) {
@@ -1881,6 +2577,7 @@ plotServerOrtologous <- function(id, data, max_gene_length, min_gene_coord, max_
                 module_perf$id <- paste0(perf_parent, "|plot=", as.character(plotIndex))
             }
             app_perf_mark(module_perf, "module init", "ORTHO_MOD")
+            app_perf_mark_ms(module_perf, "module_init_ms", app_perf_elapsed_ms(module_init_t0), "ORTHO_MOD")
             destroy_module <- function() {
                 if (isTRUE(module_destroyed)) {
                     return(invisible(FALSE))
@@ -1903,6 +2600,7 @@ plotServerOrtologous <- function(id, data, max_gene_length, min_gene_coord, max_
             })
 
             resolve_neighbor_context_sync <- function(step_prefix = "neighbor context") {
+                neighbor_t0 <- app_perf_now()
                 df_gene <- processed_cache$df_gene
                 df_plot <- processed_cache$df
                 if (is.null(annotation_file_path) || !nzchar(annotation_file_path) || (nrow(df_gene) <= 0 && nrow(df_plot) <= 0)) {
@@ -1931,10 +2629,11 @@ plotServerOrtologous <- function(id, data, max_gene_length, min_gene_coord, max_
                 )
                 out_ctx <- get_neighbor_context_for_target(annotation_file_path, target_gene)
                 app_perf_mark(module_perf, sprintf("%s done", as.character(step_prefix)), "ORTHO_MOD")
+                app_perf_mark_ms(module_perf, "neighbor_context_ms", app_perf_elapsed_ms(neighbor_t0), "ORTHO_MOD")
                 out_ctx
             }
 
-            resolve_gene_info_sync <- function(step_prefix = "prefetch") {
+            resolve_gene_info_sync <- function(step_prefix = "prefetch", composition_only = FALSE) {
                 df_gene <- processed_cache$df_gene
                 df_plot <- processed_cache$df
                 df_transcript <- processed_cache$df_transcript
@@ -1995,6 +2694,23 @@ plotServerOrtologous <- function(id, data, max_gene_length, min_gene_coord, max_
                         ""
                 )
 
+                if (isTRUE(composition_only)) {
+                    comp_info <- NULL
+                    if (!is.null(genome_fasta_path) && nzchar(genome_fasta_path) && file.exists(genome_fasta_path) &&
+                        !is.null(exon_ranges) && nrow(normalize_exon_ranges(exon_ranges)) > 0L) {
+                        comp_info <- tryCatch(
+                            get_transcript_composition_cached(genome_fasta_path, chr_for_fetch, exon_ranges, strand = tx_strand),
+                            error = function(e) NULL
+                        )
+                    }
+                    comp_blob <- if (!is.null(comp_info)) make_sequence_composition_blob(comp_info) else ""
+                    current_genSequences <- isolate(genSequences())
+                    current_genSequences[[plotIndex]] <- comp_blob
+                    genSequences(current_genSequences)
+                    app_perf_mark(module_perf, sprintf("%s composition_only ready=%s", as.character(step_prefix), as.character(nzchar(comp_blob))), "ORTHO_MOD")
+                    return(list(sequence = "", file_content = comp_blob, fasta_id = tx_label, composition = comp_info, composition_blob = comp_blob))
+                }
+
                 result <- fetch_gene_data_sync(
                     chr_for_fetch,
                     list(start = as.numeric(tx_start), end = as.numeric(tx_end)),
@@ -2014,43 +2730,227 @@ plotServerOrtologous <- function(id, data, max_gene_length, min_gene_coord, max_
             prefetch_observer <- observe({
                 req(data)
                 app_perf_mark(module_perf, "observe start", "ORTHO_MOD")
-                # OPT-4: Use pre-computed processed data
                 df_gene <- processed_cache$df_gene
                 df_plot <- processed_cache$df
                 df_transcript <- processed_cache$df_transcript
+
+                defer_sequence <- isTRUE(is_ortho_sequence_deferred())
+                gs_source_ok <- nzchar(as.character(genome_fasta_path %||% "")) && file.exists(genome_fasta_path)
+                gs_start <- suppressWarnings(min(df_plot$xstart, na.rm = TRUE))
+                gs_end <- suppressWarnings(max(df_plot$xend, na.rm = TRUE))
+                gs_seqid <- as.character(df_plot$seqid[1] %||% "")
 
                 if (!is.null(precomputed_neighbor_context)) {
                     neighbor_context(precomputed_neighbor_context)
                     neighbor_context_resolved(TRUE)
                     app_perf_mark(module_perf, "neighbor context precomputed", "ORTHO_MOD")
-                } else if (isTRUE(prefetch_neighbor_context)) {
-                    neighbor_context(resolve_neighbor_context_sync("neighbor context prefetch"))
-                    neighbor_context_resolved(TRUE)
                 } else {
                     neighbor_context(NULL)
                     neighbor_context_resolved(FALSE)
-                    app_perf_mark(module_perf, "neighbor context deferred", "ORTHO_MOD")
                 }
 
-                if (isTRUE(prefetch_sequence)) {
-                    app_perf_mark(module_perf, "prefetch sequence start", "ORTHO_MOD")
-                    result <- resolve_gene_info_sync("prefetch")
-                    gene_info(result)
+                # Compute all I/O arguments in the main thread (CPU-only, fast)
+                tx_start <- suppressWarnings(min(as.numeric(df_transcript$V4), na.rm = TRUE))
+                tx_end <- suppressWarnings(max(as.numeric(df_transcript$V5), na.rm = TRUE))
+                if (!is.finite(tx_start) || !is.finite(tx_end) || tx_end <= tx_start) {
+                    tx_start <- suppressWarnings(min(df_plot$xstart, na.rm = TRUE))
+                    tx_end <- suppressWarnings(max(df_plot$xend, na.rm = TRUE))
+                }
+                if (!is.finite(tx_start) || !is.finite(tx_end) || tx_end <= tx_start) {
+                    tx_start <- suppressWarnings(min(df_gene$V4, na.rm = TRUE))
+                    tx_end <- suppressWarnings(max(df_gene$V5, na.rm = TRUE))
+                }
+                if (!is.finite(tx_start) || !is.finite(tx_end) || tx_end <= tx_start) {
+                    tx_start <- suppressWarnings(min(as.numeric(data$V4), na.rm = TRUE))
+                    tx_end <- suppressWarnings(max(as.numeric(data$V5), na.rm = TRUE))
+                }
+
+                tx_attr <- if (nrow(df_transcript) > 0) as.character(df_transcript$V9[1] %||% "") else ""
+                tx_attrs <- parse_gff_attributes(tx_attr %||% "")
+                gene_attr <- if (nrow(df_gene) > 0) as.character(df_gene$V9[1] %||% "") else ""
+                tx_label_candidates <- c(
+                    tx_attrs[["name"]][1],
+                    tx_attrs[["transcript"]][1],
+                    tx_attrs[["id"]][1],
+                    tx_attrs[["transcript_id"]][1],
+                    extract_primary_gene_name(gene_attr),
+                    extract_primary_gene_id(gene_attr)
+                )
+                tx_label_candidates <- as.character(tx_label_candidates %||% character(0))
+                tx_label_candidates <- tx_label_candidates[!is.na(tx_label_candidates) & nzchar(trimws(tx_label_candidates))]
+                tx_label <- if (length(tx_label_candidates) > 0) tx_label_candidates[1] else "transcript"
+                tx_label <- trimws(utils::URLdecode(tx_label))
+                if (!nzchar(tx_label)) tx_label <- "transcript"
+                tx_strand <- trimws(as.character(df_transcript$V7[1] %||% df_gene$V7[1] %||% data$V7[1] %||% "+"))
+                if (!nzchar(tx_strand)) tx_strand <- "+"
+                if (!tx_strand %in% c("+", "-")) tx_strand <- "+"
+
+                exon_idx <- which(tolower(as.character(df_plot$feature_type %||% rep("", nrow(df_plot)))) == "exon")
+                if (length(exon_idx) == 0) {
+                    exon_idx <- which(tolower(as.character(df_plot$feature_type %||% rep("", nrow(df_plot)))) == "cds")
+                }
+                exon_ranges <- if (length(exon_idx) > 0) {
+                    data.frame(
+                        start = suppressWarnings(as.numeric(df_plot$xstart[exon_idx])),
+                        end = suppressWarnings(as.numeric(df_plot$xend[exon_idx])),
+                        stringsAsFactors = FALSE
+                    )
                 } else {
-                    gene_info(NULL)
-                    app_perf_mark(module_perf, "prefetch disabled", "ORTHO_MOD")
+                    NULL
+                }
+                chr_for_fetch <- as.character(
+                    df_gene$V1[1] %||%
+                        df_transcript$V1[1] %||%
+                        df_plot$seqid[1] %||%
+                        data$V1[1] %||%
+                        ""
+                )
+
+                tgt_chr <- as.character(df_gene$V1[1] %||% df_plot$seqid[1] %||% data$V1[1] %||% NA_character_)
+                tgt_start <- suppressWarnings(as.numeric(min(df_gene$V4, na.rm = TRUE)))
+                tgt_end <- suppressWarnings(as.numeric(max(df_gene$V5, na.rm = TRUE)))
+                if (!is.finite(tgt_start) || !is.finite(tgt_end) || tgt_end < tgt_start) {
+                    tgt_start <- suppressWarnings(as.numeric(min(df_plot$xstart, na.rm = TRUE)))
+                    tgt_end <- suppressWarnings(as.numeric(max(df_plot$xend, na.rm = TRUE)))
+                }
+                if (!is.finite(tgt_start) || !is.finite(tgt_end) || tgt_end < tgt_start) {
+                    tgt_start <- suppressWarnings(as.numeric(min(data$V4, na.rm = TRUE)))
+                    tgt_end <- suppressWarnings(as.numeric(max(data$V5, na.rm = TRUE)))
+                }
+                tgt_attr <- as.character(df_gene$V9[1] %||% data$V9[1] %||% "")
+                target_gene_for_ctx <- data.frame(
+                    gene_id = extract_primary_gene_id(tgt_attr),
+                    chr = tgt_chr,
+                    start = tgt_start,
+                    end = tgt_end,
+                    strand = as.character(df_gene$V7[1] %||% data$V7[1] %||% NA_character_),
+                    stringsAsFactors = FALSE
+                )
+
+                # Capture simple-data locals for the future worker
+                local_genome <- genome_fasta_path
+                local_annotation <- annotation_file_path
+                local_gs_seqid <- gs_seqid
+                local_gs_start <- gs_start
+                local_gs_end <- gs_end
+                local_gs_ok <- isTRUE(gs_source_ok)
+                local_chr <- chr_for_fetch
+                local_tx_coords <- list(start = as.numeric(tx_start), end = as.numeric(tx_end))
+                local_tx_label <- tx_label
+                local_exon_ranges <- exon_ranges
+                local_tx_strand <- tx_strand
+                local_target_gene <- target_gene_for_ctx
+                local_need_neighbor <- is.null(precomputed_neighbor_context) && isTRUE(prefetch_neighbor_context)
+                local_need_sequence <- isTRUE(prefetch_sequence) && !isTRUE(defer_sequence)
+
+                fn_extract_seq <- extract_sequence_from_fasta
+                fn_fetch_gene <- fetch_gene_data_sync
+                fn_get_neighbor <- get_neighbor_context_for_target
+
+                inline_fast <- should_inline_fast_sequence_prefetch(
+                    local_genome,
+                    min(c(local_gs_start, local_tx_coords$start), na.rm = TRUE),
+                    max(c(local_gs_end, local_tx_coords$end), na.rm = TRUE)
+                ) && !isTRUE(local_need_neighbor)
+
+                run_prefetch_payload <- function() {
+                    gs_seq <- ""
+                    if (isTRUE(local_gs_ok) && is.finite(local_gs_start) && is.finite(local_gs_end) &&
+                        local_gs_end > local_gs_start && nzchar(local_gs_seqid)) {
+                        gs_seq <- tryCatch(
+                            fn_extract_seq(local_genome, local_gs_seqid, as.integer(local_gs_start), as.integer(local_gs_end)),
+                            error = function(e) ""
+                        )
+                    }
+                    seq_result <- list(sequence = "", file_content = "", fasta_id = local_tx_label)
+                    if (isTRUE(local_need_sequence) && !is.null(local_genome) && nzchar(local_genome) && file.exists(local_genome)) {
+                        seq_result <- tryCatch(
+                            fn_fetch_gene(local_chr, local_tx_coords,
+                                fasta_path = local_genome, fasta_id = local_tx_label,
+                                exon_ranges = local_exon_ranges, strand = local_tx_strand),
+                            error = function(e) list(sequence = "", file_content = "", fasta_id = local_tx_label)
+                        )
+                    }
+                    ctx <- NULL
+                    if (isTRUE(local_need_neighbor) && !is.null(local_annotation) && nzchar(local_annotation) && file.exists(local_annotation)) {
+                        ctx <- tryCatch(fn_get_neighbor(local_annotation, local_target_gene), error = function(e) NULL)
+                    }
+                    list(gs_seq = gs_seq, seq_result = seq_result, ctx = ctx)
+                }
+                apply_prefetch_payload <- function(result, source_label = "async") {
+                    if (isTRUE(module_destroyed)) return(invisible(NULL))
+                    genomic_span_seq(result$gs_seq %||% "")
+                    if (isTRUE(local_need_sequence)) {
+                        gene_info(result$seq_result %||% list(sequence = "", file_content = ""))
+                        current_genSequences <- isolate(genSequences())
+                        current_genSequences[[plotIndex]] <- result$seq_result$file_content %||% ""
+                        genSequences(current_genSequences)
+                        seq_len <- nchar(as.character(result$seq_result$sequence %||% ""))
+                        app_perf_mark(module_perf, sprintf("%s prefetch done seq_len=%d", source_label, as.integer(seq_len)), "ORTHO_MOD")
+                    } else {
+                        gene_info(NULL)
+                    }
+                    if (isTRUE(local_need_neighbor)) {
+                        neighbor_context(result$ctx)
+                        neighbor_context_resolved(TRUE)
+                    }
+                    invisible(NULL)
+                }
+                handle_prefetch_error <- function(err, source_label = "async") {
+                    if (isTRUE(module_destroyed)) return(invisible(NULL))
+                    app_perf_mark(module_perf, sprintf("%s prefetch error: %s", source_label, as.character(err$message %||% "unknown")), "ORTHO_MOD")
+                    gene_info(list(sequence = "", file_content = ""))
+                    current_genSequences <- isolate(genSequences())
+                    current_genSequences[[plotIndex]] <- ""
+                    genSequences(current_genSequences)
+                    if (isTRUE(local_need_neighbor)) {
+                        neighbor_context(NULL)
+                        neighbor_context_resolved(FALSE)
+                    }
+                    invisible(NULL)
+                }
+
+                if (isTRUE(local_gs_ok)) {
+                    gc_span_prefetch_started(TRUE)
+                }
+                if (isTRUE(inline_fast)) {
+                    inline_t0 <- app_perf_now()
+                    app_perf_mark(module_perf, "inline fast prefetch start", "ORTHO_MOD")
+                    tryCatch(
+                        apply_prefetch_payload(run_prefetch_payload(), "inline fast"),
+                        error = function(err) handle_prefetch_error(err, "inline fast")
+                    )
+                    app_perf_mark_ms(
+                        module_perf,
+                        "inline_fast_prefetch_ms",
+                        app_perf_elapsed_ms(inline_t0),
+                        "ORTHO_MOD"
+                    )
+                } else {
+                    app_perf_mark(module_perf, "async prefetch launch", "ORTHO_MOD")
+                    promises::future_promise(
+                        run_prefetch_payload(),
+                        seed = FALSE
+                    ) %...>% (function(result) {
+                        apply_prefetch_payload(result, "async")
+                    }) %...!% (function(err) {
+                        handle_prefetch_error(err, "async")
+                    })
                 }
             })
 
             render_trigger <- reactive({
                 # With lazy sequence mode, avoid tracking gene_info as a reactive dependency
                 # so the internal gene_info(info) assignment does not trigger a second rerender.
-                info_evt <- if (isTRUE(prefetch_sequence)) gene_info() else isolate(gene_info())
-                if (isTRUE(prefetch_sequence) && is.null(info_evt)) {
-                    return(NULL)
+                defer_sequence <- isTRUE(is_ortho_sequence_deferred())
+                if (isTRUE(prefetch_sequence) && !isTRUE(defer_sequence)) {
+                    info_evt <- gene_info()
+                    if (is.null(info_evt)) {
+                        return(NULL)
+                    }
+                } else {
+                    info_evt <- isolate(gene_info())
                 }
-                max_gene_length_evt <- suppressWarnings(as.numeric(max_gene_length() %||% 0))
-                if (!is.finite(max_gene_length_evt)) max_gene_length_evt <- 0
                 visual_mode_evt <- "compact"
                 if (!is.null(visual_mode)) {
                     visual_mode_evt <- tryCatch(as.character(visual_mode())[1], error = function(e) "compact")
@@ -2072,18 +2972,30 @@ plotServerOrtologous <- function(id, data, max_gene_length, min_gene_coord, max_
                     seq_len_evt <- suppressWarnings(as.integer(nchar(as.character(info_evt$sequence %||% ""))))
                     if (!is.finite(seq_len_evt)) seq_len_evt <- 0L
                 }
+                max_gene_length_evt <- suppressWarnings(as.numeric(isolate(max_gene_length()) %||% 0))
+                if (!is.finite(max_gene_length_evt) || is.na(max_gene_length_evt) || max_gene_length_evt < 0) {
+                    max_gene_length_evt <- 0
+                }
                 neighbor_evt <- if (isTRUE(prefetch_neighbor_context)) {
                     !is.null(neighbor_context())
                 } else {
                     !is.null(isolate(neighbor_context()))
                 }
+                gc_span_len_evt <- if (isTRUE(is_feature_gc_deferred())) {
+                    suppressWarnings(as.integer(nchar(as.character(genomic_span_seq() %||% ""))))
+                } else {
+                    0L
+                }
+                if (!is.finite(gc_span_len_evt)) gc_span_len_evt <- 0L
                 list(
-                    max_gene_length_evt,
                     visual_mode_evt,
                     theme_mode_evt,
                     colorblind_evt,
                     as.logical(neighbor_evt),
-                    seq_len_evt
+                    seq_len_evt,
+                    as.integer(gc_span_len_evt),
+                    as.integer(round(max_gene_length_evt)),
+                    render_nonce()
                 )
             })
 
@@ -2102,7 +3014,8 @@ plotServerOrtologous <- function(id, data, max_gene_length, min_gene_coord, max_
                     neighbor_context(lazy_ctx)
                     neighbor_context_resolved(TRUE)
                 }
-                if (!isTRUE(prefetch_sequence) && is.null(info)) {
+                defer_sequence <- isTRUE(is_ortho_sequence_deferred())
+                if (!isTRUE(prefetch_sequence) && !isTRUE(defer_sequence) && is.null(info)) {
                     app_perf_mark(module_perf, "lazy sequence fetch start", "ORTHO_MOD")
                     info <- tryCatch(
                         resolve_gene_info_sync("lazy_fetch"),
@@ -2115,7 +3028,7 @@ plotServerOrtologous <- function(id, data, max_gene_length, min_gene_coord, max_
                 }
                 current_neighbor_context <- if (isTRUE(prefetch_neighbor_context)) neighbor_context() else isolate(neighbor_context())
                 app_perf_mark(module_perf, sprintf("render start info_ready=%s", ifelse(is.null(info), "FALSE", "TRUE")), "ORTHO_MOD")
-                if (isTRUE(prefetch_sequence)) {
+                if (isTRUE(prefetch_sequence) && !isTRUE(defer_sequence)) {
                     req(!is.null(info))
                 }
                 width_svg <- 16.7
@@ -2150,7 +3063,11 @@ plotServerOrtologous <- function(id, data, max_gene_length, min_gene_coord, max_
                 }
                 current_transcript_length <- as.numeric(transcript_end - transcript_start + 1)
                 if (!is.finite(current_transcript_length) || current_transcript_length <= 0) current_transcript_length <- 1
-                length_difference <- max(0, max_gene_length() - current_transcript_length)
+                current_max_gene_length <- isolate(suppressWarnings(as.numeric(max_gene_length() %||% current_transcript_length)))
+                if (!is.finite(current_max_gene_length) || current_max_gene_length <= 0) {
+                    current_max_gene_length <- current_transcript_length
+                }
+                length_difference <- max(0, current_max_gene_length - current_transcript_length)
 
                 gene_length_bp <- if (nrow(df_gene) > 0) as.numeric(max(df_gene$V5) - min(df_gene$V4) + 1) else current_transcript_length
                 gene_length_label <- sprintf("Gene Length: %s pb", format(as.integer(round(gene_length_bp)), big.mark = ","))
@@ -2175,7 +3092,7 @@ plotServerOrtologous <- function(id, data, max_gene_length, min_gene_coord, max_
                 }
 
                 cache_enabled <- isTRUE(is_ortho_plot_cache_enabled())
-                max_gene_length_key <- suppressWarnings(as.numeric(max_gene_length() %||% 0))
+                max_gene_length_key <- current_max_gene_length
                 if (!is.finite(max_gene_length_key)) max_gene_length_key <- 0
                 seq_len_key <- 0L
                 if (!is.null(info) && !is.null(info$sequence)) {
@@ -2183,15 +3100,25 @@ plotServerOrtologous <- function(id, data, max_gene_length, min_gene_coord, max_
                     if (!is.finite(seq_len_key)) seq_len_key <- 0L
                 }
                 has_neighbor_context <- !is.null(current_neighbor_context)
-                cache_key <- paste(
-                    as.character(plotIndex %||% ""),
-                    format(max_gene_length_key, scientific = FALSE, trim = TRUE),
-                    this_visual_mode,
-                    theme_mode,
-                    as.character(isTRUE(is_colorblind_mode)),
-                    as.character(seq_len_key),
-                    as.character(isTRUE(has_neighbor_context)),
-                    sep = "|"
+                gc_span_len_key <- suppressWarnings(as.integer(nchar(as.character(genomic_span_seq() %||% ""))))
+                if (!is.finite(gc_span_len_key)) gc_span_len_key <- 0L
+                defer_feature_gc <- isTRUE(is_feature_gc_deferred())
+                compact_feature_key <- paste(
+                    if (identical(this_visual_mode, "compact")) is_compact_feature_interactivity_enabled() else TRUE,
+                    if (isTRUE(defer_feature_gc)) gc_span_len_key else "eager",
+                    sep = ":gc="
+                )
+                cache_key <- make_girafe_plot_cache_key(
+                    "orthologous",
+                    plot_signature = plot_signature,
+                    fallback_id = plotIndex,
+                    max_gene_length_key = max_gene_length_key,
+                    visual_mode = this_visual_mode,
+                    theme_mode = theme_mode,
+                    is_colorblind_mode = is_colorblind_mode,
+                    seq_len_key = seq_len_key,
+                    has_neighbor_context = has_neighbor_context,
+                    compact_feature_interactivity = compact_feature_key
                 )
 
                 if (cache_enabled) {
@@ -2202,6 +3129,13 @@ plotServerOrtologous <- function(id, data, max_gene_length, min_gene_coord, max_
                             return(refresh_girafe_widget_uid(cached_plot))
                         }
                     }
+                    shared_plot <- get_shared_girafe_plot_cache(cache_key)
+                    if (!is.null(shared_plot)) {
+                        app_perf_mark(module_perf, "render shared cache hit", "ORTHO_MOD")
+                        cached_plot_key(cache_key)
+                        cached_plot_obj(shared_plot)
+                        return(refresh_girafe_widget_uid(shared_plot))
+                    }
                     app_perf_mark(module_perf, "render cache miss", "ORTHO_MOD")
                 } else {
                     app_perf_mark(module_perf, "render cache disabled", "ORTHO_MOD")
@@ -2211,7 +3145,14 @@ plotServerOrtologous <- function(id, data, max_gene_length, min_gene_coord, max_
                     }
                 }
 
+                create_t0 <- app_perf_now()
                 app_perf_mark(module_perf, "create_gene_plot start", "ORTHO_MOD")
+                span_for_plot <- genomic_span_seq()
+                genome_for_plot <- if (isTRUE(defer_feature_gc) && !nzchar(trimws(as.character(span_for_plot %||% "")))) {
+                    ""
+                } else {
+                    genome_fasta_path
+                }
                 plot_obj <- create_gene_plot(
                     df, df_gene, df_transcript, current_transcript_length, length_difference,
                     composicion_secuencia, gene_length_label, transcript_length_label,
@@ -2225,23 +3166,81 @@ plotServerOrtologous <- function(id, data, max_gene_length, min_gene_coord, max_
                     report_path = report_path,
                     plot_id = as.character(plotIndex),
                     plot_context = "orthologous",
-                    genome_fasta_path = genome_fasta_path,
+                    genome_fasta_path = genome_for_plot,
                     is_dark_theme = is_dark_theme,
                     is_colorblind_mode = is_colorblind_mode,
-                    gene_display_name = gene_name
+                    gene_display_name = gene_name,
+                    precomputed_genomic_span = span_for_plot,
+                    model_cache_key = cache_key
                 )
+                if (isTRUE(defer_feature_gc) && !nzchar(trimws(as.character(span_for_plot %||% "")))) {
+                    schedule_gc_span_prefetch(df)
+                }
+                if (isTRUE(defer_sequence) && is.null(info)) {
+                    schedule_deferred_sequence_prefetch()
+                }
                 app_perf_mark(module_perf, "create_gene_plot done", "ORTHO_MOD")
+                app_perf_mark_ms(module_perf, "create_gene_plot_ms", app_perf_elapsed_ms(create_t0), "ORTHO_MOD")
                 if (cache_enabled) {
                     cached_plot_key(cache_key)
                     cached_plot_obj(plot_obj)
+                    set_shared_girafe_plot_cache(cache_key, plot_obj)
                 }
                 plot_obj
             }), render_trigger(), ignoreNULL = TRUE)
-            outputOptions(output, "plot", suspendWhenHidden = TRUE)
+            default_suspend_when_hidden <- isTRUE(is_ortho_suspend_hidden_enabled())
+            outputOptions(output, "plot", suspendWhenHidden = default_suspend_when_hidden)
+            nudge_render_nonce <- function(reason = "manually") {
+                if (isTRUE(module_destroyed)) {
+                    return(invisible(FALSE))
+                }
+                current_nonce <- isolate(render_nonce())
+                if (!is.finite(suppressWarnings(as.numeric(current_nonce)))) {
+                    current_nonce <- 0L
+                }
+                render_nonce(as.integer(current_nonce) + 1L)
+                app_perf_mark(module_perf, sprintf("render nonce nudged %s", reason), "ORTHO_MOD")
+                invisible(TRUE)
+            }
+            if (isTRUE(is_ortho_server_render_nudge_enabled())) {
+                nudge_after_flush <- function() {
+                    nudge_render_nonce("after flush")
+                    invisible(NULL)
+                }
+                tryCatch({
+                    if (!is.null(session) && is.function(session$onFlushed)) {
+                        session$onFlushed(nudge_after_flush, once = TRUE)
+                    } else {
+                        nudge_after_flush()
+                    }
+                }, error = function(e) {
+                    app_perf_mark(module_perf, sprintf("render nonce nudge error: %s", as.character(e$message %||% "unknown")), "ORTHO_MOD")
+                })
+            } else {
+                app_perf_mark(module_perf, "server render nonce nudge disabled", "ORTHO_MOD")
+            }
             list(
                 destroy = destroy_module,
                 is_destroyed = function() {
                     isTRUE(module_destroyed)
+                },
+                nudge_render = function() {
+                    nudge_render_nonce("manually")
+                },
+                set_background_render = function(enabled = TRUE) {
+                    if (isTRUE(module_destroyed)) {
+                        return(invisible(FALSE))
+                    }
+                    enabled <- isTRUE(enabled)
+                    outputOptions(
+                        output,
+                        "plot",
+                        suspendWhenHidden = if (enabled) FALSE else default_suspend_when_hidden
+                    )
+                    if (enabled) {
+                        nudge_render_nonce("for Figure Studio")
+                    }
+                    invisible(TRUE)
                 }
             )
         }

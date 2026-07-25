@@ -156,3 +156,23 @@ Si quieres una imagen totalmente autocontenida (muy pesada), tendrías que quita
 - El prewarm de Docker ocurre contra datos montados por volumen, no durante `docker build`.
 - Por eso, la optimización correcta es post-arranque (automática con `APP_PREWARM_ON_START=1` o manual con `docker exec`).
 - Mantén `CGV_CACHE_DIR` persistente y evita `docker compose down -v` para conservar cachés entre reinicios.
+- Para que el primer gráfico aparezca rápido sin perder contenido, conserva:
+  `APP_ORTHO_SUSPEND_HIDDEN=1`, `APP_ORTHO_DEFER_SEQUENCE=0`,
+  `APP_FOOTER_DEFER_SEQUENCE=0`, `APP_HOMO_UPFRONT_ISOFORMS=0` y
+  `APP_ORTHO_UPFRONT_ISOFORMS=0`. No eliminan anexos, fuentes externas,
+  composición de secuencia del footer ni GC por feature: solo difieren
+  isoformas ocultas y reutilizan el tramo genómico cacheado para evitar lecturas
+  repetidas durante la construcción del gráfico.
+
+## Nota de performance (tráfico navegador/servidor)
+
+CGV envía muchos widgets interactivos por la conexión viva de Shiny. Para reducir bytes sin perder funcionalidad:
+
+- `APP_SHINY_JSON_DIGITS=12`: reduce precisión numérica JSON enviada al navegador. Usa `16` o `max` si necesitas máxima precisión.
+- `APP_GIRAFE_COMPACT_SVG=1`: compacta el SVG interno de `ggiraph` antes de enviarlo por Shiny.
+- `APP_GIRAFE_SVG_DECIMALS=2`: redondea coordenadas SVG a 2 decimales; los datos biológicos originales en R no se modifican.
+- `APP_ALIGNED_RIBBON_POINTS=25`: controla la suavidad de las cintas curvas del alineamiento. Mantén `25` para curvas suaves; valores menores reducen bytes pero pueden verse más rectos.
+- `APP_MULTIPIP_VISUAL_MERGE_FROM=350`: en MultiPIP denso, agrupa segmentos visuales cercanos por pista/categoría; mantiene tooltips resumen.
+- `APP_TRANSPORT_TIMING=1`: activa medición temporal en navegador. Los logs del contenedor mostrarán bytes HTTP y volumen de mensajes Shiny/WebSocket. Déjalo en `0` para uso normal.
+
+Si usas Nginx delante de Docker/Shiny, adapta `deploy/nginx/cgv-shiny.conf`. Activa gzip siempre; Brotli solo si tu build de Nginx incluye el módulo. En Cloudflare, mantén WebSockets activos y habilita Compression Rules/Brotli/Zstandard para respuestas HTTP comprimibles.

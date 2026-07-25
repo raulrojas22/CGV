@@ -3,22 +3,19 @@
 const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
-const { execFileSync } = require("child_process");
 const yaml = require("js-yaml");
-const { appBuilderPath } = require("app-builder-bin");
+const { buildBlockMap } = require("app-builder-lib/out/targets/blockmap/blockmap");
 const packageJson = require("../package.json");
 
 function sha512Base64(filePath) {
   return crypto.createHash("sha512").update(fs.readFileSync(filePath)).digest("base64");
 }
 
-function buildBlockmap(installerPath, blockmapPath) {
-  execFileSync(appBuilderPath, ["blockmap", "--input", installerPath, "--output", blockmapPath], {
-    stdio: "inherit"
-  });
+async function buildBlockmap(installerPath, blockmapPath) {
+  await buildBlockMap(installerPath, "gzip", blockmapPath);
 }
 
-function refreshSignedWindowsUpdate(options) {
+async function refreshSignedWindowsUpdate(options) {
   const installerPath = path.resolve(options.installerPath);
   const updateInfoPath = path.resolve(options.updateInfoPath);
   const createBlockmap = options.createBlockmap || buildBlockmap;
@@ -42,7 +39,7 @@ function refreshSignedWindowsUpdate(options) {
   if (updateInfo.path !== expectedName) throw new Error(`latest.yml path must be ${expectedName}.`);
 
   const blockmapPath = `${installerPath}.blockmap`;
-  createBlockmap(installerPath, blockmapPath);
+  await createBlockmap(installerPath, blockmapPath);
   if (!fs.existsSync(blockmapPath)) throw new Error(`Signed installer blockmap was not created: ${blockmapPath}`);
 
   const installerStat = fs.statSync(installerPath);
@@ -65,17 +62,24 @@ function refreshSignedWindowsUpdate(options) {
   };
 }
 
-if (require.main === module) {
+async function main() {
   const installerPath = process.argv[2];
   const updateInfoPath = process.argv[3] || path.join(path.dirname(installerPath || ""), "latest.yml");
   if (!installerPath) {
     console.error("Usage: node scripts/refresh-signed-windows-update.js <signed-installer.exe> [latest.yml]");
     process.exit(2);
   }
-  const result = refreshSignedWindowsUpdate({ installerPath, updateInfoPath });
+  const result = await refreshSignedWindowsUpdate({ installerPath, updateInfoPath });
   console.log(
     `signed-windows-update-ok installer_bytes=${result.installerSize} blockmap_bytes=${result.blockmapSize}`
   );
+}
+
+if (require.main === module) {
+  main().catch((error) => {
+    console.error(error);
+    process.exit(1);
+  });
 }
 
 module.exports = { refreshSignedWindowsUpdate, sha512Base64 };
