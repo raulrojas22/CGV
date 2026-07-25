@@ -20,17 +20,9 @@ const linux = build.linux || {};
 const publish = build.publish || {};
 const appResource = extraResources.find((entry) => entry && entry.to === "app");
 const filters = Array.isArray(appResource && appResource.filter) ? appResource.filter : [];
-const commonGoResource = extraResources.find((entry) => entry && entry.to === "app/go_annotations");
 
 if (filters.includes("cache/annotation_index/**")) {
-  throw new Error("The lite Desktop installer must not bundle repository annotation caches; each verified organism package supplies its own indexes.");
-}
-if (
-  commonGoResource?.from !== "resources/common-go" ||
-  !Array.isArray(commonGoResource.filter) ||
-  !["go-basic.obo", "go_term_map.rds", "manifest.json"].every((file) => commonGoResource.filter.includes(file))
-) {
-  throw new Error("Desktop must package the locked common GO resources prepared under resources/common-go.");
+  throw new Error("Lite Desktop builds must not embed a developer-machine annotation cache; dataset packages install their own precomputed indexes.");
 }
 
 if (afterPack !== "scripts/trim-packaged-runtime.js") {
@@ -39,8 +31,8 @@ if (afterPack !== "scripts/trim-packaged-runtime.js") {
 
 const expectedVersions = {
   electron: "42.6.1",
-  "electron-builder": "26.11.1",
-  "electron-updater": "6.8.5",
+  "electron-builder": "26.15.3",
+  "electron-updater": "6.8.9",
   "js-yaml": "4.3.0"
 };
 for (const [dependency, version] of Object.entries(expectedVersions)) {
@@ -82,27 +74,29 @@ for (const releaseSurfacePath of [downloadJsPath, downloadUiPath]) {
     throw new Error(`${path.basename(releaseSurfacePath)} must not fall back to releases from the CGV source repository.`);
   }
 }
-
-const goLockPath = path.join(desktopRoot, "go-assets-lock.json");
-const goLock = JSON.parse(fs.readFileSync(goLockPath, "utf8"));
-if (
-  goLock.version !== 1 ||
-  !/^https:\/\/release\.geneontology\.org\/\d{4}-\d{2}-\d{2}\/ontology\/go-basic\.obo$/.test(goLock.obo?.url || "") ||
-  !/^[a-f0-9]{64}$/.test(goLock.obo?.sha256 || "")
-) {
-  throw new Error("Common GO assets must be pinned to a dated official Gene Ontology release with SHA-256.");
-}
-if (packageJson.scripts?.["prepare:go"] !== "node scripts/prepare-common-go.js") {
-  throw new Error("Desktop must prepare the locked common GO assets before packaging.");
-}
-for (const buildScript of ["build", "build:mac", "build:linux", "build:win", "build:store"]) {
-  if (!String(packageJson.scripts?.[buildScript] || "").includes("npm run prepare:go")) {
-    throw new Error(`${buildScript} must prepare locked common GO assets.`);
+const expectedRuntimeScripts = {
+  "runtime:mac:arm64": "bash scripts/build-runtime-macos-arm64.sh",
+  "runtime:mac:x64": "bash scripts/build-runtime-macos-x64.sh",
+  "runtime:linux:x64": "bash scripts/build-runtime-linux-x64.sh",
+  "runtime:win": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-runtime-windows-x64.ps1"
+};
+for (const [scriptName, expectedCommand] of Object.entries(expectedRuntimeScripts)) {
+  if (packageJson.scripts?.[scriptName] !== expectedCommand) {
+    throw new Error(`${scriptName} must invoke the supported platform runtime builder.`);
   }
 }
-for (const windowsBuildScript of ["build:win", "build:store"]) {
-  if (!/(?:^|\s)--publish(?:\s+|=)never(?:\s|$)/.test(String(packageJson.scripts?.[windowsBuildScript] || ""))) {
-    throw new Error(`${windowsBuildScript} must disable electron-builder implicit CI publishing.`);
+for (const buildScript of [
+  "build",
+  "build:mac",
+  "build:mac:arm64",
+  "build:mac:x64",
+  "build:linux",
+  "build:linux:x64",
+  "build:win",
+  "build:store"
+]) {
+  if (!/(?:^|\s)--publish(?:\s+|=)never(?:\s|$)/.test(String(packageJson.scripts?.[buildScript] || ""))) {
+    throw new Error(`${buildScript} must disable electron-builder implicit publishing.`);
   }
 }
 if (!mainJs.includes("autoUpdater.checkForUpdatesAndNotify()") || !mainJs.includes("isDirectWindowsBuild")) {
@@ -209,13 +203,11 @@ if (!fs.existsSync(path.join(repoRoot, ".github", "workflows", "desktop-windows.
   throw new Error("Missing Windows x64 GitHub Actions workflow.");
 }
 const windowsWorkflow = fs.readFileSync(path.join(repoRoot, ".github", "workflows", "desktop-windows.yml"), "utf8");
-if (
-  !windowsWorkflow.includes("WINDOWS_BETA_ARTIFACT_PASSWORD") ||
-  !windowsWorkflow.includes("-mhe=on") ||
-  !windowsWorkflow.includes("npm run prepare:go") ||
-  /uses:\s+[^\s]+@v\d+/i.test(windowsWorkflow)
-) {
-  throw new Error("Windows beta workflow must pin actions, prepare locked GO assets, and encrypt unsigned artifacts with a repository secret.");
+if (!windowsWorkflow.includes("WINDOWS_BETA_ARTIFACT_PASSWORD") || !windowsWorkflow.includes("-mhe=on")) {
+  throw new Error("Windows beta workflow must encrypt unsigned artifacts with a repository secret.");
+}
+if (/uses:\s+[^\s]+@v\d+/i.test(windowsWorkflow)) {
+  throw new Error("Every action in the Windows beta workflow must be pinned to an immutable commit SHA.");
 }
 if (
   !windowsWorkflow.includes("id: msys2") ||
@@ -240,7 +232,6 @@ for (const requiredFragment of [
   "refresh-signed-windows-update.js",
   "CN=SignPath Foundation",
   "CGV_DESKTOP_RELEASE_TOKEN",
-  "npm run prepare:go",
   "already public; this workflow may update draft releases only"
 ]) {
   if (!signedWorkflow.includes(requiredFragment)) {
@@ -259,6 +250,25 @@ for (const requiredFragment of [
 ]) {
   if (!signPathArtifactXml.includes(requiredFragment)) {
     throw new Error(`SignPath artifact configuration is missing: ${requiredFragment}`);
+  }
+}
+
+const linuxWorkflowPath = path.join(repoRoot, ".github", "workflows", "desktop-linux.yml");
+if (!fs.existsSync(linuxWorkflowPath)) throw new Error("Missing Linux x64 GitHub Actions workflow.");
+const linuxWorkflow = fs.readFileSync(linuxWorkflowPath, "utf8");
+if (/uses:\s+[^\s]+@v\d+/i.test(linuxWorkflow)) {
+  throw new Error("Every action in the Linux workflow must be pinned to an immutable commit SHA.");
+}
+for (const requiredFragment of [
+  "runs-on: ubuntu-24.04",
+  "npm run runtime:linux:x64",
+  "npm run build:linux:x64",
+  "--appimage-extract",
+  "SHA256SUMS-linux-x64.txt",
+  "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"
+]) {
+  if (!linuxWorkflow.includes(requiredFragment)) {
+    throw new Error(`Linux workflow is missing required safeguard: ${requiredFragment}`);
   }
 }
 
@@ -297,4 +307,4 @@ for (const [key, value] of Object.entries(expectedDesktopDefaults)) {
   }
 }
 
-console.log(`desktop-package-config-ok installer=lite-catalog-first runtime_defaults=${Object.keys(expectedDesktopDefaults).length} windows_runtime=locked`);
+console.log(`desktop-package-config-ok lite_annotation_cache=dataset_packages runtime_defaults=${Object.keys(expectedDesktopDefaults).length} windows_runtime=locked`);

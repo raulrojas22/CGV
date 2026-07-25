@@ -7,6 +7,7 @@ Use the same flow in every run. The goal is consistency, not exploration.
 - Use the same machine and avoid heavy background jobs.
 - Close other browser tabs if possible.
 - Do not change theme, colorblind mode, or hidden app settings mid-run.
+- Declare `APP_FUTURE_MODE` and `APP_FUTURE_WORKERS` explicitly for every run.
 - In every benchmark run, follow the same click order.
 - When the app reaches the target state and PERF logs are printed, stop the run with `Ctrl+C`.
 
@@ -62,6 +63,9 @@ Use this only for the aligned benchmark.
 
 - first plot ready time
 - total plots ready time
+- search observer total time
+- local exact / external alias / local flex lookup time
+- module init, sequence prefetch, neighbor context, create plot, and girafe build time
 - aligned total time
 - aligned collect time
 - aligned plot build time

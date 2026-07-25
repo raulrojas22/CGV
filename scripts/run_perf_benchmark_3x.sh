@@ -18,7 +18,9 @@ echo "This will run $TRIALS trial(s) (ON then OFF)."
 echo "Initial-visible defaults are fixed for this benchmark:"
 echo "  APP_HOMO_INITIAL_VISIBLE=1 APP_ORTHO_INITIAL_VISIBLE=1"
 echo "Aligned fast-path defaults are fixed for this benchmark:"
-echo "  APP_ORTHO_ALIGNED_FAST=1 APP_ORTHO_ALIGNED_KMER_K=8"
+echo "  APP_ORTHO_ALIGNED_FAST=1"
+echo "Future defaults for this benchmark:"
+echo "  APP_FUTURE_MODE=${APP_FUTURE_MODE:-multisession} APP_FUTURE_WORKERS=${APP_FUTURE_WORKERS:-2}"
 echo "For each run: perform the same UI flow, then press Ctrl+C in this terminal."
 echo
 
@@ -27,13 +29,15 @@ run_one() {
   local trial="$2"
   local logfile="$3"
   local rc=0
+  local future_mode="${APP_FUTURE_MODE:-multisession}"
+  local future_workers="${APP_FUTURE_WORKERS:-2}"
 
   if [[ "$mode" == "ON" ]]; then
-    APP_HOMO_PLOT_CACHE=1 APP_ORTHO_PLOT_CACHE=1 APP_HOMO_INITIAL_VISIBLE=1 APP_ORTHO_INITIAL_VISIBLE=1 APP_ORTHO_ALIGNED_FAST=1 APP_ORTHO_ALIGNED_KMER_K=8 APP_PERF_TIMING=1 APP_DEBUG_LOGS=1 \
+    APP_HOMO_PLOT_CACHE=1 APP_ORTHO_PLOT_CACHE=1 APP_HOMO_INITIAL_VISIBLE=1 APP_ORTHO_INITIAL_VISIBLE=1 APP_ORTHO_ALIGNED_FAST=1 APP_FUTURE_MODE="$future_mode" APP_FUTURE_WORKERS="$future_workers" APP_PERF_TIMING=1 APP_DEBUG_LOGS=1 \
       Rscript -e "shiny::runApp('.', launch.browser=TRUE)" 2>&1 | tee "$logfile"
     rc=${PIPESTATUS[0]}
   else
-    APP_HOMO_PLOT_CACHE=0 APP_ORTHO_PLOT_CACHE=0 APP_HOMO_INITIAL_VISIBLE=1 APP_ORTHO_INITIAL_VISIBLE=1 APP_ORTHO_ALIGNED_FAST=1 APP_ORTHO_ALIGNED_KMER_K=8 APP_PERF_TIMING=1 APP_DEBUG_LOGS=1 \
+    APP_HOMO_PLOT_CACHE=0 APP_ORTHO_PLOT_CACHE=0 APP_HOMO_INITIAL_VISIBLE=1 APP_ORTHO_INITIAL_VISIBLE=1 APP_ORTHO_ALIGNED_FAST=1 APP_FUTURE_MODE="$future_mode" APP_FUTURE_WORKERS="$future_workers" APP_PERF_TIMING=1 APP_DEBUG_LOGS=1 \
       Rscript -e "shiny::runApp('.', launch.browser=TRUE)" 2>&1 | tee "$logfile"
     rc=${PIPESTATUS[0]}
   fi

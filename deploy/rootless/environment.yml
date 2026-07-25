@@ -1,0 +1,45 @@
+name: cgv-rootless
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - r-base=4.5
+  - r-shiny
+  - r-bslib
+  - r-shinyjs
+  - r-shinycssloaders
+  - r-shinywidgets
+  - r-dplyr
+  - r-tidyr
+  - r-purrr
+  - r-stringr
+  - r-ggiraph
+  - r-ggplot2
+  - r-ggrepel
+  - r-patchwork
+  - r-scales
+  - r-vroom
+  - r-future
+  - r-promises
+  - r-httr2
+  - r-furrr
+  - r-visnetwork
+  - r-jsonlite
+  - r-later
+  - r-htmltools
+  - r-dt
+  - r-sass
+  - r-data.table
+  - r-processx
+  - r-biocmanager
+  - bioconductor-biostrings
+  - bioconductor-rsamtools
+  - bioconductor-genomicranges
+  - bioconductor-iranges
+  - bioconductor-genomeinfodb
+  - bioconductor-genomeinfodbdata
+  - bioconductor-rtracklayer
+  - bioconductor-pwalign
+  - lastz
+  - samtools
+  - tabix

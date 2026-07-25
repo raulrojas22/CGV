@@ -12,15 +12,25 @@
 .gitignore
 
 # Secrets — never bake into the image
+.env
 .env.local
 
 # Documentation (not needed at runtime)
 DOCKER_DEPLOY.md
 README.md
 LICENSE
+SHINYPROXY_DEPLOY.md
+desktop/
 
 # Runtime/generated artifacts
 cache/
+build_sources/
+data/
+ncbi_downloads/
+_incoming_brachypodium/
+outputs/
+logs/
+tmp/
 
 # Large biological datasets are mounted as volumes in docker-compose.
 # Remove these lines only if you want a very large self-contained image.

@@ -1,0 +1,16 @@
+[Unit]
+Description=CGV Shiny App
+After=network.target
+
+[Service]
+Type=simple
+User=cgv
+Group=cgv
+WorkingDirectory=/opt/cgv/app
+Environment=APP_DIR=/opt/cgv/app
+ExecStart=/usr/bin/env bash /opt/cgv/app/scripts/run-native.sh
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
