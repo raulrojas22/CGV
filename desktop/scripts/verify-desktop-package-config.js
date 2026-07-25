@@ -263,6 +263,7 @@ for (const requiredFragment of [
   "runs-on: ubuntu-24.04",
   "environment-name: cgv-build",
   "create-args: conda-pack",
+  "shell: micromamba-shell {0}",
   "npm run runtime:linux:x64",
   "npm run build:linux:x64",
   "--appimage-extract",
