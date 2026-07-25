@@ -1,0 +1,114 @@
+name: CGV Desktop Linux x64
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cgv-desktop-linux-x64
+  cancel-in-progress: false
+
+jobs:
+  linux-x64:
+    name: Runtime, AppImage, DEB, and package validation
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: "false"
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - name: Set up micromamba and conda-pack
+        uses: mamba-org/setup-micromamba@ce51e99f4bb8a82ab7158c4dc59ef4634c59c4f9 # v3.1.0
+        with:
+          environment-name: base
+          create-args: conda-pack
+          init-shell: bash
+          cache-downloads: true
+
+      - name: Install Electron dependencies
+        working-directory: desktop
+        run: npm ci
+
+      - name: Run Node tests and package guardrails
+        working-directory: desktop
+        run: |
+          npm test
+          npm run verify:config
+
+      - name: Build Linux scientific runtime
+        working-directory: desktop
+        run: npm run runtime:linux:x64
+
+      - name: Build AppImage and DEB
+        working-directory: desktop
+        run: npm run build:linux:x64
+
+      - name: Validate Linux packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          appimages=(desktop/dist/*-Linux-x64.AppImage)
+          debs=(desktop/dist/*-Linux-x64.deb)
+          if [[ ${#appimages[@]} -ne 1 ]]; then
+            echo "Expected exactly one Linux x64 AppImage; found ${#appimages[@]}." >&2
+            exit 1
+          fi
+          if [[ ${#debs[@]} -ne 1 ]]; then
+            echo "Expected exactly one Linux x64 DEB; found ${#debs[@]}." >&2
+            exit 1
+          fi
+
+          appimage="${appimages[0]}"
+          deb="${debs[0]}"
+          chmod +x "$appimage"
+          file "$appimage" "$deb"
+          dpkg-deb --info "$deb"
+
+          validation_root="$RUNNER_TEMP/cgv-linux-package-validation"
+          mkdir -p "$validation_root/appimage" "$validation_root/deb"
+          (
+            cd "$validation_root/appimage"
+            "$GITHUB_WORKSPACE/$appimage" --appimage-extract >/dev/null
+          )
+          dpkg-deb --extract "$deb" "$validation_root/deb"
+
+          appimage_figure_studio="$validation_root/appimage/squashfs-root/resources/app/www/js/figure_studio.js"
+          deb_figure_studio="$(find "$validation_root/deb" -path '*/resources/app/www/js/figure_studio.js' -type f -print -quit)"
+          appimage_runtime="$validation_root/appimage/squashfs-root/resources/runtime/linux-x64/bin/Rscript"
+          deb_runtime="$(find "$validation_root/deb" -path '*/resources/runtime/linux-x64/bin/Rscript' -type f -print -quit)"
+          test -s "$appimage_figure_studio"
+          test -n "$deb_figure_studio"
+          test -s "$deb_figure_studio"
+          test -x "$appimage_runtime"
+          test -n "$deb_runtime"
+          test -x "$deb_runtime"
+          cmp www/js/figure_studio.js "$appimage_figure_studio"
+          cmp www/js/figure_studio.js "$deb_figure_studio"
+
+          sha256sum "$appimage" "$deb" > desktop/dist/SHA256SUMS-linux-x64.txt
+          cat desktop/dist/SHA256SUMS-linux-x64.txt
+
+      - name: Upload Linux installers
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: CGV-Desktop-Linux-x64-1.1.0
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            desktop/dist/CGV-Desktop-1.1.0-Linux-x64.AppImage
+            desktop/dist/CGV-Desktop-1.1.0-Linux-x64.deb
+            desktop/dist/latest-linux.yml
+            desktop/dist/SHA256SUMS-linux-x64.txt

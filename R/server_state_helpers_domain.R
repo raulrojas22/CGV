@@ -2,6 +2,11 @@ init_server_state_helpers_domain <- function(
     autocompleteBuildEpochs_rv,
     searchRunState_rv
 ) {
+    pending_session_source_restore <- shiny::reactiveVal(list(
+        homologous = "",
+        orthologous = ""
+    ))
+
     parse_positive_int_env <- function(name, default_value) {
         raw <- trimws(as.character(Sys.getenv(name, as.character(default_value)) %||% ""))
         val <- suppressWarnings(as.integer(raw))
@@ -113,6 +118,49 @@ init_server_state_helpers_domain <- function(
         invisible(TRUE)
     }
 
+    begin_session_source_restore <- function(panel, expected_key) {
+        panel_key <- tolower(trimws(as.character(panel %||% "")))
+        if (!panel_key %in% c("homologous", "orthologous")) {
+            return(invisible(FALSE))
+        }
+        key <- trimws(as.character(expected_key %||% ""))
+        pending <- pending_session_source_restore()
+        pending[[panel_key]] <- key
+        pending_session_source_restore(pending)
+        invisible(nzchar(key))
+    }
+
+    consume_session_source_restore <- function(panel, observed_key) {
+        panel_key <- tolower(trimws(as.character(panel %||% "")))
+        if (!panel_key %in% c("homologous", "orthologous")) {
+            return("none")
+        }
+        pending <- pending_session_source_restore()
+        expected <- trimws(as.character(pending[[panel_key]] %||% ""))
+        if (!nzchar(expected)) {
+            return("none")
+        }
+        observed <- trimws(as.character(observed_key %||% ""))
+        if (identical(observed, expected)) {
+            pending[[panel_key]] <- ""
+            pending_session_source_restore(pending)
+            return("complete")
+        }
+        "pending"
+    }
+
+    finish_session_source_restore <- function(panel) {
+        panel_key <- tolower(trimws(as.character(panel %||% "")))
+        if (!panel_key %in% c("homologous", "orthologous")) {
+            return(invisible(FALSE))
+        }
+        pending <- pending_session_source_restore()
+        was_pending <- nzchar(trimws(as.character(pending[[panel_key]] %||% "")))
+        pending[[panel_key]] <- ""
+        pending_session_source_restore(pending)
+        invisible(was_pending)
+    }
+
     list(
         parse_positive_int_env = parse_positive_int_env,
         get_autocomplete_epoch = get_autocomplete_epoch,
@@ -121,6 +169,9 @@ init_server_state_helpers_domain <- function(
         compose_autocomplete_still_valid = compose_autocomplete_still_valid,
         get_search_run_mode_state = get_search_run_mode_state,
         begin_search_run = begin_search_run,
-        finish_search_run = finish_search_run
+        finish_search_run = finish_search_run,
+        begin_session_source_restore = begin_session_source_restore,
+        consume_session_source_restore = consume_session_source_restore,
+        finish_session_source_restore = finish_session_source_restore
     )
 }

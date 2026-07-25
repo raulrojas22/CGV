@@ -131,9 +131,11 @@
     }
 
     // Also check the active tab to show workflow type
+    var activeTabValue = '';
     var activeTab = document.querySelector('#navtabs .tab-pane.active, #navtabs .tab-pane.show');
     if (activeTab && !workflowEl.textContent) {
       var tabValue = activeTab.getAttribute('data-value') || '';
+      activeTabValue = tabValue;
       var labels = {
         'home': 'Home',
         'homologous': 'Homologous Search',
@@ -143,7 +145,14 @@
         'feedback': 'Feedback'
       };
       workflowEl.textContent = labels[tabValue] || '';
+    } else if (activeTab) {
+      activeTabValue = activeTab.getAttribute('data-value') || '';
     }
+
+    var hasGene = !!String(geneEl.textContent || '').trim();
+    var hasWorkflow = !!String(workflowEl.textContent || '').trim();
+    var shouldHide = (!hasGene && !hasWorkflow) || activeTabValue === 'home';
+    bar.style.display = shouldHide ? 'none' : 'flex';
   }
 
   // Observe DOM changes to keep context bar updated

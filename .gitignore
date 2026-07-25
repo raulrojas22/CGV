@@ -1,9 +1,11 @@
 # macOS / editors
 .DS_Store
 .Rhistory
+.Rapp.history
 .Rproj.user/
 .claude/
 .codex_backups/
+.codex_work/
 .qodo/
 *.Rproj
 
@@ -15,6 +17,16 @@
 # Runtime / generated artifacts
 cache/*
 !cache/.gitkeep
+logs/
+outputs/
+tmp/
+_incoming_*/
+
+# Generated indexes, derived tables, and local packaging payloads.
+# These are rebuilt from the lightweight registries and external datasets.
+data/
+desktop/oracle-upload-*/
+faToTwoBit
 
 # Large biological datasets live outside Git history.
 # Keep only lightweight documentation and registries versioned.
@@ -36,14 +48,15 @@ go_annotations/raw/*
 ncbi_downloads/*
 !ncbi_downloads/.gitkeep
 
+# Generated SQLite alias index databases (large, rebuilt at startup)
+data/alias_index/*.sqlite
+data/alias_index/*.sqlite-*
+
 # Desktop Electron app
 desktop/node_modules/
 desktop/dist/
 desktop/resources/r/
 desktop/resources/bin/
-desktop/resources/common-go/
-desktop/resources/demo-data/
-desktop/resources/bundled-data/
 desktop/dataset-packages/work/
 desktop/dataset-packages/*.zip
 desktop/dataset-packages/*.dmg
@@ -54,3 +67,14 @@ desktop/dataset-packages/*.exe
 # Keep lightweight desktop package metadata versioned.
 !desktop/dataset-packages/*.manifest.json
 !desktop/dataset-packages/catalog.json
+
+# Build source data (large intermediate files)
+build_sources/
+packages/
+
+# Screencast videos
+www/screencasts/
+www/screencasts.orig/
+
+# Paper (not needed in repo)
+paper/

@@ -1,0 +1,115 @@
+#!/usr/bin/env Rscript
+
+server_txt <- paste(readLines("server.R", warn = FALSE), collapse = "\n")
+modules_txt <- paste(readLines(file.path("R", "modules.R"), warn = FALSE), collapse = "\n")
+env_txt <- paste(readLines(".env.example", warn = FALSE), collapse = "\n")
+desktop_main_txt <- paste(readLines(file.path("desktop", "src", "main.js"), warn = FALSE), collapse = "\n")
+
+expect_pattern <- function(txt, pattern, label) {
+    if (!grepl(pattern, txt, perl = TRUE)) {
+        stop(sprintf("Missing expected lazy-render default: %s", label))
+    }
+}
+
+expect_pattern(
+    server_txt,
+    'parse_positive_int_env\\("APP_HOMO_UPFRONT_ISOFORMS",\\s*0L\\)',
+    "homologous hidden isoforms are not instantiated upfront by default"
+)
+expect_pattern(
+    server_txt,
+    'parse_positive_int_env\\("APP_ORTHO_UPFRONT_ISOFORMS",\\s*0L\\)',
+    "orthologous hidden isoforms are not instantiated upfront by default"
+)
+expect_pattern(
+    modules_txt,
+    'APP_ORTHO_SUSPEND_HIDDEN",\\s*"1"',
+    "orthologous girafe outputs suspend while hidden by default"
+)
+expect_pattern(
+    modules_txt,
+    'needs_feature_gc <- isTRUE\\(has_gc_source\\)',
+    "gene plots keep per-feature GC enabled when a genome source exists"
+)
+expect_pattern(
+    modules_txt,
+    'APP_DEFER_FEATURE_GC",\\s*"0"',
+    "feature GC can be deferred without disabling GC support"
+)
+expect_pattern(
+    modules_txt,
+    'schedule_gc_span_prefetch\\(df\\)',
+    "orthologous plots prefetch feature GC after the first deferred render"
+)
+expect_pattern(
+    modules_txt,
+    'schedule_deferred_sequence_prefetch\\(\\)',
+    "orthologous plots prefetch sequence composition after the first deferred render"
+)
+for (output_id in c(
+    "homo_aligned_plot_out",
+    "homo_aligned_footer",
+    "homo_pip_plot_out",
+    "homo_pip_footer",
+    "homo_multipip_plot_out",
+    "homo_multipip_footer",
+    "ortho_aligned_plot_out",
+    "ortho_aligned_footer",
+    "ortho_pip_plot_out",
+    "ortho_pip_footer",
+    "ortho_multipip_plot_out",
+    "ortho_multipip_footer"
+)) {
+    expect_pattern(
+        server_txt,
+        sprintf(
+            'outputOptions\\(output, "%s", suspendWhenHidden = isTRUE\\(should_suspend_hidden_ortho_outputs\\(\\)\\)\\)',
+            output_id
+        ),
+        paste("hidden heavy output suspends:", output_id)
+    )
+}
+expect_pattern(
+    server_txt,
+    'APP_FOOTER_DEFER_SEQUENCE",\\s*"0"',
+    "server web default keeps footer sequence composition unless Desktop overrides it"
+)
+expect_pattern(
+    modules_txt,
+    'APP_HOMO_DEFER_SEQUENCE",\\s*"0"',
+    "server web default keeps homologous sequence composition unless Desktop overrides it"
+)
+expect_pattern(
+    server_txt,
+    '!isTRUE\\(defer_footer_sequence_h\\)\\s*&&\\s*\\n\\s*is_canonical_footer_h',
+    "homologous footer avoids canonical gene sequence extraction while deferred"
+)
+expect_pattern(
+    server_txt,
+    '!isTRUE\\(defer_footer_sequence_o\\)\\s*&&\\s*\\n\\s*is_canonical_footer_o',
+    "orthologous footer avoids canonical gene sequence extraction while deferred"
+)
+for (env_key in c(
+    "APP_ORTHO_AUTO_RENDER_MORE=1",
+    "APP_ORTHO_SUSPEND_HIDDEN=1",
+    "APP_HOMO_DEFER_SEQUENCE=1",
+    "APP_ORTHO_DEFER_SEQUENCE=1",
+    "APP_FOOTER_DEFER_SEQUENCE=1",
+    "APP_DEFER_FEATURE_GC=1",
+    "APP_HOMO_UPFRONT_ISOFORMS=0",
+    "APP_ORTHO_UPFRONT_ISOFORMS=0"
+)) {
+    expect_pattern(env_txt, env_key, paste("env example keeps", env_key))
+}
+expect_pattern(
+    desktop_main_txt,
+    'APP_HOMO_DEFER_SEQUENCE:\\s*process\\.env\\.APP_HOMO_DEFER_SEQUENCE \\|\\| "1"',
+    "Desktop defers homologous sequence composition by default"
+)
+expect_pattern(
+    desktop_main_txt,
+    'APP_DEFER_FEATURE_GC:\\s*process\\.env\\.APP_DEFER_FEATURE_GC \\|\\| "1"',
+    "Desktop defers feature GC by default"
+)
+
+cat("render-lazy-defaults-ok\n")

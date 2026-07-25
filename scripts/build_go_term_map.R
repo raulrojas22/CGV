@@ -147,10 +147,17 @@ map <- parse_go_map(obo_path)
 dir.create(dirname(out_path), recursive = TRUE, showWarnings = FALSE)
 
 obo_mtime <- suppressWarnings(as.numeric(file.info(obo_path)$mtime[1]))
+obo_fingerprint <- if (requireNamespace("digest", quietly = TRUE)) {
+  digest::digest(file = obo_path, algo = "sha256")
+} else {
+  paste(as.character(file.info(obo_path)$size[1]), as.character(obo_mtime), sep = "-")
+}
 saveRDS(
   list(
+    schema_version = 2L,
     source_file = obo_path,
     source_mtime = obo_mtime,
+    source_fingerprint = obo_fingerprint,
     map = map
   ),
   file = out_path
@@ -158,3 +165,4 @@ saveRDS(
 
 cat("GO term map saved:", out_path, "\n")
 cat("Terms:", length(map), "\n")
+cat("Fingerprint:", obo_fingerprint, "\n")

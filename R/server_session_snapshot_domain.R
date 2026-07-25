@@ -42,7 +42,8 @@ init_session_snapshot_domain <- function(
     clear_orthologous_visualizations_fn,
     recalc_plot_ranges_homologous_fn,
     recalc_plot_ranges_orthologous_fn,
-    summary_toggle_label_fn
+    summary_toggle_label_fn,
+    begin_session_source_restore_fn = NULL
 ) {
     snapshot_plot_records <- function(ids, titles_map, file_data_map, chr_map, seq_map, sig_map, ann_map, genome_map, org_map, metrics_map, gene_meta_map) {
         ids_chr <- as.character(ids %||% integer(0))
@@ -100,6 +101,7 @@ init_session_snapshot_domain <- function(
                 genome_source_ortho = as.character(genomeSourceOrthologous_rv() %||% ""),
                 current_organism_homo = currentOrganismHomologous_rv(),
                 current_organism_ortho = currentOrganismOrthologous_rv(),
+                figure_studio_state = as.character(input$figure_studio_state %||% ""),
                 global_search_query = as.character(input$global_search_query %||% ""),
                 global_search_query_collapsed = as.character(input$global_search_query_collapsed %||% ""),
                 filter1 = as.character(input$filter1 %||% ""),
@@ -313,6 +315,11 @@ init_session_snapshot_domain <- function(
                 "    }",
                 "    if (window.Shiny && typeof Shiny.setInputValue === 'function') {",
                 "      Shiny.setInputValue(inputId, payload, {priority:'event'});",
+                "      window.setTimeout(function(){",
+                "        Shiny.setInputValue('cgv_session_source_restored',",
+                "          {input_id: inputId, nonce: Date.now() + Math.random()},",
+                "          {priority:'event'});",
+                "      }, 30);",
                 "    }",
                 "  }, 80);",
                 "})();",
@@ -358,8 +365,27 @@ init_session_snapshot_domain <- function(
         state <- app_state %||% list()
         mode_homo <- tolower(trimws(as.character(state$homo_data_mode %||% "preloaded")))
         mode_ortho <- tolower(trimws(as.character(state$ortho_data_mode %||% "preloaded")))
-        if (!mode_homo %in% c("preloaded", "upload")) mode_homo <- "preloaded"
-        if (!mode_ortho %in% c("preloaded", "upload")) mode_ortho <- "preloaded"
+        if (!mode_homo %in% c("preloaded", "ncbi", "upload")) mode_homo <- "preloaded"
+        if (!mode_ortho %in% c("preloaded", "ncbi", "upload", "mixed")) mode_ortho <- "preloaded"
+
+        homo_species <- as.character(state$homo_preloaded_species %||% "")
+        ortho_species <- as.character(state$ortho_preloaded_species %||% character(0))
+        if (is.function(begin_session_source_restore_fn)) {
+            homo_source_detail <- if (identical(mode_homo, "preloaded")) homo_species else ""
+            ortho_source_detail <- if (mode_ortho %in% c("preloaded", "mixed")) {
+                paste(sort(ortho_species), collapse = "|")
+            } else {
+                ""
+            }
+            begin_session_source_restore_fn(
+                "homologous",
+                paste(mode_homo, homo_source_detail, sep = "::")
+            )
+            begin_session_source_restore_fn(
+                "orthologous",
+                paste(mode_ortho, ortho_source_detail, sep = "::")
+            )
+        }
 
         updateRadioButtons(session, "homo_data_mode", selected = mode_homo)
         updateRadioButtons(session, "ortho_data_mode", selected = mode_ortho)
@@ -385,8 +411,6 @@ init_session_snapshot_domain <- function(
         updateCheckboxInput(session, "ext_alias_source_uniprot", value = isTRUE(state$ext_alias_source_uniprot %||% TRUE))
         updateCheckboxInput(session, "ext_alias_source_ensembl", value = isTRUE(state$ext_alias_source_ensembl %||% TRUE))
 
-        homo_species <- as.character(state$homo_preloaded_species %||% "")
-        ortho_species <- as.character(state$ortho_preloaded_species %||% character(0))
         restore_species_grid_selection("homo_preloaded_species", if (nzchar(homo_species)) homo_species else character(0), mode = "single")
         restore_species_grid_selection("ortho_preloaded_species", ortho_species, mode = "multi")
 
@@ -405,7 +429,7 @@ init_session_snapshot_domain <- function(
         shinyjs::runjs(sprintf("setTimeout(function(){ if (typeof applyTheme === 'function') { applyTheme(%s); } }, 20);", theme_json))
 
         nav_target <- tolower(trimws(as.character(state$navtab %||% preferred)))
-        if (!nav_target %in% c("home", "homologous", "orthologous", "desktop-app", "settings", "help", "feedback")) nav_target <- preferred
+        if (!nav_target %in% c("home", "homologous", "orthologous", "figure-studio", "desktop-app", "settings", "help", "feedback")) nav_target <- preferred
         updateTabsetPanel(session, "navtabs", selected = nav_target)
 
         searchStatusHomologous_rv(as.character(state$search_status_homo %||% "Ready."))
@@ -434,6 +458,22 @@ init_session_snapshot_domain <- function(
         restored_h <- restore_panel_from_snapshot(snap$homologous %||% list(), panel = "homologous")
         restored_o <- restore_panel_from_snapshot(snap$orthologous %||% list(), panel = "orthologous")
         apply_summary_visibility_ui()
+        visual_state <- snap$app %||% list()
+        session$onFlushed(function() {
+            homo_visual <- tolower(trimws(as.character(visual_state$homo_visual_mode %||% "compact")))
+            ortho_visual <- tolower(trimws(as.character(visual_state$ortho_visual_mode %||% "compact")))
+            if (!homo_visual %in% c("compact", "detailed")) homo_visual <- "compact"
+            if (!ortho_visual %in% c("compact", "detailed", "aligned")) ortho_visual <- "compact"
+            updateRadioButtons(session, "homo_visual_mode", selected = homo_visual)
+            updateRadioButtons(session, "ortho_visual_mode", selected = ortho_visual)
+            shinyjs::runjs(
+                "setTimeout(function(){if(window.syncVizModeToggles){window.syncVizModeToggles();}if(window.updateCompactModeLayoutState){window.updateCompactModeLayoutState();}},0);"
+            )
+            studio_state <- as.character(visual_state$figure_studio_state %||% "")
+            if (nzchar(studio_state)) {
+                session$sendCustomMessage("cgv:figure-studio-restore", studio_state)
+            }
+        }, once = TRUE)
 
         list(homologous = restored_h, orthologous = restored_o)
     }

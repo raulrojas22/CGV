@@ -1,0 +1,56 @@
+proxy:
+  title: CGV - Comparative Gene Viewer
+  landing-page: /app_direct/cgv
+  heartbeat-rate: ${SP_HEARTBEAT_RATE_MS:30000}
+  heartbeat-timeout: 120000
+  container-wait-time: 180000
+  port: 8080
+  authentication: none
+  container-backend: docker
+  container-strategy: spawn
+  stop-proxy-on-startup-failure: true
+  hide-navbar: true
+  max-total-instances: ${SP_MAX_TOTAL_INSTANCES:10}
+  default-proxy-max-lifetime: ${SP_MAX_LIFETIME_MINUTES:120}
+
+  docker:
+    internal-networking: true
+
+  specs:
+    - id: cgv
+      display-name: CGV - Comparative Gene Viewer
+      description: Interactive Shiny app for ortholog analysis, GO enrichment, and genome comparison
+      container-image: ${CGV_IMAGE:cgv:1.0.0}
+      container-cmd: ["bash", "/app/docker/run-app.sh"]
+      container-network: sp-net
+      container-env-file: /opt/shinyproxy/env/cgv.env
+      container-env:
+        APP_PREWARM_ON_START: "0"
+        APP_PREWARM_BLOCK_START: "0"
+        APP_SESSION_METRICS: "1"
+        APP_PERF_TIMING: "${SP_APP_PERF_TIMING:1}"
+        CGV_DATA_ROOT: "/app"
+        CGV_CACHE_DIR: "/app/cache"
+        CGV_NCBI_DOWNLOADS_DIR: "/app/ncbi_downloads"
+        CGV_NCBI_CACHE_MAX_GB: "${CGV_NCBI_CACHE_MAX_GB:50}"
+        CGV_NCBI_USAGE_LOG_ENABLED: "${CGV_NCBI_USAGE_LOG_ENABLED:true}"
+        APP_ALIAS_DISK_CACHE_DIR: "/app/cache/external_alias"
+      container-volumes:
+        - "${SP_ANNOTATIONS_DIR}:/app/annotations:ro"
+        - "${SP_GENOMES_DIR}:/app/genomes:ro"
+        - "${SP_GO_ANNOTATIONS_DIR}:/app/go_annotations:ro"
+        - "${SP_DATA_DIR}:/app/data:ro"
+        - "${SP_CACHE_DIR}:/app/cache"
+        - "${SP_NCBI_DOWNLOADS_DIR}:/app/ncbi_downloads"
+      container-memory: ${SP_CONTAINER_MEMORY:2g}
+      container-cpu-shares: 1024
+      minimum-seats-available: ${SP_MINIMUM_SEATS_AVAILABLE:1}
+      allow-container-re-use: ${SP_ALLOW_CONTAINER_RE_USE:false}
+      scale-down-delay: ${SP_SCALE_DOWN_DELAY_MINUTES:10}
+      max-instances: ${SP_MAX_INSTANCES_PER_USER:10}
+      max-total-instances: ${SP_MAX_TOTAL_INSTANCES:10}
+      max-lifetime: ${SP_MAX_LIFETIME_MINUTES:120}
+
+logging:
+  file:
+    /var/log/shinyproxy/shinyproxy.log

@@ -15,8 +15,14 @@ suppressPackageStartupMessages({
 
 `%||%` <- function(x, y) if (is.null(x) || length(x) == 0) y else x
 
+alias_cache_dir <- tempfile("alias-cache-")
+dir.create(alias_cache_dir, recursive = TRUE, showWarnings = FALSE)
+Sys.setenv(APP_ALIAS_DISK_CACHE_DIR = alias_cache_dir)
+
 source("/Users/rarojas/Documents/A_FULLAPP/R/utils.R")
 source("/Users/rarojas/Documents/A_FULLAPP/gene_search_lib.R")
+
+on.exit(unlink(alias_cache_dir, recursive = TRUE, force = TRUE), add = TRUE)
 
 assert_true <- function(cond, msg) {
   if (!isTRUE(cond)) {

@@ -1,6 +1,6 @@
 {
   "title": "CGV: Comparative Gene Viewer",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "upload_type": "software",
   "description": "Comparative Gene Viewer (CGV) is an interactive R/Shiny web application for comparative gene visualization and functional analysis across species.",
   "access_right": "open",

@@ -74,9 +74,11 @@ jobs:
         working-directory: desktop
         run: npm ci
 
-      - name: Run Node tests
+      - name: Run tests and release guardrails
         working-directory: desktop
-        run: npm test
+        run: |
+          npm test
+          npm run verify:config
 
       - name: Build locked Windows scientific runtime
         working-directory: desktop
@@ -84,12 +86,6 @@ jobs:
         env:
           CGV_MSYS2_ROOT: ${{ steps.msys2.outputs.msys2-location }}
         run: npm run runtime:win
-
-      - name: Prepare locked common GO assets and release guardrails
-        working-directory: desktop
-        run: |
-          npm run prepare:go
-          npm run verify:config
 
       - name: Build unsigned offline NSIS installer
         working-directory: desktop
