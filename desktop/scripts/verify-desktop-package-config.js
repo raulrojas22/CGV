@@ -266,6 +266,10 @@ for (const requiredFragment of [
   "shell: micromamba-shell {0}",
   "npm run runtime:linux:x64",
   "npm run build:linux:x64",
+  "*-Linux-x86_64.AppImage",
+  "*-Linux-amd64.deb",
+  "CGV-Desktop-1.1.0-Linux-x86_64.AppImage",
+  "CGV-Desktop-1.1.0-Linux-amd64.deb",
   "--appimage-extract",
   "SHA256SUMS-linux-x64.txt",
   "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"
