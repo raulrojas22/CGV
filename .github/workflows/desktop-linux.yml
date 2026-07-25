@@ -32,7 +32,7 @@ jobs:
       - name: Set up micromamba and conda-pack
         uses: mamba-org/setup-micromamba@ce51e99f4bb8a82ab7158c4dc59ef4634c59c4f9 # v3.1.0
         with:
-          environment-name: base
+          environment-name: cgv-build
           create-args: conda-pack
           init-shell: bash
           cache-downloads: true
