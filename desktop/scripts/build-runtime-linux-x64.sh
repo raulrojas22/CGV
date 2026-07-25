@@ -33,7 +33,7 @@ if command -v conda-pack >/dev/null 2>&1; then
 elif python -m conda_pack --help >/dev/null 2>&1; then
   CONDA_PACK=(python -m conda_pack)
 else
-  echo "ERROR: conda-pack is required. Install it with: ${CONDA_EXE} install -n base -c conda-forge conda-pack" >&2
+  echo "ERROR: conda-pack is required. Install it in the active build environment, for example: ${CONDA_EXE} install -n cgv-build -c conda-forge conda-pack" >&2
   exit 1
 fi
 
