@@ -3477,34 +3477,18 @@ function(input, output, session) {
             return(invisible(FALSE))
         }
         min_shared <- if (identical(mode, "orthologous")) 2L else 1L
-        strict_partial_suggestions <- isTRUE(app_env_flag("APP_PARTIAL_SUGGESTIONS_STRICT", FALSE))
-        suggestions <- if (strict_partial_suggestions && exists("find_deterministic_partial_gene_suggestions", mode = "function")) {
-            find_deterministic_partial_gene_suggestions(
-                annotation_paths = annotation_paths,
-                query = query_txt,
-                file_labels = file_labels,
-                det_list = det_list,
-                max_per_file = max_per_file,
-                max_total = max_total,
-                min_query_chars = 2L,
-                min_shared_organisms = min_shared,
-                include_alias_sql = TRUE,
-                base_dir = "."
-            )
-        } else {
-            find_partial_gene_suggestions_fast(
-                annotation_paths = annotation_paths,
-                query = query_txt,
-                file_labels = file_labels,
-                max_per_file = max_per_file,
-                max_total = max_total,
-                min_query_chars = 2L,
-                min_shared_organisms = min_shared,
-                time_budget_sec = time_budget_sec,
-                det_list = det_list,
-                include_alias_sql = TRUE
-            )
-        }
+        suggestions <- find_deterministic_partial_gene_suggestions(
+            annotation_paths = annotation_paths,
+            query = query_txt,
+            file_labels = file_labels,
+            det_list = det_list,
+            max_per_file = max_per_file,
+            max_total = max_total,
+            min_query_chars = 2L,
+            min_shared_organisms = min_shared,
+            include_alias_sql = TRUE,
+            base_dir = "."
+        )
         if ((!is.data.frame(suggestions) || nrow(suggestions) == 0L) &&
             isTRUE(include_alias_family) &&
             is_low_specific_gene_family_query(query_txt) &&
@@ -3554,13 +3538,6 @@ function(input, output, session) {
             return(invisible(FALSE))
         }
         show_partial_gene_suggestions_df(mode = mode, query = query_txt, suggestions = suggestions, context = context)
-    }
-
-    partial_gene_suggestions_time_budget <- function(server_sec = 3.0, local_sec = 1.2) {
-        if (isTRUE(app_env_flag("APP_PARTIAL_SUGGESTIONS_STRICT", FALSE))) {
-            return(server_sec)
-        }
-        local_sec
     }
 
     find_partial_gene_suggestions_from_autocomplete_cache <- function(annotation_paths, query, file_labels = NULL,
@@ -3837,14 +3814,14 @@ function(input, output, session) {
         normalize_partial_gene_suggestions_df(do.call(rbind, rows))
     }
 
-    find_partial_gene_suggestions_fast <- function(annotation_paths, query, file_labels = NULL,
-                                                   max_per_file = 10L, max_total = 15L,
-                                                   min_query_chars = 2L,
-                                                   min_shared_organisms = 1L,
-                                                   source_label_preview = 4L,
-                                                   time_budget_sec = 1.5,
-                                                   det_list = NULL,
-                                                   include_alias_sql = TRUE) {
+    find_partial_gene_suggestions_time_limited_legacy <- function(annotation_paths, query, file_labels = NULL,
+                                                                 max_per_file = 10L, max_total = 15L,
+                                                                 min_query_chars = 2L,
+                                                                 min_shared_organisms = 1L,
+                                                                 source_label_preview = 4L,
+                                                                 time_budget_sec = 1.5,
+                                                                 det_list = NULL,
+                                                                 include_alias_sql = TRUE) {
         q_comp <- normalize_partial_gene_query(query)
         min_query_chars <- suppressWarnings(as.integer(min_query_chars %||% 2L))
         if (!is.finite(min_query_chars) || is.na(min_query_chars) || min_query_chars < 1L) min_query_chars <- 2L
@@ -4013,6 +3990,32 @@ function(input, output, session) {
             rows <- append_alias_sql_rows(rows)
         }
         aggregate_rows(rows)
+    }
+
+    # Keep the established helper name for callers and smoke tests, but make its
+    # result independent of CPU speed, cache warmth, and deployment environment.
+    # `time_budget_sec` is retained only for API compatibility.
+    find_partial_gene_suggestions_fast <- function(annotation_paths, query, file_labels = NULL,
+                                                   max_per_file = 10L, max_total = 15L,
+                                                   min_query_chars = 2L,
+                                                   min_shared_organisms = 1L,
+                                                   source_label_preview = 4L,
+                                                   time_budget_sec = 1.5,
+                                                   det_list = NULL,
+                                                   include_alias_sql = TRUE) {
+        find_deterministic_partial_gene_suggestions(
+            annotation_paths = annotation_paths,
+            query = query,
+            file_labels = file_labels,
+            det_list = det_list,
+            max_per_file = max_per_file,
+            max_total = max_total,
+            min_query_chars = min_query_chars,
+            min_shared_organisms = min_shared_organisms,
+            source_label_preview = source_label_preview,
+            include_alias_sql = include_alias_sql,
+            base_dir = "."
+        )
     }
 
     build_organism_confirm_modal <- function(detected_name, source_label, mode = "homo", detected_items = NULL) {
@@ -9225,7 +9228,7 @@ function(input, output, session) {
     })
 
     homoLastzModesEnabled <- function() {
-        isTRUE(app_env_flag("APP_HOMO_LASTZ_MODES", default = FALSE))
+        isTRUE(app_env_flag("APP_HOMO_LASTZ_MODES", default = TRUE))
     }
 
     output$homo_visual_mode_ui <- renderUI({
@@ -12522,32 +12525,17 @@ function(input, output, session) {
             if (!isTRUE(allow_partial_suggestions)) {
                 return(empty_partial_gene_suggestions_df(source_labels = TRUE, source_label_preview = TRUE))
             }
-            if (isTRUE(app_env_flag("APP_PARTIAL_SUGGESTIONS_STRICT", FALSE)) &&
-                exists("find_deterministic_partial_gene_suggestions", mode = "function")) {
-                return(find_deterministic_partial_gene_suggestions(
-                    annotation_paths = file_path,
-                    query = input_gene,
-                    file_labels = file_label %||% basename(file_path),
-                    det_list = list(det_info %||% list()),
-                    max_per_file = max_per_file,
-                    max_total = max_total,
-                    min_query_chars = 2L,
-                    min_shared_organisms = 1L,
-                    include_alias_sql = TRUE,
-                    base_dir = "."
-                ))
-            }
-            find_partial_gene_suggestions_fast(
+            find_deterministic_partial_gene_suggestions(
                 annotation_paths = file_path,
                 query = input_gene,
                 file_labels = file_label %||% basename(file_path),
+                det_list = list(det_info %||% list()),
                 max_per_file = max_per_file,
                 max_total = max_total,
                 min_query_chars = 2L,
                 min_shared_organisms = 1L,
-                time_budget_sec = partial_gene_suggestions_time_budget(server_sec = 3.0, local_sec = 1.2),
-                det_list = list(det_info %||% list()),
-                include_alias_sql = TRUE
+                include_alias_sql = TRUE,
+                base_dir = "."
             )
         }
         return_partial_suggestions <- function(progress_message, suggestions) {
@@ -13912,6 +13900,75 @@ function(input, output, session) {
         session$sendCustomMessage("cgv_trigger_ortho_search", list(origin = as.character(origin %||% "local")))
         invisible(TRUE)
     }
+
+    observeEvent(input$neighbor_gene_visualize_request, {
+        payload <- input$neighbor_gene_visualize_request %||% list()
+        if (!is.list(payload)) return(invisible(NULL))
+
+        scalar_text <- function(x) {
+            value <- trimws(as.character(x %||% ""))
+            if (length(value) == 0L || is.na(value[1])) return("")
+            value[1]
+        }
+        neighbor_name <- scalar_text(payload$neighbor_name)
+        neighbor_id <- scalar_text(payload$neighbor_id)
+        source_gene <- scalar_text(payload$source_gene)
+        invalid_labels <- c("", "N/A", "None", "Unknown")
+        search_gene <- if (!neighbor_name %in% invalid_labels) neighbor_name else neighbor_id
+        if (search_gene %in% invalid_labels) {
+            emit_popup_status(
+                "Genomic Neighbor",
+                "This annotation does not provide a searchable gene identifier.",
+                tone = "warning",
+                clear = FALSE
+            )
+            return(invisible(NULL))
+        }
+
+        source_panel <- tolower(scalar_text(payload$panel))
+        if (!source_panel %in% c("homologous", "orthologous")) {
+            source_panel <- as.character(input$navtabs %||% preferredSearchWorkflow() %||% "homologous")
+        }
+        if (!source_panel %in% c("homologous", "orthologous")) source_panel <- "homologous"
+
+        relation_detail <- scalar_text(payload$detail)
+        relation_note <- if (nzchar(relation_detail)) paste0(" (", relation_detail, ")") else ""
+        source_note <- if (nzchar(source_gene) && !source_gene %in% invalid_labels) {
+            paste0(" from ", source_gene)
+        } else {
+            ""
+        }
+        emit_popup_status(
+            "Genomic Neighbor",
+            paste0("Adding ", search_gene, source_note, relation_note, " below the current results."),
+            tone = "info",
+            clear = FALSE
+        )
+
+        active_panel <- as.character(input$navtabs %||% "")
+        # A contextual neighbor/overlap action normally originates from the
+        # workflow that is already visible. Re-selecting that same hidden tab
+        # emits a nav change and reopens the left workflow panel unnecessarily.
+        if (!identical(active_panel, source_panel)) {
+            updateTabsetPanel(session, "navtabs", selected = source_panel)
+        }
+        dispatch_neighbor_search <- function() {
+            if (identical(source_panel, "orthologous")) {
+                updateTextInput(session, "gene_name", value = search_gene)
+                execute_orthologous_search(gene_override = search_gene, origin = "genomic_neighbor")
+            } else {
+                updateTextInput(session, "filter1", value = search_gene)
+                execute_homologous_search(gene_override = search_gene, origin = "genomic_neighbor")
+            }
+            invisible(TRUE)
+        }
+        if (!identical(active_panel, source_panel) && requireNamespace("later", quietly = TRUE)) {
+            later::later(dispatch_neighbor_search, delay = 0.08)
+        } else {
+            dispatch_neighbor_search()
+        }
+        invisible(TRUE)
+    }, ignoreInit = TRUE, ignoreNULL = TRUE)
 
     observeEvent(searchPreparationReadyHomo(), {
         if (!isTRUE(searchPreparationReadyHomo())) return(invisible(NULL))
@@ -16576,7 +16633,7 @@ function(input, output, session) {
                         max_per_file = 20L,
                         max_total = 20L,
                         context = "Multi-Gene Search",
-                        time_budget_sec = partial_gene_suggestions_time_budget(server_sec = 3.0, local_sec = 1.2),
+                        time_budget_sec = 3.0,
                         include_alias_family = FALSE
                     ))
                     app_perf_mark_ms(
@@ -16659,7 +16716,7 @@ function(input, output, session) {
                         max_per_file = 20L,
                         max_total = 20L,
                         context = "Multi-Gene Search",
-                        time_budget_sec = partial_gene_suggestions_time_budget(server_sec = 3.0, local_sec = 1.2),
+                        time_budget_sec = 3.0,
                         include_alias_family = FALSE
                     )
                     return(invisible(NULL))
@@ -28086,6 +28143,41 @@ function(input, output, session) {
         )
     }
 
+    header_genomic_ruler_button <- function() {
+        tags$button(
+            type = "button",
+            class = "summary-display-submode-button summary-genomic-ruler-toggle is-active",
+            `data-genomic-ruler-toggle` = "true",
+            `aria-pressed` = "true",
+            `aria-label` = "Hide genomic context scale",
+            title = "Show or hide genomic coordinates and compressed neighbor-distance context",
+            icon("ruler-horizontal"),
+            span("Scale")
+        )
+    }
+
+    header_genomic_context_button <- function(kind, label, icon_name) {
+        kind_txt <- tolower(trimws(as.character(kind %||% "")))
+        tags$button(
+            type = "button",
+            class = paste(
+                "summary-display-submode-button summary-genomic-context-toggle",
+                paste0("summary-genomic-context-toggle--", kind_txt),
+                "is-active"
+            ),
+            `data-genomic-context-toggle` = kind_txt,
+            `aria-pressed` = "true",
+            `aria-label` = if (identical(kind_txt, "overlaps")) {
+                "Hide overlapping genes"
+            } else {
+                "Hide neighboring genes"
+            },
+            title = paste("Show or hide", tolower(label), "on gene cards"),
+            icon(icon_name),
+            span(label)
+        )
+    }
+
     build_header_mode_switch <- function(scope, current_mode, align_available = TRUE, align_disabled_title = "", align_choices = NULL) {
         scope <- as.character(scope %||% "homo")
         input_id <- paste0(scope, "_header_mode_pick")
@@ -28132,12 +28224,24 @@ function(input, output, session) {
                 class = "summary-display-mode-subbar",
                 span(class = "summary-display-submode-label", "Visual detail"),
                 header_submode_button(input_id, "compact", "Compact", active = identical(current_mode, "compact")),
-                header_submode_button(input_id, "detailed", "Detailed", active = identical(current_mode, "detailed"))
+                header_submode_button(input_id, "detailed", "Detailed", active = identical(current_mode, "detailed")),
+                header_genomic_ruler_button()
             )
+        }
+        context_subbar <- if (!is_alignment) {
+            div(
+                class = "summary-display-mode-subbar summary-display-context-subbar",
+                span(class = "summary-display-submode-label summary-display-context-label", "Context"),
+                header_genomic_context_button("neighbors", "Neighbors", "location-arrow"),
+                header_genomic_context_button("overlaps", "Overlaps", "layer-group")
+            )
+        } else {
+            NULL
         }
 
         div(
             class = "summary-display-mode-control",
+            context_subbar,
             div(
                 class = "summary-display-mode-main",
                 header_mode_button(
@@ -28457,6 +28561,21 @@ function(input, output, session) {
             div(
                 class = "summary-context-actions",
                 span(class = "summary-context-gene-hint", gene_hint),
+                if (length(id_vec) > 0L) {
+                    actionButton(
+                        inputId = if (isTRUE(is_cross_species_header)) {
+                            "open_share_analysis_ortho"
+                        } else {
+                            "open_share_analysis_homo"
+                        },
+                        label = span("Share"),
+                        icon = icon("share-nodes"),
+                        class = "summary-share-analysis-btn",
+                        title = "Share this analysis as a read-only interactive report"
+                    )
+                } else {
+                    NULL
+                },
                 tags$button(
                     type = "button",
                     class = "app-notification-center-btn app-notification-center-toggle",
@@ -34430,5 +34549,166 @@ function(input, output, session) {
             message("[Feedback] Save error: ", e$message)
         })
     }, ignoreInit = TRUE)
+
+    # =========================================================================
+    # PORTABLE ANALYSIS / STATIC READ-ONLY REPORTS
+    # =========================================================================
+    if (isTRUE(app_env_flag("APP_SHARED_REPORTS_ENABLED", default = TRUE))) {
+        sharedAnalysisDomain <- init_shared_analysis_domain(
+            input = input,
+            output = output,
+            session = session,
+            build_session_snapshot_fn = function() build_work_session_snapshot(),
+            homo_summary_fn = function() get_homo_summary_df(perf_context = "HOMO_SHARE"),
+            ortho_summary_fn = function() get_ortho_summary_df(perf_context = "ORTHO_SHARE"),
+            pip_runs_fn = function() {
+                ortho_runs <- pipLocalAlignmentRunsOrthologous() %||% list()
+                homo_runs <- (homoPipLocalAlignmentState() %||% list())$runs %||% list()
+                ortho_ids <- names(ortho_runs)
+                homo_ids <- names(homo_runs)
+                if (is.null(ortho_ids)) ortho_ids <- as.character(seq_along(ortho_runs))
+                if (is.null(homo_ids)) homo_ids <- as.character(seq_along(homo_runs))
+                names(ortho_runs) <- paste0("cross_species_", ortho_ids)
+                names(homo_runs) <- paste0("multi_gene_", homo_ids)
+                c(ortho_runs, homo_runs)
+            },
+            multipip_runs_fn = function() {
+                ortho_runs <- multipipLocalAlignmentRunsOrthologous() %||% list()
+                homo_runs <- (homoMultipipLocalAlignmentState() %||% list())$runs %||% list()
+                ortho_ids <- names(ortho_runs)
+                homo_ids <- names(homo_runs)
+                if (is.null(ortho_ids)) ortho_ids <- as.character(seq_along(ortho_runs))
+                if (is.null(homo_ids)) homo_ids <- as.character(seq_along(homo_runs))
+                names(ortho_runs) <- paste0("cross_species_", ortho_ids)
+                names(homo_runs) <- paste0("multi_gene_", homo_ids)
+                c(ortho_runs, homo_runs)
+            },
+            run_lastz_fn = function(contexts) {
+                contexts <- unique(as.character(contexts %||% character(0)))
+                missing <- character(0)
+                completed_for_report <- list()
+
+                if ("homo" %in% contexts) {
+                    homo_state <- tryCatch(
+                        run_homo_local_lastz(
+                            "blocks",
+                            span_mode = as.character(input$homo_pip_span %||% "gene")
+                        ),
+                        error = function(e) list(
+                            status = "error",
+                            error = conditionMessage(e),
+                            runs = list()
+                        )
+                    )
+                    homoPipLocalAlignmentState(homo_state)
+                    completed_homo <- cgv_completed_alignment_runs(homo_state$runs %||% list())
+                    if (length(completed_homo)) {
+                        homo_ids <- names(completed_homo)
+                        if (is.null(homo_ids)) homo_ids <- as.character(seq_along(completed_homo))
+                        names(completed_homo) <- paste0("multi_gene_", homo_ids)
+                        completed_for_report <- c(completed_for_report, completed_homo)
+                    }
+                    if (!length(completed_homo)) {
+                        detail <- cgv_safe_scalar(
+                            homo_state$error,
+                            "no compatible LASTZ result was completed"
+                        )
+                        missing <- c(missing, paste0("Multi-Gene LASTZ: ", detail))
+                    }
+                }
+
+                if ("ortho" %in% contexts) {
+                    ortho_contexts <- tryCatch(pipWindowTracksOrthologous() %||% list(), error = function(e) list())
+                    ortho_reference <- tryCatch(pipReferenceWindowOrthologous(), error = function(e) NULL)
+                    ortho_ids <- as.character(tryCatch(pipVisiblePlotIdsOrthologous(), error = function(e) character(0)))
+                    reference_id <- cgv_safe_scalar((ortho_reference %||% list())$plot_id)
+                    query_ids <- setdiff(ortho_ids[nzchar(ortho_ids)], reference_id)
+                    ortho_runs <- if (!is.null(ortho_reference) && length(query_ids)) {
+                        stats::setNames(lapply(query_ids, function(plot_id) {
+                            query_context <- ortho_contexts[[plot_id]] %||% NULL
+                            if (is.null(query_context)) {
+                                return(list(
+                                    status = "invalid_input",
+                                    stderr = "Missing query locus context.",
+                                    blocks = data.frame(stringsAsFactors = FALSE)
+                                ))
+                            }
+                            tryCatch(
+                                run_local_locus_alignment(
+                                    reference_ctx = ortho_reference,
+                                    query_ctx = query_context,
+                                    engine = "lastz",
+                                    format_name = "general"
+                                ),
+                                error = function(e) list(
+                                    status = "engine_error",
+                                    stderr = conditionMessage(e),
+                                    blocks = data.frame(stringsAsFactors = FALSE)
+                                )
+                            )
+                        }), query_ids)
+                    } else {
+                        list()
+                    }
+                    setPipLocalAlignmentStateOrthologous(
+                        runs = ortho_runs,
+                        stamp = format(Sys.time(), "%Y-%m-%d %H:%M:%S"),
+                        running = FALSE,
+                        token = paste0("report_", cgv_random_secret(8L))
+                    )
+                    completed_ortho <- cgv_completed_alignment_runs(ortho_runs)
+                    if (length(completed_ortho)) {
+                        ortho_run_ids <- names(completed_ortho)
+                        if (is.null(ortho_run_ids)) ortho_run_ids <- as.character(seq_along(completed_ortho))
+                        names(completed_ortho) <- paste0("cross_species_", ortho_run_ids)
+                        completed_for_report <- c(completed_for_report, completed_ortho)
+                    }
+                    if (!length(completed_ortho)) {
+                        missing <- c(
+                            missing,
+                            "Cross-Species LASTZ: no compatible alignment result was completed."
+                        )
+                    }
+                }
+
+                list(
+                    missing = unique(missing),
+                    pip_runs = completed_for_report
+                )
+            },
+            active_homo_ids_rv = activePlotIdsHomologous,
+            active_ortho_ids_rv = activePlotIdsOrthologous,
+            homo_synteny_available_fn = function() {
+                length(homoMultiTranscriptGeneGroups()) > 0L
+            },
+            homo_synteny_groups_fn = function() {
+                groups <- homoMultiTranscriptGeneGroups()
+                unname(lapply(groups, function(group) {
+                    list(
+                        value = as.character(group$key %||% ""),
+                        gene_label = as.character(group$gene_label %||% ""),
+                        organism_label = as.character(group$org_label %||% ""),
+                        label = as.character(group$label %||% group$gene_label %||% "")
+                    )
+                }))
+            },
+            plot_chr_length_fn = function(workflow, plot_id, chr_name) {
+                ann_map <- if (identical(as.character(workflow), "multi_gene")) {
+                    tryCatch(annotationPathsHomologous(), error = function(e) list())
+                } else {
+                    tryCatch(annotationPathsOrthologous(), error = function(e) list())
+                }
+                ann_path <- as.character(ann_map[[as.character(plot_id)]] %||% "")
+                if (!nzchar(ann_path) || !file.exists(ann_path)) return(NA_real_)
+                len <- suppressWarnings(as.numeric(get_chromosome_length_for_chr(ann_path, as.character(chr_name))))
+                if (is.finite(len) && len > 0) len else NA_real_
+            },
+            app_version = cgv_release_version,
+            base_dir = "."
+        )
+    } else {
+        shinyjs::hide("open_share_analysis_homo")
+        shinyjs::hide("open_share_analysis_ortho")
+    }
 
 }

@@ -194,6 +194,8 @@ if [ \"\$HTTP\" != '200' ]; then
   ${REMOTE_DOCKER} logs --tail 100 cgv >&2 || true
   exit 1
 fi
+echo '  Verificando montaje de índices de alias preloaded...'
+${REMOTE_DOCKER} exec cgv Rscript /app/scripts/verify_preloaded_alias_indexes.R --root=/app
 VIDEO_HTTP_FAILURES=0
 VIDEO_RANGE_WARNINGS=0
 for video in ${GUIDE_MEDIA_FILES[*]}; do

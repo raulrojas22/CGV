@@ -102,6 +102,12 @@ for (const buildScript of [
 if (!mainJs.includes("autoUpdater.checkForUpdatesAndNotify()") || !mainJs.includes("isDirectWindowsBuild")) {
   throw new Error("Direct Windows builds must check the electron-builder update feed automatically.");
 }
+if (!/CGV_RUNTIME:\s*[\"']desktop[\"']/.test(mainJs)) {
+  throw new Error("The local Shiny process must be marked as CGV Desktop so report exports never publish a Web URL.");
+}
+if (!mainJs.includes('exportDownloadSession.on("will-download"') || !mainJs.includes("setSaveDialogOptions")) {
+  throw new Error("Desktop exports must use the operating-system save dialog.");
+}
 
 const winTargets = Array.isArray(win.target) ? win.target : [];
 const nsisTarget = winTargets.find((target) => target && target.target === "nsis");

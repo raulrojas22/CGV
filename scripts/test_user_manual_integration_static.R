@@ -6,6 +6,8 @@ ui_text <- read_text("ui.R")
 home_text <- read_text(file.path("www", "home_preview_cgv.html"))
 guide_css <- read_text(file.path("www", "css", "cgv_guide.css"))
 compiled_css <- read_text(file.path("www", "css", "cgv_compiled.css"))
+manual_source <- read_text(file.path("docs", "user_manual", "CGV_User_Manual_Source.md"))
+desktop_downloads <- read_text(file.path("R", "ui_desktop_downloads.R"))
 desktop_package <- read_text(file.path("desktop", "package.json"))
 metadata <- jsonlite::fromJSON(file.path("www", "docs", "manual.json"))
 
@@ -37,7 +39,20 @@ stopifnot(
   grepl('versioned_asset_path("home_preview_cgv.html")', ui_text, fixed = TRUE),
   grepl("data-cgv-manual-link", home_text, fixed = TRUE),
   grepl("docs/manual.json", home_text, fixed = TRUE),
+  grepl("Interactive report", home_text, fixed = TRUE),
+  grepl("self-contained local HTML report", home_text, fixed = TRUE),
   grepl(".guide-manual-card", guide_css, fixed = TRUE),
+  grepl("guide-runtime-desktop", guide_css, fixed = TRUE),
+  grepl('`data-guide-route` = "figure-studio"', ui_text, fixed = TRUE),
+  grepl("guide-common-share-analysis-web.mp4", ui_text, fixed = TRUE),
+  grepl("guide-common-export-report-desktop.mp4", ui_text, fixed = TRUE),
+  grepl("guide-figure-studio-04-preview-and-export.mp4", ui_text, fixed = TRUE),
+  grepl("Use Share to create an expiring secret read-only URL", ui_text, fixed = TRUE),
+  grepl("CGV Desktop does not upload the analysis", ui_text, fixed = TRUE),
+  grepl("Local interactive reports", desktop_downloads, fixed = TRUE),
+  grepl("## 2.7 Share analysis", manual_source, fixed = TRUE),
+  grepl("CGV freezes a visual copy", manual_source, fixed = TRUE),
+  grepl("**Figure Studio** covers:", manual_source, fixed = TRUE),
   grepl(".feedback-manual-prompt", compiled_css, fixed = TRUE),
   grepl('"www/**"', desktop_package, fixed = TRUE)
 )

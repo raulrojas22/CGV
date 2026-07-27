@@ -2232,6 +2232,10 @@
         preview: openExportPreview,
         exportSvg: exportSvg,
         exportPng: exportPng,
+        exportSnapshot: function () {
+            if (!state.panels.length) return "";
+            return serializeCompositeSvg();
+        },
         getState: function () { return serializableState(); },
         restore: restoreExternalDraft
     };

@@ -27,7 +27,7 @@ APP_PREWARM_BLOCK_START="${APP_PREWARM_BLOCK_START:-0}"
 cd "${APP_DIR}"
 mkdir -p cache/work_sessions
 
-for required_dir in annotations genomes go_annotations; do
+for required_dir in annotations genomes go_annotations data/alias_index; do
   if [[ ! -d "${required_dir}" ]]; then
     echo "[cgv-native] warning: '${required_dir}' directory not found in ${APP_DIR}"
   fi

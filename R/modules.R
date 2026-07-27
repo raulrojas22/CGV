@@ -255,6 +255,366 @@ truncate_neighbor_label <- function(x, max_chars = 18) {
     paste0(substr(x, 1, max_chars - 3), "...")
 }
 
+build_genomic_ruler_spec <- function(start_pos, end_pos, target_breaks = 4L, max_ticks = 6L) {
+    start_num <- suppressWarnings(as.numeric(start_pos %||% NA_real_))
+    end_num <- suppressWarnings(as.numeric(end_pos %||% NA_real_))
+    if (!is.finite(start_num) || !is.finite(end_num)) {
+        return(NULL)
+    }
+    if (end_num < start_num) {
+        tmp <- start_num
+        start_num <- end_num
+        end_num <- tmp
+    }
+    if (end_num <= start_num) {
+        return(NULL)
+    }
+
+    span_bp <- end_num - start_num
+    max_abs_coord <- max(abs(c(start_num, end_num)))
+    if (max_abs_coord >= 1e6) {
+        unit_scale <- 1e6
+        unit_label <- "Mb"
+    } else if (max_abs_coord >= 1e3) {
+        unit_scale <- 1e3
+        unit_label <- "kb"
+    } else {
+        unit_scale <- 1
+        unit_label <- "bp"
+    }
+
+    target_breaks <- suppressWarnings(as.integer(target_breaks %||% 4L))
+    if (!is.finite(target_breaks) || target_breaks < 2L) target_breaks <- 4L
+    max_ticks <- suppressWarnings(as.integer(max_ticks %||% 6L))
+    if (!is.finite(max_ticks) || max_ticks < 2L) max_ticks <- 6L
+
+    inner_ticks <- pretty(c(start_num, end_num), n = target_breaks)
+    inner_ticks <- inner_ticks[
+        is.finite(inner_ticks) &
+            inner_ticks > start_num &
+            inner_ticks < end_num
+    ]
+    # Keep endpoint labels visually distinct from the first/last pretty break.
+    # The plot reserves a fixed central width, so a 10% edge gap is a safer
+    # readability threshold than relying on the genomic span alone.
+    min_edge_gap <- span_bp * 0.10
+    inner_ticks <- inner_ticks[
+        (inner_ticks - start_num) >= min_edge_gap &
+            (end_num - inner_ticks) >= min_edge_gap
+    ]
+    max_inner <- max(0L, max_ticks - 2L)
+    if (length(inner_ticks) > max_inner && max_inner > 0L) {
+        keep_idx <- unique(as.integer(round(seq(1, length(inner_ticks), length.out = max_inner))))
+        inner_ticks <- inner_ticks[keep_idx]
+    } else if (max_inner == 0L) {
+        inner_ticks <- numeric(0)
+    }
+    ticks <- sort(unique(c(start_num, inner_ticks, end_num)))
+
+    span_display <- span_bp / unit_scale
+    digits <- if (identical(unit_label, "bp")) {
+        0L
+    } else if (span_display >= 10) {
+        1L
+    } else if (span_display >= 0.01) {
+        3L
+    } else if (span_display >= 0.001) {
+        4L
+    } else {
+        5L
+    }
+    scaled_ticks <- ticks / unit_scale
+    labels <- formatC(scaled_ticks, format = "f", digits = digits, big.mark = ",")
+    while (length(unique(labels)) < length(labels) && digits < 7L) {
+        digits <- digits + 1L
+        labels <- formatC(scaled_ticks, format = "f", digits = digits, big.mark = ",")
+    }
+    labels <- paste(labels, unit_label)
+
+    exact_bp <- format(
+        round(ticks),
+        big.mark = ",",
+        scientific = FALSE,
+        trim = TRUE
+    )
+    data.frame(
+        value = ticks,
+        label = labels,
+        exact_bp = exact_bp,
+        hjust = c(0, rep(0.5, max(0L, length(ticks) - 2L)), 1),
+        unit = unit_label,
+        stringsAsFactors = FALSE
+    )
+}
+
+prune_genomic_ruler_spec_for_width <- function(
+    ruler_spec,
+    start_pos,
+    end_pos,
+    display_width_in,
+    text_size_mm = 3.55,
+    min_gap_in = 0.10
+) {
+    if (is.null(ruler_spec) || !is.data.frame(ruler_spec) || nrow(ruler_spec) <= 1L) {
+        return(ruler_spec)
+    }
+
+    start_num <- suppressWarnings(as.numeric(start_pos %||% NA_real_))
+    end_num <- suppressWarnings(as.numeric(end_pos %||% NA_real_))
+    width_in <- suppressWarnings(as.numeric(display_width_in %||% NA_real_))
+    text_mm <- suppressWarnings(as.numeric(text_size_mm %||% 3.55))
+    gap_in <- suppressWarnings(as.numeric(min_gap_in %||% 0.10))
+    if (!is.finite(start_num) || !is.finite(end_num) || end_num <= start_num ||
+        !is.finite(width_in) || width_in <= 0) {
+        return(ruler_spec)
+    }
+    if (!is.finite(text_mm) || text_mm <= 0) text_mm <- 3.55
+    if (!is.finite(gap_in) || gap_in < 0) gap_in <- 0.10
+
+    # ggplot text size is expressed in millimetres. A typical UI sans-serif
+    # glyph occupies about 54% of the font size horizontally.
+    label_width_in <- pmax(
+        0.18,
+        nchar(as.character(ruler_spec$label), type = "width") * text_mm * 0.54 / 25.4
+    )
+    normalized_x <- (as.numeric(ruler_spec$value) - start_num) / (end_num - start_num)
+    label_x_in <- normalized_x * width_in
+    label_hjust <- suppressWarnings(as.numeric(ruler_spec$hjust))
+    label_hjust[!is.finite(label_hjust)] <- 0.5
+    label_left <- label_x_in - label_hjust * label_width_in
+    label_right <- label_x_in + (1 - label_hjust) * label_width_in
+
+    labels_fit <- function(keep_idx) {
+        keep_idx <- sort(unique(as.integer(keep_idx)))
+        if (length(keep_idx) <= 1L) return(TRUE)
+        all(
+            label_right[keep_idx[-length(keep_idx)]] + gap_in <=
+                label_left[keep_idx[-1L]]
+        )
+    }
+
+    n_ticks <- nrow(ruler_spec)
+    endpoint_idx <- unique(c(1L, n_ticks))
+    if (!labels_fit(endpoint_idx)) {
+        midpoint <- (start_num + end_num) / 2
+        unit_label <- as.character(ruler_spec$unit[1] %||% "bp")
+        unit_scale <- switch(unit_label, Mb = 1e6, kb = 1e3, bp = 1, 1)
+        first_numeric_label <- sub(
+            paste0("\\s+", unit_label, "$"),
+            "",
+            as.character(ruler_spec$label[1])
+        )
+        digits <- if (grepl("\\.", first_numeric_label)) {
+            nchar(sub("^.*\\.", "", first_numeric_label))
+        } else {
+            0L
+        }
+        midpoint_label <- paste(
+            formatC(midpoint / unit_scale, format = "f", digits = digits, big.mark = ","),
+            unit_label
+        )
+        return(data.frame(
+            value = midpoint,
+            label = midpoint_label,
+            exact_bp = format(
+                round(midpoint),
+                big.mark = ",",
+                scientific = FALSE,
+                trim = TRUE
+            ),
+            hjust = 0.5,
+            unit = unit_label,
+            stringsAsFactors = FALSE
+        ))
+    }
+
+    inner_idx <- if (n_ticks > 2L) seq.int(2L, n_ticks - 1L) else integer(0)
+    best_keep <- endpoint_idx
+    best_count <- length(best_keep)
+    best_spacing <- -Inf
+    subset_count <- 2^length(inner_idx)
+    for (mask in seq.int(0, subset_count - 1L)) {
+        selected_inner <- if (length(inner_idx) == 0L) {
+            integer(0)
+        } else {
+            inner_idx[vapply(
+                seq_along(inner_idx),
+                function(bit) bitwAnd(mask, bitwShiftL(1L, bit - 1L)) != 0L,
+                logical(1)
+            )]
+        }
+        keep_idx <- sort(c(endpoint_idx, selected_inner))
+        if (!labels_fit(keep_idx)) next
+        spacing_score <- if (length(keep_idx) > 1L) {
+            min(diff(label_x_in[keep_idx]))
+        } else {
+            width_in
+        }
+        if (length(keep_idx) > best_count ||
+            (length(keep_idx) == best_count && spacing_score > best_spacing)) {
+            best_keep <- keep_idx
+            best_count <- length(keep_idx)
+            best_spacing <- spacing_score
+        }
+    }
+
+    ruler_spec[best_keep, , drop = FALSE]
+}
+
+assign_genomic_overlap_lanes <- function(starts, ends, padding_bp = 0) {
+    starts_num <- suppressWarnings(as.numeric(starts))
+    ends_num <- suppressWarnings(as.numeric(ends))
+    n_intervals <- length(starts_num)
+    if (n_intervals == 0L) return(integer(0))
+    if (length(ends_num) != n_intervals || any(!is.finite(starts_num)) || any(!is.finite(ends_num))) {
+        stop("Overlap lane coordinates must be finite vectors of equal length.")
+    }
+
+    interval_start <- pmin(starts_num, ends_num)
+    interval_end <- pmax(starts_num, ends_num)
+    padding_num <- suppressWarnings(as.numeric(padding_bp %||% 0))
+    if (!is.finite(padding_num) || padding_num < 0) padding_num <- 0
+
+    order_idx <- order(interval_start, interval_end, seq_len(n_intervals))
+    lane_ends <- numeric(0)
+    lane_index <- integer(n_intervals)
+    for (idx in order_idx) {
+        available <- which(interval_start[idx] > (lane_ends + padding_num))
+        lane <- if (length(available) > 0L) available[1] else length(lane_ends) + 1L
+        if (lane > length(lane_ends)) {
+            lane_ends <- c(lane_ends, interval_end[idx])
+        } else {
+            lane_ends[lane] <- interval_end[idx]
+        }
+        lane_index[idx] <- lane
+    }
+    lane_index
+}
+
+has_genomic_overlap_context <- function(neighbor_context) {
+    if (is.null(neighbor_context) || !is.list(neighbor_context)) return(FALSE)
+
+    overlap_flags <- neighbor_context$flags
+    if (is.list(overlap_flags)) {
+        if (isTRUE(overlap_flags$has_overlap)) return(TRUE)
+        overlap_count <- suppressWarnings(as.integer(overlap_flags$overlap_count %||% 0L))
+        if (is.finite(overlap_count) && overlap_count > 0L) return(TRUE)
+    }
+
+    overlapping <- neighbor_context$overlapping
+    if (is.data.frame(overlapping)) {
+        if (nrow(overlapping) > 0L) return(TRUE)
+    } else if (is.list(overlapping)) {
+        if (!is.null(overlapping$neighbor_start) || !is.null(overlapping$neighbor_end)) {
+            return(TRUE)
+        }
+        overlap_entries <- Filter(function(entry) {
+            is.list(entry) || (is.data.frame(entry) && nrow(entry) > 0L)
+        }, overlapping)
+        if (length(overlap_entries) > 0L) return(TRUE)
+    }
+
+    legacy_neighbors <- list(neighbor_context$upstream, neighbor_context$downstream)
+    any(vapply(legacy_neighbors, function(neighbor) {
+        if (is.null(neighbor)) return(FALSE)
+        distance <- if (is.data.frame(neighbor)) {
+            suppressWarnings(as.numeric(neighbor$dist_bp))
+        } else if (is.list(neighbor)) {
+            suppressWarnings(as.numeric(neighbor$dist_bp %||% NA_real_))
+        } else {
+            NA_real_
+        }
+        any(is.finite(distance) & distance < 0)
+    }, logical(1)))
+}
+
+classify_neighbor_relation <- function(target_start, target_end, neighbor_start, neighbor_end) {
+    coords <- suppressWarnings(as.numeric(c(
+        target_start, target_end, neighbor_start, neighbor_end
+    )))
+    names(coords) <- c("target_start", "target_end", "neighbor_start", "neighbor_end")
+    if (any(!is.finite(coords))) {
+        return(list(
+            category = "unknown",
+            relation = "unknown",
+            relation_label = "Unknown relation",
+            gap_bp = NA_real_,
+            overlap_bp = NA_real_,
+            clipped_start = NA_real_,
+            clipped_end = NA_real_
+        ))
+    }
+
+    target_lo <- min(coords[["target_start"]], coords[["target_end"]])
+    target_hi <- max(coords[["target_start"]], coords[["target_end"]])
+    neighbor_lo <- min(coords[["neighbor_start"]], coords[["neighbor_end"]])
+    neighbor_hi <- max(coords[["neighbor_start"]], coords[["neighbor_end"]])
+
+    if (neighbor_hi < target_lo) {
+        gap_bp <- target_lo - neighbor_hi - 1
+        adjacent <- identical(as.numeric(gap_bp), 0)
+        return(list(
+            category = if (adjacent) "adjacent" else "separated",
+            relation = if (adjacent) "adjacent_left" else "separated_left",
+            relation_label = if (adjacent) "Adjacent on left (0 bp gap)" else "Separated on left",
+            gap_bp = gap_bp,
+            overlap_bp = 0,
+            clipped_start = NA_real_,
+            clipped_end = NA_real_
+        ))
+    }
+    if (neighbor_lo > target_hi) {
+        gap_bp <- neighbor_lo - target_hi - 1
+        adjacent <- identical(as.numeric(gap_bp), 0)
+        return(list(
+            category = if (adjacent) "adjacent" else "separated",
+            relation = if (adjacent) "adjacent_right" else "separated_right",
+            relation_label = if (adjacent) "Adjacent on right (0 bp gap)" else "Separated on right",
+            gap_bp = gap_bp,
+            overlap_bp = 0,
+            clipped_start = NA_real_,
+            clipped_end = NA_real_
+        ))
+    }
+
+    clipped_start <- max(target_lo, neighbor_lo)
+    clipped_end <- min(target_hi, neighbor_hi)
+    overlap_bp <- clipped_end - clipped_start + 1
+    same_span <- neighbor_lo == target_lo && neighbor_hi == target_hi
+    neighbor_inside <- neighbor_lo >= target_lo && neighbor_hi <= target_hi
+    target_inside <- neighbor_lo <= target_lo && neighbor_hi >= target_hi
+    relation <- if (same_span) {
+        "same_span"
+    } else if (neighbor_inside) {
+        "neighbor_inside_query"
+    } else if (target_inside) {
+        "neighbor_contains_query"
+    } else if (neighbor_lo < target_lo) {
+        "partial_overlap_left"
+    } else {
+        "partial_overlap_right"
+    }
+    relation_label <- switch(
+        relation,
+        same_span = "Same genomic span",
+        neighbor_inside_query = "Neighbor lies inside query",
+        neighbor_contains_query = "Neighbor contains query",
+        partial_overlap_left = "Partial overlap from left",
+        partial_overlap_right = "Partial overlap from right",
+        "Overlap"
+    )
+
+    list(
+        category = "overlap",
+        relation = relation,
+        relation_label = relation_label,
+        gap_bp = NA_real_,
+        overlap_bp = overlap_bp,
+        clipped_start = clipped_start,
+        clipped_end = clipped_end
+    )
+}
+
 extract_composition_percentages <- function(composition_label) {
     lbl <- as.character(composition_label %||% "")
     if (!nzchar(lbl) || grepl("N/A", lbl, ignore.case = TRUE)) {
@@ -867,15 +1227,24 @@ create_gene_plot <- function(df, df_gene, df_transcript = NULL, current_transcri
         intron_df <- intron_df[keep_intron, , drop = FALSE]
     }
 
-    structure_y_offset <- 0
+    # Reserve the deeper lane only when an overlap label actually needs it.
+    # Cards without overlaps can keep the primary gene closer to the ruler
+    # while the flanking-neighbor labels remain in their independent side
+    # panels.
+    has_overlap_layout <- has_genomic_overlap_context(neighbor_context)
+    structure_y_offset <- if (identical(visual_mode, "compact")) {
+        if (isTRUE(has_overlap_layout)) -0.070 else -0.025
+    } else {
+        if (isTRUE(has_overlap_layout)) -0.025 else 0
+    }
     structure_y_base <- 1 + structure_y_offset
 
     df_rect <- if (visual_mode == "compact") {
         compact_rects <- prepared_model$compact_rects
         if (nrow(compact_rects) > 0) {
             compact_rects$plot_group <- "compact"
-            compact_rects$ymin_feat <- 0.952
-            compact_rects$ymax_feat <- 1.048
+            compact_rects$ymin_feat <- 0.965 + structure_y_offset
+            compact_rects$ymax_feat <- 1.035 + structure_y_offset
             compact_rects$feature_uid <- paste0("compact_region_", seq_len(nrow(compact_rects)))
             if (isTRUE(compact_feature_interactivity)) {
                 # Pre-assign features to merged rects only when compact feature
@@ -975,8 +1344,8 @@ create_gene_plot <- function(df, df_gene, df_transcript = NULL, current_transcri
         neighbor_tick_size <- 3.2
         neighbor_name_size <- 3.4
         center_gene_size <- 4.1
-        center_gene_label_y <- 1.102
-        neighbor_gene_label_y <- 0.935
+        center_gene_label_y <- 1.075
+        neighbor_gene_label_y <- 0.955 + structure_y_offset
         neighbor_dist_size <- 2.7
         neighbor_marker_size <- 2.8
         neighbor_marker_fill <- "#5D8FB8"
@@ -990,8 +1359,8 @@ create_gene_plot <- function(df, df_gene, df_transcript = NULL, current_transcri
         neighbor_label_col <- "#2C3E50"
         neighbor_tick_size <- 3.4
         neighbor_name_size <- 3.6
-        center_gene_size <- 4.3
-        center_gene_label_y <- 1.108
+        center_gene_size <- 4.2
+        center_gene_label_y <- 1.100
         neighbor_gene_label_y <- 0.939 + structure_y_offset
         neighbor_dist_size <- 2.9
         neighbor_marker_size <- 3.0
@@ -1007,6 +1376,17 @@ create_gene_plot <- function(df, df_gene, df_transcript = NULL, current_transcri
         neighbor_label_col <- "#EAF2FB"
         neighbor_marker_fill <- "#76AFD8"
         neighbor_marker_col <- "#BCD2E6"
+    }
+    genomic_ruler_line_col <- if (is_dark_theme) "#73C7E2" else "#2F7895"
+    genomic_ruler_text_col <- if (is_dark_theme) "#B8DDEA" else "#294F65"
+    genomic_ruler_context_col <- if (is_dark_theme) "#789AB0" else "#7892A2"
+    genomic_overlap_col <- if (is_dark_theme) "#C3A2F2" else "#7A5AA6"
+    genomic_ruler_text_size <- if (visual_mode == "compact") 3.55 else 3.35
+    if (is_colorblind_mode) {
+        genomic_ruler_line_col <- if (is_dark_theme) "#8FC2F0" else "#4C78A8"
+        genomic_ruler_text_col <- if (is_dark_theme) "#C6DDF4" else "#355A7A"
+        genomic_ruler_context_col <- if (is_dark_theme) "#8BA8C2" else "#6F879C"
+        genomic_overlap_col <- if (is_dark_theme) "#F0A6CE" else "#A64D79"
     }
 
     target_start <- suppressWarnings(min(df$xstart, na.rm = TRUE))
@@ -1092,6 +1472,12 @@ create_gene_plot <- function(df, df_gene, df_transcript = NULL, current_transcri
         y = structure_y_base,
         yend = structure_y_base
     )
+    full_width_gene_guide_df <- data.frame(
+        x = left_panel_start,
+        xend = right_panel_end,
+        y = structure_y_base,
+        yend = structure_y_base
+    )
     arrow_line_df <- data.frame(
         x = if (gene_strand == "-") arrow_left_tip else target_end,
         xend = if (gene_strand == "+") arrow_right_tip else target_start,
@@ -1164,6 +1550,68 @@ create_gene_plot <- function(df, df_gene, df_transcript = NULL, current_transcri
         ),
         error = function(e) tx_chr
     )
+    ruler_spec <- build_genomic_ruler_spec(target_start, target_end)
+    ruler_display_width_in <- suppressWarnings(
+        as.numeric(width_svg) *
+            ((target_end - target_start) / max(plot_right - plot_left, .Machine$double.eps))
+    )
+    ruler_spec <- prune_genomic_ruler_spec_for_width(
+        ruler_spec,
+        target_start,
+        target_end,
+        display_width_in = ruler_display_width_in,
+        text_size_mm = genomic_ruler_text_size,
+        min_gap_in = 0.11
+    )
+    # Keep the genomic axis clear of exon/CDS structures without increasing the
+    # plot height. The gene name sits on the axis and masks the line beneath it.
+    ruler_line_y <- center_gene_label_y
+    ruler_tick_top_y <- center_gene_label_y + 0.013
+    ruler_label_y <- center_gene_label_y + 0.031
+    ruler_line_df <- data.frame()
+    ruler_tick_df <- data.frame()
+    ruler_label_df <- data.frame()
+    if (!is.null(ruler_spec) && nrow(ruler_spec) >= 2L) {
+        ruler_range_tooltip <- paste0(
+            "<b style='color:var(--app-message-accent);font-weight:700;'>Genomic Context Scale</b><br/>",
+            "<b>Chromosome / Sequence:</b> ", esc_html(tx_chr_short), "<br/>",
+            "<b>Displayed Start:</b> ", format_bp(target_start), " bp<br/>",
+            "<b>Displayed End:</b> ", format_bp(target_end), " bp<br/>",
+            "<b>Displayed Span:</b> ", format_bp(target_end - target_start + 1), " bp<br/>",
+            "<span style='opacity:.82;'>Solid center: linear coordinates. Dashed sides: compressed neighbor distance.</span>"
+        )
+        ruler_line_df <- data.frame(
+            x = target_start,
+            xend = target_end,
+            y = ruler_line_y,
+            yend = ruler_line_y,
+            tooltip = ruler_range_tooltip,
+            data_id = "genomic_ruler_line",
+            stringsAsFactors = FALSE
+        )
+        ruler_tick_df <- data.frame(
+            x = ruler_spec$value,
+            xend = ruler_spec$value,
+            y = ruler_line_y,
+            yend = ruler_tick_top_y,
+            tooltip = paste0(
+                "<b style='color:var(--app-message-accent);font-weight:700;'>Genomic Position</b><br/>",
+                "<b>Chromosome / Sequence:</b> ", esc_html(tx_chr_short), "<br/>",
+                "<b>Position:</b> ", ruler_spec$exact_bp, " bp"
+            ),
+            data_id = paste0("genomic_ruler_tick_", seq_len(nrow(ruler_spec))),
+            stringsAsFactors = FALSE
+        )
+        ruler_label_df <- data.frame(
+            x = ruler_spec$value,
+            y = ruler_label_y,
+            label = ruler_spec$label,
+            hjust = ruler_spec$hjust,
+            tooltip = ruler_tick_df$tooltip,
+            data_id = paste0("genomic_ruler_label_", seq_len(nrow(ruler_spec))),
+            stringsAsFactors = FALSE
+        )
+    }
     tx_start_num <- suppressWarnings(as.numeric(if (!is.null(tx_row)) tx_row$V4[1] else target_start))
     tx_end_num <- suppressWarnings(as.numeric(if (!is.null(tx_row)) tx_row$V5[1] else target_end))
     if (!is.finite(tx_start_num)) tx_start_num <- target_start
@@ -1202,6 +1650,30 @@ create_gene_plot <- function(df, df_gene, df_transcript = NULL, current_transcri
         "|strand=", encode_data_id_value(tx_strand),
         "|side=", encode_data_id_value(promoter_side_label)
     )
+    genomic_neighbor_data_id <- function(kind, neighbor, relation_label, relation_detail = "") {
+        neighbor_id <- pick_first_value(neighbor$neighbor_id, neighbor$neighbor_name, neighbor$neighbor_label)
+        neighbor_name <- pick_first_value(neighbor$neighbor_label, neighbor$neighbor_name, neighbor$neighbor_id)
+        neighbor_chr <- pick_first_value(neighbor$neighbor_chr, tx_chr)
+        neighbor_start <- suppressWarnings(as.numeric(neighbor$neighbor_start %||% NA_real_))
+        neighbor_end <- suppressWarnings(as.numeric(neighbor$neighbor_end %||% NA_real_))
+        neighbor_strand <- pick_first_value(neighbor$neighbor_strand, "N/A")
+        paste0(
+            "genomic_ruler_", kind,
+            "|panel=", encode_data_id_value(plot_context_txt),
+            "|plot_id=", encode_data_id_value(plot_id_txt),
+            "|organism=", encode_data_id_value(organism_display),
+            "|source_gene=", encode_data_id_value(center_gene_label),
+            "|neighbor_id=", encode_data_id_value(neighbor_id),
+            "|neighbor_name=", encode_data_id_value(neighbor_name),
+            "|seqid=", encode_data_id_value(neighbor_chr),
+            "|chromosome=", encode_data_id_value(neighbor_chr),
+            "|start=", encode_data_id_value(if (is.finite(neighbor_start)) as.integer(round(neighbor_start)) else "N/A"),
+            "|end=", encode_data_id_value(if (is.finite(neighbor_end)) as.integer(round(neighbor_end)) else "N/A"),
+            "|strand=", encode_data_id_value(neighbor_strand),
+            "|relation=", encode_data_id_value(relation_label),
+            "|detail=", encode_data_id_value(relation_detail)
+        )
+    }
     center_title <- if (!is.null(tx_row)) "Transcript Annotation" else "Gene Annotation"
     center_tooltip <- sprintf(
         "<b style='color:var(--app-message-accent);font-weight:700;'>%s</b><br/><b>Gene Name:</b> %s<br/><b>Transcript Id:</b> %s<br/><b>Transcript Name:</b> %s<br/><b>Chromosome:</b> %s<br/><b>Start:</b> %s<br/><b>End:</b> %s<br/><b>Strand:</b> %s<br/><b>Biotype:</b> %s",
@@ -1225,16 +1697,27 @@ create_gene_plot <- function(df, df_gene, df_transcript = NULL, current_transcri
     )
 
     if (visual_mode == "compact") {
-        plot_ymin <- 0.88
-        plot_ymax <- 1.16
+        plot_ymin <- 0.875
+        plot_ymax <- 1.130
     } else {
         detailed_feature_ymin <- if (nrow(df_rect) > 0) suppressWarnings(min(df_rect$ymin_feat, na.rm = TRUE)) else 0.825
         if (!is.finite(detailed_feature_ymin)) detailed_feature_ymin <- 0.825
         plot_ymin <- max(0.72, detailed_feature_ymin - 0.07)
-        plot_ymax <- max(1.14, center_gene_label_y + 0.028)
+        plot_ymax <- max(1.145, ruler_label_y + 0.020)
     }
 
     gg_lines <- ggplot() +
+        # Permanent full-width guide for the gene track. Neighbor and overlap
+        # toggles only control their glyphs and labels, never this baseline.
+        geom_segment(
+            data = full_width_gene_guide_df,
+            aes(x = x, xend = xend, y = y, yend = yend),
+            colour = neighbor_dash_col,
+            linewidth = 0.42,
+            linetype = "22",
+            lineend = "butt"
+        ) +
+
         # Línea base
         geom_segment(
             data = base_line_df,
@@ -1273,7 +1756,8 @@ create_gene_plot <- function(df, df_gene, df_transcript = NULL, current_transcri
                 geom_segment_interactive(
                     data = intron_df,
                     aes(
-                        x = intron_start, xend = intron_end, y = 1, yend = 1,
+                        x = intron_start, xend = intron_end,
+                        y = structure_y_base, yend = structure_y_base,
                         tooltip = tooltip, data_id = data_id
                     ),
                     color = gene_line_color,
@@ -1283,7 +1767,10 @@ create_gene_plot <- function(df, df_gene, df_transcript = NULL, current_transcri
             } else if (nrow(intron_df) > 0) {
                 geom_segment(
                     data = intron_df,
-                    aes(x = intron_start, xend = intron_end, y = 1, yend = 1),
+                    aes(
+                        x = intron_start, xend = intron_end,
+                        y = structure_y_base, yend = structure_y_base
+                    ),
                     color = gene_line_color,
                     linewidth = 0.8,
                     linetype = "solid"
@@ -1319,18 +1806,71 @@ create_gene_plot <- function(df, df_gene, df_transcript = NULL, current_transcri
                 NULL
             }
         } +
-        geom_text_interactive(
+        {
+            if (nrow(df_rect) > 0) scale_fill_manual(values = custom_colors, na.value = "#95A5A6") else NULL
+        } +
+        {
+            if (nrow(ruler_line_df) > 0) {
+                geom_segment_interactive(
+                    data = ruler_line_df,
+                    aes(
+                        x = x, xend = xend, y = y, yend = yend,
+                        tooltip = tooltip, data_id = data_id
+                    ),
+                    color = genomic_ruler_line_col,
+                    linewidth = 0.42,
+                    lineend = "round"
+                )
+            } else {
+                NULL
+            }
+        } +
+        {
+            if (nrow(ruler_tick_df) > 0) {
+                geom_segment_interactive(
+                    data = ruler_tick_df,
+                    aes(
+                        x = x, xend = xend, y = y, yend = yend,
+                        tooltip = tooltip, data_id = data_id
+                    ),
+                    color = genomic_ruler_line_col,
+                    linewidth = 0.34,
+                    lineend = "round"
+                )
+            } else {
+                NULL
+            }
+        } +
+        {
+            if (nrow(ruler_label_df) > 0) {
+                geom_text_interactive(
+                    data = ruler_label_df,
+                    aes(
+                        x = x, y = y, label = label, hjust = hjust,
+                        tooltip = tooltip, data_id = data_id
+                    ),
+                    size = genomic_ruler_text_size,
+                    color = genomic_ruler_text_col,
+                    vjust = 0.5,
+                    lineheight = 0.9
+                )
+            } else {
+                NULL
+            }
+        } +
+        geom_label_interactive(
             data = center_label_df,
             aes(x = x, y = y, label = label, tooltip = tooltip, data_id = data_id),
             size = center_gene_size,
             color = center_label_col,
+            fill = panel_bg_fill,
+            label.size = 0,
+            label.padding = grid::unit(0.12, "lines"),
+            label.r = grid::unit(0.08, "lines"),
             fontface = "bold",
             hjust = 0.5,
             vjust = 0.5
         ) +
-        {
-            if (nrow(df_rect) > 0) scale_fill_manual(values = custom_colors, na.value = "#95A5A6") else NULL
-        } +
         scale_x_continuous(expand = expansion(mult = 0, add = 0)) +
         scale_y_continuous(expand = expansion(mult = 0, add = 0)) +
         coord_cartesian(
@@ -1379,26 +1919,66 @@ create_gene_plot <- function(df, df_gene, df_transcript = NULL, current_transcri
         }
 
         ticks_vals <- c(0, 100, 1000, 10000, 100000)
-        tick_numbers <- c("0", "100", "1", "10", "100")
-        tick_units <- c("bp", "bp", "kbp", "kbp", "kbp")
         tick_s <- vapply(ticks_vals, to_panel_s, numeric(1))
+        side_tick_s <- tick_s[-1]
+        side_tick_labels <- c("100 bp", "1 kb", "10 kb", "\u2265100 kb")
 
         left_ticks <- data.frame(
-            x = left_panel_end - tick_s * neighbor_panel_width,
-            xend = left_panel_end - tick_s * neighbor_panel_width,
-            y = structure_y_base,
-            yend = structure_y_base + 0.035,
-            num_label = tick_numbers,
-            unit_label = tick_units,
+            x = left_panel_end - side_tick_s * neighbor_panel_width,
+            xend = left_panel_end - side_tick_s * neighbor_panel_width,
+            y = ruler_line_y,
+            yend = ruler_tick_top_y,
+            label = side_tick_labels,
+            hjust = c(0.5, 0.5, 0.5, 0),
+            tooltip = paste0(
+                "<b style='color:var(--app-message-accent);font-weight:700;'>Compressed Neighbor Distance</b><br/>",
+                "<b>Side:</b> Left<br/>",
+                "<b>Distance from query-gene boundary:</b> ", side_tick_labels,
+                "<br/><span style='opacity:.82;'>Logarithmically compressed for context.</span>"
+            ),
+            data_id = paste0("genomic_ruler_context_left_tick_", seq_along(side_tick_s)),
             stringsAsFactors = FALSE
         )
         right_ticks <- data.frame(
-            x = right_panel_start + tick_s * neighbor_panel_width,
-            xend = right_panel_start + tick_s * neighbor_panel_width,
-            y = structure_y_base,
-            yend = structure_y_base + 0.035,
-            num_label = tick_numbers,
-            unit_label = tick_units,
+            x = right_panel_start + side_tick_s * neighbor_panel_width,
+            xend = right_panel_start + side_tick_s * neighbor_panel_width,
+            y = ruler_line_y,
+            yend = ruler_tick_top_y,
+            label = side_tick_labels,
+            hjust = c(0.5, 0.5, 0.5, 1),
+            tooltip = paste0(
+                "<b style='color:var(--app-message-accent);font-weight:700;'>Compressed Neighbor Distance</b><br/>",
+                "<b>Side:</b> Right<br/>",
+                "<b>Distance from query-gene boundary:</b> ", side_tick_labels,
+                "<br/><span style='opacity:.82;'>Logarithmically compressed for context.</span>"
+            ),
+            data_id = paste0("genomic_ruler_context_right_tick_", seq_along(side_tick_s)),
+            stringsAsFactors = FALSE
+        )
+        context_side_segments <- data.frame(
+            x = c(left_panel_start, target_end),
+            xend = c(target_start, right_panel_end),
+            y = c(ruler_line_y, ruler_line_y),
+            yend = c(ruler_line_y, ruler_line_y),
+            tooltip = c(
+                "<b style='color:var(--app-message-accent);font-weight:700;'>Left Neighbor Context</b><br/>Compressed distance scale from the query-gene boundary (up to 100 kb).",
+                "<b style='color:var(--app-message-accent);font-weight:700;'>Right Neighbor Context</b><br/>Compressed distance scale from the query-gene boundary (up to 100 kb)."
+            ),
+            data_id = c("genomic_ruler_context_left", "genomic_ruler_context_right"),
+            stringsAsFactors = FALSE
+        )
+        context_breaks <- data.frame(
+            x = c(
+                (left_panel_end + target_start) / 2,
+                (target_end + right_panel_start) / 2
+            ),
+            y = c(ruler_line_y, ruler_line_y),
+            label = c("//", "//"),
+            tooltip = c(
+                "Scale break: left neighbor distances are compressed.",
+                "Scale break: right neighbor distances are compressed."
+            ),
+            data_id = c("genomic_ruler_context_left_break", "genomic_ruler_context_right_break"),
             stringsAsFactors = FALSE
         )
         promoter_fraction <- 0.58
@@ -1465,24 +2045,85 @@ create_gene_plot <- function(df, df_gene, df_transcript = NULL, current_transcri
             promoter_click_target <- promoter_click_target[keep_prom, , drop = FALSE]
         }
         both_ticks <- rbind(left_ticks, right_ticks)
-        both_ticks_num <- both_ticks
-        both_ticks_num$y <- structure_y_base + 0.068
-        both_ticks_unit <- both_ticks
-        both_ticks_unit$y <- structure_y_base + 0.043
+        both_tick_labels <- both_ticks
+        both_tick_labels$y <- ruler_label_y
         connector_base <- connector_segments[connector_segments$part == "base", , drop = FALSE]
         connector_promoter <- connector_segments[connector_segments$part == "promoter", , drop = FALSE]
+        lower_context_segments <- data.frame(
+            x = c(left_panel_start, right_panel_start),
+            xend = c(left_panel_end, right_panel_end),
+            y = c(structure_y_base, structure_y_base),
+            yend = c(structure_y_base, structure_y_base),
+            tooltip = c(
+                "Left neighbor position projected onto the compressed genomic-context scale.",
+                "Right neighbor position projected onto the compressed genomic-context scale."
+            ),
+            data_id = c(
+                "genomic_ruler_lower_context_left",
+                "genomic_ruler_lower_context_right"
+            ),
+            stringsAsFactors = FALSE
+        )
 
         gg_lines <- gg_lines +
-            geom_segment(
-                data = data.frame(
-                    x = c(left_panel_start, right_panel_start),
-                    xend = c(left_panel_end, right_panel_end),
-                    y = c(structure_y_base, structure_y_base),
-                    yend = c(structure_y_base, structure_y_base)
+            geom_segment_interactive(
+                data = context_side_segments,
+                aes(
+                    x = x, xend = xend, y = y, yend = yend,
+                    tooltip = tooltip, data_id = data_id
                 ),
-                aes(x = x, xend = xend, y = y, yend = yend),
-                color = neighbor_rule_col,
-                linewidth = 0.48
+                color = genomic_ruler_context_col,
+                linewidth = 0.42,
+                linetype = "22",
+                lineend = "butt"
+            ) +
+            geom_segment_interactive(
+                data = both_ticks,
+                aes(
+                    x = x, xend = xend, y = y, yend = yend,
+                    tooltip = tooltip, data_id = data_id
+                ),
+                color = genomic_ruler_context_col,
+                linewidth = 0.34,
+                lineend = "round"
+            ) +
+            geom_text_interactive(
+                data = both_tick_labels,
+                aes(
+                    x = x, y = y, label = label, hjust = hjust,
+                    tooltip = tooltip, data_id = data_id
+                ),
+                size = genomic_ruler_text_size * 0.96,
+                color = genomic_ruler_text_col,
+                vjust = 0.5,
+                lineheight = 0.9
+            ) +
+            geom_label_interactive(
+                data = context_breaks,
+                aes(
+                    x = x, y = y, label = label,
+                    tooltip = tooltip, data_id = data_id
+                ),
+                size = 2.7,
+                color = genomic_ruler_context_col,
+                fill = panel_bg_fill,
+                label.size = 0,
+                label.padding = grid::unit(0.04, "lines"),
+                label.r = grid::unit(0.02, "lines"),
+                fontface = "bold",
+                hjust = 0.5,
+                vjust = 0.5
+            ) +
+            geom_segment_interactive(
+                data = lower_context_segments,
+                aes(
+                    x = x, xend = xend, y = y, yend = yend,
+                    tooltip = tooltip, data_id = data_id
+                ),
+                color = neighbor_dash_col,
+                linewidth = 0.42,
+                linetype = "22",
+                lineend = "butt"
             ) +
             geom_segment(
                 data = connector_base,
@@ -1514,146 +2155,457 @@ create_gene_plot <- function(df, df_gene, df_transcript = NULL, current_transcri
                 alpha = 0.001,
                 linetype = "solid",
                 lineend = "butt"
-            ) +
-            geom_segment(
-                data = both_ticks,
-                aes(x = x, xend = xend, y = y, yend = yend),
-                color = neighbor_rule_col,
-                linewidth = 0.32
-            ) +
-            geom_text(
-                data = both_ticks_num,
-                aes(x = x, y = y, label = num_label),
-                size = neighbor_tick_size,
-                color = neighbor_tick_col,
-                hjust = 0.5,
-                lineheight = 0.9,
-                vjust = 0
-            ) +
-            geom_text(
-                data = both_ticks_unit,
-                aes(x = x, y = y, label = unit_label),
-                size = neighbor_tick_size * 0.78,
-                color = neighbor_tick_col,
-                hjust = 0.5,
-                lineheight = 0.9,
-                vjust = 0
             )
 
-        make_side_df <- function(side_name, neighbor, is_left = TRUE) {
-            side_title <- ifelse(side_name == "upstream", "Upstream Neighbor", "Downstream Neighbor")
-            has_neighbor <- !is.null(neighbor) && !is.na(neighbor$dist_bp)
-            if (!has_neighbor) {
-                name_text <- "None"
-                tooltip <- sprintf(
-                    "<b style='color:var(--app-message-accent);font-weight:700;'>%s</b><br/><span style='font-size:13px;font-weight:700;'>Distance To Query Gene: N/A</span><br/><b>Neighbor Gene:</b> None<br/><b>Neighbor Chromosome:</b> N/A<br/><b>Neighbor Start:</b> N/A<br/><b>Neighbor End:</b> N/A<br/><b>Neighbor Strand:</b> N/A<br/><b>Overlap:</b> No",
-                    side_title
-                )
-                marker_x <- NA_real_
-                overlap <- FALSE
+        strand_arrow <- function(strand) {
+            strand_txt <- trimws(as.character(strand %||% ""))
+            if (identical(strand_txt, "+")) "\u2192" else if (identical(strand_txt, "-")) "\u2190" else ""
+        }
+        compact_distance_label <- function(bp) {
+            bp_num <- suppressWarnings(as.numeric(bp))
+            if (!is.finite(bp_num)) return("N/A")
+            if (bp_num >= 1e6) {
+                out <- sprintf("%.1f Mb", bp_num / 1e6)
+            } else if (bp_num >= 1e3) {
+                out <- sprintf("%.1f kb", bp_num / 1e3)
             } else {
-                dist_bp_raw <- suppressWarnings(as.numeric(neighbor$dist_bp))
+                out <- sprintf("%d bp", as.integer(round(bp_num)))
+            }
+            sub("\\.0\\s", " ", out)
+        }
+        empty_track_df <- function() {
+            data.frame(
+                side = character(0), x = numeric(0), y = numeric(0),
+                yend = numeric(0), glyph_from = numeric(0), glyph_to = numeric(0),
+                name_text = character(0), strand_direction = character(0),
+                marker_kind = character(0), tooltip = character(0),
+                data_id = character(0), stringsAsFactors = FALSE
+            )
+        }
+        make_side_df <- function(side_name, neighbor, is_left = TRUE) {
+            dist_bp_raw <- suppressWarnings(as.numeric(neighbor$dist_bp %||% NA_real_))
+            neighbor_start_num <- suppressWarnings(as.numeric(neighbor$neighbor_start %||% NA_real_))
+            neighbor_end_num <- suppressWarnings(as.numeric(neighbor$neighbor_end %||% NA_real_))
+            if (!is.finite(dist_bp_raw) || dist_bp_raw < 0 ||
+                !is.finite(neighbor_start_num) || !is.finite(neighbor_end_num)) {
+                return(empty_track_df())
+            }
+
+            relation <- classify_neighbor_relation(
+                target_start, target_end, neighbor_start_num, neighbor_end_num
+            )
+            marker_kind <- if (identical(relation$category, "adjacent")) "adjacent" else "separated"
+            marker_x <- if (is_left) {
+                left_panel_end - to_panel_s(dist_bp_raw) * neighbor_panel_width
+            } else {
+                right_panel_start + to_panel_s(dist_bp_raw) * neighbor_panel_width
+            }
+            neighbor_display_clean <- truncate_neighbor_label(
+                pick_first_value(neighbor$neighbor_label, neighbor$neighbor_name, neighbor$neighbor_id),
+                max_chars = 100
+            )
+            neighbor_name_short <- truncate_neighbor_label(neighbor_display_clean, max_chars = 22)
+            arrow_txt <- strand_arrow(neighbor$neighbor_strand)
+            strand_txt <- trimws(as.character(neighbor$neighbor_strand %||% ""))
+            strand_direction <- if (identical(strand_txt, "+")) {
+                "forward"
+            } else if (identical(strand_txt, "-")) {
+                "reverse"
+            } else {
+                "unknown"
+            }
+            distance_short <- compact_distance_label(dist_bp_raw)
+            relation_short <- if (identical(marker_kind, "adjacent")) {
+                "adjacent \u00b7 0 bp gap"
+            } else if (dist_bp_raw > d_max) {
+                paste0(distance_short, " \u00b7 beyond scale")
+            } else {
+                paste0(distance_short, " gap")
+            }
+            name_text <- paste0(
+                neighbor_name_short,
+                if (nzchar(arrow_txt)) paste0(" ", arrow_txt) else "",
+                "\n", relation_short
+            )
+            side_title <- if (is_left) "Left Neighbor" else "Right Neighbor"
+            tooltip <- sprintf(
+                paste0(
+                    "<b style='color:var(--app-message-accent);font-weight:700;'>%s</b><br/>",
+                    "<span style='font-size:13px;font-weight:700;'>%s</span><br/>",
+                    "<b>Relation:</b> %s<br/>",
+                    "<b>Gap To Query Gene:</b> %s (%s bp)<br/>",
+                    "<b>Neighbor Gene:</b> %s<br/>",
+                    "<b>Neighbor Chromosome:</b> %s<br/>",
+                    "<b>Neighbor Start:</b> %s<br/>",
+                    "<b>Neighbor End:</b> %s<br/>",
+                    "<b>Neighbor Strand:</b> %s<br/>",
+                    "<b>Glyph:</b> symbolic gene body (length not to scale)<br/>",
+                    "<span style='opacity:.82;'>Click to visualize this gene below.</span>"
+                ),
+                side_title,
+                esc_html(neighbor_display_clean),
+                relation$relation_label,
+                distance_short,
+                format_bp(dist_bp_raw),
+                esc_html(neighbor_display_clean),
+                esc_html(neighbor$neighbor_chr %||% "N/A"),
+                format_bp(neighbor_start_num),
+                format_bp(neighbor_end_num),
+                esc_html(neighbor$neighbor_strand %||% "N/A")
+            )
+            glyph_width <- min(0.022 * scene_width, 0.22 * neighbor_panel_width)
+            glyph_start <- if (is_left) marker_x - glyph_width else marker_x
+            glyph_end <- if (is_left) marker_x else marker_x + glyph_width
+            panel_lo <- if (is_left) left_panel_start else right_panel_start
+            panel_hi <- if (is_left) left_panel_end else right_panel_end
+            glyph_start <- min(max(glyph_start, panel_lo), panel_hi)
+            glyph_end <- min(max(glyph_end, panel_lo), panel_hi)
+            glyph_lo <- min(glyph_start, glyph_end)
+            glyph_hi <- max(glyph_start, glyph_end)
+            glyph_from <- if (identical(strand_direction, "reverse")) glyph_hi else glyph_lo
+            glyph_to <- if (identical(strand_direction, "reverse")) glyph_lo else glyph_hi
+            glyph_offset <- if (identical(visual_mode, "compact")) {
+                if (isTRUE(has_overlap_layout)) 0.040 else 0.020
+            } else {
+                if (isTRUE(has_overlap_layout)) 0.035 else 0.018
+            }
+            glyph_y <- ruler_line_y - glyph_offset
+            data.frame(
+                side = side_name,
+                x = marker_x,
+                y = ruler_line_y,
+                yend = glyph_y,
+                glyph_from = glyph_from,
+                glyph_to = glyph_to,
+                name_text = name_text,
+                strand_direction = strand_direction,
+                marker_kind = marker_kind,
+                tooltip = tooltip,
+                data_id = genomic_neighbor_data_id(
+                    "neighbor",
+                    neighbor,
+                    relation_label = relation$relation_label,
+                    relation_detail = relation_short
+                ),
+                stringsAsFactors = FALSE
+            )
+        }
+
+        side_df <- rbind(
+            make_side_df("left", neighbor_context$upstream, is_left = TRUE),
+            make_side_df("right", neighbor_context$downstream, is_left = FALSE)
+        )
+        if (nrow(side_df) > 0) {
+            side_df$x <- suppressWarnings(as.numeric(side_df$x))
+            side_df$tooltip <- as.character(side_df$tooltip)
+            side_df$data_id <- as.character(side_df$data_id)
+            side_df$name_text <- as.character(side_df$name_text)
+            side_df <- side_df[
+                is.finite(side_df$x) &
+                    !is.na(side_df$tooltip) & nzchar(trimws(side_df$tooltip)) &
+                    !is.na(side_df$data_id) & nzchar(trimws(side_df$data_id)) &
+                    !is.na(side_df$name_text) & nzchar(trimws(side_df$name_text)),
+                ,
+                drop = FALSE
+            ]
+        }
+        side_label_offset <- if (identical(visual_mode, "compact")) {
+            if (isTRUE(has_overlap_layout)) 0.088 else 0.060
+        } else {
+            if (isTRUE(has_overlap_layout)) 0.078 else 0.055
+        }
+        side_label_y <- ruler_line_y - side_label_offset
+        directional_side_df <- side_df[
+            side_df$strand_direction %in% c("forward", "reverse"),
+            ,
+            drop = FALSE
+        ]
+        unknown_strand_side_df <- side_df[
+            !side_df$strand_direction %in% c("forward", "reverse"),
+            ,
+            drop = FALSE
+        ]
+
+        as_neighbor_list <- function(x) {
+            if (is.null(x)) return(list())
+            if (is.data.frame(x)) {
+                return(lapply(seq_len(nrow(x)), function(i) as.list(x[i, , drop = FALSE])))
+            }
+            if (is.list(x) && !is.null(x$neighbor_start)) return(list(x))
+            if (is.list(x)) return(Filter(is.list, x))
+            list()
+        }
+        overlap_neighbors <- as_neighbor_list(neighbor_context$overlapping)
+        legacy_neighbors <- list(neighbor_context$upstream, neighbor_context$downstream)
+        legacy_neighbors <- Filter(function(nb) {
+            is.list(nb) && is.finite(suppressWarnings(as.numeric(nb$dist_bp %||% NA_real_))) &&
+                suppressWarnings(as.numeric(nb$dist_bp)) < 0
+        }, legacy_neighbors)
+        overlap_neighbors <- c(overlap_neighbors, legacy_neighbors)
+
+        overlap_band_df <- data.frame()
+        if (length(overlap_neighbors) > 0) {
+            overlap_keys <- vapply(overlap_neighbors, function(nb) {
+                paste(
+                    as.character(nb$neighbor_id %||% nb$neighbor_name %||% ""),
+                    as.character(nb$neighbor_start %||% ""),
+                    as.character(nb$neighbor_end %||% ""),
+                    as.character(nb$neighbor_strand %||% ""),
+                    sep = "::"
+                )
+            }, character(1))
+            overlap_neighbors <- overlap_neighbors[!duplicated(overlap_keys)]
+            overlap_rows <- lapply(seq_along(overlap_neighbors), function(i) {
+                neighbor <- overlap_neighbors[[i]]
+                neighbor_start_num <- suppressWarnings(as.numeric(neighbor$neighbor_start %||% NA_real_))
+                neighbor_end_num <- suppressWarnings(as.numeric(neighbor$neighbor_end %||% NA_real_))
+                relation <- classify_neighbor_relation(
+                    target_start, target_end, neighbor_start_num, neighbor_end_num
+                )
+                if (!identical(relation$category, "overlap")) return(NULL)
                 neighbor_display_clean <- truncate_neighbor_label(
                     pick_first_value(neighbor$neighbor_label, neighbor$neighbor_name, neighbor$neighbor_id),
                     max_chars = 100
                 )
-                name_text <- truncate_neighbor_label(neighbor_display_clean, max_chars = 24)
-                plot_bp <- ifelse(dist_bp_raw < 0, 0, dist_bp_raw)
-                dist_bp_label <- if (is.finite(plot_bp)) paste0(format_bp(plot_bp), " bp") else "N/A"
-                if (is.finite(dist_bp_raw) && dist_bp_raw > d_max) dist_bp_label <- paste0(dist_bp_label, " (>100 kb)")
-                if (is.finite(dist_bp_raw) && dist_bp_raw > 0 && dist_bp_raw < d_min) dist_bp_label <- paste0(dist_bp_label, " (<10 bp)")
-                neighbor_start_num <- suppressWarnings(as.numeric(neighbor$neighbor_start))
-                neighbor_end_num <- suppressWarnings(as.numeric(neighbor$neighbor_end))
-                neighbor_start_lbl <- if (is.finite(neighbor_start_num)) format_bp(neighbor_start_num) else as.character(neighbor$neighbor_start %||% "N/A")
-                neighbor_end_lbl <- if (is.finite(neighbor_end_num)) format_bp(neighbor_end_num) else as.character(neighbor$neighbor_end %||% "N/A")
-                overlap <- is.finite(dist_bp_raw) && dist_bp_raw < 0
+                neighbor_name_short <- truncate_neighbor_label(neighbor_display_clean, max_chars = 18)
+                arrow_txt <- strand_arrow(neighbor$neighbor_strand)
+                relation_short <- switch(
+                    relation$relation,
+                    same_span = "same span",
+                    neighbor_inside_query = "inside query",
+                    neighbor_contains_query = "contains query",
+                    partial_overlap_left = "overlaps left edge",
+                    partial_overlap_right = "overlaps right edge",
+                    "overlap"
+                )
+                overlap_short <- compact_distance_label(relation$overlap_bp)
                 tooltip <- sprintf(
-                    "<b style='color:var(--app-message-accent);font-weight:700;'>%s</b><br/><span style='font-size:13px;font-weight:700;'>Distance To Query Gene: %s</span><br/><b>Neighbor Gene:</b> %s<br/><b>Neighbor Chromosome:</b> %s<br/><b>Neighbor Start:</b> %s<br/><b>Neighbor End:</b> %s<br/><b>Neighbor Strand:</b> %s<br/><b>Overlap:</b> %s",
-                    side_title,
-                    dist_bp_label,
-                    neighbor_display_clean %||% "N/A",
-                    neighbor$neighbor_chr %||% "N/A",
-                    neighbor_start_lbl,
-                    neighbor_end_lbl,
-                    neighbor$neighbor_strand %||% "N/A",
-                    ifelse(overlap, "Yes", "No")
+                    paste0(
+                        "<b style='color:var(--app-message-accent);font-weight:700;'>Overlapping Neighbor</b><br/>",
+                        "<span style='font-size:13px;font-weight:700;'>%s</span><br/>",
+                        "<b>Relation:</b> %s<br/>",
+                        "<b>Shared Interval:</b> %s - %s<br/>",
+                        "<b>Overlap Length:</b> %s (%s bp)<br/>",
+                        "<b>Neighbor Start:</b> %s<br/>",
+                        "<b>Neighbor End:</b> %s<br/>",
+                        "<b>Neighbor Strand:</b> %s<br/>",
+                        "<span style='opacity:.82;'>Click to visualize this gene below.</span>"
+                    ),
+                    esc_html(neighbor_display_clean),
+                    relation$relation_label,
+                    format_bp(relation$clipped_start),
+                    format_bp(relation$clipped_end),
+                    overlap_short,
+                    format_bp(relation$overlap_bp),
+                    format_bp(neighbor_start_num),
+                    format_bp(neighbor_end_num),
+                    esc_html(neighbor$neighbor_strand %||% "N/A")
                 )
-                s <- to_panel_s(plot_bp)
-                marker_x <- if (is_left) left_panel_end - s * neighbor_panel_width else right_panel_start + s * neighbor_panel_width
-            }
-
-            label_x <- if (is.finite(marker_x)) {
-                marker_x
-            } else if (is_left) {
-                (left_panel_start + left_panel_end) / 2
-            } else {
-                (right_panel_start + right_panel_end) / 2
-            }
-
-            list(
-                label = data.frame(
-                    side = side_name,
-                    name_x = label_x,
-                    hjust_name = 0.5,
-                    name_text = name_text,
+                data.frame(
+                    x = relation$clipped_start,
+                    xend = relation$clipped_end,
+                    midpoint = (relation$clipped_start + relation$clipped_end) / 2,
+                    neighbor_name = neighbor_name_short,
+                    strand_arrow = arrow_txt,
+                    relation_short = relation_short,
+                    overlap_bp = relation$overlap_bp,
                     tooltip = tooltip,
-                    data_id = paste0("neighbor_label_", side_name),
-                    stringsAsFactors = FALSE
-                ),
-                marker = data.frame(
-                    side = side_name,
-                    x = marker_x,
-                    y = structure_y_base,
-                    overlap = overlap,
-                    tooltip = tooltip,
-                    data_id = paste0("neighbor_marker_", side_name),
+                    data_id = genomic_neighbor_data_id(
+                        "overlap",
+                        neighbor,
+                        relation_label = relation$relation_label,
+                        relation_detail = paste0(relation_short, " \u00b7 ", overlap_short, " shared")
+                    ),
                     stringsAsFactors = FALSE
                 )
-            )
+            })
+            overlap_rows <- Filter(Negate(is.null), overlap_rows)
+            if (length(overlap_rows) > 0) overlap_band_df <- do.call(rbind, overlap_rows)
         }
 
-        up_df <- make_side_df("upstream", neighbor_context$upstream, is_left = TRUE)
-        down_df <- make_side_df("downstream", neighbor_context$downstream, is_left = FALSE)
-        text_df <- rbind(up_df$label, down_df$label)
-        text_df$name_x <- suppressWarnings(as.numeric(text_df$name_x))
-        text_df$tooltip <- as.character(text_df$tooltip)
-        text_df$data_id <- as.character(text_df$data_id)
-        text_df$name_text <- as.character(text_df$name_text)
-        keep_text <- is.finite(text_df$name_x) &
-            !is.na(text_df$tooltip) &
-            nzchar(trimws(text_df$tooltip)) &
-            !is.na(text_df$data_id) &
-            nzchar(trimws(text_df$data_id)) &
-            !is.na(text_df$name_text) &
-            nzchar(trimws(text_df$name_text))
-        text_df <- text_df[keep_text, , drop = FALSE]
-        marker_df <- rbind(up_df$marker, down_df$marker)
-        marker_df$x <- suppressWarnings(as.numeric(marker_df$x))
-        marker_df$tooltip <- as.character(marker_df$tooltip)
-        marker_df$data_id <- as.character(marker_df$data_id)
-        keep_marker <- is.finite(marker_df$x) &
-            !is.na(marker_df$tooltip) &
-            nzchar(trimws(marker_df$tooltip)) &
-            !is.na(marker_df$data_id) &
-            nzchar(trimws(marker_df$data_id))
-        marker_df <- marker_df[keep_marker, , drop = FALSE]
-
-        gg_lines <- gg_lines +
-            geom_text_interactive(
-                data = text_df,
-                aes(x = name_x, y = neighbor_gene_label_y, label = name_text, hjust = hjust_name, tooltip = tooltip, data_id = data_id),
-                size = neighbor_name_size,
-                color = neighbor_label_col
-            ) +
-            geom_point_interactive(
-                data = marker_df,
-                aes(x = x, y = y, tooltip = tooltip, data_id = data_id),
-                shape = 21,
-                size = neighbor_marker_size,
-                fill = neighbor_marker_fill,
-                color = neighbor_marker_col,
-                stroke = neighbor_marker_stroke
+        if (nrow(side_df) > 0) {
+            gg_lines <- gg_lines +
+                geom_segment_interactive(
+                    data = side_df,
+                    aes(
+                        x = x, xend = x, y = y, yend = yend,
+                        tooltip = tooltip, data_id = data_id
+                    ),
+                    color = neighbor_marker_col,
+                    linewidth = 0.38,
+                    lineend = "round"
+                ) +
+                geom_text_interactive(
+                    data = side_df,
+                    aes(
+                        x = x, y = side_label_y, label = name_text,
+                        tooltip = tooltip, data_id = data_id
+                    ),
+                    size = neighbor_name_size * 0.88,
+                    color = neighbor_label_col,
+                    lineheight = 0.88,
+                    vjust = 0.5
+                )
+        }
+        if (nrow(directional_side_df) > 0) {
+            gg_lines <- gg_lines +
+                geom_segment_interactive(
+                    data = directional_side_df,
+                    aes(
+                        x = glyph_from, xend = glyph_to, y = yend, yend = yend,
+                        tooltip = tooltip, data_id = data_id
+                    ),
+                    color = neighbor_marker_col,
+                    linewidth = 2.15,
+                    lineend = "round",
+                    arrow = grid::arrow(
+                        type = "closed",
+                        length = grid::unit(0.055, "inches")
+                    )
+                )
+        }
+        if (nrow(unknown_strand_side_df) > 0) {
+            gg_lines <- gg_lines +
+                geom_segment_interactive(
+                    data = unknown_strand_side_df,
+                    aes(
+                        x = glyph_from, xend = glyph_to, y = yend, yend = yend,
+                        tooltip = tooltip, data_id = data_id
+                    ),
+                    color = neighbor_marker_col,
+                    linewidth = 2.15,
+                    lineend = "round"
+                )
+        }
+        if (nrow(overlap_band_df) > 0) {
+            overlap_band_df$lane <- assign_genomic_overlap_lanes(
+                overlap_band_df$x,
+                overlap_band_df$xend,
+                padding_bp = max(1, (target_end - target_start) * 0.004)
             )
+            lane_count <- max(overlap_band_df$lane)
+            lane_top_y <- ruler_line_y - if (identical(visual_mode, "compact")) 0.040 else 0.035
+            lane_bottom_y <- ruler_line_y - if (identical(visual_mode, "compact")) 0.055 else 0.048
+            lane_positions <- if (lane_count <= 1L) {
+                lane_top_y
+            } else {
+                seq(lane_top_y, lane_bottom_y, length.out = lane_count)
+            }
+            overlap_band_df$y <- lane_positions[overlap_band_df$lane]
+            overlap_band_df$yend <- overlap_band_df$y
+            overlap_band_df$marker_y <- overlap_band_df$y
+            overlap_stem_df <- rbind(
+                transform(
+                    overlap_band_df,
+                    stem_x = x,
+                    stem_id = paste0(data_id, "|part=start")
+                ),
+                transform(
+                    overlap_band_df,
+                    stem_x = xend,
+                    stem_id = paste0(data_id, "|part=end")
+                )
+            )
+            if (nrow(overlap_band_df) == 1L) {
+                overlap_label_text <- paste0(
+                    overlap_band_df$neighbor_name[1],
+                    if (nzchar(overlap_band_df$strand_arrow[1])) {
+                        paste0(" ", overlap_band_df$strand_arrow[1])
+                    } else {
+                        ""
+                    },
+                    " \u00b7 ", overlap_band_df$relation_short[1]
+                )
+                overlap_label_tooltip <- overlap_band_df$tooltip[1]
+                overlap_label_x <- overlap_band_df$midpoint[1]
+                overlap_label_y <- overlap_band_df$y[1] -
+                    if (identical(visual_mode, "compact")) 0.040 else 0.030
+                overlap_label_data_id <- overlap_band_df$data_id[1]
+            } else {
+                overlap_label_text <- paste0(
+                    nrow(overlap_band_df), " overlapping neighbors \u00b7 ",
+                    lane_count, if (lane_count == 1L) " lane" else " lanes"
+                )
+                overlap_lengths <- vapply(
+                    overlap_band_df$overlap_bp,
+                    compact_distance_label,
+                    character(1)
+                )
+                overlap_label_tooltip <- paste0(
+                    "<b style='color:var(--app-message-accent);font-weight:700;'>Overlapping Neighbors</b><br/>",
+                    paste(
+                        paste0(
+                            esc_html(overlap_band_df$neighbor_name),
+                            ": ", overlap_band_df$relation_short,
+                            " (", overlap_lengths, ")"
+                        ),
+                        collapse = "<br/>"
+                    )
+                )
+                overlap_label_x <- mean(c(target_start, target_end))
+                overlap_label_y <- lane_bottom_y -
+                    if (identical(visual_mode, "compact")) 0.035 else 0.028
+                overlap_label_data_id <- "genomic_ruler_overlap_summary"
+            }
+            overlap_label_df <- data.frame(
+                x = overlap_label_x,
+                y = overlap_label_y,
+                label = overlap_label_text,
+                tooltip = overlap_label_tooltip,
+                data_id = overlap_label_data_id,
+                stringsAsFactors = FALSE
+            )
+            gg_lines <- gg_lines +
+                geom_segment_interactive(
+                    data = overlap_stem_df,
+                    aes(
+                        x = stem_x, xend = stem_x,
+                        y = ruler_line_y, yend = y,
+                        tooltip = tooltip, data_id = stem_id
+                    ),
+                    color = genomic_overlap_col,
+                    linewidth = 0.46,
+                    lineend = "round"
+                ) +
+                geom_segment_interactive(
+                    data = overlap_band_df,
+                    aes(
+                        x = x, xend = xend, y = y, yend = yend,
+                        tooltip = tooltip, data_id = data_id
+                    ),
+                    color = genomic_overlap_col,
+                    linewidth = 2.15,
+                    lineend = "round",
+                    alpha = 0.88
+                ) +
+                geom_point_interactive(
+                    data = overlap_band_df,
+                    aes(
+                        x = midpoint, y = marker_y,
+                        tooltip = tooltip, data_id = data_id
+                    ),
+                    shape = 23,
+                    size = 2.25,
+                    fill = panel_bg_fill,
+                    color = genomic_overlap_col,
+                    stroke = 0.5
+                ) +
+                geom_label_interactive(
+                    data = overlap_label_df,
+                    aes(
+                        x = x, y = y, label = label,
+                        tooltip = tooltip, data_id = data_id
+                    ),
+                    size = neighbor_name_size * 0.82,
+                    color = genomic_overlap_col,
+                    fill = panel_bg_fill,
+                    label.size = 0.25,
+                    label.padding = grid::unit(0.08, "lines"),
+                    label.r = grid::unit(0.06, "lines"),
+                    fontface = "bold",
+                    vjust = 0.5
+                )
+        }
     }
 
     # Disable hover restyling to avoid rapid style thrash in ultra-dense regions.
@@ -2972,7 +3924,7 @@ plotServerOrtologous <- function(id, data, max_gene_length, min_gene_coord, max_
                     seq_len_evt <- suppressWarnings(as.integer(nchar(as.character(info_evt$sequence %||% ""))))
                     if (!is.finite(seq_len_evt)) seq_len_evt <- 0L
                 }
-                max_gene_length_evt <- suppressWarnings(as.numeric(isolate(max_gene_length()) %||% 0))
+                max_gene_length_evt <- suppressWarnings(as.numeric(max_gene_length() %||% 0))
                 if (!is.finite(max_gene_length_evt) || is.na(max_gene_length_evt) || max_gene_length_evt < 0) {
                     max_gene_length_evt <- 0
                 }

@@ -303,6 +303,7 @@ sys.source("R/server_state_helpers_domain.R", envir = lib_env)
 sys.source("R/server_source_history_domain.R", envir = lib_env)
 sys.source("R/server_popup_status_domain.R", envir = lib_env)
 sys.source("R/server_session_snapshot_domain.R", envir = lib_env)
+sys.source("R/server_shared_analysis_domain.R", envir = lib_env)
 sys.source("R/server_ncbi_download_domain.R", envir = lib_env)
 
 # Cargamos la librería de búsqueda optimizada si existe
@@ -323,6 +324,17 @@ if ("app_libraries" %in% search()) {
 # pero cuando 'future' las exporte, solo exportará este entorno ligero (<1MB)
 # en lugar de los 870MB del entorno global.
 attach(lib_env, name = "app_libraries")
+
+# Direct/native Shiny deployments can serve the same immutable report files
+# without starting a second Shiny session. ShinyProxy production still serves
+# this prefix directly from Nginx so report reads do not consume containers.
+.cgv_shared_reports_path <- cgv_reports_root(".")
+dir.create(.cgv_shared_reports_path, recursive = TRUE, showWarnings = FALSE)
+if ("share" %in% names(shiny::resourcePaths())) {
+    shiny::removeResourcePath("share")
+}
+shiny::addResourcePath("share", .cgv_shared_reports_path)
+rm(.cgv_shared_reports_path)
 
 # Tema personalizado mejorado
 theme_custom <- bs_theme(

@@ -45,6 +45,36 @@ init_session_snapshot_domain <- function(
     summary_toggle_label_fn,
     begin_session_source_restore_fn = NULL
 ) {
+    snapshot_data_root <- tryCatch(
+        get_cgv_data_root("."),
+        error = function(e) normalizePath(".", winslash = "/", mustWork = FALSE)
+    )
+
+    portable_snapshot_path <- function(path) {
+        value <- trimws(as.character(path %||% ""))
+        if (!nzchar(value)) return("")
+        normalized <- normalizePath(value, winslash = "/", mustWork = FALSE)
+        root <- normalizePath(snapshot_data_root, winslash = "/", mustWork = FALSE)
+        prefix <- paste0(sub("/+$", "", root), "/")
+        if (startsWith(normalized, prefix)) {
+            return(substring(normalized, nchar(prefix) + 1L))
+        }
+        if (!grepl("^(/|[A-Za-z]:[/\\\\]|\\\\\\\\)", value)) {
+            return(gsub("^\\./", "", value))
+        }
+        ""
+    }
+
+    resolve_snapshot_path <- function(path, source_ref = NULL) {
+        value <- trimws(as.character(path %||% ""))
+        if (!nzchar(value) && is.list(source_ref)) {
+            value <- trimws(as.character(source_ref$relative_path %||% ""))
+        }
+        if (!nzchar(value)) return("")
+        if (grepl("^(/|[A-Za-z]:[/\\\\]|\\\\\\\\)", value)) return(value)
+        normalizePath(file.path(snapshot_data_root, value), winslash = "/", mustWork = FALSE)
+    }
+
     snapshot_plot_records <- function(ids, titles_map, file_data_map, chr_map, seq_map, sig_map, ann_map, genome_map, org_map, metrics_map, gene_meta_map) {
         ids_chr <- as.character(ids %||% integer(0))
         ids_chr <- ids_chr[nzchar(ids_chr)]
@@ -60,8 +90,18 @@ init_session_snapshot_domain <- function(
                 chr_name = as.character(chr_map[[id_chr]] %||% ""),
                 sequence_blob = seq_map[[id_chr]] %||% "",
                 plot_signature = as.character(sig_map[[id_chr]] %||% ""),
-                annotation_path = as.character(ann_map[[id_chr]] %||% ""),
-                genome_path = as.character(genome_map[[id_chr]] %||% ""),
+                annotation_path = portable_snapshot_path(ann_map[[id_chr]] %||% ""),
+                genome_path = portable_snapshot_path(genome_map[[id_chr]] %||% ""),
+                annotation_source = if (exists("cgv_portable_source_ref", mode = "function")) {
+                    cgv_portable_source_ref(ann_map[[id_chr]] %||% "", snapshot_data_root)
+                } else {
+                    list(name = basename(as.character(ann_map[[id_chr]] %||% "")), relative_path = portable_snapshot_path(ann_map[[id_chr]] %||% ""))
+                },
+                genome_source = if (exists("cgv_portable_source_ref", mode = "function")) {
+                    cgv_portable_source_ref(genome_map[[id_chr]] %||% "", snapshot_data_root)
+                } else {
+                    list(name = basename(as.character(genome_map[[id_chr]] %||% "")), relative_path = portable_snapshot_path(genome_map[[id_chr]] %||% ""))
+                },
                 organism_info = org_map[[id_chr]] %||% list(),
                 plot_metrics = metrics_map[[id_chr]] %||% list(),
                 plot_gene_meta = gene_meta_map[[id_chr]] %||% list()
@@ -75,7 +115,7 @@ init_session_snapshot_domain <- function(
         ortho_ids <- as.character(activePlotIdsOrthologous_rv() %||% integer(0))
 
         list(
-            schema_version = 1L,
+            schema_version = 2L,
             saved_at = as.character(format(Sys.time(), "%Y-%m-%d %H:%M:%S %z")),
             app = list(
                 navtab = as.character(input$navtabs %||% "home"),
@@ -101,6 +141,48 @@ init_session_snapshot_domain <- function(
                 genome_source_ortho = as.character(genomeSourceOrthologous_rv() %||% ""),
                 current_organism_homo = currentOrganismHomologous_rv(),
                 current_organism_ortho = currentOrganismOrthologous_rv(),
+                alignment_parameters = list(
+                    aligned = list(
+                        anchor_track = as.character(input$ortho_aligned_anchor_track %||% ""),
+                        representative = as.character(input$ortho_aligned_representative %||% ""),
+                        track_order = as.character(input$ortho_aligned_track_order %||% ""),
+                        manual_order = as.character(input$ortho_aligned_manual_order %||% character(0)),
+                        min_identity = suppressWarnings(as.numeric(input$ortho_aligned_min_identity %||% NA_real_)),
+                        mode = as.character(input$ortho_aligned_mode %||% "")
+                    ),
+                    lastz = list(
+                        reference_track = as.character(input$ortho_pip_reference_track %||% ""),
+                        span = as.character(input$ortho_pip_span %||% ""),
+                        track_order = as.character(input$ortho_pip_track_order %||% ""),
+                        min_identity = suppressWarnings(as.numeric(input$ortho_pip_min_identity %||% NA_real_)),
+                        min_length = suppressWarnings(as.numeric(input$ortho_pip_min_length %||% NA_real_))
+                    ),
+                    multipip = list(
+                        reference_track = as.character(input$ortho_multipip_reference_track %||% ""),
+                        span = as.character(input$ortho_multipip_span %||% ""),
+                        track_order = as.character(input$ortho_multipip_track_order %||% ""),
+                        min_identity = suppressWarnings(as.numeric(input$ortho_multipip_min_identity %||% NA_real_)),
+                        min_segment_bp = suppressWarnings(as.numeric(input$ortho_multipip_min_segment_bp %||% NA_real_))
+                    ),
+                    multi_gene = list(
+                        aligned = list(
+                            gene_group = as.character(input$homo_aligned_gene_group %||% ""),
+                            mode = as.character(input$homo_aligned_mode %||% ""),
+                            track_order = as.character(input$homo_aligned_track_order %||% ""),
+                            min_identity = suppressWarnings(as.numeric(input$homo_aligned_min_identity %||% NA_real_))
+                        ),
+                        lastz = list(
+                            span = as.character(input$homo_pip_span %||% ""),
+                            min_identity = suppressWarnings(as.numeric(input$homo_pip_min_identity %||% NA_real_)),
+                            min_length = suppressWarnings(as.numeric(input$homo_pip_min_length %||% NA_real_))
+                        ),
+                        multipip = list(
+                            span = as.character(input$homo_multipip_span %||% ""),
+                            min_identity = suppressWarnings(as.numeric(input$homo_multipip_min_identity %||% NA_real_)),
+                            min_length = suppressWarnings(as.numeric(input$homo_multipip_min_length %||% NA_real_))
+                        )
+                    )
+                ),
                 figure_studio_state = as.character(input$figure_studio_state %||% ""),
                 global_search_query = as.character(input$global_search_query %||% ""),
                 global_search_query_collapsed = as.character(input$global_search_query_collapsed %||% ""),
@@ -166,8 +248,8 @@ init_session_snapshot_domain <- function(
                     chr_name = as.character(p$chr_name %||% ""),
                     sequence_blob = p$sequence_blob %||% "",
                     plot_signature = as.character(p$plot_signature %||% ""),
-                    annotation_path = as.character(p$annotation_path %||% ""),
-                    genome_path = as.character(p$genome_path %||% ""),
+                    annotation_path = resolve_snapshot_path(p$annotation_path %||% "", p$annotation_source %||% NULL),
+                    genome_path = resolve_snapshot_path(p$genome_path %||% "", p$genome_source %||% NULL),
                     organism_info = p$organism_info %||% list(),
                     plot_metrics = p$plot_metrics %||% list(),
                     plot_gene_meta = p$plot_gene_meta %||% list()
@@ -254,8 +336,8 @@ init_session_snapshot_domain <- function(
             plotGeneMetaHomologous_rv(gene_meta_map)
             existingPlotsHomologous_rv(list())
             closeObserversBoundHomologous_rv(character())
-            recalc_plot_ranges_homologous_fn()
             activePlotIdsHomologous_rv(ids_int)
+            recalc_plot_ranges_homologous_fn()
             plotCounterHomologous_rv(counter_out)
         } else {
             clear_orthologous_visualizations_fn()
@@ -271,8 +353,8 @@ init_session_snapshot_domain <- function(
             plotGeneMetaOrthologous_rv(gene_meta_map)
             existingPlotsOrthologous_rv(list())
             closeObserversBoundOrthologous_rv(character())
-            recalc_plot_ranges_orthologous_fn()
             activePlotIdsOrthologous_rv(ids_int)
+            recalc_plot_ranges_orthologous_fn()
             plotCounterOrthologous_rv(counter_out)
         }
         invisible(as.integer(length(ids_chr)))
@@ -392,8 +474,8 @@ init_session_snapshot_domain <- function(
 
         homo_visual <- tolower(trimws(as.character(state$homo_visual_mode %||% "compact")))
         ortho_visual <- tolower(trimws(as.character(state$ortho_visual_mode %||% "compact")))
-        if (!homo_visual %in% c("compact", "detailed")) homo_visual <- "compact"
-        if (!ortho_visual %in% c("compact", "detailed", "aligned")) ortho_visual <- "compact"
+        if (!homo_visual %in% c("compact", "detailed", "aligned", "pip_blocks", "pip_multipip")) homo_visual <- "compact"
+        if (!ortho_visual %in% c("compact", "detailed", "aligned", "pip_blocks", "pip_multipip")) ortho_visual <- "compact"
         updateRadioButtons(session, "homo_visual_mode", selected = homo_visual)
         updateRadioButtons(session, "ortho_visual_mode", selected = ortho_visual)
 
@@ -405,6 +487,87 @@ init_session_snapshot_domain <- function(
         if (!ortho_sort %in% allowed_ortho_sort) ortho_sort <- "load"
         updateSelectInput(session, "homo_sort_mode", selected = homo_sort)
         updateSelectInput(session, "ortho_sort_mode", selected = ortho_sort)
+
+        alignment <- state$alignment_parameters %||% list()
+        aligned <- alignment$aligned %||% list()
+        lastz <- alignment$lastz %||% list()
+        multipip <- alignment$multipip %||% list()
+        if (nzchar(as.character(aligned$anchor_track %||% ""))) {
+            updateSelectInput(session, "ortho_aligned_anchor_track", selected = aligned$anchor_track)
+        }
+        if (nzchar(as.character(aligned$representative %||% ""))) {
+            updateSelectInput(session, "ortho_aligned_representative", selected = aligned$representative)
+        }
+        if (nzchar(as.character(aligned$track_order %||% ""))) {
+            updateSelectInput(session, "ortho_aligned_track_order", selected = aligned$track_order)
+        }
+        if (is.finite(suppressWarnings(as.numeric(aligned$min_identity %||% NA_real_)))) {
+            updateSliderInput(session, "ortho_aligned_min_identity", value = as.numeric(aligned$min_identity))
+        }
+        if (nzchar(as.character(lastz$reference_track %||% ""))) {
+            updateSelectInput(session, "ortho_pip_reference_track", selected = lastz$reference_track)
+        }
+        if (nzchar(as.character(lastz$span %||% ""))) {
+            updateRadioButtons(session, "ortho_pip_span", selected = lastz$span)
+        }
+        if (nzchar(as.character(lastz$track_order %||% ""))) {
+            updateSelectInput(session, "ortho_pip_track_order", selected = lastz$track_order)
+        }
+        if (is.finite(suppressWarnings(as.numeric(lastz$min_identity %||% NA_real_)))) {
+            updateSliderInput(session, "ortho_pip_min_identity", value = as.numeric(lastz$min_identity))
+        }
+        if (is.finite(suppressWarnings(as.numeric(lastz$min_length %||% NA_real_)))) {
+            updateSliderInput(session, "ortho_pip_min_length", value = as.numeric(lastz$min_length))
+        }
+        if (nzchar(as.character(multipip$reference_track %||% ""))) {
+            updateSelectInput(session, "ortho_multipip_reference_track", selected = multipip$reference_track)
+        }
+        if (nzchar(as.character(multipip$span %||% ""))) {
+            updateRadioButtons(session, "ortho_multipip_span", selected = multipip$span)
+        }
+        if (nzchar(as.character(multipip$track_order %||% ""))) {
+            updateSelectInput(session, "ortho_multipip_track_order", selected = multipip$track_order)
+        }
+        if (is.finite(suppressWarnings(as.numeric(multipip$min_identity %||% NA_real_)))) {
+            updateSliderInput(session, "ortho_multipip_min_identity", value = as.numeric(multipip$min_identity))
+        }
+        if (is.finite(suppressWarnings(as.numeric(multipip$min_segment_bp %||% NA_real_)))) {
+            updateNumericInput(session, "ortho_multipip_min_segment_bp", value = as.numeric(multipip$min_segment_bp))
+        }
+        homo_alignment <- alignment$multi_gene %||% list()
+        homo_aligned <- homo_alignment$aligned %||% list()
+        homo_lastz <- homo_alignment$lastz %||% list()
+        homo_multipip <- homo_alignment$multipip %||% list()
+        if (nzchar(as.character(homo_aligned$gene_group %||% ""))) {
+            updateSelectInput(session, "homo_aligned_gene_group", selected = homo_aligned$gene_group)
+        }
+        if (nzchar(as.character(homo_aligned$mode %||% ""))) {
+            updateRadioButtons(session, "homo_aligned_mode", selected = homo_aligned$mode)
+        }
+        if (nzchar(as.character(homo_aligned$track_order %||% ""))) {
+            updateSelectInput(session, "homo_aligned_track_order", selected = homo_aligned$track_order)
+        }
+        if (is.finite(suppressWarnings(as.numeric(homo_aligned$min_identity %||% NA_real_)))) {
+            updateSliderInput(session, "homo_aligned_min_identity", value = as.numeric(homo_aligned$min_identity))
+        }
+        if (nzchar(as.character(homo_lastz$span %||% ""))) {
+            updateRadioButtons(session, "homo_pip_span", selected = homo_lastz$span)
+        }
+        if (is.finite(suppressWarnings(as.numeric(homo_lastz$min_identity %||% NA_real_)))) {
+            updateSliderInput(session, "homo_pip_min_identity", value = as.numeric(homo_lastz$min_identity))
+        }
+        if (is.finite(suppressWarnings(as.numeric(homo_lastz$min_length %||% NA_real_)))) {
+            updateSliderInput(session, "homo_pip_min_length", value = as.numeric(homo_lastz$min_length))
+        }
+        if (nzchar(as.character(homo_multipip$span %||% ""))) {
+            updateRadioButtons(session, "homo_multipip_span", selected = homo_multipip$span)
+        }
+        if (is.finite(suppressWarnings(as.numeric(homo_multipip$min_identity %||% NA_real_)))) {
+            updateSliderInput(session, "homo_multipip_min_identity", value = as.numeric(homo_multipip$min_identity))
+        }
+        if (is.finite(suppressWarnings(as.numeric(homo_multipip$min_length %||% NA_real_)))) {
+            updateSliderInput(session, "homo_multipip_min_length", value = as.numeric(homo_multipip$min_length))
+        }
 
         updateCheckboxInput(session, "ext_alias_source_mygene", value = isTRUE(state$ext_alias_source_mygene %||% TRUE))
         updateCheckboxInput(session, "ext_alias_source_ncbi", value = isTRUE(state$ext_alias_source_ncbi %||% TRUE))
@@ -450,7 +613,7 @@ init_session_snapshot_domain <- function(
             stop("Invalid session file format.")
         }
         schema_version <- suppressWarnings(as.integer(snap$schema_version %||% 0L))
-        if (!is.finite(schema_version) || schema_version < 1L) {
+        if (!is.finite(schema_version) || !schema_version %in% c(1L, 2L)) {
             stop("Unsupported session schema version.")
         }
 
@@ -462,8 +625,8 @@ init_session_snapshot_domain <- function(
         session$onFlushed(function() {
             homo_visual <- tolower(trimws(as.character(visual_state$homo_visual_mode %||% "compact")))
             ortho_visual <- tolower(trimws(as.character(visual_state$ortho_visual_mode %||% "compact")))
-            if (!homo_visual %in% c("compact", "detailed")) homo_visual <- "compact"
-            if (!ortho_visual %in% c("compact", "detailed", "aligned")) ortho_visual <- "compact"
+            if (!homo_visual %in% c("compact", "detailed", "aligned", "pip_blocks", "pip_multipip")) homo_visual <- "compact"
+            if (!ortho_visual %in% c("compact", "detailed", "aligned", "pip_blocks", "pip_multipip")) ortho_visual <- "compact"
             updateRadioButtons(session, "homo_visual_mode", selected = homo_visual)
             updateRadioButtons(session, "ortho_visual_mode", selected = ortho_visual)
             shinyjs::runjs(

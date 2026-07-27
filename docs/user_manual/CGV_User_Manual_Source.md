@@ -30,7 +30,8 @@ CGV is designed for gene-centered structural and comparative analysis. It is esp
 - comparing transcript isoforms and cross-species structural relationships;
 - examining local sequence conservation with aligned synteny, LASTZ blocks, and MultiPIP;
 - reviewing gene metrics, sequence composition, Gene Ontology annotations, functional summaries, literature, and protein interaction context;
-- exporting figures, tables, sequences, and reproducible work sessions.
+- exporting figures, tables, sequences, and reproducible work sessions;
+- sharing immutable interactive read-only reports by secret URL in CGV Web or self-contained HTML in CGV Desktop.
 
 CGV is not a replacement for differential-expression analysis, variant calling, genome assembly, whole-genome browsing, phylogenetic inference, population-genetic analysis, protein 3D prediction, or clinical interpretation.
 
@@ -80,7 +81,7 @@ CGV follows a consistent analysis path regardless of the data source or search m
 7. Inspect the result cards in **Compact** or **Detailed** view.
 8. Open **Show Summary Table** and **Show Analytics** for structured comparisons.
 9. Use card actions for function, network, GO, external records, charts, literature, or sequence download.
-10. Export the required figures and tables, then save the work session from **Settings**.
+10. Export the required figures and tables, save the work session from **Settings**, or use **Share** to create an interactive report for other readers.
 
 ## A recommended working pattern
 
@@ -187,7 +188,15 @@ The toolbar above the result cards contains:
 
 Zoom changes the horizontal display scale of the interactive plot cards without changing the biological coordinates. Sorting changes presentation order, not the data or alignment calculation.
 
-## 2.7 Quick navigation button
+## 2.7 Share analysis
+
+The unobtrusive **Share** action in the active result header appears after CGV
+has at least one result. In CGV Web it creates an expiring secret read-only URL.
+In CGV Desktop the same action prepares a self-contained interactive HTML file
+and reproducibility ZIP without uploading the analysis. See Sections 11.10 and
+11.11 for privacy, contents, and reproducibility details.
+
+## 2.8 Quick navigation button
 
 When enabled in **Settings**, the floating quick-actions button provides:
 
@@ -1207,14 +1216,77 @@ Restoring replaces current visualizations.
 
 ## 11.10 Reproducible export set
 
-For a publication or assessment record, preserve:
+Select the unobtrusive **Share** action in the active result header after
+generating at least one result. CGV creates a
+versioned reproducibility ZIP containing:
 
-1. work-session RDS;
-2. summary CSV;
-3. individual or batch SVG files;
-4. Figure Studio SVG;
-5. relevant FASTA exports;
-6. a short text note containing source assembly, query, alignment settings, and export date.
+- `analysis.json`, with CGV version, workflows, queries, organisms, source
+  provenance (assembly/annotation accession, version, source, and SHA-256
+  checksum), alias decisions, parameters, unresolved organisms, and completed
+  alignment metadata;
+- a human-readable `README.md` and `CHECKSUMS.sha256`;
+- a portable schema-v2 CGV session;
+- available summary CSV, completed LASTZ/MultiPIP TSV, and captured SVG files;
+- FASTA only when private sequence inclusion is explicitly enabled.
+
+Complete reference genomes are not copied into the package. CGV records their
+assembly and annotation provenance instead. When private sequences are
+excluded, restored visualizations remain available but sequence-dependent
+downloads may be disabled.
+
+## 11.11 Read-only interactive reports
+
+On CGV Web, the header **Share** action also creates an immutable secret URL. Before
+publishing, choose:
+
+- when both workflows contain results, whether to include **Multi-Gene**,
+  **Cross-Species**, or both;
+- whether to include private or uploaded sequence content;
+- whether readers may download the reproducibility ZIP;
+- whether CGV should run the compatible current LASTZ and MultiPIP comparisons
+  before capturing both alignment views;
+- an expiry of 7, 14, or 30 days. The default is 7 days.
+
+The report gives the gene structure full page width and presents chromosome
+position as a compact location aid. It contains aligned synteny when available,
+completed LASTZ/MultiPIP results, external results used in the analysis, and
+Figure Studio when available. CGV derives the complete analytics chart set and
+summary tables during publication even when the author never opened those
+panels. Readers can use tooltips, zoom, filters, table sorting, and collapsible
+sections. The report cannot run new searches, modify the analysis, or contact
+external databases.
+
+When one report contains both workflows, every location, structure, synteny,
+alignment, analytics, and table block is labelled and separated as
+**Multi-Gene** or **Cross-Species**. Detailed sections start collapsed to keep
+large analyses navigable. Gene-structure results are grouped by gene and
+organism; each group initially shows its primary transcript and provides a
+selector for one specific transcript or all captured isoforms.
+
+For Multi-Gene results, CGV captures one aligned-synteny view for every loaded
+gene that has more than one transcript. Each view is labelled with that gene
+instead of with the complete search list. Report preparation temporarily
+renders uncached views behind the Share dialog. CGV freezes a visual copy of
+the current application beneath the modal during this process, so the visible
+workspace does not turn blank or expose intermediate mode changes.
+
+If the browser cannot capture an expected element, CGV lists it before
+publication. The author must either cancel or explicitly continue with that
+element excluded; capture failures are never omitted silently.
+
+Anyone with the URL can view and copy visible information. The link is not
+indexed, but it must still be treated as a secret. Reports created in the
+current browser appear under **Settings > Shared analysis reports**, where they
+can be copied or revoked.
+
+CGV Desktop does not upload analyses. It exports the same interactive report as
+a self-contained HTML file plus the reproducibility ZIP, prompting for each
+destination through the operating-system save dialog.
+
+The optional pre-publication LASTZ/MultiPIP action is tied to the current report
+generation and only completed results are included. Persistent background
+queues for unfinished LASTZ/MultiPIP jobs are not part of this release; durable
+cancel/retry/resume jobs remain planned for a future phase.
 
 ---HARDPAGE---
 
@@ -1286,7 +1358,9 @@ CGV Desktop packages the complete scientific interface with a local application 
 - user-selected storage;
 - local diagnostics;
 - desktop update handling;
-- the same search, analytics, Figure Studio, and export features as CGV Web.
+- the same search, analytics, Figure Studio, and export features as CGV Web;
+- self-contained interactive HTML reports and reproducibility ZIPs saved only
+  to a location chosen by the user.
 
 CGV Desktop does not require a separate R, Docker, WSL, or command-line installation for normal use.
 
@@ -1426,7 +1500,17 @@ CGV Guide complements this manual with short visual demonstrations.
 - organism and assembly information;
 - external alias configuration;
 - save and load session;
+- sharing an expiring read-only report URL in Web or exporting the interactive
+  HTML and ZIP locally in Desktop;
 - clear visualizations.
+
+**Figure Studio** covers:
+
+- opening the workspace from the current analysis;
+- adding structural, alignment, and analytics panels;
+- arranging, resizing, labelling, and styling the composition;
+- previewing and exporting SVG or PNG;
+- including a non-empty Figure Studio composition in an interactive report.
 
 ## 14.2 Use the Guide effectively
 
@@ -1778,4 +1862,4 @@ Fallback logic supports several transcript and non-coding RNA feature names, but
 
 **Source repository:** https://github.com/raulrojas22/CGV
 
-This manual describes the complete user-facing behavior represented by CGV version {{PRODUCT_VERSION}}, including the desktop data catalog, aligned-synteny tools, LASTZ and MultiPIP views, Figure Studio, functional context, exports, and session management.
+This manual describes the complete user-facing behavior represented by CGV version {{PRODUCT_VERSION}}, including the desktop data catalog, aligned-synteny tools, LASTZ and MultiPIP views, Figure Studio, interactive read-only reports, reproducibility exports, and session management.

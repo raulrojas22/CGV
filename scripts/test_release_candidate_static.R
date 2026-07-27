@@ -20,6 +20,11 @@ citation_txt <- read_text("CITATION.cff")
 zenodo <- jsonlite::fromJSON(".zenodo.json")
 dockerfile_txt <- read_text("Dockerfile")
 shinyproxy_txt <- read_text("docker-compose.shinyproxy.yml")
+compose_txt <- read_text("docker-compose.yml")
+compose_deploy_txt <- read_text("docker-compose.deploy.yml")
+server_txt <- read_text("server.R")
+env_example_txt <- read_text(".env.example")
+nas_deploy_txt <- read_text("deploy-nas.sh")
 release_notes <- sprintf("RELEASE_NOTES_v%s.md", release_version)
 release_checklist <- sprintf("RELEASE_CHECKLIST_v%s.md", release_version)
 desktop_scripts <- desktop_package$scripts
@@ -43,6 +48,18 @@ stopifnot(
   identical(zenodo$version, release_version),
   grepl(sprintf('org.opencontainers.image.version="%s"', release_version), dockerfile_txt, fixed = TRUE),
   grepl(sprintf("cgv:%s", release_version), shinyproxy_txt, fixed = TRUE),
+  grepl("${CGV_DATA_DIR:-./data}:/app/data:ro", compose_txt, fixed = TRUE),
+  grepl("${CGV_DATA_DIR:-./data}:/app/data:ro", compose_deploy_txt, fixed = TRUE),
+  grepl(
+    "scripts/verify_preloaded_alias_indexes.R --root=/app",
+    nas_deploy_txt,
+    fixed = TRUE
+  ),
+  !grepl(
+    "APP_PARTIAL_SUGGESTIONS_STRICT",
+    paste(server_txt, dockerfile_txt, env_example_txt),
+    fixed = TRUE
+  ),
   file.exists(release_notes),
   file.exists(release_checklist),
   identical(desktop_scripts[["runtime:mac:arm64"]], "bash scripts/build-runtime-macos-arm64.sh"),

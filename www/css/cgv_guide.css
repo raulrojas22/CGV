@@ -50,8 +50,12 @@
   background: #dfe6ea;
   z-index: 3;
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   box-shadow: 0 14px 30px rgba(31, 43, 53, 0.22);
+}
+
+.app-guide-pane.guide-runtime-desktop .guide-route-panel {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
 }
 
 .app-guide-pane .guide-workspace {
@@ -817,6 +821,11 @@
     grid-row: auto;
   }
 
+  .app-guide-pane .guide-route-panel,
+  .app-guide-pane.guide-runtime-desktop .guide-route-panel {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .app-guide-pane .guide-route-panel > .guide-route-card {
     width: 100%;
   }
@@ -858,6 +867,11 @@
   .app-guide-pane {
     padding-left: 12px;
     padding-right: 12px;
+  }
+
+  .app-guide-pane .guide-route-panel,
+  .app-guide-pane.guide-runtime-desktop .guide-route-panel {
+    grid-template-columns: 1fr;
   }
 
   .app-guide-pane .guide-route-card,
