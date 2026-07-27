@@ -28,7 +28,7 @@ if [[ "${APP_SESSION_METRICS:-0}" == "1" ]]; then
   echo "[cgv] startup app_dir=${APP_DIR} data_root=${CGV_DATA_ROOT} cache_dir=${CGV_CACHE_DIR} pid=$$"
 fi
 
-for required_dir in annotations genomes go_annotations; do
+for required_dir in annotations genomes go_annotations data/alias_index; do
   if [[ ! -d "${CGV_DATA_ROOT}/${required_dir}" ]]; then
     echo "[cgv] warning: '${required_dir}' directory not found in ${CGV_DATA_ROOT}"
   fi

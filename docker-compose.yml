@@ -51,5 +51,6 @@ services:
       - ${CGV_ANNOTATIONS_DIR:-./annotations}:/app/annotations:ro
       - ${CGV_GENOMES_DIR:-./genomes}:/app/genomes:ro
       - ${CGV_GO_ANNOTATIONS_DIR:-./go_annotations}:/app/go_annotations:ro
+      - ${CGV_DATA_DIR:-./data}:/app/data:ro
       - ${CGV_CACHE_DIR:-./cache}:/app/cache
       - ${CGV_NCBI_DOWNLOADS_DIR:-./ncbi_downloads}:/app/ncbi_downloads

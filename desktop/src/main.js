@@ -30,6 +30,7 @@ let datasetInstallQueue = Promise.resolve();
 const datasetInstallControllers = new Map();
 const cancelableDatasetInstalls = new Set();
 let shinyStartPromise = null;
+let exportDownloadSession = null;
 
 // Increment when the bundled conda runtime changes. A new revision replaces
 // the user-local runtime on the next app launch.
@@ -728,6 +729,7 @@ async function startShiny() {
     APP_ANALYTICS_PHASE2_DELAY_MS: process.env.APP_ANALYTICS_PHASE2_DELAY_MS || "0",
     APP_ANALYTICS_PHASE3_DELAY_MS: process.env.APP_ANALYTICS_PHASE3_DELAY_MS || "0",
     APP_CACHE_WARM_EAGER: "1",
+    CGV_RUNTIME: "desktop",
     CGV_DATA_ROOT: dataRoot,
     CGV_CACHE_DIR: cacheRoot,
     APP_ALIAS_DISK_CACHE_DIR: path.join(cacheRoot, "external_alias"),
@@ -1369,6 +1371,15 @@ async function createWindow() {
     shell.openExternal(url);
     return { action: "deny" };
   });
+  if (exportDownloadSession !== mainWindow.webContents.session) {
+    exportDownloadSession = mainWindow.webContents.session;
+    exportDownloadSession.on("will-download", (_event, item) => {
+      item.setSaveDialogOptions({
+        title: "Save CGV export",
+        defaultPath: item.getFilename()
+      });
+    });
+  }
 
   await mainWindow.loadFile(path.join(__dirname, "launcher.html"));
   installApplicationMenu();

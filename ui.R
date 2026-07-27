@@ -80,7 +80,13 @@ guide_media_files <- c(
   "guide-common-08-configure-external-alias-lookup.mp4",
   "guide-common-09a-save-work-session.mp4",
   "guide-common-09b-load-work-session.mp4",
-  "guide-common-10-clear-visualizations.mp4"
+  "guide-common-10-clear-visualizations.mp4",
+  "guide-common-share-analysis-web.mp4",
+  "guide-common-export-report-desktop.mp4",
+  "guide-figure-studio-01-open-workspace.mp4",
+  "guide-figure-studio-02-add-panels.mp4",
+  "guide-figure-studio-03-arrange-and-style.mp4",
+  "guide-figure-studio-04-preview-and-export.mp4"
 )
 guide_media_map <- stats::setNames(
   vapply(guide_media_files, function(file) guide_media_path(file.path("screencasts", file)), character(1)),
@@ -117,6 +123,30 @@ initial_summary_context_header <- function(search_mode_label = "Multi-Gene", gen
       div(
         class = "summary-display-mode-control",
         div(
+          class = "summary-display-mode-subbar summary-display-context-subbar",
+          span(class = "summary-display-submode-label summary-display-context-label", "Context"),
+          tags$button(
+            type = "button",
+            class = "summary-display-submode-button summary-genomic-context-toggle summary-genomic-context-toggle--neighbors is-active",
+            `data-genomic-context-toggle` = "neighbors",
+            `aria-pressed` = "true",
+            `aria-label` = "Hide neighboring genes",
+            title = "Hide neighboring genes on gene cards",
+            icon("location-arrow"),
+            span("Neighbors")
+          ),
+          tags$button(
+            type = "button",
+            class = "summary-display-submode-button summary-genomic-context-toggle summary-genomic-context-toggle--overlaps is-active",
+            `data-genomic-context-toggle` = "overlaps",
+            `aria-pressed` = "true",
+            `aria-label` = "Hide overlapping genes",
+            title = "Hide overlapping genes on gene cards",
+            icon("layer-group"),
+            span("Overlaps")
+          )
+        ),
+        div(
           class = "summary-display-mode-main",
           tags$button(
             type = "button",
@@ -149,7 +179,16 @@ initial_summary_context_header <- function(search_mode_label = "Multi-Gene", gen
           class = "summary-display-mode-subbar",
           span(class = "summary-display-submode-label", "Visual detail"),
           tags$button(type = "button", class = "summary-display-submode-button is-active", `aria-pressed` = "true", "Compact"),
-          tags$button(type = "button", class = "summary-display-submode-button", `aria-pressed` = "false", "Detailed")
+          tags$button(type = "button", class = "summary-display-submode-button", `aria-pressed` = "false", "Detailed"),
+          tags$button(
+            type = "button",
+            class = "summary-display-submode-button summary-genomic-ruler-toggle is-active",
+            `data-genomic-ruler-toggle` = "true",
+            `aria-pressed` = "true",
+            `aria-label` = "Hide genomic context scale",
+            icon("ruler-horizontal"),
+            span("Scale")
+          )
         )
       )
     )
@@ -1830,12 +1869,15 @@ fluidPage(
       tags$script(src = versioned_asset_path("js/keepalive.js")),
       tags$script(src = versioned_asset_path("js/dna_loader_unifier.js")),
       tags$script(src = versioned_asset_path("js/plot_zoom.js")),
+      tags$script(src = versioned_asset_path("js/genomic_ruler_toggle.js")),
       tags$script(src = versioned_asset_path("js/export_svg.js")),
       tags$script(src = versioned_asset_path("js/figure_studio.js")),
+      tags$script(src = versioned_asset_path("js/reproducible_report.js")),
       tags$script(src = versioned_asset_path("js/string_theme.js")),
       tags$script(src = versioned_asset_path("js/status_popup.js")),
       tags$script(src = versioned_asset_path("js/search_submit_feedback.js")),
       tags$script(src = versioned_asset_path("js/promoter_popup.js")),
+      tags$script(src = versioned_asset_path("js/genomic_neighbor_popup.js")),
       tags$script(src = versioned_asset_path("js/go_terms_popup.js")),
       tags$script(src = versioned_asset_path("js/papers_popup.js")),
       tags$script(src = versioned_asset_path("js/preloaded_assembly_popup.js")),
@@ -3203,11 +3245,17 @@ fluidPage(
           });
           // Retrigger homologous search after organism-change confirmation
           Shiny.addCustomMessageHandler('cgv_trigger_homo_search', function(message) {
+            if (message && message.origin === 'genomic_neighbor') {
+              setWorkflowPanel(null);
+            }
             var btn = document.getElementById('generate1');
             if (btn) btn.click();
           });
           // Retrigger orthologous search after gene-change confirmation
           Shiny.addCustomMessageHandler('cgv_trigger_ortho_search', function(message) {
+            if (message && message.origin === 'genomic_neighbor') {
+              setWorkflowPanel(null);
+            }
             var btn = document.getElementById('search_gene');
             if (btn) btn.click();
           });
@@ -4827,7 +4875,18 @@ fluidPage(
                   span(class = "guide-route-icon", icon("chart-line")),
                   span(class = "guide-route-copy",
                     tags$strong("Common Analysis"),
-                    tags$small("Review models, analytics, popups, and exports.")
+                    tags$small("Review models, analytics, reports, and shared tools.")
+                  )
+                ),
+                tags$button(
+                  type = "button",
+                  class = "guide-route-card",
+                  `data-guide-route` = "figure-studio",
+                  span(class = "guide-route-number", "04"),
+                  span(class = "guide-route-icon", icon("object-group")),
+                  span(class = "guide-route-copy",
+                    tags$strong("Figure Studio"),
+                    tags$small("Compose CGV results as a publication-ready multi-panel figure.")
                   )
                 )
               ),
@@ -4916,6 +4975,14 @@ fluidPage(
                     onclick = "document.querySelector('.app-nav-btn[data-target=\"orthologous\"]').click();",
                     icon("sitemap"),
                     "Open Cross-Species"
+                  ),
+                  tags$button(
+                    type = "button",
+                    class = "guide-secondary-btn",
+                    `data-guide-open` = "figure-studio",
+                    onclick = "document.querySelector('.app-nav-btn[data-target=\"figure-studio\"]').click();",
+                    icon("object-group"),
+                    "Open Figure Studio"
                   )
                 )
               ),
@@ -5090,7 +5157,7 @@ fluidPage(
                   },
                   common: {
                     title: 'Common Analysis',
-                    summary: 'Shared tools for interpreting models, charts, popups, sessions, settings, and cleanup in CGV.',
+                    summary: 'Shared tools for interpreting models, charts, reports, sessions, settings, and cleanup in CGV.',
                     open: '',
                     steps: [
                       { title: 'Review analytics charts', copy: 'Analyze the statistics generated from the current visualizations, including structural and sequence-derived summaries.', short: 'Statistics from rendered data.', media: guideVideo('guide-common-01-review-analytics-charts.mp4') },
@@ -5110,7 +5177,48 @@ fluidPage(
                           { title: 'Load work session', short: 'Restore previous state.', copy: 'Load a previously saved session file to restore plots and settings into the current CGV session.', media: guideVideo('guide-common-09b-load-work-session.mp4') }
                         ]
                       },
+                      {
+                        title: window.cgvDesktop ? 'Export interactive report' : 'Share analysis',
+                        copy: window.cgvDesktop
+                          ? 'Use Share to save a self-contained read-only HTML report and reproducibility ZIP locally. CGV Desktop does not upload the analysis or create a public URL.'
+                          : 'Use Share to create an expiring secret read-only URL. Choose Multi-Gene, Cross-Species, or both, review privacy and download options, and copy the completed link for the intended readers.',
+                        short: window.cgvDesktop ? 'Save HTML and ZIP locally.' : 'Create a secret read-only link.',
+                        media: window.cgvDesktop
+                          ? guideVideo('guide-common-export-report-desktop.mp4')
+                          : guideVideo('guide-common-share-analysis-web.mp4')
+                      },
                       { title: 'Clear visualizations', copy: 'Remove current visualizations when you want to reset the workspace before starting a new analysis.', short: 'Reset the workspace.', media: guideVideo('guide-common-10-clear-visualizations.mp4') }
+                    ]
+                  },
+                  'figure-studio': {
+                    title: 'Figure Studio',
+                    summary: 'Turn structural views, alignments, analytics, and labels already generated in CGV into one reusable multi-panel figure.',
+                    open: 'figure-studio',
+                    steps: [
+                      {
+                        title: 'Open the workspace',
+                        copy: 'Open Figure Studio after generating the CGV results you want to compose. The source library only includes figures available in the current analysis.',
+                        short: 'Start from current results.',
+                        media: guideVideo('guide-figure-studio-01-open-workspace.mp4')
+                      },
+                      {
+                        title: 'Add source panels',
+                        copy: 'Choose gene structures, synteny or alignment views, analytics charts, and other available SVG sources, then add the required panels to the canvas.',
+                        short: 'Choose CGV visual sources.',
+                        media: guideVideo('guide-figure-studio-02-add-panels.mp4')
+                      },
+                      {
+                        title: 'Arrange and style',
+                        copy: 'Reorder and resize panels, edit labels and captions, adjust the page layout, and keep related visual elements aligned.',
+                        short: 'Build the multi-panel layout.',
+                        media: guideVideo('guide-figure-studio-03-arrange-and-style.mp4')
+                      },
+                      {
+                        title: 'Preview and export',
+                        copy: 'Review the final composition and export SVG for editable vector output or PNG for convenient sharing. The Figure Studio composition is also included in an interactive report when it contains panels.',
+                        short: 'Export SVG or PNG.',
+                        media: guideVideo('guide-figure-studio-04-preview-and-export.mp4')
+                      }
                     ]
                   },
                   'desktop-downloads': {
@@ -5129,6 +5237,7 @@ fluidPage(
                   }
                 };
 
+                root.classList.toggle('guide-runtime-desktop', !!window.cgvDesktop);
                 if (!window.cgvDesktop) {
                   delete routeData['desktop-downloads'];
                   root.querySelectorAll('.guide-desktop-only').forEach(function(node) {
@@ -6636,6 +6745,16 @@ fluidPage(
                   )
                 ),
                 p(class = "app-submenu-hint", "Loading a session replaces current visualizations.")
+              ),
+              div(
+                class = "help-section",
+                h3(icon("share-nodes"), span("Shared analysis reports")),
+                p("Secret read-only reports created in this browser appear below. They can be copied or revoked without a CGV account."),
+                div(id = "cgv-shared-report-list", class = "cgv-shared-report-list"),
+                p(
+                  class = "app-submenu-hint",
+                  "This list is stored only in this browser. Reports still expire automatically if the browser list is cleared."
+                )
               )
             )
           )

@@ -35,6 +35,7 @@ cran_packages <- c(
   "sass",
   "data.table",
   "processx",
+  "digest",
   "DBI",
   "RSQLite"
 )

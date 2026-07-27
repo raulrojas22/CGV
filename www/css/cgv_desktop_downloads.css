@@ -211,9 +211,9 @@
 
 .cgv-download-visual {
   position: relative;
-  width: min(790px, 100%);
+  width: min(980px, 100%);
   margin: 42px auto 0;
-  padding: 0 25px;
+  padding: 0 14px;
 }
 
 .cgv-download-visual::before {
@@ -229,10 +229,10 @@
 .cgv-download-window {
   overflow: hidden;
   border: 1px solid rgba(155, 183, 201, 0.66);
-  border-radius: 22px;
+  border-radius: 20px;
   text-align: left;
   background: #fff;
-  box-shadow: 0 30px 70px rgba(32, 67, 91, 0.22), 0 3px 10px rgba(32, 67, 91, 0.1);
+  box-shadow: 0 30px 70px rgba(32, 67, 91, 0.2), 0 3px 10px rgba(32, 67, 91, 0.09);
 }
 
 .cgv-download-window-bar {
@@ -254,68 +254,380 @@
 .cgv-download-window-dots i:nth-child(3) { background: #41c9a6; }
 .cgv-download-window-local { justify-self: end; display: inline-flex; align-items: center; gap: 5px; color: #16806d; }
 
-.cgv-download-window-body { display: grid; grid-template-columns: 86px 1fr; min-height: 245px; }
+.cgv-download-window-body {
+  display: grid;
+  grid-template-columns: 150px minmax(0, 1fr);
+  min-height: 375px;
+  background: #eef5f8;
+}
 
 .cgv-download-mini-sidebar {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: 11px;
-  padding: 16px 10px;
+  gap: 15px;
+  padding: 18px 12px 14px;
   border-right: 1px solid #dce8ee;
-  background: #f7fafc;
+  background: rgba(255, 255, 255, 0.96);
 }
 
-.cgv-download-mini-logo {
-  margin-bottom: 3px;
-  color: #28445c;
-  font-size: 15px;
-  font-weight: 900;
-  letter-spacing: 0.08em;
+.cgv-download-mini-brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 42px;
+  padding: 0 4px 13px;
+  border-bottom: 1px solid #dce8ee;
 }
 
-.cgv-download-mini-sidebar > span {
+.cgv-download-mini-mark {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 34px;
-  height: 30px;
-  border-radius: 9px;
-  color: #8297a7;
+  width: 31px;
+  height: 31px;
+  flex: 0 0 31px;
+  border-right: 3px solid #23c4ad;
+  color: #29465f;
+  font-size: 19px;
 }
 
-.cgv-download-mini-sidebar > span.is-active { color: #fff; background: #29465f; }
+.cgv-download-mini-brand > div {
+  display: grid;
+  line-height: 1;
+}
 
-.cgv-download-mini-canvas { padding: 25px 28px 24px; background: linear-gradient(155deg, #fff, #f5fafc); }
-.cgv-download-mini-heading { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
-.cgv-download-mini-heading > div { display: grid; gap: 4px; }
-.cgv-download-mini-heading > div span { color: #18a78b; font-size: 8px; font-weight: 900; letter-spacing: 0.13em; }
-.cgv-download-mini-heading strong { color: #29465e; font-size: 15px; }
-.cgv-download-mini-ready { display: inline-flex; align-items: center; gap: 5px; color: #17816d; font-size: 9.5px; font-weight: 800; }
+.cgv-download-mini-brand strong {
+  color: #29425d;
+  font-family: Georgia, serif;
+  font-size: 21px;
+  letter-spacing: 0.02em;
+}
+
+.cgv-download-mini-brand small {
+  max-width: 66px;
+  color: #506b81;
+  font-size: 6.5px;
+  font-weight: 850;
+  line-height: 1.05;
+}
+
+.cgv-download-mini-nav {
+  display: grid;
+  gap: 6px;
+}
+
+.cgv-download-mini-nav span,
+.cgv-download-mini-desktop {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  padding: 7px 9px;
+  border-radius: 9px;
+  color: #334d62;
+  font-size: 8px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.cgv-download-mini-nav i,
+.cgv-download-mini-desktop i {
+  width: 12px;
+  color: #29465f;
+  text-align: center;
+}
+
+.cgv-download-mini-nav span.is-active {
+  color: #fff;
+  background: #294158;
+  box-shadow: 0 6px 12px rgba(34, 61, 83, 0.18);
+}
+
+.cgv-download-mini-nav span.is-active i { color: #fff; }
+
+.cgv-download-mini-desktop {
+  margin-top: auto;
+  color: #236778;
+  border: 1px solid #cde7ea;
+  background: #effafd;
+}
+
+.cgv-download-mini-desktop i { color: #25899a; }
+
+.cgv-download-mini-canvas {
+  min-width: 0;
+  padding: 13px;
+  background: linear-gradient(145deg, #edf4f8, #e6f0f4);
+}
+
+.cgv-download-mini-control-panel {
+  padding: 10px 12px 9px;
+  border: 1px solid #d3e2ea;
+  border-radius: 11px;
+  background: rgba(255, 255, 255, 0.97);
+  box-shadow: 0 7px 14px rgba(37, 70, 94, 0.11);
+}
+
+.cgv-download-mini-heading,
+.cgv-download-mini-heading > div,
+.cgv-download-mini-modes,
+.cgv-download-mini-context,
+.cgv-download-gene-head,
+.cgv-download-gene-head > div,
+.cgv-download-mini-toolbar,
+.cgv-download-gene-metrics {
+  display: flex;
+  align-items: center;
+}
+
+.cgv-download-mini-heading {
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #e0e9ee;
+}
+
+.cgv-download-mini-heading > div { gap: 7px; }
+.cgv-download-mini-heading > div > span { color: #71879a; font-size: 6.5px; font-weight: 900; letter-spacing: 0.08em; }
+.cgv-download-mini-heading strong { color: #263f55; font-size: 11px; }
+
+.cgv-download-mini-heading em {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 7px;
+  border: 1px solid #cddfea;
+  border-radius: 8px;
+  color: #3c586d;
+  background: #f8fbfd;
+  font-size: 7.5px;
+  font-weight: 750;
+}
+
+.cgv-download-mini-heading em i { color: #d7ad4d; }
+
+.cgv-download-mini-count {
+  padding: 5px 7px;
+  border: 1px solid #cbdce9;
+  border-radius: 8px;
+  color: #355772;
+  background: #eef6fb;
+  font-size: 7.5px;
+  font-weight: 850;
+}
+
+.cgv-download-mini-modes {
+  justify-content: space-between;
+  gap: 7px;
+  padding-top: 8px;
+}
+
+.cgv-download-mini-context {
+  gap: 4px;
+  padding: 3px 5px;
+  border: 1px solid #dae6ec;
+  border-radius: 999px;
+  color: #6b8294;
+}
+
+.cgv-download-mini-context small { font-size: 5.5px; font-weight: 900; }
+.cgv-download-mini-context span { padding: 4px 6px; border-radius: 999px; color: #fff; font-size: 6px; font-weight: 800; }
+.cgv-download-mini-context .is-neighbor { background: #2d91c4; }
+.cgv-download-mini-context .is-overlap { background: #8156ae; }
+
+.cgv-download-mini-modes > span {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: 6px;
+  min-width: 147px;
+  padding: 6px 10px;
+  border: 1px solid #d4e0e7;
+  border-radius: 8px;
+  color: #3b586e;
+  background: #fff;
+}
+
+.cgv-download-mini-modes > span > i {
+  grid-row: 1 / 3;
+  align-self: center;
+  color: #8b5db4;
+  font-size: 10px;
+}
+
+.cgv-download-mini-modes > span strong { font-size: 7.5px; }
+.cgv-download-mini-modes > span small { color: #71899a; font-size: 5.7px; }
+.cgv-download-mini-modes > span.is-active { color: #fff; border-color: transparent; background: linear-gradient(135deg, #139d8f, #288bc0); }
+.cgv-download-mini-modes > span.is-active i,
+.cgv-download-mini-modes > span.is-active small { color: #fff; }
+
+.cgv-download-mini-toolbar {
+  gap: 6px;
+  min-height: 39px;
+  padding: 8px 0 7px;
+  border-bottom: 1px solid #d9e6ec;
+}
+
+.cgv-download-mini-toolbar span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 23px;
+  padding: 5px 7px;
+  border-radius: 5px;
+  color: #fff;
+  background: #7c8d9b;
+  font-size: 6.5px;
+  font-weight: 850;
+}
+
+.cgv-download-mini-toolbar span.is-dark { background: #294158; }
+.cgv-download-mini-toolbar span.is-teal,
+.cgv-download-mini-toolbar span:nth-child(3) { background: #1abf9f; }
+
+.cgv-download-gene-results {
+  display: grid;
+  gap: 8px;
+  padding-top: 9px;
+}
 
 .cgv-download-gene-card {
-  margin-top: 18px;
-  padding: 13px 15px 15px;
-  border: 1px solid #dce8ee;
-  border-radius: 13px;
-  background: rgba(255, 255, 255, 0.94);
-  box-shadow: 0 8px 18px rgba(40, 77, 102, 0.07);
+  overflow: hidden;
+  border: 1px solid #d6e3e9;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 5px 12px rgba(38, 70, 92, 0.08);
 }
 
-.cgv-download-gene-card-alt { margin-top: 10px; }
-.cgv-download-gene-label { display: flex; justify-content: space-between; gap: 12px; color: #7a8f9f; font-size: 8.5px; }
-.cgv-download-gene-label strong { color: #34546b; font-size: 10px; }
-.cgv-download-gene-track { position: relative; display: flex; align-items: center; height: 20px; margin-top: 11px; }
-.cgv-download-gene-track::before { content: ""; position: absolute; left: 1%; right: 1%; height: 2px; background: #8a9dac; }
-.cgv-download-gene-track span { position: absolute; z-index: 1; height: 12px; border-radius: 3px; border: 2px solid #fff; background: #18bc9c; box-shadow: 0 0 0 1px rgba(22, 118, 102, 0.15); }
-.cgv-download-gene-track .e1 { left: 4%; width: 8%; }
-.cgv-download-gene-track .e2 { left: 25%; width: 14%; background: #44b0ff; }
-.cgv-download-gene-track .e3 { left: 54%; width: 10%; background: #765cff; }
-.cgv-download-gene-track .e4 { left: 81%; width: 15%; background: #18bc9c; }
-.cgv-download-gene-card-alt .e1 { left: 9%; width: 10%; }
-.cgv-download-gene-card-alt .e2 { left: 31%; width: 9%; }
-.cgv-download-gene-card-alt .e3 { left: 57%; width: 16%; }
-.cgv-download-gene-card-alt .e4 { left: 87%; width: 8%; }
+.cgv-download-gene-head {
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 31px;
+  padding: 5px 7px;
+  color: #fff;
+  background: #294158;
+}
+
+.cgv-download-gene-head > div { gap: 6px; min-width: 0; }
+.cgv-download-gene-head > div:first-child { overflow: hidden; }
+.cgv-download-gene-head em,
+.cgv-download-gene-head strong,
+.cgv-download-gene-head b { overflow: hidden; font-size: 6.7px; text-overflow: ellipsis; white-space: nowrap; }
+.cgv-download-gene-head em { max-width: 92px; }
+.cgv-download-gene-head strong { max-width: 105px; }
+.cgv-download-gene-head > div:first-child > i { width: 1px; height: 12px; flex: 0 0 1px; background: rgba(255, 255, 255, 0.25); }
+
+.cgv-download-species-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  flex: 0 0 15px;
+  border-radius: 50%;
+  color: #b98e32;
+  background: #fff;
+  font-size: 7px;
+}
+
+.cgv-download-gene-head > div:last-child span {
+  padding: 4px 6px;
+  border-radius: 4px;
+  color: #fff;
+  background: #516fb4;
+  font-size: 5.8px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.cgv-download-gene-head > div:last-child .is-purple { background: #6661b4; }
+.cgv-download-gene-head > div:last-child .is-pink { background: #99538f; }
+.cgv-download-gene-head > div:last-child .is-cyan { background: #238da3; }
+.cgv-download-gene-head > div:last-child .is-blue { background: #2b6895; }
+.cgv-download-gene-head > div:last-child .is-close { padding: 4px 5px; color: #4d6577; background: #edf4f6; }
+
+.cgv-download-gene-plot {
+  position: relative;
+  height: 55px;
+  padding: 4px 18px;
+}
+
+.cgv-download-plot-scale {
+  display: flex;
+  justify-content: space-between;
+  color: #587287;
+  font-size: 5.8px;
+}
+
+.cgv-download-context-line,
+.cgv-download-transcript-line {
+  position: relative;
+  height: 19px;
+  border-bottom: 1px dashed #96acba;
+}
+
+.cgv-download-context-line span,
+.cgv-download-transcript-line span {
+  position: absolute;
+  bottom: -2px;
+}
+
+.cgv-download-context-line .left-neighbor,
+.cgv-download-context-line .right-neighbor {
+  width: 22px;
+  height: 4px;
+  border-radius: 3px;
+  background: #37759f;
+}
+
+.cgv-download-context-line .left-neighbor { left: 7%; }
+.cgv-download-context-line .right-neighbor { right: 6%; }
+.cgv-download-context-line .focus-region { left: 36%; width: 36%; height: 3px; background: #8057aa; }
+
+.cgv-download-transcript-line::before {
+  content: "";
+  position: absolute;
+  left: 32%;
+  right: 28%;
+  bottom: 2px;
+  height: 2px;
+  background: #354d60;
+}
+
+.cgv-download-transcript-line .exon {
+  height: 10px;
+  border-radius: 2px;
+  background: #f46179;
+}
+
+.cgv-download-transcript-line .e1 { left: 33%; width: 7%; }
+.cgv-download-transcript-line .e2 { left: 43%; width: 14%; }
+.cgv-download-transcript-line .e3 { left: 63%; width: 9%; }
+.cgv-download-transcript-line .arrow-left,
+.cgv-download-transcript-line .arrow-right { bottom: -1px; width: 0; height: 0; border-top: 5px solid transparent; border-bottom: 5px solid transparent; }
+.cgv-download-transcript-line .arrow-left { left: 29%; border-right: 8px solid #8ea3b2; }
+.cgv-download-transcript-line .arrow-right { right: 25%; border-left: 8px solid #8ea3b2; }
+
+.cgv-download-gene-card-alt .cgv-download-context-line .focus-region { left: 40%; width: 27%; }
+.cgv-download-gene-card-alt .cgv-download-transcript-line .e1 { left: 38%; width: 18%; }
+.cgv-download-gene-card-alt .cgv-download-transcript-line .e2 { left: 59%; width: 5%; }
+.cgv-download-gene-card-alt .cgv-download-transcript-line .e3 { left: 67%; width: 7%; }
+
+.cgv-download-gene-metrics {
+  justify-content: flex-end;
+  border-top: 1px solid #e0e9ed;
+  color: #5f778a;
+  font-size: 5.8px;
+}
+
+.cgv-download-gene-metrics span {
+  padding: 4px 8px;
+  border-left: 1px solid #e0e9ed;
+}
+
+.cgv-download-gene-metrics strong { color: #344f64; }
+.cgv-download-gene-metrics b { display: inline-flex; align-items: center; justify-content: center; width: 10px; height: 10px; border-radius: 50%; color: #344f64; font-size: 5.5px; }
+.cgv-download-gene-metrics .base-a { background: #ffad4c; }
+.cgv-download-gene-metrics .base-t { background: #e6dc3d; }
 
 .cgv-download-section {
   width: min(1220px, calc(100% - 52px));
@@ -368,10 +680,13 @@
 .cgv-download-release-status.is-pending { color: #8a6831; border-color: rgba(221, 169, 76, 0.33); background: #fff9ed; }
 .cgv-download-release-status.is-error { color: #9a554b; border-color: rgba(209, 105, 92, 0.3); background: #fff4f1; }
 
-.cgv-download-platform-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; align-items: start; }
+.cgv-download-platform-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; align-items: stretch; }
 
 .cgv-download-platform-card {
   position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
   min-height: 510px;
   padding: 24px;
   border: 1px solid var(--cgv-download-line);
@@ -448,7 +763,7 @@
 .cgv-download-platform-card.is-recommended .cgv-download-asset-action { color: #176f74 !important; border-color: transparent; background: #fff; }
 .cgv-download-platform-card.is-recommended .cgv-download-asset-action[aria-disabled="true"] { color: rgba(255, 255, 255, 0.72) !important; border-color: rgba(255, 255, 255, 0.16); background: rgba(255, 255, 255, 0.1); }
 
-.cgv-download-install-guide { margin-top: 13px; color: #657e90; font-size: 10.5px; line-height: 1.5; }
+.cgv-download-install-guide { margin-top: auto; padding-top: 13px; color: #657e90; font-size: 10.5px; line-height: 1.5; }
 .cgv-download-install-guide summary { display: flex; align-items: center; gap: 7px; padding: 8px 2px; color: #426278; font-weight: 800; cursor: pointer; }
 .cgv-download-install-guide ol { margin: 7px 0 7px 19px; padding: 0; }
 .cgv-download-install-guide ul { margin: 7px 0 7px 17px; padding: 0; }
@@ -597,15 +912,33 @@ html[data-app-theme="dark"] .cgv-download-button-secondary { color: #cae0ed !imp
 html[data-app-theme="dark"] .cgv-download-window { border-color: #31546a; background: #143047; }
 html[data-app-theme="dark"] .cgv-download-window-bar,
 html[data-app-theme="dark"] .cgv-download-mini-sidebar { border-color: #294a60; background: #102a3f; }
+html[data-app-theme="dark"] .cgv-download-window-body { background: #10293d; }
 html[data-app-theme="dark"] .cgv-download-mini-canvas { background: linear-gradient(155deg, #15334a, #10293d); }
-html[data-app-theme="dark"] .cgv-download-gene-card { border-color: #315369; background: rgba(19, 48, 70, 0.95); }
+html[data-app-theme="dark"] .cgv-download-mini-brand,
+html[data-app-theme="dark"] .cgv-download-mini-heading,
+html[data-app-theme="dark"] .cgv-download-mini-toolbar { border-color: #294a60; }
+html[data-app-theme="dark"] .cgv-download-mini-brand strong,
 html[data-app-theme="dark"] .cgv-download-mini-heading strong,
-html[data-app-theme="dark"] .cgv-download-gene-label strong,
+html[data-app-theme="dark"] .cgv-download-mini-modes > span strong { color: #d3e6f2; }
+html[data-app-theme="dark"] .cgv-download-mini-brand small,
+html[data-app-theme="dark"] .cgv-download-mini-heading > div > span,
+html[data-app-theme="dark"] .cgv-download-mini-modes > span small,
+html[data-app-theme="dark"] .cgv-download-plot-scale,
+html[data-app-theme="dark"] .cgv-download-gene-metrics { color: #9fb8c8; }
+html[data-app-theme="dark"] .cgv-download-mini-control-panel,
+html[data-app-theme="dark"] .cgv-download-mini-heading em,
+html[data-app-theme="dark"] .cgv-download-mini-count,
+html[data-app-theme="dark"] .cgv-download-mini-modes > span { border-color: #31546a; background: #143047; color: #bdd1dd; }
+html[data-app-theme="dark"] .cgv-download-gene-card { border-color: #315369; background: rgba(19, 48, 70, 0.95); }
 html[data-app-theme="dark"] .cgv-download-platform-card h3,
 html[data-app-theme="dark"] .cgv-download-feature h3,
 html[data-app-theme="dark"] .cgv-download-asset-row strong,
 html[data-app-theme="dark"] .cgv-download-requirement strong,
 html[data-app-theme="dark"] .cgv-download-release-card dd { color: #d3e6f2; }
+html[data-app-theme="dark"] .cgv-download-gene-plot { background: #143047; }
+html[data-app-theme="dark"] .cgv-download-gene-metrics,
+html[data-app-theme="dark"] .cgv-download-gene-metrics span { border-color: #294a60; }
+html[data-app-theme="dark"] .cgv-download-gene-metrics strong { color: #d3e6f2; }
 html[data-app-theme="dark"] .cgv-download-platform-state,
 html[data-app-theme="dark"] .cgv-download-platform-icon,
 html[data-app-theme="dark"] .cgv-download-asset-row,
@@ -629,11 +962,25 @@ html[data-app-theme="dark"] .app-nav-btn.app-nav-btn-desktop { color: #b8d8e6; b
   .cgv-download-hero { min-height: auto; padding: 48px 18px 42px; }
   .cgv-download-hero h1 { font-size: clamp(38px, 12vw, 56px); }
   .cgv-download-visual { padding: 0; }
-  .cgv-download-window-body { grid-template-columns: 58px 1fr; min-height: 220px; }
-  .cgv-download-mini-sidebar { padding-inline: 7px; }
-  .cgv-download-mini-sidebar > span { width: 31px; }
-  .cgv-download-mini-canvas { padding: 18px 15px; }
-  .cgv-download-gene-label span { display: none; }
+  .cgv-download-window-body { grid-template-columns: 78px minmax(0, 1fr); min-height: 330px; }
+  .cgv-download-mini-sidebar { gap: 9px; padding: 12px 7px 9px; }
+  .cgv-download-mini-brand { justify-content: center; padding-inline: 0; }
+  .cgv-download-mini-brand > div { display: none; }
+  .cgv-download-mini-mark { border-right: 0; }
+  .cgv-download-mini-nav span,
+  .cgv-download-mini-desktop { justify-content: center; padding-inline: 5px; font-size: 0; }
+  .cgv-download-mini-nav i,
+  .cgv-download-mini-desktop i { width: auto; font-size: 11px; }
+  .cgv-download-mini-canvas { padding: 9px; }
+  .cgv-download-mini-heading em { max-width: 120px; }
+  .cgv-download-mini-modes { justify-content: stretch; }
+  .cgv-download-mini-context { display: none; }
+  .cgv-download-mini-modes > span { min-width: 0; flex: 1; padding-inline: 7px; }
+  .cgv-download-mini-toolbar span:nth-child(n + 3) { display: none; }
+  .cgv-download-gene-head > div:last-child span:not(.is-close) { display: none; }
+  .cgv-download-gene-head em { max-width: 74px; }
+  .cgv-download-gene-head strong { display: none; }
+  .cgv-download-gene-metrics span:nth-child(n + 3) { display: none; }
   .cgv-download-section { width: min(100% - 28px, 1220px); padding: 54px 0; }
   .cgv-download-section-heading { align-items: flex-start; flex-direction: column; }
   .cgv-download-release-status { max-width: none; }

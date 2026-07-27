@@ -135,31 +135,42 @@ compact_girafe_svg_html <- function(html, decimals = 2L) {
     out <- html
     out <- gsub(">\\s+<", "><", out, perl = TRUE)
 
-        decimals_i <- suppressWarnings(as.integer(decimals %||% 2L))
+    decimals_i <- suppressWarnings(as.integer(decimals %||% 2L))
     if (!is.finite(decimals_i) || is.na(decimals_i) || decimals_i < 0L) {
         return(out)
     }
 
     # ggplot-generated SVG coordinates often carry far more precision than the
-    # browser can show. Rounding them trims WebSocket payloads without changing
-    # base-pair data stored in R.
-    matches <- gregexpr("(?<![A-Za-z0-9_])-?\\d+\\.\\d{4,}(?![A-Za-z0-9_])", out, perl = TRUE)
-    vals <- regmatches(out, matches)
-    if (!length(vals) || !length(vals[[1]])) {
+    # browser can show. Only opening-tag attributes are compacted: visible labels,
+    # tooltips and other text nodes must retain their genomic precision.
+    tag_matches <- gregexpr("<[^>]+>", out, perl = TRUE)
+    tags <- regmatches(out, tag_matches)
+    if (!length(tags) || !length(tags[[1]])) {
         return(out)
     }
 
-    regmatches(out, matches) <- lapply(vals, function(x) {
-        nums <- suppressWarnings(as.numeric(x))
-        repl <- ifelse(
-            is.finite(nums),
-            format(round(nums, decimals_i), scientific = FALSE, trim = TRUE),
-            x
+    compact_tag <- function(tag) {
+        matches <- gregexpr(
+            "(?<![A-Za-z0-9_])-?\\d+\\.\\d{4,}(?![A-Za-z0-9_])",
+            tag,
+            perl = TRUE
         )
-        repl <- sub("\\.?0+$", "", repl, perl = TRUE)
-        repl[repl == "-0"] <- "0"
-        repl
-    })
+        vals <- regmatches(tag, matches)
+        if (!length(vals) || !length(vals[[1]])) return(tag)
+        regmatches(tag, matches) <- lapply(vals, function(x) {
+            nums <- suppressWarnings(as.numeric(x))
+            repl <- ifelse(
+                is.finite(nums),
+                format(round(nums, decimals_i), scientific = FALSE, trim = TRUE),
+                x
+            )
+            repl <- sub("\\.?0+$", "", repl, perl = TRUE)
+            repl[repl == "-0"] <- "0"
+            repl
+        })
+        tag
+    }
+    regmatches(out, tag_matches) <- list(vapply(tags[[1]], compact_tag, character(1)))
     out
 }
 
@@ -7987,7 +7998,12 @@ get_nearest_neighbors <- function(gene_target, genes_df, chr_index = NULL) {
         return(list(
             upstream = empty_neighbor,
             downstream = empty_neighbor,
-            flags = list(has_up = FALSE, has_down = FALSE, overlap_up = FALSE, overlap_down = FALSE)
+            overlapping = list(),
+            flags = list(
+                has_up = FALSE, has_down = FALSE,
+                overlap_up = FALSE, overlap_down = FALSE,
+                has_overlap = FALSE, overlap_count = 0L
+            )
         ))
     }
 
@@ -7998,7 +8014,12 @@ get_nearest_neighbors <- function(gene_target, genes_df, chr_index = NULL) {
         return(list(
             upstream = empty_neighbor,
             downstream = empty_neighbor,
-            flags = list(has_up = FALSE, has_down = FALSE, overlap_up = FALSE, overlap_down = FALSE)
+            overlapping = list(),
+            flags = list(
+                has_up = FALSE, has_down = FALSE,
+                overlap_up = FALSE, overlap_down = FALSE,
+                has_overlap = FALSE, overlap_count = 0L
+            )
         ))
     }
     chr_vec <- as.character(genes_df$chr %||% rep("", nrow(genes_df)))
@@ -8026,7 +8047,22 @@ get_nearest_neighbors <- function(gene_target, genes_df, chr_index = NULL) {
         }
     }
     if (length(idx_chr) > 0) {
-        keep_non_self <- !(start_vec_chr == target_start & end_vec_chr == target_end)
+        same_coords <- start_vec_chr == target_start & end_vec_chr == target_end
+        target_id <- trimws(as.character(gene_target$gene_id[1] %||% ""))
+        target_strand <- trimws(as.character(gene_target$strand[1] %||% ""))
+        candidate_ids <- as.character(genes_df$gene_id[idx_chr] %||% rep("", length(idx_chr)))
+        candidate_strands <- as.character(genes_df$strand[idx_chr] %||% rep("", length(idx_chr)))
+        if (nzchar(target_id)) {
+            is_self <- same_coords & (
+                trimws(candidate_ids) == target_id |
+                    (nzchar(target_strand) & trimws(candidate_strands) == target_strand)
+            )
+        } else if (nzchar(target_strand)) {
+            is_self <- same_coords & trimws(candidate_strands) == target_strand
+        } else {
+            is_self <- same_coords
+        }
+        keep_non_self <- !is_self
         idx_chr <- idx_chr[keep_non_self]
         start_vec_chr <- start_vec_chr[keep_non_self]
         end_vec_chr <- end_vec_chr[keep_non_self]
@@ -8035,29 +8071,30 @@ get_nearest_neighbors <- function(gene_target, genes_df, chr_index = NULL) {
         return(list(
             upstream = empty_neighbor,
             downstream = empty_neighbor,
-            flags = list(has_up = FALSE, has_down = FALSE, overlap_up = FALSE, overlap_down = FALSE)
+            overlapping = list(),
+            flags = list(
+                has_up = FALSE, has_down = FALSE,
+                overlap_up = FALSE, overlap_down = FALSE,
+                has_overlap = FALSE, overlap_count = 0L
+            )
         ))
     }
 
-    idx_up_overlap <- which(start_vec_chr < target_start & end_vec_chr >= target_start)
     idx_up_non_overlap <- which(end_vec_chr < target_start)
-    up_idx <- if (length(idx_up_overlap) > 0) {
-        idx_chr[idx_up_overlap[which.max(end_vec_chr[idx_up_overlap])]]
-    } else if (length(idx_up_non_overlap) > 0) {
+    up_idx <- if (length(idx_up_non_overlap) > 0) {
         idx_chr[idx_up_non_overlap[which.max(end_vec_chr[idx_up_non_overlap])]]
     } else {
         NA_integer_
     }
 
-    idx_down_overlap <- which(start_vec_chr <= target_end & end_vec_chr > target_end)
     idx_down_non_overlap <- which(start_vec_chr > target_end)
-    down_idx <- if (length(idx_down_overlap) > 0) {
-        idx_chr[idx_down_overlap[which.min(start_vec_chr[idx_down_overlap])]]
-    } else if (length(idx_down_non_overlap) > 0) {
+    down_idx <- if (length(idx_down_non_overlap) > 0) {
         idx_chr[idx_down_non_overlap[which.min(start_vec_chr[idx_down_non_overlap])]]
     } else {
         NA_integer_
     }
+    idx_overlap_local <- which(start_vec_chr <= target_end & end_vec_chr >= target_start)
+    overlap_idx <- idx_chr[idx_overlap_local]
 
     build_neighbor <- function(idx_one, target_start_local, target_end_local) {
         if (!is.finite(idx_one) || is.na(idx_one) || idx_one < 1L || idx_one > nrow(genes_df)) {
@@ -8080,7 +8117,7 @@ get_nearest_neighbors <- function(gene_target, genes_df, chr_index = NULL) {
         } else if (nb_start > target_end_local) {
             as.numeric(nb_start - target_end_local - 1)
         } else {
-            as.numeric(min(target_start_local - nb_end - 1, nb_start - target_end_local - 1))
+            -as.numeric(min(target_end_local, nb_end) - max(target_start_local, nb_start) + 1)
         }
         list(
             neighbor_id = nb_id,
@@ -8096,15 +8133,24 @@ get_nearest_neighbors <- function(gene_target, genes_df, chr_index = NULL) {
 
     upstream <- build_neighbor(up_idx, target_start, target_end)
     downstream <- build_neighbor(down_idx, target_start, target_end)
+    overlapping <- lapply(
+        overlap_idx,
+        build_neighbor,
+        target_start_local = target_start,
+        target_end_local = target_end
+    )
 
     list(
         upstream = upstream,
         downstream = downstream,
+        overlapping = overlapping,
         flags = list(
             has_up = !is.na(upstream$dist_bp),
             has_down = !is.na(downstream$dist_bp),
-            overlap_up = !is.na(upstream$dist_bp) && upstream$dist_bp < 0,
-            overlap_down = !is.na(downstream$dist_bp) && downstream$dist_bp < 0
+            overlap_up = FALSE,
+            overlap_down = FALSE,
+            has_overlap = length(overlapping) > 0,
+            overlap_count = as.integer(length(overlapping))
         )
     )
 }
@@ -8124,7 +8170,12 @@ get_nearest_neighbors_from_light_index <- function(gene_target, genes_df) {
     empty_context <- list(
         upstream = empty_neighbor,
         downstream = empty_neighbor,
-        flags = list(has_up = FALSE, has_down = FALSE, overlap_up = FALSE, overlap_down = FALSE)
+        overlapping = list(),
+        flags = list(
+            has_up = FALSE, has_down = FALSE,
+            overlap_up = FALSE, overlap_down = FALSE,
+            has_overlap = FALSE, overlap_count = 0L
+        )
     )
 
     if (is.null(gene_target) || is.null(genes_df) || !is.data.frame(genes_df) || nrow(genes_df) == 0) {
@@ -8155,7 +8206,27 @@ get_nearest_neighbors_from_light_index <- function(gene_target, genes_df) {
 
     start_chr <- start_vec[idx_chr]
     end_chr <- end_vec[idx_chr]
-    keep_non_self <- !(start_chr == target_start & end_chr == target_end)
+    same_coords <- start_chr == target_start & end_chr == target_end
+    target_id <- trimws(as.character(gene_target$gene_id[1] %||% ""))
+    target_strand <- trimws(as.character(gene_target$strand[1] %||% ""))
+    attrs_vec_full <- as.character(get_col(genes_df, "attributes", "V9", ""))
+    strand_vec_full <- as.character(get_col(genes_df, "strand", "V7", ""))
+    same_local <- which(same_coords)
+    is_self <- rep(FALSE, length(idx_chr))
+    if (length(same_local) > 0 && nzchar(target_id)) {
+        same_ids <- vapply(
+            attrs_vec_full[idx_chr[same_local]],
+            function(attr) sanitize_gene_display_name(extract_primary_gene_id(as.character(attr %||% ""))),
+            character(1)
+        )
+        is_self[same_local] <- trimws(same_ids) == target_id |
+            (nzchar(target_strand) & trimws(strand_vec_full[idx_chr[same_local]]) == target_strand)
+    } else if (length(same_local) > 0 && nzchar(target_strand)) {
+        is_self[same_local] <- trimws(strand_vec_full[idx_chr[same_local]]) == target_strand
+    } else if (length(same_local) > 0) {
+        is_self[same_local] <- TRUE
+    }
+    keep_non_self <- !is_self
     idx_chr <- idx_chr[keep_non_self]
     start_chr <- start_chr[keep_non_self]
     end_chr <- end_chr[keep_non_self]
@@ -8163,28 +8234,24 @@ get_nearest_neighbors_from_light_index <- function(gene_target, genes_df) {
         return(empty_context)
     }
 
-    idx_up_overlap <- which(start_chr < target_start & end_chr >= target_start)
     idx_up_non_overlap <- which(end_chr < target_start)
-    up_idx <- if (length(idx_up_overlap) > 0) {
-        idx_chr[idx_up_overlap[which.max(end_chr[idx_up_overlap])]]
-    } else if (length(idx_up_non_overlap) > 0) {
+    up_idx <- if (length(idx_up_non_overlap) > 0) {
         idx_chr[idx_up_non_overlap[which.max(end_chr[idx_up_non_overlap])]]
     } else {
         NA_integer_
     }
 
-    idx_down_overlap <- which(start_chr <= target_end & end_chr > target_end)
     idx_down_non_overlap <- which(start_chr > target_end)
-    down_idx <- if (length(idx_down_overlap) > 0) {
-        idx_chr[idx_down_overlap[which.min(start_chr[idx_down_overlap])]]
-    } else if (length(idx_down_non_overlap) > 0) {
+    down_idx <- if (length(idx_down_non_overlap) > 0) {
         idx_chr[idx_down_non_overlap[which.min(start_chr[idx_down_non_overlap])]]
     } else {
         NA_integer_
     }
+    idx_overlap_local <- which(start_chr <= target_end & end_chr >= target_start)
+    overlap_idx <- idx_chr[idx_overlap_local]
 
-    attrs_vec <- as.character(get_col(genes_df, "attributes", "V9", ""))
-    strand_vec <- as.character(get_col(genes_df, "strand", "V7", ""))
+    attrs_vec <- attrs_vec_full
+    strand_vec <- strand_vec_full
 
     build_neighbor <- function(idx_one) {
         if (!is.finite(idx_one) || is.na(idx_one) || idx_one < 1L || idx_one > nrow(genes_df)) {
@@ -8203,7 +8270,7 @@ get_nearest_neighbors_from_light_index <- function(gene_target, genes_df) {
         } else if (nb_start > target_end) {
             as.numeric(nb_start - target_end - 1)
         } else {
-            as.numeric(min(target_start - nb_end - 1, nb_start - target_end - 1))
+            -as.numeric(min(target_end, nb_end) - max(target_start, nb_start) + 1)
         }
         list(
             neighbor_id = nb_id,
@@ -8219,14 +8286,18 @@ get_nearest_neighbors_from_light_index <- function(gene_target, genes_df) {
 
     upstream <- build_neighbor(up_idx)
     downstream <- build_neighbor(down_idx)
+    overlapping <- lapply(overlap_idx, build_neighbor)
     list(
         upstream = upstream,
         downstream = downstream,
+        overlapping = overlapping,
         flags = list(
             has_up = !is.na(upstream$dist_bp),
             has_down = !is.na(downstream$dist_bp),
-            overlap_up = !is.na(upstream$dist_bp) && upstream$dist_bp < 0,
-            overlap_down = !is.na(downstream$dist_bp) && downstream$dist_bp < 0
+            overlap_up = FALSE,
+            overlap_down = FALSE,
+            has_overlap = length(overlapping) > 0,
+            overlap_count = as.integer(length(overlapping))
         )
     )
 }

@@ -67,41 +67,136 @@ cgv_desktop_downloads_page <- function() {
         ),
         div(
           class = "cgv-download-visual",
-          `aria-label` = "CGV Desktop local workspace preview",
+          `aria-label` = "Preview of the CGV Desktop Multi-Gene Search workspace",
           div(
             class = "cgv-download-window",
             div(
               class = "cgv-download-window-bar",
               span(class = "cgv-download-window-dots", tags$i(), tags$i(), tags$i()),
-              span("CGV Desktop · local workspace"),
+              span("CGV Desktop"),
               span(class = "cgv-download-window-local", tags$i(class = "fas fa-lock"), "Local")
             ),
             div(
               class = "cgv-download-window-body",
               div(
                 class = "cgv-download-mini-sidebar",
-                div(class = "cgv-download-mini-logo", "CGV"),
-                span(class = "is-active", tags$i(class = "fas fa-house")),
-                span(tags$i(class = "fas fa-dna")),
-                span(tags$i(class = "fas fa-sitemap")),
-                span(tags$i(class = "fas fa-route"))
+                div(
+                  class = "cgv-download-mini-brand",
+                  span(class = "cgv-download-mini-mark", tags$i(class = "fas fa-dna")),
+                  div(strong("CGV"), tags$small("Comparative Gene Viewer"))
+                ),
+                div(
+                  class = "cgv-download-mini-nav",
+                  span(tags$i(class = "fas fa-house"), "Home"),
+                  span(class = "is-active", tags$i(class = "fas fa-dna"), "Multi-Gene Search"),
+                  span(tags$i(class = "fas fa-sitemap"), "Cross-Species"),
+                  span(tags$i(class = "fas fa-image"), "Figure Studio"),
+                  span(tags$i(class = "fas fa-route"), "CGV Guide")
+                ),
+                span(class = "cgv-download-mini-desktop", tags$i(class = "fas fa-laptop"), "CGV Desktop")
               ),
               div(
                 class = "cgv-download-mini-canvas",
                 div(
-                  class = "cgv-download-mini-heading",
-                  div(span("MULTI-GENE SEARCH"), strong("Transcript comparison")),
-                  span(class = "cgv-download-mini-ready", tags$i(class = "fas fa-circle-check"), "Ready")
+                  class = "cgv-download-mini-control-panel",
+                  div(
+                    class = "cgv-download-mini-heading",
+                    div(
+                      span("SEARCH TYPE"),
+                      strong("Multi-Gene"),
+                      tags$em(tags$i(class = "fas fa-seedling"), "Oryza sativa ssp. japonica")
+                    ),
+                    span(class = "cgv-download-mini-count", "Genes: 7")
+                  ),
+                  div(
+                    class = "cgv-download-mini-modes",
+                    div(
+                      class = "cgv-download-mini-context",
+                      tags$small("CONTEXT"),
+                      span(class = "is-neighbor", tags$i(class = "fas fa-location-arrow"), "Neighbors"),
+                      span(class = "is-overlap", tags$i(class = "fas fa-layer-group"), "Overlaps")
+                    ),
+                    span(class = "is-active", tags$i(class = "fas fa-eye"), strong("Visualize mode"), tags$small("Explore gene models")),
+                    span(tags$i(class = "fas fa-project-diagram"), strong("Alignment mode"), tags$small("Compare transcripts"))
+                  )
                 ),
                 div(
-                  class = "cgv-download-gene-card",
-                  div(class = "cgv-download-gene-label", strong("AT1G12920"), span("3 transcripts · Arabidopsis thaliana")),
-                  div(class = "cgv-download-gene-track", span(class = "e1"), span(class = "e2"), span(class = "e3"), span(class = "e4"))
+                  class = "cgv-download-mini-toolbar",
+                  span(class = "is-dark", tags$i(class = "fas fa-chart-bar"), "Show Analytics"),
+                  span(class = "is-teal", tags$i(class = "fas fa-play"), "Show Summary Table"),
+                  span(tags$i(class = "fas fa-download"), "CSV"),
+                  span(tags$i(class = "fas fa-file-archive"), "Result SVGs")
                 ),
                 div(
-                  class = "cgv-download-gene-card cgv-download-gene-card-alt",
-                  div(class = "cgv-download-gene-label", strong("AT1G12930"), span("2 transcripts · aligned locally")),
-                  div(class = "cgv-download-gene-track", span(class = "e1"), span(class = "e2"), span(class = "e3"), span(class = "e4"))
+                  class = "cgv-download-gene-results",
+                  div(
+                    class = "cgv-download-gene-card",
+                    div(
+                      class = "cgv-download-gene-head",
+                      div(
+                        span(class = "cgv-download-species-mark", tags$i(class = "fas fa-seedling")),
+                        tags$em("Oryza sativa ssp. japonica"),
+                        tags$i(),
+                        strong("Gene: LOC112938776"),
+                        tags$i(),
+                        tags$b("Chr: 4")
+                      ),
+                      div(
+                        span(class = "is-purple", "Function"),
+                        span(class = "is-pink", "Network"),
+                        span(class = "is-cyan", "GO"),
+                        span(class = "is-blue", "NCBI"),
+                        span(class = "is-close", tags$i(class = "fas fa-xmark"))
+                      )
+                    ),
+                    div(
+                      class = "cgv-download-gene-plot",
+                      div(class = "cgv-download-plot-scale", span("≥100 kb"), span("10 kb"), span("1 kb"), span("31.2320 Mb"), span("31.2335 Mb")),
+                      div(class = "cgv-download-context-line", span(class = "left-neighbor"), span(class = "focus-region"), span(class = "right-neighbor")),
+                      div(class = "cgv-download-transcript-line", span(class = "arrow-left"), span(class = "exon e1"), span(class = "exon e2"), span(class = "exon e3"), span(class = "arrow-right"))
+                    ),
+                    div(
+                      class = "cgv-download-gene-metrics",
+                      span("5 transcripts"),
+                      span("Gene length ", strong("2,690 bp")),
+                      span("Transcript length ", strong("2,623 bp")),
+                      span("Sequence composition ", tags$b(class = "base-a", "A"), " 30.07% ", tags$b(class = "base-t", "T"), " 29.29%")
+                    )
+                  ),
+                  div(
+                    class = "cgv-download-gene-card cgv-download-gene-card-alt",
+                    div(
+                      class = "cgv-download-gene-head",
+                      div(
+                        span(class = "cgv-download-species-mark", tags$i(class = "fas fa-seedling")),
+                        tags$em("Oryza sativa ssp. japonica"),
+                        tags$i(),
+                        strong("Gene: LOC4328465"),
+                        tags$i(),
+                        tags$b("Chr: 2")
+                      ),
+                      div(
+                        span(class = "is-purple", "Function"),
+                        span(class = "is-pink", "Network"),
+                        span(class = "is-cyan", "GO"),
+                        span(class = "is-blue", "NCBI"),
+                        span(class = "is-close", tags$i(class = "fas fa-xmark"))
+                      )
+                    ),
+                    div(
+                      class = "cgv-download-gene-plot",
+                      div(class = "cgv-download-plot-scale", span("≥100 kb"), span("10 kb"), span("1 kb"), span("4.1125 Mb"), span("4.1148 Mb")),
+                      div(class = "cgv-download-context-line", span(class = "left-neighbor"), span(class = "focus-region"), span(class = "right-neighbor")),
+                      div(class = "cgv-download-transcript-line", span(class = "arrow-left"), span(class = "exon e1"), span(class = "exon e2"), span(class = "exon e3"), span(class = "arrow-right"))
+                    ),
+                    div(
+                      class = "cgv-download-gene-metrics",
+                      span("3 transcripts"),
+                      span("Gene length ", strong("2,271 bp")),
+                      span("Transcript length ", strong("2,271 bp")),
+                      span("Sequence composition ", tags$b(class = "base-a", "A"), " 30.25% ", tags$b(class = "base-t", "T"), " 30.52%")
+                    )
+                  )
                 )
               )
             )
@@ -250,6 +345,7 @@ cgv_desktop_downloads_page <- function() {
         div(class = "cgv-download-feature", span(tags$i(class = "fas fa-sitemap")), h3("Cross-Species Search"), p("Inspect homologous structures, synteny, LASTZ blocks, and MultiPIP-style conservation.")),
         div(class = "cgv-download-feature", span(tags$i(class = "fas fa-lightbulb")), h3("Smarter gene discovery"), p("Use gene suggestions, alias resolution, and disambiguation when several records share a name.")),
         div(class = "cgv-download-feature", span(tags$i(class = "fas fa-chart-column")), h3("Figures and analytics"), p("Generate structural plots, sequence metrics, context charts, tables, and publication-ready exports.")),
+        div(class = "cgv-download-feature", span(tags$i(class = "fas fa-file-code")), h3("Local interactive reports"), p("Save a self-contained read-only HTML report and reproducibility ZIP for sharing without uploading the analysis to a server.")),
         div(class = "cgv-download-feature", span(tags$i(class = "fas fa-database")), h3("25-organism catalog"), p("Install only the curated animal, plant, and fungal references needed for your work.")),
         div(class = "cgv-download-feature", span(tags$i(class = "fas fa-folder-open")), h3("Persistent workspace"), p("Keep downloaded organisms, generated caches, settings, and saved sessions between launches."))
       )
@@ -262,12 +358,13 @@ cgv_desktop_downloads_page <- function() {
           class = "cgv-download-local-copy",
           span(class = "cgv-download-eyebrow", "Local by design"),
           h2("Your analyses stay in a private session on your computer."),
-          p("CGV Desktop starts its own local Shiny service and opens it only inside the desktop application. Reference datasets and caches are stored in your user profile, where they remain available for later work."),
+          p("CGV Desktop starts its own local Shiny service and opens it only inside the desktop application. Reference datasets and caches are stored in your user profile, where they remain available for later work. Interactive reports are written only to locations you choose through the operating-system save dialog."),
           div(
             class = "cgv-download-local-points",
             span(tags$i(class = "fas fa-lock"), "Private localhost session"),
             span(tags$i(class = "fas fa-hard-drive"), "User-controlled storage"),
             span(tags$i(class = "fas fa-cloud-arrow-down"), "Organisms installed on demand"),
+            span(tags$i(class = "fas fa-file-code"), "Local HTML reports; no public URL"),
             span(tags$i(class = "fas fa-rotate"), "Reusable local caches")
           )
         ),

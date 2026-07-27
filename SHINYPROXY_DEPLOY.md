@@ -48,3 +48,17 @@ docker logs cgv-shinyproxy --tail 100
 
 Expected result: each active browser session has an isolated CGV app container;
 closing tabs should release containers after the heartbeat timeout.
+
+## Static shared reports
+
+The ShinyProxy compose stack mounts `${SP_CACHE_DIR}` read-only into nginx.
+Secret reports under `/share/<64-hex-token>/index.html` are therefore served
+without allocating a ShinyProxy application container. The report route:
+
+- disables access logging so bearer tokens are not retained;
+- adds `noindex`, no-referrer, no-store, nosniff, and CSP headers;
+- exposes only the report HTML/JSON and the optional reproducibility ZIP;
+- leaves revocation metadata outside the public report directory.
+
+The lightweight `report-cleaner` service runs every 15 minutes against the
+shared cache. Set `CGV_PUBLIC_BASE_URL` to the public origin before deployment.

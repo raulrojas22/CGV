@@ -188,7 +188,18 @@ init_plot_lifecycle_domain <- function(
         c(start = start_val, end = end_val)
     }
 
-    compute_plot_ranges <- function(data_list) {
+    compute_plot_ranges <- function(data_list, plot_ids = NULL) {
+        if (!is.null(plot_ids)) {
+            active_keys <- unique(as.character(plot_ids %||% character(0)))
+            active_keys <- active_keys[nzchar(active_keys)]
+            data_keys <- names(data_list %||% list())
+            keep_keys <- intersect(active_keys, as.character(data_keys %||% character(0)))
+            data_list <- if (length(keep_keys) > 0L) {
+                data_list[keep_keys]
+            } else {
+                list()
+            }
+        }
         if (length(data_list) == 0) {
             return(list(max_len = 0, min_coord = Inf, max_coord = -Inf))
         }
@@ -228,7 +239,10 @@ init_plot_lifecycle_domain <- function(
     }
 
     recalc_plot_ranges_homologous <- function() {
-        ranges <- compute_plot_ranges(fileDataHomologous_rv())
+        ranges <- compute_plot_ranges(
+            fileDataHomologous_rv(),
+            plot_ids = activePlotIdsHomologous_rv()
+        )
         update_numeric_reactive(max_gene_length_homo_rv, ranges$max_len)
         update_numeric_reactive(min_gene_coord_homo_rv, ranges$min_coord)
         update_numeric_reactive(max_gene_coord_homo_rv, ranges$max_coord)
@@ -236,7 +250,10 @@ init_plot_lifecycle_domain <- function(
     }
 
     recalc_plot_ranges_orthologous <- function() {
-        ranges <- compute_plot_ranges(fileDataOrthologous_rv())
+        ranges <- compute_plot_ranges(
+            fileDataOrthologous_rv(),
+            plot_ids = activePlotIdsOrthologous_rv()
+        )
         update_numeric_reactive(max_gene_length_ortho_rv, ranges$max_len)
         update_numeric_reactive(min_gene_coord_ortho_rv, ranges$min_coord)
         update_numeric_reactive(max_gene_coord_ortho_rv, ranges$max_coord)
@@ -781,6 +798,70 @@ init_plot_lifecycle_domain <- function(
         invisible(NULL)
     }
 
+    resolve_plot_removal_ids <- function(
+        id_txt,
+        active_ids,
+        plot_gene_meta,
+        annotation_paths,
+        organism_info
+    ) {
+        id_txt <- as.character(id_txt %||% "")
+        active_keys <- unique(as.character(active_ids %||% character(0)))
+        active_keys <- active_keys[nzchar(active_keys)]
+        if (!nzchar(id_txt) || !(id_txt %in% active_keys)) {
+            return(id_txt)
+        }
+
+        ref_meta <- tryCatch(plot_gene_meta[[id_txt]], error = function(e) NULL)
+        if (is.null(ref_meta) || !isTRUE(ref_meta$is_canonical)) {
+            return(id_txt)
+        }
+
+        normalize_group_value <- function(x) {
+            value <- trimws(tolower(as.character(x %||% "")))
+            value <- value[!is.na(value) & nzchar(value)]
+            if (length(value) > 0L) value[[1L]] else ""
+        }
+        gene_group_key <- function(meta) {
+            for (value in list(
+                meta$matched_gene_id,
+                meta$display_gene_name,
+                meta$matched_gene_name,
+                meta$query_gene
+            )) {
+                key <- normalize_group_value(value)
+                if (nzchar(key)) return(key)
+            }
+            ""
+        }
+        source_group_key <- function(plot_id, meta) {
+            annotation_key <- normalize_group_value(annotation_paths[[plot_id]])
+            if (nzchar(annotation_key)) {
+                return(paste0("annotation:", annotation_key))
+            }
+            organism_key <- normalize_group_value(
+                meta$organism_scientific %||% organism_info[[plot_id]]$name
+            )
+            if (nzchar(organism_key)) paste0("organism:", organism_key) else ""
+        }
+
+        ref_gene_key <- gene_group_key(ref_meta)
+        ref_source_key <- source_group_key(id_txt, ref_meta)
+        if (!nzchar(ref_gene_key) || !nzchar(ref_source_key)) {
+            return(id_txt)
+        }
+
+        group_ids <- Filter(function(candidate_id) {
+            candidate_meta <- tryCatch(plot_gene_meta[[candidate_id]], error = function(e) NULL)
+            if (is.null(candidate_meta) || isTRUE(candidate_meta$is_canonical_copy)) {
+                return(FALSE)
+            }
+            identical(gene_group_key(candidate_meta), ref_gene_key) &&
+                identical(source_group_key(candidate_id, candidate_meta), ref_source_key)
+        }, active_keys)
+        unique(c(id_txt, as.character(group_ids %||% character(0))))
+    }
+
     remove_homologous_plot <- function(id_local, announce = TRUE) {
         id_txt <- as.character(id_local %||% "")
         if (!nzchar(id_txt)) {
@@ -790,18 +871,32 @@ init_plot_lifecycle_domain <- function(
         if (!is.finite(id_int)) {
             return(invisible(FALSE))
         }
-        destroy_homologous_plot_runtime(id_txt)
-        activePlotIdsHomologous_rv(setdiff(activePlotIdsHomologous_rv(), as.integer(id_int)))
-        remove_named_value(titlesHomologous_rv, id_txt)
-        remove_named_value(existingPlotsHomologous_rv, id_txt)
-        remove_named_value(fileDataHomologous_rv, id_txt)
-        remove_named_value(chrNamesHomologous_rv, id_txt)
-        remove_named_value(genSequencesHomologous_rv, id_txt)
-        remove_named_value(plotSignaturesHomologous_rv, id_txt)
-        remove_named_value(annotationPathsHomologous_rv, id_txt)
-        remove_named_value(genomePathsHomologous_rv, id_txt)
-        remove_named_value(plotMetricsHomologous_rv, id_txt)
-        remove_named_value(plotGeneMetaHomologous_rv, id_txt)
+        remove_ids <- resolve_plot_removal_ids(
+            id_txt = id_txt,
+            active_ids = activePlotIdsHomologous_rv(),
+            plot_gene_meta = plotGeneMetaHomologous_rv(),
+            annotation_paths = annotationPathsHomologous_rv(),
+            organism_info = organismInfoHomologous_rv()
+        )
+        state_keys <- unique(c(remove_ids, paste0(remove_ids, "_c")))
+        invisible(lapply(state_keys, destroy_homologous_plot_runtime))
+        activePlotIdsHomologous_rv(setdiff(
+            activePlotIdsHomologous_rv(),
+            suppressWarnings(as.integer(remove_ids))
+        ))
+        for (key in state_keys) {
+            remove_named_value(titlesHomologous_rv, key)
+            remove_named_value(existingPlotsHomologous_rv, key)
+            remove_named_value(fileDataHomologous_rv, key)
+            remove_named_value(chrNamesHomologous_rv, key)
+            remove_named_value(genSequencesHomologous_rv, key)
+            remove_named_value(plotSignaturesHomologous_rv, key)
+            remove_named_value(annotationPathsHomologous_rv, key)
+            remove_named_value(genomePathsHomologous_rv, key)
+            remove_named_value(organismInfoHomologous_rv, key)
+            remove_named_value(plotMetricsHomologous_rv, key)
+            remove_named_value(plotGeneMetaHomologous_rv, key)
+        }
         clear_summary_cache_scope_fn("homo", drop_rows = FALSE)
         clear_analytics_cache_scope_fn("homo")
         recalc_plot_ranges_homologous()
@@ -820,18 +915,32 @@ init_plot_lifecycle_domain <- function(
         if (!is.finite(id_int)) {
             return(invisible(FALSE))
         }
-        destroy_orthologous_plot_runtime(id_txt)
-        activePlotIdsOrthologous_rv(setdiff(activePlotIdsOrthologous_rv(), as.integer(id_int)))
-        remove_named_value(titlesOrthologous_rv, id_txt)
-        remove_named_value(existingPlotsOrthologous_rv, id_txt)
-        remove_named_value(fileDataOrthologous_rv, id_txt)
-        remove_named_value(chrNamesOrthologous_rv, id_txt)
-        remove_named_value(genSequencesOrthologous_rv, id_txt)
-        remove_named_value(plotSignaturesOrthologous_rv, id_txt)
-        remove_named_value(annotationPathsOrthologous_rv, id_txt)
-        remove_named_value(genomePathsOrthologous_rv, id_txt)
-        remove_named_value(plotMetricsOrthologous_rv, id_txt)
-        remove_named_value(plotGeneMetaOrthologous_rv, id_txt)
+        remove_ids <- resolve_plot_removal_ids(
+            id_txt = id_txt,
+            active_ids = activePlotIdsOrthologous_rv(),
+            plot_gene_meta = plotGeneMetaOrthologous_rv(),
+            annotation_paths = annotationPathsOrthologous_rv(),
+            organism_info = organismInfoOrthologous_rv()
+        )
+        state_keys <- unique(c(remove_ids, paste0(remove_ids, "_c")))
+        invisible(lapply(state_keys, destroy_orthologous_plot_runtime))
+        activePlotIdsOrthologous_rv(setdiff(
+            activePlotIdsOrthologous_rv(),
+            suppressWarnings(as.integer(remove_ids))
+        ))
+        for (key in state_keys) {
+            remove_named_value(titlesOrthologous_rv, key)
+            remove_named_value(existingPlotsOrthologous_rv, key)
+            remove_named_value(fileDataOrthologous_rv, key)
+            remove_named_value(chrNamesOrthologous_rv, key)
+            remove_named_value(genSequencesOrthologous_rv, key)
+            remove_named_value(plotSignaturesOrthologous_rv, key)
+            remove_named_value(annotationPathsOrthologous_rv, key)
+            remove_named_value(genomePathsOrthologous_rv, key)
+            remove_named_value(organismInfoOrthologous_rv, key)
+            remove_named_value(plotMetricsOrthologous_rv, key)
+            remove_named_value(plotGeneMetaOrthologous_rv, key)
+        }
         clear_summary_cache_scope_fn("ortho", drop_rows = FALSE)
         clear_analytics_cache_scope_fn("ortho")
         recalc_plot_ranges_orthologous()

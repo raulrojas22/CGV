@@ -68,12 +68,14 @@ docker_cmd run --rm \
     Rscript scripts/build_alias_index_sqlite.R --root=/app --all || echo '  warning: no fatal'
     echo '[2/2] Precomputando caches de anotaciones y genomas...'
     Rscript scripts/precompute_preloaded_cache.R --root=/app || echo '  warning: no fatal'
+    Rscript scripts/verify_preloaded_alias_indexes.R --root=/app
   "
 
 echo ""
 echo "Prewarm completado."
 echo ""
 echo "Los indices SQLite estan en:"
+echo "  ${ROOT}/data/alias_index/"
 echo "  ${ROOT}/annotations/"
 echo "  ${ROOT}/genomes/"
 echo "  ${ROOT}/cache/"

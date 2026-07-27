@@ -1,6 +1,6 @@
 # Docker: empaquetado y despliegue (NAS + servidor)
 
-CGV (Comparative Genomics Viewer) es una app Shiny en R que usa datasets grandes (`annotations/`, `genomes/`, `go_annotations/`).
+CGV (Comparative Genomics Viewer) es una app Shiny en R que usa datasets grandes (`annotations/`, `genomes/`, `go_annotations/`, `data/alias_index/`).
 La configuración incluida usa este enfoque:
 
 - Imagen Docker con código + dependencias R.
@@ -14,6 +14,7 @@ La configuración incluida usa este enfoque:
    - `annotations/`
    - `genomes/`
    - `go_annotations/`
+   - `data/alias_index/` (índices SQLite/TSV de nombres y sinónimos)
    - `cache/` (escritura)
 
 ## 2) Primer arranque local
@@ -71,6 +72,7 @@ Esto llena `cache/annotation_index/` (persistente si está montado como volumen)
    - `CGV_ANNOTATIONS_DIR=/volume1/docker/cgv/annotations`
    - `CGV_GENOMES_DIR=/volume1/docker/cgv/genomes`
    - `CGV_GO_ANNOTATIONS_DIR=/volume1/docker/cgv/go_annotations`
+   - `CGV_DATA_DIR=/volume1/docker/cgv/data`
    - `CGV_CACHE_DIR=/volume1/docker/cgv/cache`
 4. Ejecutar:
 
@@ -148,7 +150,7 @@ docker image rm cgv:1.0.0
 
 ## Nota importante sobre tamaño de imagen
 
-`.dockerignore` excluye `annotations/`, `genomes/`, `go_annotations/` y `cache/` para evitar builds de decenas de GB.
+`.dockerignore` excluye `annotations/`, `genomes/`, `go_annotations/`, `data/` y `cache/` para evitar builds de decenas de GB.
 Si quieres una imagen totalmente autocontenida (muy pesada), tendrías que quitar esas exclusiones y cambiar la estrategia de volúmenes.
 
 ## Nota de performance (primera búsqueda)
@@ -176,3 +178,27 @@ CGV envía muchos widgets interactivos por la conexión viva de Shiny. Para redu
 - `APP_TRANSPORT_TIMING=1`: activa medición temporal en navegador. Los logs del contenedor mostrarán bytes HTTP y volumen de mensajes Shiny/WebSocket. Déjalo en `0` para uso normal.
 
 Si usas Nginx delante de Docker/Shiny, adapta `deploy/nginx/cgv-shiny.conf`. Activa gzip siempre; Brotli solo si tu build de Nginx incluye el módulo. En Cloudflare, mantén WebSockets activos y habilita Compression Rules/Brotli/Zstandard para respuestas HTTP comprimibles.
+
+## Reportes interactivos compartidos
+
+Los reportes se escriben en `${CGV_CACHE_DIR}/shared_reports` y los paquetes de
+autor en `${CGV_CACHE_DIR}/reproducibility_packages`. Configuración inicial:
+
+```dotenv
+APP_SHARED_REPORTS_ENABLED=1
+APP_SHARED_REPORT_MAX_MB=100
+APP_SHARED_REPORT_STORAGE_GB=5
+CGV_PUBLIC_BASE_URL=https://cgv.mobilomics.org
+```
+
+En ShinyProxy, Nginx monta el mismo caché como sólo lectura y sirve
+`/share/<token>/index.html` sin crear otro contenedor CGV. La ruta desactiva el
+access log para no registrar tokens secretos. `report-cleaner` elimina reportes
+caducados cada 15 minutos y paquetes temporales después de 24 horas.
+La publicación usa staging, renombrado atómico y un bloqueo compartido de cuota
+entre contenedores. Al alcanzar 100 MB por reporte o 5 GB totales se rechazan
+nuevas publicaciones; nunca se elimina un enlace vigente para liberar espacio.
+
+Si usas el despliegue Shiny nativo, CGV registra `/share` como recurso estático
+del propio proceso. Conserva el caché persistente y no expongas
+`shared_report_metadata`, que contiene los hashes privados de revocación.

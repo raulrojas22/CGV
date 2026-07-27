@@ -16,6 +16,11 @@ Windows release signing follows the [CGV Desktop code signing policy](desktop/le
 
 CGV was designed to reduce the fragmented workflow common in comparative genomics. Instead of switching between genome browsers, orthology resources, Gene Ontology portals, promoter utilities, and protein-network tools, users can explore these layers from one web application.
 
+Completed analyses can also be preserved as a portable, versioned
+reproducibility ZIP. Web deployments can publish the same snapshot as an
+expiring secret read-only report with interactive SVGs and sortable tables;
+Desktop exports an equivalent self-contained HTML file without uploading data.
+
 Key capabilities include:
 
 - gene-centered search without requiring prior genomic coordinates
@@ -116,6 +121,7 @@ volumes:
   - ${CGV_ANNOTATIONS_DIR:-./annotations}:/app/annotations:ro
   - ${CGV_GENOMES_DIR:-./genomes}:/app/genomes:ro
   - ${CGV_GO_ANNOTATIONS_DIR:-./go_annotations}:/app/go_annotations:ro
+  - ${CGV_DATA_DIR:-./data}:/app/data:ro
   - ${CGV_CACHE_DIR:-./cache}:/app/cache
 ```
 
@@ -146,6 +152,8 @@ For deployment details, see [DOCKER_DEPLOY.md](DOCKER_DEPLOY.md).
 ├── go_annotations/
 │   ├── README.md
 │   └── registry.tsv
+├── data/
+│   └── alias_index/
 ├── scripts/
 ├── www/
 ├── Dockerfile

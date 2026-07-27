@@ -41,8 +41,22 @@ services:
       - "${CGV_NGINX_PORT:-18080}:80"
     volumes:
       - ./deploy/nginx/cgv-shinyproxy.conf:/etc/nginx/conf.d/default.conf:ro
+      - ${SP_CACHE_DIR:-./cache}:/srv/cgv-cache:ro
     depends_on:
       - shinyproxy
+
+  report-cleaner:
+    image: "${CGV_IMAGE:-cgv:1.1.0}"
+    restart: unless-stopped
+    command: ["sh", "-c", "while true; do Rscript /app/scripts/cleanup_shared_reports.R; sleep 900; done"]
+    environment:
+      CGV_CACHE_DIR: "/app/cache"
+    volumes:
+      - ${SP_CACHE_DIR:-./cache}:/app/cache
+    networks:
+      - sp-net
+    healthcheck:
+      disable: true
 
 networks:
   sp-net:

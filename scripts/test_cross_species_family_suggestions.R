@@ -68,6 +68,33 @@ testServer(server_fun, {
     max(suppressWarnings(as.integer(hkt1$source_count)), na.rm = TRUE) == 3L,
     "HKT1 should be supported by Arabidopsis, rice, and maize in the bundled alias indexes."
   )
+
+  oryza_expected_hkt <- c(
+    "HKT1;1", "HKT1;3", "HKT1;4", "HKT2;1", "HKT2;3", "HKT2;4",
+    "HKT1", "hkt3", "hkt4", "hkt6", "hkt7", "HKT8", "hkt9", "HKT1.5"
+  )
+  oryza_suggestions <- find_partial_gene_suggestions_fast(
+    annotation_paths = annotation_paths[[2L]],
+    query = "hkt",
+    file_labels = file_labels[[2L]],
+    max_per_file = 20L,
+    max_total = 20L,
+    min_shared_organisms = 1L,
+    time_budget_sec = 0.001,
+    det_list = det_list[2L],
+    include_alias_sql = TRUE
+  )
+  missing_oryza <- setdiff(
+    oryza_expected_hkt,
+    as.character(oryza_suggestions$gene_name %||% character(0))
+  )
+  assert_true(
+    length(missing_oryza) == 0L,
+    paste(
+      "Oryza HKT suggestions must not depend on the legacy time budget; missing:",
+      paste(missing_oryza, collapse = ", ")
+    )
+  )
 })
 
 cat("cross-species-family-suggestions-ok\n")
