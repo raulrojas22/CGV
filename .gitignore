@@ -68,6 +68,9 @@ desktop/dataset-packages/*.exe
 !desktop/dataset-packages/*.manifest.json
 !desktop/dataset-packages/catalog.json
 
+# Local CGV Desktop release installers
+/INSTALABLES-FINALES/
+
 # Build source data (large intermediate files)
 build_sources/
 packages/

@@ -31,6 +31,7 @@ const datasetInstallControllers = new Map();
 const cancelableDatasetInstalls = new Set();
 let shinyStartPromise = null;
 let exportDownloadSession = null;
+let preparedRuntimeRoot = "";
 
 // Increment when the bundled conda runtime changes. A new revision replaces
 // the user-local runtime on the next app launch.
@@ -63,6 +64,12 @@ function appRoot() {
   if (process.env.CGV_APP_ROOT) return process.env.CGV_APP_ROOT;
   if (app.isPackaged) return resourcePath("app");
   return path.resolve(__dirname, "..", "..");
+}
+
+function windowIconPath() {
+  return app.isPackaged
+    ? resourcePath("icon.png")
+    : path.join(__dirname, "..", "build", "icon.png");
 }
 
 function findRscript(runtimeRoot = "") {
@@ -677,6 +684,7 @@ async function startShiny() {
   seedBundledCache(cacheRoot);
 
   const runtimeRoot = await prepareRuntime();
+  preparedRuntimeRoot = runtimeRoot;
   const port = Number(process.env.APP_PORT || await getFreePort());
   const rscript = findRscript(runtimeRoot);
   const lastz = findBundledBinary("lastz", "APP_LASTZ_BIN", runtimeRoot);
@@ -699,6 +707,10 @@ async function startShiny() {
     APP_HOST: "127.0.0.1",
     APP_FUTURE_MODE: process.env.APP_FUTURE_MODE || "multisession",
     APP_FUTURE_WORKERS: process.env.APP_FUTURE_WORKERS || String(Math.max(1, Math.min(2, os.cpus().length - 1))),
+    APP_LASTZ_WORKERS: process.env.APP_LASTZ_WORKERS || "1",
+    APP_LASTZ_TIMEOUT_SECONDS: process.env.APP_LASTZ_TIMEOUT_SECONDS || "90",
+    APP_LASTZ_MAX_SEQUENCE_BP: process.env.APP_LASTZ_MAX_SEQUENCE_BP || "2000000",
+    APP_LASTZ_CACHE_MAX_ENTRIES: process.env.APP_LASTZ_CACHE_MAX_ENTRIES || "12",
     APP_PREWARM_ON_START: "0",
     APP_ORTHO_WORKER_PREWARM: process.env.APP_ORTHO_WORKER_PREWARM || "0",
     APP_ORTHO_BACKGROUND_CACHE_WARM: process.env.APP_ORTHO_BACKGROUND_CACHE_WARM || "0",
@@ -737,6 +749,12 @@ async function startShiny() {
     PATH: pathEntries.join(path.delimiter)
   };
   if (process.platform === "win32") env.R_HOME = runtimeRoot;
+  if (process.platform === "linux") {
+    const fontconfigFile = path.join(runtimeRoot, "etc", "fonts", "fonts.conf");
+    const fontconfigPath = path.join(runtimeRoot, "etc", "fonts");
+    if (isFile(fontconfigFile)) env.FONTCONFIG_FILE = fontconfigFile;
+    if (fs.existsSync(fontconfigPath)) env.FONTCONFIG_PATH = fontconfigPath;
+  }
   if (lastz) env.APP_LASTZ_BIN = lastz;
   if (samtools) env.APP_SAMTOOLS_BIN = samtools;
   if (tabix) env.APP_TABIX_BIN = tabix;
@@ -1150,7 +1168,7 @@ async function warmDatasetAfterInstall(dataset, dataRoot, cacheRoot) {
   const relAnnotation = hit.annotation_tabix || hit.annotation || "";
   const annotationPath = relAnnotation ? path.join(dataRoot, relAnnotation) : "";
   const aliasSqlitePath = path.join(dataRoot, "data", "alias_index", `${speciesId}.alias_index.sqlite`);
-  const rscript = findRscript();
+  const rscript = findRscript(preparedRuntimeRoot);
   const root = appRoot();
   const rCode = `
     Sys.setenv(
@@ -1360,6 +1378,7 @@ async function createWindow() {
     minWidth: 1100,
     minHeight: 720,
     title: "CGV Desktop",
+    icon: windowIconPath(),
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,

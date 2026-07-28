@@ -19,6 +19,7 @@ const mac = build.mac || {};
 const linux = build.linux || {};
 const publish = build.publish || {};
 const appResource = extraResources.find((entry) => entry && entry.to === "app");
+const windowIconResource = extraResources.find((entry) => entry && entry.to === "icon.png");
 const filters = Array.isArray(appResource && appResource.filter) ? appResource.filter : [];
 
 if (filters.includes("cache/annotation_index/**")) {
@@ -61,6 +62,28 @@ if (mac.artifactName !== "CGV-Desktop-${version}-macOS-${arch}.${ext}") {
 }
 if (linux.artifactName !== "CGV-Desktop-${version}-Linux-${arch}.${ext}") {
   throw new Error("Linux artifacts must use the stable CGV Desktop release filename.");
+}
+if (
+  !windowIconResource ||
+  windowIconResource.from !== "build/icon.png" ||
+  !fs.existsSync(path.join(desktopRoot, windowIconResource.from))
+) {
+  throw new Error("Desktop packages must include the CGV PNG used by the native application window.");
+}
+if (linux.syncDesktopName !== true || linux.desktop?.entry?.StartupWMClass !== "cgv-desktop") {
+  throw new Error("Linux desktop metadata must match Electron's cgv-desktop window class.");
+}
+for (const requiredMainFragment of [
+  "icon: windowIconPath()",
+  "findRscript(preparedRuntimeRoot)",
+  "APP_LASTZ_WORKERS: process.env.APP_LASTZ_WORKERS || \"1\"",
+  "APP_LASTZ_TIMEOUT_SECONDS: process.env.APP_LASTZ_TIMEOUT_SECONDS || \"90\"",
+  "env.FONTCONFIG_FILE = fontconfigFile",
+  "env.FONTCONFIG_PATH = fontconfigPath"
+]) {
+  if (!mainJs.includes(requiredMainFragment)) {
+    throw new Error(`Desktop runtime safety configuration is missing: ${requiredMainFragment}`);
+  }
 }
 for (const releaseSurfacePath of [downloadJsPath, downloadUiPath]) {
   if (!fs.existsSync(releaseSurfacePath)) {
