@@ -66,6 +66,24 @@ lav_lines <- readLines(file.path(fixture_dir, "lastz_sample.lav"), warn = FALSE)
 ref_ctx <- list(plot_id = "ref", seqid = "chrRef", window_start = 1000L, window_end = 1500L)
 qry_ctx <- list(plot_id = "qry", seqid = "chrQry", window_start = 2000L, window_end = 2500L)
 
+old_lastz_timeout <- Sys.getenv("APP_LASTZ_TIMEOUT_SECONDS", unset = "")
+old_lastz_max_bp <- Sys.getenv("APP_LASTZ_MAX_SEQUENCE_BP", unset = "")
+on.exit({
+  Sys.setenv(
+    APP_LASTZ_TIMEOUT_SECONDS = old_lastz_timeout,
+    APP_LASTZ_MAX_SEQUENCE_BP = old_lastz_max_bp
+  )
+}, add = TRUE)
+Sys.setenv(APP_LASTZ_TIMEOUT_SECONDS = "17", APP_LASTZ_MAX_SEQUENCE_BP = "12345")
+assert_true(identical(lastz_process_timeout_ms(), 17000L), "LASTZ timeout environment setting was not converted to milliseconds.")
+assert_true(identical(lastz_max_sequence_bp(), 12345L), "LASTZ maximum sequence guard was not applied.")
+Sys.setenv(APP_LASTZ_TIMEOUT_SECONDS = old_lastz_timeout, APP_LASTZ_MAX_SEQUENCE_BP = old_lastz_max_bp)
+server_source <- paste(readLines("server.R", warn = FALSE), collapse = "\n")
+assert_true(
+  grepl("I(as.integer(target_workers))", server_source, fixed = TRUE),
+  "LASTZ with one worker must remain on a real background multisession process."
+)
+
 parsed_blocks <- parse_lastz_general_output(general_lines, reference_ctx = ref_ctx, query_ctx = qry_ctx)
 assert_true(is.data.frame(parsed_blocks) && nrow(parsed_blocks) == 2L, "General LASTZ fixture did not parse into two blocks.")
 assert_true(all(parsed_blocks$identity_pct > 80), "General LASTZ fixture identity values are incorrect.")

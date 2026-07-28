@@ -469,13 +469,44 @@
       window.setTimeout(function () { callback([], []); }, 0);
       return;
     }
-    requestStructuralFigures(targets);
+    // Most report figures already exist in the live result cards. Asking
+    // Shiny to render every target again needlessly invalidates those cards
+    // and can create a large memory spike in Desktop builds. Only request the
+    // records that are actually absent after the report restores its mode.
+    var pendingTargets = targets.map(function (target) {
+      return {
+        context: target.context,
+        ids: target.ids.filter(function (id) {
+          var card = document.getElementById(target.context + "-card-" + id);
+          return !(card && card.querySelector("svg")) ||
+            !!(card && card.querySelector(".recalculating"));
+        })
+      };
+    }).filter(function (target) {
+      return target.ids.length > 0;
+    });
+    if (!pendingTargets.length) {
+      window.setTimeout(function () { callback([], []); }, 350);
+      return;
+    }
+    var missingTargets = pendingTargets.map(function (target) {
+      return {
+        context: target.context,
+        ids: target.ids.filter(function (id) {
+          var card = document.getElementById(target.context + "-card-" + id);
+          return !(card && card.querySelector("svg"));
+        })
+      };
+    }).filter(function (target) {
+      return target.ids.length > 0;
+    });
+    if (missingTargets.length) requestStructuralFigures(missingTargets);
     var started = Date.now();
     var stable = 0;
     var previous = "";
     var timer = window.setInterval(function () {
       var states = [];
-      targets.forEach(function (target) {
+      pendingTargets.forEach(function (target) {
         target.ids.forEach(function (id) {
           var card = document.getElementById(target.context + "-card-" + id);
           states.push({
@@ -502,7 +533,7 @@
           return (state.context === "homo" ? "Multi-Gene" : "Cross-Species") +
             " transcript " + state.id + ": structure did not render before capture";
         });
-        callback(missing, targets);
+        callback(missing, missingTargets);
       }
     }, 350);
   }
@@ -600,9 +631,9 @@
         input.dispatchEvent(new window.Event("change", { bubbles: true }));
       } catch (err) {}
     }
-    if (window.Shiny && typeof window.Shiny.setInputValue === "function") {
-      window.Shiny.setInputValue(inputId, next, { priority: "event" });
-    }
+    // selectize.setValue() and the native change event are already observed
+    // by Shiny. Sending the same value again with setInputValue() caused two
+    // invalidations and made each report synteny view render more than once.
     return true;
   }
 
@@ -648,7 +679,7 @@
     var assets = [];
     var missing = [];
     var index = 0;
-    var previousHomoMarkup = "";
+    var previousHomoSvg = null;
 
     var runNext = function () {
       if (index >= tasks.length) {
@@ -658,7 +689,7 @@
       var task = tasks[index++];
       var started = Date.now();
       var selectionAppliedAt = 0;
-      var stableSignature = "";
+      var stableSvg = null;
       var stableCount = 0;
       var timer = window.setInterval(function () {
         if (task.context === "homo" && task.group && !selectionAppliedAt) {
@@ -668,13 +699,13 @@
         if (!selectionAppliedAt) selectionAppliedAt = Date.now();
         var output = document.getElementById(task.outputId);
         var svg = output && output.querySelector("svg");
-        var markup = svg && !output.classList.contains("recalculating") ? normalizeSvg(svg) : "";
-        var changed = task.context !== "homo" || !previousHomoMarkup || markup !== previousHomoMarkup;
-        if (markup && changed && Date.now() - selectionAppliedAt >= 450) {
-          if (markup === stableSignature) {
+        var ready = !!(svg && output && !output.classList.contains("recalculating"));
+        var changed = task.context !== "homo" || !previousHomoSvg || svg !== previousHomoSvg;
+        if (ready && changed && Date.now() - selectionAppliedAt >= 450) {
+          if (svg === stableSvg) {
             stableCount += 1;
           } else {
-            stableSignature = markup;
+            stableSvg = svg;
             stableCount = 0;
           }
           if (stableCount >= 2) {
@@ -682,7 +713,7 @@
             var asset = captureSyntenyTask(task);
             if (asset) {
               assets.push(asset);
-              if (task.context === "homo") previousHomoMarkup = asset.svg;
+              if (task.context === "homo") previousHomoSvg = svg;
             } else {
               missing.push((task.context === "homo" ? task.group.gene : "Cross-Species") +
                 " aligned synteny: SVG could not be serialized");
@@ -691,7 +722,7 @@
             return;
           }
         } else {
-          stableSignature = "";
+          stableSvg = null;
           stableCount = 0;
         }
         if (Date.now() - started >= timeoutMs) {
@@ -708,7 +739,7 @@
   function prepareSyntenyForReport(message) {
     var requestId = String((message && message.request_id) || "");
     var captureLimit = Number((message && message.max_total_bytes) || (24 * 1024 * 1024));
-    var taskTimeout = Math.max(15000, Number((message && message.per_view_timeout_ms) || 45000));
+    var taskTimeout = Math.max(15000, Number((message && message.per_view_timeout_ms) || 30000));
     var contexts = asArray(message && message.contexts).filter(function (context) {
       return context === "homo" || context === "ortho";
     });
@@ -964,63 +995,17 @@
     if (body) body.scrollTop = 0;
   }
 
-  function copyFrozenElementState(sourceRoot, cloneRoot) {
-    if (!sourceRoot || !cloneRoot) return;
-    var sourceNodes = [sourceRoot].concat(Array.prototype.slice.call(sourceRoot.querySelectorAll("*")));
-    var cloneNodes = [cloneRoot].concat(Array.prototype.slice.call(cloneRoot.querySelectorAll("*")));
-    var count = Math.min(sourceNodes.length, cloneNodes.length);
-    for (var i = 0; i < count; i++) {
-      var source = sourceNodes[i];
-      var clone = cloneNodes[i];
-      if (!source || !clone) continue;
-      if ("scrollTop" in source) clone.scrollTop = source.scrollTop;
-      if ("scrollLeft" in source) clone.scrollLeft = source.scrollLeft;
-      if (source instanceof HTMLInputElement) {
-        clone.value = source.value;
-        clone.checked = source.checked;
-      } else if (source instanceof HTMLTextAreaElement) {
-        clone.value = source.value;
-        clone.textContent = source.value;
-      } else if (source instanceof HTMLSelectElement) {
-        clone.value = source.value;
-      } else if (source instanceof HTMLCanvasElement && clone instanceof HTMLCanvasElement) {
-        try {
-          clone.width = source.width;
-          clone.height = source.height;
-          clone.getContext("2d").drawImage(source, 0, 0);
-        } catch (err) {}
-      }
-    }
-  }
-
   function freezeReportBackground(modal) {
     var existing = document.getElementById("cgv-report-capture-curtain");
     if (existing) return existing;
-    var app = document.querySelector(".app-shell");
     var curtain = document.createElement("div");
     curtain.id = "cgv-report-capture-curtain";
     curtain.className = "cgv-report-capture-curtain";
     curtain.setAttribute("aria-hidden", "true");
-    if (app) {
-      var frozenApp = app.cloneNode(true);
-      frozenApp.classList.add("cgv-report-frozen-app");
-      frozenApp.setAttribute("aria-hidden", "true");
-      frozenApp.querySelectorAll("script, iframe").forEach(function (node) {
-        node.remove();
-      });
-      frozenApp.querySelectorAll("input, button, select, textarea, a").forEach(function (node) {
-        node.setAttribute("tabindex", "-1");
-      });
-      try { frozenApp.inert = true; } catch (err) {}
-      curtain.appendChild(frozenApp);
-      document.body.appendChild(curtain);
-      copyFrozenElementState(app, frozenApp);
-      window.requestAnimationFrame(function () {
-        copyFrozenElementState(app, frozenApp);
-      });
-    } else {
-      document.body.appendChild(curtain);
-    }
+    // Keep the live application completely out of sight while report-only
+    // modes render. Cloning the app still exposed a graph behind the modal
+    // and also duplicated a very large DOM tree in memory.
+    document.body.appendChild(curtain);
     var backdrop = document.querySelector(".modal-backdrop");
     var backdropZ = backdrop ? parseInt(window.getComputedStyle(backdrop).zIndex, 10) : NaN;
     var modalZ = modal ? parseInt(window.getComputedStyle(modal).zIndex, 10) : NaN;

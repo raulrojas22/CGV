@@ -1875,7 +1875,7 @@ init_shared_analysis_domain <- function(input,
             include_global_assets = isTRUE(pending$include_global_assets),
             homo_groups = pending$homo_synteny_groups %||% list(),
             homo_selected_group = pending$homo_selected_group %||% "",
-            per_view_timeout_ms = 45000L,
+            per_view_timeout_ms = 30000L,
             capture_after_synteny = TRUE
         ))
         synteny_views <- length(pending$homo_synteny_groups %||% list()) +
@@ -1883,7 +1883,7 @@ init_shared_analysis_domain <- function(input,
         arm_report_stage_timeout(
             pending$request_id,
             "synteny",
-            max(95, 20 + 50 * synteny_views),
+            max(100, 60 + 35 * synteny_views),
             "One or more aligned synteny views did not finish before the report timeout. Nothing was published; try again after the current analysis finishes updating."
         )
         invisible(NULL)

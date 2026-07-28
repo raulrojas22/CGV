@@ -4765,6 +4765,54 @@ resolve_lastz_binary <- function(candidate = Sys.getenv("APP_LASTZ_BIN", "lastz"
     )
 }
 
+lastz_process_timeout_ms <- function(default_seconds = 90L) {
+    raw <- trimws(as.character(Sys.getenv(
+        "APP_LASTZ_TIMEOUT_SECONDS",
+        as.character(default_seconds)
+    ) %||% as.character(default_seconds)))
+    seconds <- suppressWarnings(as.integer(raw))
+    if (!is.finite(seconds) || is.na(seconds) || seconds < 5L) {
+        seconds <- as.integer(default_seconds)
+    }
+    as.integer(min(seconds, 3600L) * 1000L)
+}
+
+lastz_max_sequence_bp <- function(default_bp = 2000000L) {
+    raw <- trimws(as.character(Sys.getenv(
+        "APP_LASTZ_MAX_SEQUENCE_BP",
+        as.character(default_bp)
+    ) %||% as.character(default_bp)))
+    max_bp <- suppressWarnings(as.integer(raw))
+    if (!is.finite(max_bp) || is.na(max_bp) || max_bp < 1000L) {
+        max_bp <- as.integer(default_bp)
+    }
+    max_bp
+}
+
+run_lastz_process <- function(binary, args) {
+    if (requireNamespace("processx", quietly = TRUE)) {
+        return(processx::run(
+            binary,
+            args = args,
+            echo = FALSE,
+            error_on_status = FALSE,
+            timeout = lastz_process_timeout_ms()
+        ))
+    }
+    sys2_out <- system2(binary, args = args, stdout = TRUE, stderr = TRUE)
+    sys2_status <- attr(sys2_out, "status")
+    list(
+        status = if (is.null(sys2_status) || length(sys2_status) == 0L) {
+            0L
+        } else {
+            suppressWarnings(as.integer(sys2_status[1L]))
+        },
+        stdout = if (is.character(sys2_out)) sys2_out else character(0),
+        stderr = character(0),
+        timeout = FALSE
+    )
+}
+
 wrap_fasta_sequence_lines <- function(seq_txt, width = 80L) {
     seq_txt <- gsub("\\s+", "", as.character(seq_txt %||% ""))
     if (!nzchar(seq_txt)) {
@@ -4922,6 +4970,24 @@ run_local_locus_alignment <- function(reference_ctx,
             blocks = data.frame(stringsAsFactors = FALSE)
         ))
     }
+    max_sequence_bp <- lastz_max_sequence_bp()
+    if (nchar(ref_seq) > max_sequence_bp || nchar(qry_seq) > max_sequence_bp) {
+        return(list(
+            status = "window_too_large",
+            engine = engine_txt,
+            binary = bin_path,
+            binary_path = bin_path,
+            binary_source = as.character(bin_info$source %||% ""),
+            job = job,
+            reference_width = nchar(ref_seq),
+            query_width = nchar(qry_seq),
+            setup_hint = sprintf(
+                "Reduce the locus span below %s bp before running LASTZ.",
+                format(max_sequence_bp, big.mark = ",")
+            ),
+            blocks = data.frame(stringsAsFactors = FALSE)
+        ))
+    }
     run_dir <- tempfile(pattern = "ctv_lastz_")
     dir.create(run_dir, recursive = TRUE, showWarnings = FALSE)
     ref_name <- paste0("ref_", sanitize_cache_key((reference_ctx %||% list())$plot_id %||% "reference"))
@@ -4966,20 +5032,13 @@ run_local_locus_alignment <- function(reference_ctx,
         args <- c(args, as.character(extra_args))
     }
     run_res <- tryCatch(
-        if (requireNamespace("processx", quietly = TRUE)) {
-            processx::run(bin_path, args = args, echo = FALSE, error_on_status = FALSE)
-        } else {
-            {
-                sys2_out <- system2(bin_path, args = args, stdout = TRUE, stderr = TRUE)
-                sys2_status <- attr(sys2_out, "status")
-                list(
-                    status = if (is.null(sys2_status) || length(sys2_status) == 0L) 0L else suppressWarnings(as.integer(sys2_status[1L])),
-                    stdout = if (is.character(sys2_out)) sys2_out else character(0),
-                    stderr = character(0)
-                )
-            }
-        },
-        error = function(e) list(status = 1L, stdout = character(0), stderr = as.character(e$message %||% "unknown error"))
+        run_lastz_process(bin_path, args),
+        error = function(e) list(
+            status = 1L,
+            stdout = character(0),
+            stderr = as.character(e$message %||% "unknown error"),
+            timeout = grepl("timed?\\s*out|timeout", conditionMessage(e), ignore.case = TRUE)
+        )
     )
     app_perf_mark(
         lastz_perf,
@@ -4997,7 +5056,14 @@ run_local_locus_alignment <- function(reference_ctx,
     if (length(exit_status) == 0L || !is.finite(exit_status)) {
         exit_status <- 1L
     }
-    status_txt <- if (exit_status == 0L) "ok" else "engine_error"
+    timed_out <- isTRUE(run_res$timeout)
+    status_txt <- if (timed_out) {
+        "engine_timeout"
+    } else if (exit_status == 0L) {
+        "ok"
+    } else {
+        "engine_error"
+    }
     app_perf_mark(
         lastz_perf,
         sprintf("finish status=%s exit=%d blocks=%d", status_txt, as.integer(exit_status), as.integer(nrow(parsed_blocks %||% data.frame()))),
@@ -5013,6 +5079,7 @@ run_local_locus_alignment <- function(reference_ctx,
         reference_width = nchar(ref_seq),
         query_width = nchar(qry_seq),
         exit_status = exit_status,
+        timed_out = timed_out,
         stderr = as.character(run_res$stderr %||% character(0)),
         stdout = as.character(run_res$stdout %||% character(0)),
         blocks = parsed_blocks
@@ -5474,6 +5541,24 @@ run_local_locus_alignment_multipip <- function(reference_ctx,
             segments = data.frame(stringsAsFactors = FALSE)
         ))
     }
+    max_sequence_bp <- lastz_max_sequence_bp()
+    if (nchar(ref_seq) > max_sequence_bp || nchar(qry_seq) > max_sequence_bp) {
+        return(list(
+            status = "window_too_large",
+            engine = engine_txt,
+            binary = bin_path,
+            binary_path = bin_path,
+            binary_source = as.character(bin_info$source %||% ""),
+            job = job,
+            reference_width = nchar(ref_seq),
+            query_width = nchar(qry_seq),
+            setup_hint = sprintf(
+                "Reduce the locus span below %s bp before running MultiPIP.",
+                format(max_sequence_bp, big.mark = ",")
+            ),
+            segments = data.frame(stringsAsFactors = FALSE)
+        ))
+    }
     run_dir <- tempfile(pattern = "ctv_lastz_multipip_")
     dir.create(run_dir, recursive = TRUE, showWarnings = FALSE)
     ref_name <- paste0("ref_", sanitize_cache_key((reference_ctx %||% list())$plot_id %||% "reference"))
@@ -5508,20 +5593,13 @@ run_local_locus_alignment_multipip <- function(reference_ctx,
         args <- c(args, as.character(extra_args))
     }
     run_res <- tryCatch(
-        if (requireNamespace("processx", quietly = TRUE)) {
-            processx::run(bin_path, args = args, echo = FALSE, error_on_status = FALSE)
-        } else {
-            {
-                sys2_out <- system2(bin_path, args = args, stdout = TRUE, stderr = TRUE)
-                sys2_status <- attr(sys2_out, "status")
-                list(
-                    status = if (is.null(sys2_status) || length(sys2_status) == 0L) 0L else suppressWarnings(as.integer(sys2_status[1L])),
-                    stdout = if (is.character(sys2_out)) sys2_out else character(0),
-                    stderr = character(0)
-                )
-            }
-        },
-        error = function(e) list(status = 1L, stdout = character(0), stderr = as.character(e$message %||% "unknown error"))
+        run_lastz_process(bin_path, args),
+        error = function(e) list(
+            status = 1L,
+            stdout = character(0),
+            stderr = as.character(e$message %||% "unknown error"),
+            timeout = grepl("timed?\\s*out|timeout", conditionMessage(e), ignore.case = TRUE)
+        )
     )
     app_perf_mark(
         lastz_perf,
@@ -5541,7 +5619,14 @@ run_local_locus_alignment_multipip <- function(reference_ctx,
     if (length(exit_status) == 0L || !is.finite(exit_status)) {
         exit_status <- 1L
     }
-    status_txt <- if (exit_status == 0L) "ok" else "engine_error"
+    timed_out <- isTRUE(run_res$timeout)
+    status_txt <- if (timed_out) {
+        "engine_timeout"
+    } else if (exit_status == 0L) {
+        "ok"
+    } else {
+        "engine_error"
+    }
     app_perf_mark(
         lastz_perf,
         sprintf("finish status=%s exit=%d segments=%d", status_txt, as.integer(exit_status), as.integer(nrow(parsed_segments %||% data.frame()))),
@@ -5557,6 +5642,7 @@ run_local_locus_alignment_multipip <- function(reference_ctx,
         reference_width = nchar(ref_seq),
         query_width = nchar(qry_seq),
         exit_status = exit_status,
+        timed_out = timed_out,
         stderr = as.character(run_res$stderr %||% character(0)),
         stdout = as.character(run_res$stdout %||% character(0)),
         segments = parsed_segments

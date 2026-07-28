@@ -214,7 +214,8 @@ rsync -az --delete-delay --itemize-changes \
   --exclude='/annotations' --exclude='/genomes' --exclude='/go_annotations' \
   --exclude='/data' --exclude='/cache' --exclude='/ncbi_downloads' \
   --exclude='/build_sources' --exclude='/outputs' --exclude='/logs' --exclude='/tmp' \
-  --exclude='/desktop' --exclude='/node_modules' --exclude='/paper' \
+  --exclude='/desktop' --exclude='/INSTALABLES-FINALES' \
+  --exclude='/node_modules' --exclude='/paper' \
   --exclude='/deploy-colors-shinyproxy.sh' \
   --exclude='/docker-compose.shinyproxy.yml' \
   --exclude='/docker-compose.shinyproxy.colors.yml' \

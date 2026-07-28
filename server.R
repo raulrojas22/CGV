@@ -104,6 +104,13 @@ function(input, output, session) {
             session$sendCustomMessage("lastz_debug", msg),
             error = function(e) message("[LASTZ-DEBUG][server] ", step, " | ", detail %||% "")
         )
+        if (grepl("START|END|FATAL|worker plan", as.character(step), ignore.case = TRUE)) {
+            message(
+                "[LASTZ] ",
+                as.character(step),
+                if (!is.null(detail) && nzchar(as.character(detail))) paste0(" | ", as.character(detail)) else ""
+            )
+        }
     }
 
     read_lastz_worker_count <- function(default_workers = NULL) {
@@ -127,12 +134,17 @@ function(input, output, session) {
     }
 
     with_lastz_future_plan <- function(expr, label = "LASTZ") {
+        current_plan <- tryCatch(future::plan(), error = function(e) NULL)
         current_workers <- tryCatch(as.integer(future::nbrOfWorkers()), error = function(e) 1L)
         if (!is.finite(current_workers) || is.na(current_workers) || current_workers < 1L) {
             current_workers <- 1L
         }
         target_workers <- read_lastz_worker_count(default_workers = current_workers)
-        if (!is.finite(target_workers) || is.na(target_workers) || target_workers < 1L || target_workers == current_workers) {
+        current_backend <- if (!is.null(current_plan)) attr(current_plan, "backend") else NULL
+        current_is_sequential <- inherits(current_backend, "SequentialFutureBackend")
+        needs_background_worker <- identical(as.integer(target_workers), 1L) && isTRUE(current_is_sequential)
+        if (!is.finite(target_workers) || is.na(target_workers) || target_workers < 1L ||
+            (target_workers == current_workers && !needs_background_worker)) {
             lastz_dbg(
                 paste0(label, " worker plan"),
                 detail = sprintf("using global future workers=%d", as.integer(current_workers))
@@ -141,10 +153,22 @@ function(input, output, session) {
         }
 
         tryCatch({
-            future::plan(future::multisession, workers = target_workers)
+            # future treats workers=1 as a sequential plan unless the scalar is
+            # wrapped in AsIs. LASTZ must stay in a real background R process
+            # so the Shiny session remains responsive.
+            workers_arg <- if (identical(as.integer(target_workers), 1L)) {
+                I(as.integer(target_workers))
+            } else {
+                as.integer(target_workers)
+            }
+            future::plan(future::multisession, workers = workers_arg)
             lastz_dbg(
                 paste0(label, " worker plan"),
-                detail = sprintf("persistent APP_LASTZ_WORKERS=%d (previous global was %d)", as.integer(target_workers), as.integer(current_workers))
+                detail = sprintf(
+                    "persistent background APP_LASTZ_WORKERS=%d (previous global was %d)",
+                    as.integer(target_workers),
+                    as.integer(current_workers)
+                )
             )
         }, error = function(e) {
             lastz_dbg(
@@ -10576,10 +10600,16 @@ function(input, output, session) {
                 }, integer(1)), na.rm = TRUE)
                 app_perf_mark_ms(NULL, "lastz_blocks_run_total_ms", app_perf_elapsed_ms(run_t0), "ORTHO_LASTZ")
                 app_perf_mark(NULL, sprintf("lastz_blocks_run_done runs=%d blocks=%d", as.integer(length(runs)), as.integer(total_blocks)), "ORTHO_LASTZ")
+                failed_statuses <- c("engine_error", "engine_timeout", "window_too_large")
                 all_engine_errors <- length(runs) > 0L && all(vapply(runs, function(run_obj) {
-                    identical(trimws(as.character((run_obj %||% list())$status %||% "")), "engine_error")
+                    trimws(as.character((run_obj %||% list())$status %||% "")) %in% failed_statuses
                 }, logical(1)))
-                combined_err <- unique(unlist(lapply(runs, function(run_obj) as.character((run_obj %||% list())$stderr %||% character(0))), use.names = FALSE))
+                combined_err <- unique(unlist(lapply(runs, function(run_obj) {
+                    c(
+                        as.character((run_obj %||% list())$stderr %||% character(0)),
+                        as.character((run_obj %||% list())$setup_hint %||% character(0))
+                    )
+                }), use.names = FALSE))
                 combined_err <- trimws(combined_err)
                 combined_err <- combined_err[nzchar(combined_err)]
 
@@ -10594,7 +10624,16 @@ function(input, output, session) {
                 set_popup_loading(FALSE, context = "LASTZ Blocks")
 
                 if (all_engine_errors) {
-                    err_msg <- if (length(combined_err) > 0L) combined_err[[1L]] else "unknown error"
+                    statuses <- unique(vapply(runs, function(run_obj) {
+                        trimws(as.character((run_obj %||% list())$status %||% "engine_error"))
+                    }, character(1)))
+                    err_msg <- if ("engine_timeout" %in% statuses) {
+                        "the safety timeout was reached; reduce the locus span and retry"
+                    } else if (length(combined_err) > 0L) {
+                        combined_err[[1L]]
+                    } else {
+                        "unknown error"
+                    }
                     emit_popup_status(
                         "LASTZ Blocks",
                         paste0("Local LASTZ alignments failed", if (nzchar(err_msg)) paste0(": ", err_msg) else "."),
@@ -11209,10 +11248,16 @@ function(input, output, session) {
                 }, integer(1)), na.rm = TRUE)
                 app_perf_mark_ms(NULL, "multipip_run_total_ms", app_perf_elapsed_ms(run_t0), "ORTHO_LASTZ")
                 app_perf_mark(NULL, sprintf("multipip_run_done runs=%d segments=%d", as.integer(length(runs)), as.integer(total_visible_segments)), "ORTHO_LASTZ")
+                failed_statuses <- c("engine_error", "engine_timeout", "window_too_large")
                 all_engine_errors <- length(runs) > 0L && all(vapply(runs, function(run_obj) {
-                    identical(trimws(as.character((run_obj %||% list())$status %||% "")), "engine_error")
+                    trimws(as.character((run_obj %||% list())$status %||% "")) %in% failed_statuses
                 }, logical(1)))
-                combined_err <- unique(unlist(lapply(runs, function(run_obj) as.character((run_obj %||% list())$stderr %||% character(0))), use.names = FALSE))
+                combined_err <- unique(unlist(lapply(runs, function(run_obj) {
+                    c(
+                        as.character((run_obj %||% list())$stderr %||% character(0)),
+                        as.character((run_obj %||% list())$setup_hint %||% character(0))
+                    )
+                }), use.names = FALSE))
                 combined_err <- trimws(combined_err)
                 combined_err <- combined_err[nzchar(combined_err)]
 
@@ -11226,7 +11271,16 @@ function(input, output, session) {
                 set_popup_loading(FALSE, context = "MultiPIP")
 
                 if (all_engine_errors) {
-                    err_msg <- if (length(combined_err) > 0L) combined_err[[1L]] else "unknown error"
+                    statuses <- unique(vapply(runs, function(run_obj) {
+                        trimws(as.character((run_obj %||% list())$status %||% "engine_error"))
+                    }, character(1)))
+                    err_msg <- if ("engine_timeout" %in% statuses) {
+                        "the safety timeout was reached; reduce the locus span and retry"
+                    } else if (length(combined_err) > 0L) {
+                        combined_err[[1L]]
+                    } else {
+                        "unknown error"
+                    }
                     emit_popup_status(
                         "MultiPIP",
                         paste0("Local alignments failed", if (nzchar(err_msg)) paste0(": ", err_msg) else "."),
@@ -26026,6 +26080,8 @@ function(input, output, session) {
                 status_txt,
                 "ok" = c(bg = "rgba(75, 160, 115, 0.10)", border = "#75B990", txt = "#2F6F4C"),
                 "missing_sequence" = c(bg = "rgba(224, 123, 57, 0.10)", border = "#D49B72", txt = "#8C4D1E"),
+                "window_too_large" = c(bg = "rgba(224, 123, 57, 0.10)", border = "#D49B72", txt = "#8C4D1E"),
+                "engine_timeout" = c(bg = "rgba(196, 84, 80, 0.10)", border = "#D29792", txt = "#8D3E3A"),
                 "engine_error" = c(bg = "rgba(196, 84, 80, 0.10)", border = "#D29792", txt = "#8D3E3A"),
                 "engine_unavailable" = c(bg = "rgba(196, 84, 80, 0.10)", border = "#D29792", txt = "#8D3E3A"),
                 c(bg = "rgba(91, 143, 184, 0.10)", border = "#8AAFD0", txt = "#385C77")

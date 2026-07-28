@@ -92,6 +92,10 @@
         ]
       },
       {
+        "from": "build/icon.png",
+        "to": "icon.png"
+      },
+      {
         "from": "data-manifest.json",
         "to": "data-manifest.json"
       },
@@ -113,6 +117,12 @@
         "deb"
       ],
       "category": "Science",
+      "syncDesktopName": true,
+      "desktop": {
+        "entry": {
+          "StartupWMClass": "cgv-desktop"
+        }
+      },
       "artifactName": "CGV-Desktop-${version}-Linux-${arch}.${ext}"
     },
     "win": {
