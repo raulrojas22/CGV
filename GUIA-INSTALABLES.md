@@ -192,6 +192,9 @@ git tag -d desktop-v1.1.0
 
 ## ⏭️ CHECKLIST PARA LA PRÓXIMA VERSIÓN (ej. 1.2.0)
 
+**Automático:** cambia la versión, sube todo, y ejecuta `./regenerar-instalables.sh` (pasos 2-7 de una vez).
+
+**Manual:**
 1. [ ] Cambiar `"version": "1.2.0"` en `desktop/package.json`
 2. [ ] `git add -A && git commit && git push origin master`
 3. [ ] Mac: `cd desktop && rm -rf dist/* && npm run build:mac:arm64 && npm run build:mac:x64` → copiar a `INSTALABLES-FINALES/`
