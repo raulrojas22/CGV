@@ -102,10 +102,24 @@ fi
 if [ "${SKIP_WINDOWS:-0}" != "1" ]; then
   say "3. Preparando tag $TAG y lanzando build de Windows"
   if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
-    [ "$(git rev-list -n 1 "$TAG")" = "$HEAD_SHA" ] \
-      || die "El tag $TAG ya existe pero apunta a otro commit. Sube la versión en desktop/package.json, o borra el tag: git push origin --delete $TAG && git tag -d $TAG"
-    git push origin "$TAG" --quiet 2>/dev/null || true
-    ok "Tag $TAG ya existía y apunta a este commit."
+    if [ "$(git rev-list -n 1 "$TAG")" = "$HEAD_SHA" ]; then
+      git push origin "$TAG" --quiet 2>/dev/null || true
+      ok "Tag $TAG ya existía y apunta a este commit."
+    else
+      warn "El tag $TAG ya existe pero apunta a un commit anterior (el build viejo de esta misma versión)."
+      warn "Para regenerar la MISMA versión $VERSION con el código nuevo, hay que mover el tag al commit actual."
+      read -r -p "¿Mover el tag $TAG al commit actual? [y/N] " ans
+      case "${ans:-}" in
+        y|Y)
+          git push origin --delete "$TAG" --quiet
+          git tag -d "$TAG" >/dev/null
+          git tag "$TAG"
+          git push origin "$TAG"
+          ok "Tag $TAG movido al commit actual."
+          ;;
+        *) die "Abortado. Alternativa: sube la versión en desktop/package.json para crear un tag nuevo." ;;
+      esac
+    fi
   else
     git tag "$TAG"
     git push origin "$TAG"
