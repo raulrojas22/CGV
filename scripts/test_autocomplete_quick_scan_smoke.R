@@ -140,7 +140,7 @@ staged_domain <- init_autocomplete_domain(
   session = staged_session
 )
 
-staged_domain$update_gene_autocomplete(
+staged_union_result <- staged_domain$update_gene_autocomplete(
   "gene_name",
   c(tmp_gff, tmp_gff_2),
   max_total = 50L,
@@ -157,9 +157,11 @@ assert_true(length(staged_gene_msgs) >= 2L,
             "Autocomplete should publish staged updates as each cached organism contributes suggestions.")
 assert_true(all(c("GENE_A", "GENE_D", "GENE_SHARED") %in% as.character(staged_gene_msgs[[length(staged_gene_msgs)]]$payload$choices)),
             "Final staged autocomplete should include suggestions from all cached organisms.")
+assert_true(isTRUE(staged_union_result$complete) && length(staged_union_result$unresolved_paths) == 0L,
+            "Cached autocomplete paths should be reported as completely resolved.")
 
 staged_session$messages <- list()
-staged_domain$update_gene_autocomplete(
+staged_shared_result <- staged_domain$update_gene_autocomplete(
   "gene_name",
   c(tmp_gff, tmp_gff_2),
   max_total = 50L,
@@ -173,8 +175,79 @@ shared_gene_msgs <- Filter(function(msg) {
     identical(msg$payload$input_id, "gene_name")
 }, staged_session$messages)
 latest_shared <- as.character(shared_gene_msgs[[length(shared_gene_msgs)]]$payload$choices)
+assert_true(length(shared_gene_msgs) == 1L,
+            "Cross-species shared autocomplete should publish only once after aggregating all organisms.")
 assert_true(identical(latest_shared, "GENE_SHARED"),
             "Cross-species autocomplete should only publish the same candidate when it appears in at least two organisms.")
+assert_true(isTRUE(staged_shared_result$complete),
+            "Cross-species autocomplete should report cached paths as completely resolved.")
+
+missing_session <- new.env(parent = emptyenv())
+missing_session$messages <- list()
+missing_session$sendCustomMessage <- function(type, payload) {
+  missing_session$messages[[length(missing_session$messages) + 1L]] <<- list(type = type, payload = payload)
+  invisible(NULL)
+}
+missing_domain <- init_autocomplete_domain(
+  geneAutocompleteCache_rv = make_state_cell(list()),
+  quickGeneAutocompleteCache_rv = make_state_cell(list()),
+  globalGeneSuggestionSources_rv = make_state_cell(list()),
+  session = missing_session
+)
+missing_result <- missing_domain$update_gene_autocomplete(
+  "gene_name",
+  tmp_gff,
+  max_total = 50L,
+  allow_build = FALSE,
+  allow_quick_scan = FALSE,
+  allow_disk_index = FALSE
+)
+assert_true(!isTRUE(missing_result$complete) &&
+              identical(as.character(missing_result$unresolved_paths), as.character(tmp_gff)),
+            "A skipped cache miss must remain unresolved so organism preparation can retry it once.")
+
+shared_cap_paths <- vapply(seq_len(13L), function(i) {
+  path <- tempfile(fileext = ".gff3")
+  gene <- if (i %in% c(1L, 13L)) "GENE_EDGE_SHARED" else sprintf("GENE_ONLY_%02d", i)
+  writeLines(
+    c(
+      "##gff-version 3",
+      sprintf("chr1\tsrc\tgene\t1\t100\t.\t+\t.\tID=gene-%02d;gene_name=%s;Name=%s", i, gene, gene)
+    ),
+    path,
+    useBytes = TRUE
+  )
+  path
+}, character(1))
+on.exit(unlink(shared_cap_paths, force = TRUE), add = TRUE)
+shared_cap_cache <- list()
+for (i in seq_along(shared_cap_paths)) {
+  shared_cap_cache[[gff_cache_key(shared_cap_paths[[i]])]] <-
+    if (i %in% c(1L, 13L)) "GENE_EDGE_SHARED" else sprintf("GENE_ONLY_%02d", i)
+}
+shared_cap_session <- new.env(parent = emptyenv())
+shared_cap_session$messages <- list()
+shared_cap_session$sendCustomMessage <- function(type, payload) {
+  shared_cap_session$messages[[length(shared_cap_session$messages) + 1L]] <<- list(type = type, payload = payload)
+  invisible(NULL)
+}
+shared_cap_domain <- init_autocomplete_domain(
+  geneAutocompleteCache_rv = make_state_cell(shared_cap_cache),
+  quickGeneAutocompleteCache_rv = make_state_cell(list()),
+  globalGeneSuggestionSources_rv = make_state_cell(list()),
+  session = shared_cap_session
+)
+shared_cap_result <- shared_cap_domain$update_gene_autocomplete(
+  "gene_name",
+  shared_cap_paths,
+  max_total = 50L,
+  allow_build = FALSE,
+  allow_quick_scan = FALSE,
+  allow_disk_index = FALSE,
+  min_shared_organisms = 2L
+)
+assert_true("GENE_EDGE_SHARED" %in% as.character(shared_cap_result$choices),
+            "Shared autocomplete must include the thirteenth organism instead of silently capping at twelve.")
 
 tmp_gff_3 <- tempfile(fileext = ".gff3")
 writeLines(
