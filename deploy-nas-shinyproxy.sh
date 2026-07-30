@@ -244,47 +244,123 @@ nssh "
 echo ""
 echo "[5/7] Iniciando ShinyProxy + nginx..."
 nssh "
+  set -e
   cd ${NAS_APP_DIR}
+  for d in annotations genomes go_annotations data cache ncbi_downloads; do
+    if [ ! -d '${NAS_APP_DIR}'/\"\$d\" ]; then
+      echo \"ERROR: falta la ruta absoluta ${NAS_APP_DIR}/\$d requerida por ShinyProxy.\" >&2
+      exit 1
+    fi
+  done
+
+  echo '  Validando configuración nginx...'
+  ${REMOTE_DOCKER} run --rm \
+    -v '${NAS_APP_DIR}/deploy/nginx/cgv-shinyproxy.conf:/etc/nginx/conf.d/default.conf:ro' \
+    docker.io/library/nginx:alpine nginx -t
+
+  upsert_env() {
+    key=\"\$1\"
+    value=\"\$2\"
+    if grep -q \"^\${key}=\" .env; then
+      sed -i \"s#^\${key}=.*#\${key}=\${value}#\" .env
+    else
+      printf '%s=%s\n' \"\$key\" \"\$value\" >> .env
+    fi
+  }
+
+  echo '  Fijando rutas absolutas del host NAS en .env...'
+  upsert_env CGV_NGINX_PORT '${CGV_NGINX_PORT}'
+  upsert_env SP_ANNOTATIONS_DIR '${NAS_APP_DIR}/annotations'
+  upsert_env SP_GENOMES_DIR '${NAS_APP_DIR}/genomes'
+  upsert_env SP_GO_ANNOTATIONS_DIR '${NAS_APP_DIR}/go_annotations'
+  upsert_env SP_DATA_DIR '${NAS_APP_DIR}/data'
+  upsert_env SP_CACHE_DIR '${NAS_APP_DIR}/cache'
+  upsert_env SP_NCBI_DOWNLOADS_DIR '${NAS_APP_DIR}/ncbi_downloads'
+
+  echo '  Iniciando servicios con rutas absolutas del host NAS...'
   ${REMOTE_DOCKER} compose -f docker-compose.shinyproxy.yml up -d
 "
 
 # --- Paso 6: Verificar salud ---
 echo ""
 echo "[6/7] Verificando servicios..."
-echo "  Esperando a que ShinyProxy este listo..."
+echo "  Esperando ShinyProxy, nginx y un contenedor CGV real..."
 nssh "
   cd ${NAS_APP_DIR}
-  MAX=180; ELAPSED=0
+  MAX=180; ELAPSED=0; READY=0
   while [ \$ELAPSED -lt \$MAX ]; do
-    if curl -s -o /dev/null -w '%{http_code}' http://localhost:8080 2>/dev/null | grep -q '200\|302'; then
-      echo \"  ShinyProxy responde despues de \${ELAPSED}s\"
+    shiny_code=\$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 http://127.0.0.1:8080 2>/dev/null || true)
+    nginx_code=\$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 http://127.0.0.1:${CGV_NGINX_PORT} 2>/dev/null || true)
+    delegate=\$(${REMOTE_DOCKER} ps --filter 'name=sp-container-' --filter status=running --format '{{.Names}}' 2>/dev/null | head -1 || true)
+    if echo \"\$shiny_code\" | grep -Eq '^(200|302)$' &&
+       echo \"\$nginx_code\" | grep -Eq '^(200|302)$' &&
+       [ -n \"\$delegate\" ]; then
+      echo \"  Cadena local lista después de \${ELAPSED}s (ShinyProxy=\$shiny_code, nginx=\$nginx_code, app=\$delegate)\"
+      READY=1
       break
     fi
-    echo \"  Esperando... (\${ELAPSED}s/\${MAX}s)\"
+    echo \"  Esperando... (\${ELAPSED}s/\${MAX}s; ShinyProxy=\${shiny_code:-000}, nginx=\${nginx_code:-000}, app=\${delegate:-pendiente})\"
     sleep 5
     ELAPSED=\$((ELAPSED + 5))
   done
-  curl -s -o /dev/null -w '  ShinyProxy HTTP: %{http_code}\n' http://localhost:8080 || echo '  ShinyProxy: sin respuesta'
+
+  if [ \"\$READY\" != '1' ]; then
+    echo 'ERROR: la cadena ShinyProxy/nginx/CGV no quedó lista.' >&2
+    echo '--- cgv-shinyproxy (últimas 80 líneas) ---' >&2
+    ${REMOTE_DOCKER} logs --tail 80 cgv-shinyproxy >&2 2>&1 || true
+    echo '--- cgv-nginx (últimas 80 líneas) ---' >&2
+    ${REMOTE_DOCKER} logs --tail 80 cgv-nginx >&2 2>&1 || true
+    exit 1
+  fi
+
   ${REMOTE_DOCKER} ps --filter name=cgv-nginx --filter name=cgv-shinyproxy --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'
 "
 
 # --- Paso 7: Lanzar Cloudflare tunnel ---
 echo ""
 echo "[7/7] Lanzando tunel Cloudflare (${TUNNEL_NAME})..."
-echo "  IMPORTANTE: El tunel debe apuntar a localhost:${CGV_NGINX_PORT} (nginx -> ShinyProxy)"
-echo "  Si antes apuntaba a localhost:3838 o localhost:80, actualiza la config en Cloudflare Dashboard."
-echo ""
 nssh "
+  set -e
+  tunnel_config='/home/${NAS_USER}/.cloudflared/config.yml'
+  if [ ! -f \"\$tunnel_config\" ]; then
+    tunnel_config='/home/${NAS_USER}/.cloudflared/config.yaml'
+  fi
+  if [ ! -f \"\$tunnel_config\" ]; then
+    echo 'ERROR: no se encontró config.yml/config.yaml de cloudflared.' >&2
+    exit 1
+  fi
+  if grep -Eq 'service:[[:space:]]*http://(127[.]0[.]0[.]1|localhost):(3838|80)[[:space:]]*$' \"\$tunnel_config\" ||
+     ! grep -Eq 'service:[[:space:]]*http://(127[.]0[.]0[.]1|localhost):${CGV_NGINX_PORT}[[:space:]]*$' \"\$tunnel_config\"; then
+    echo \"ERROR: el túnel ${TUNNEL_NAME} no apunta a http://127.0.0.1:${CGV_NGINX_PORT}.\" >&2
+    echo \"Corrige \$tunnel_config antes de relanzarlo.\" >&2
+    exit 1
+  fi
+
   rm -f ${NAS_PATH}/tunnel.log
   nohup ${NAS_PATH}/cloudflared tunnel --protocol http2 run ${TUNNEL_NAME} > ${NAS_PATH}/tunnel.log 2>&1 &
   echo \$! > ${NAS_PATH}/tunnel.pid
   echo \"  Tunel PID: \$(cat ${NAS_PATH}/tunnel.pid)\"
-  sleep 3
-  if kill -0 \$(cat ${NAS_PATH}/tunnel.pid) 2>/dev/null; then
-    echo '  Tunel corriendo OK'
-  else
-    echo '  ERROR: Tunel no arranco'
-    tail -5 ${NAS_PATH}/tunnel.log
+
+  MAX=60; ELAPSED=0; PUBLIC_OK=0
+  while [ \$ELAPSED -lt \$MAX ]; do
+    if ! kill -0 \$(cat ${NAS_PATH}/tunnel.pid) 2>/dev/null; then
+      echo 'ERROR: el túnel se detuvo durante el arranque.' >&2
+      tail -30 ${NAS_PATH}/tunnel.log >&2
+      exit 1
+    fi
+    public_code=\$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 https://cgvapp.com/ 2>/dev/null || true)
+    if echo \"\$public_code\" | grep -Eq '^(200|301|302)$'; then
+      echo \"  cgvapp.com responde HTTP \$public_code después de \${ELAPSED}s\"
+      PUBLIC_OK=1
+      break
+    fi
+    sleep 5
+    ELAPSED=\$((ELAPSED + 5))
+  done
+  if [ \"\$PUBLIC_OK\" != '1' ]; then
+    echo \"ERROR: cgvapp.com no quedó accesible (último HTTP: \${public_code:-000}).\" >&2
+    tail -50 ${NAS_PATH}/tunnel.log >&2
+    exit 1
   fi
 "
 
@@ -292,15 +368,11 @@ echo ""
 echo "============================================"
 echo "  ShinyProxy Deploy completado!"
 echo ""
-echo "  Local NAS:   http://${NAS_HOST}:8080"
+echo "  ShinyProxy:  http://127.0.0.1:8080 (interno del NAS)"
 echo "  Proxy web:   http://${NAS_HOST}:${CGV_NGINX_PORT}"
 echo "  Publico:     https://cgvapp.com"
 echo ""
 echo "  Login:       desactivado (acceso directo, limitado por capacidad)"
 echo ""
 echo "  Usuarios simultaneos: $(local_env_value SP_MAX_TOTAL_INSTANCES 5) max (2GB RAM c/u por defecto)"
-echo ""
-echo "  RECUERDA actualizar Cloudflare Tunnel:"
-echo "    Zero Trust -> Networks -> Tunnels -> cgv"
-echo "    Public Hostname -> apuntar a localhost:${CGV_NGINX_PORT}"
 echo "============================================"

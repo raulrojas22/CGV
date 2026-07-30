@@ -111,6 +111,10 @@ stopifnot(identical(analysis$figures[[1L]]$organism, "Test species"))
 stopifnot(is.list(analysis$branding))
 stopifnot(identical(analysis$results$structural[[1L]]$gene$annotation_path, ""))
 stopifnot(identical(analysis$results$structural[[1L]]$gene$feature_notation, "/ deletion"))
+stopifnot(is.null(analysis$results$structural[[1L]]$organism$icon_data_uri))
+stopifnot(identical(analysis$capture$mode, "complete"))
+stopifnot(length(analysis$capture$omitted) == 0L)
+stopifnot(length(analysis$provenance$alias_decisions) == 1L)
 stopifnot(isTRUE(cgv_validate_analysis_manifest(analysis)))
 invalid_analysis <- analysis
 invalid_analysis$provenance$internal_path <- absolute_annotation
@@ -133,7 +137,8 @@ package_path <- cgv_write_reproducibility_package(
     session_snapshot = legacy_snapshot,
     homo_summary = summary_df,
     include_private = FALSE,
-    base_dir = test_root
+    base_dir = test_root,
+    artifacts = cgv_prepare_report_artifacts(analysis)
 )
 stopifnot(file.exists(package_path))
 
@@ -171,6 +176,7 @@ report <- cgv_publish_static_report(
 )
 stopifnot(grepl("^[a-f0-9]{64}$", report$token))
 stopifnot(file.exists(file.path(report$path, "index.html")))
+stopifnot(!file.exists(file.path(report$path, "analysis.json")))
 stopifnot(!dir.exists(file.path(report$path, "downloads")))
 stopifnot(!cgv_revoke_static_report(report$token, cgv_random_secret(32L), test_root))
 stopifnot(cgv_revoke_static_report(report$token, report$revoke_secret, test_root))
@@ -308,6 +314,10 @@ stopifnot(any(vapply(full_analysis$provenance$organisms_without_result, function
 stopifnot(length(full_analysis$results$external) == 1L)
 stopifnot(length(full_analysis$tables$multi_gene) == 2L)
 stopifnot(identical(full_analysis$privacy$ttl_days, 14L))
+stopifnot(length(full_analysis$provenance$alias_decisions) < length(full_analysis$results$structural))
+stopifnot(all(vapply(full_analysis$results$structural, function(record) {
+    is.null((record$organism %||% list())$icon_data_uri)
+}, logical(1))))
 full_html <- cgv_render_report_html(full_analysis)
 stopifnot(grepl("LASTZ blocks", full_html, fixed = TRUE))
 stopifnot(grepl("MultiPIP", full_html, fixed = TRUE))
@@ -378,6 +388,23 @@ stopifnot(all(vapply(scoped_analysis$figures, function(item) {
     identical(item$context, "multi_gene")
 }, logical(1))))
 stopifnot(identical(scoped_analysis$figures[[1L]]$comparison_gene, "TEST1"))
+
+fast_payload <- scoped_payload
+fast_payload$capture_mode <- "fast"
+fast_payload$omitted <- "Hidden views were not generated."
+fast_analysis <- cgv_build_analysis_manifest(
+    snapshot = scoped_snapshot,
+    homo_summary = data.frame(Gene = c("TEST1", "TEST1"), Transcript = c("TX1", "TX2")),
+    client_payload = fast_payload,
+    include_private = FALSE,
+    allow_downloads = FALSE,
+    ttl_days = 7L,
+    app_version = "1.1.0",
+    base_dir = test_root
+)
+stopifnot(identical(fast_analysis$capture$mode, "fast"))
+stopifnot(identical(as.character(fast_analysis$capture$omitted), "Hidden views were not generated."))
+stopifnot(grepl("Fast capture", cgv_render_report_html(fast_analysis), fixed = TRUE))
 
 cross_scoped_snapshot <- cgv_scope_shared_snapshot(
     full_snapshot,
@@ -505,6 +532,10 @@ stopifnot(!grepl("chrGrad_|chromosome|ideogram", capture_js, fixed = TRUE))
 stopifnot(grepl("chromosome_context", capture_js, fixed = TRUE))
 stopifnot(grepl("synteny", capture_js, fixed = TRUE))
 stopifnot(grepl("external_results", capture_js, fixed = TRUE))
+stopifnot(grepl('captureMode === "fast"', capture_js, fixed = TRUE))
+stopifnot(grepl("new Set()", capture_js, fixed = TRUE))
+stopifnot(grepl("cgv_report_progress", capture_js, fixed = TRUE))
+stopifnot(grepl("notifyZipStart", capture_js, fixed = TRUE))
 ui_source <- paste(readLines("ui.R", warn = FALSE), collapse = "\n")
 server_source <- paste(readLines("server.R", warn = FALSE), collapse = "\n")
 stopifnot(!grepl("app-nav-btn-share-analysis", ui_source, fixed = TRUE))
@@ -516,7 +547,10 @@ shared_domain_source <- paste(readLines("R/server_shared_analysis_domain.R", war
 stopifnot(grepl("share_include_multi_gene", shared_domain_source, fixed = TRUE))
 stopifnot(grepl("share_include_cross_species", shared_domain_source, fixed = TRUE))
 stopifnot(grepl("Run LASTZ and MultiPIP", shared_domain_source, fixed = TRUE))
-stopifnot(grepl("Generating the interactive report and reproducibility package", shared_domain_source, fixed = TRUE))
+stopifnot(grepl("Preparing a complete report", shared_domain_source, fixed = TRUE))
+stopifnot(grepl("Fast — include only views already rendered", shared_domain_source, fixed = TRUE))
+stopifnot(grepl("ensure_reproducibility_package", shared_domain_source, fixed = TRUE))
+stopifnot(grepl("cgv_prepare_report_artifacts", shared_domain_source, fixed = TRUE))
 stopifnot(grepl('src = "/favicon.ico"', shared_domain_source, fixed = TRUE))
 stopifnot(!grepl("Rendering the aligned synteny comparison for the report", shared_domain_source, fixed = TRUE))
 snapshot_domain <- paste(readLines("R/server_session_snapshot_domain.R", warn = FALSE), collapse = "\n")
