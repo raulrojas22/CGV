@@ -1071,6 +1071,14 @@ cgv_packages_root <- function(base_dir = ".") {
     file.path(root, "reproducibility_packages")
 }
 
+cgv_reproducibility_staging_path <- function(package_root) {
+    tempfile(
+        pattern = ".cgv-reproducibility-",
+        tmpdir = package_root,
+        fileext = ".zip"
+    )
+}
+
 cgv_report_meta_root <- function(base_dir = ".") {
     root <- if (exists("get_cgv_cache_root", mode = "function")) {
         get_cgv_cache_root(base_dir)
@@ -1184,7 +1192,10 @@ cgv_write_reproducibility_package <- function(analysis,
 
     stamp <- format(Sys.time(), "%Y%m%d_%H%M%S")
     zip_path <- file.path(package_root, paste0("cgv_reproducibility_", stamp, "_", cgv_random_secret(6L), ".zip"))
-    zip_staging <- tempfile("cgv-reproducibility-", fileext = ".zip")
+    # Atomic rename requires staging and destination to be on the same
+    # filesystem. In production /tmp and the persistent /app/cache mount are
+    # different filesystems, so stage directly in the package directory.
+    zip_staging <- cgv_reproducibility_staging_path(package_root)
     on.exit(if (file.exists(zip_staging)) unlink(zip_staging, force = TRUE), add = TRUE)
     old_wd <- getwd()
     on.exit(setwd(old_wd), add = TRUE)
@@ -1193,7 +1204,9 @@ cgv_write_reproducibility_package <- function(analysis,
     utils::zip(zipfile = zip_staging, files = files, flags = "-q")
     setwd(old_wd)
     cgv_with_shared_storage_lock(base_dir, function() {
-        if (cgv_shared_storage_size(base_dir) + file.info(zip_staging)$size > limits$total_bytes) {
+        staging_size <- file.info(zip_staging)$size
+        existing_size <- max(0, cgv_shared_storage_size(base_dir) - staging_size)
+        if (existing_size + staging_size > limits$total_bytes) {
             stop("Creating this package would exceed shared-analysis storage. No active report was removed.")
         }
         if (!file.rename(zip_staging, zip_path)) {
