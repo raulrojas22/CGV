@@ -72,6 +72,15 @@ assert_true(
     "Fast organism sync must hydrate indexes after flush and gate final search observers."
 )
 assert_true(
+    grepl("APP_ORTHO_SELECTION_DEBOUNCE_MS", server_txt, fixed = TRUE) &&
+        grepl("ortho_preloaded_selection_debounced <- shiny::debounce", server_txt, fixed = TRUE),
+    "Rapid Cross-Species organism selections must be grouped before expensive preparation starts."
+)
+assert_true(
+    grepl("identical\\(lastPreparedOrthoSelection\\(\\), prep_key\\) && isTRUE\\(selection_is_ready\\)", server_txt, perl = TRUE),
+    "Returning to a previous selection must not skip preparation while its search gate is still closed."
+)
+assert_true(
     grepl("allow_disk_index = TRUE", server_txt, fixed = TRUE),
     "Preloaded organism sync must populate gene autocomplete from the persistent disk sidecar."
 )
@@ -83,6 +92,20 @@ assert_true(
     grepl("APP_TABIX_PROBE_ON_WARM", server_txt, fixed = TRUE) &&
         grepl("run_followup_queue", server_txt, fixed = TRUE),
     "Tabix probing must run in the non-blocking organism-preparation follow-up queue."
+)
+assert_true(
+    grepl("start_followup_queue <- function", server_txt, fixed = TRUE) &&
+        grepl("if \\(ready\\) \\{[\\s\\S]{0,1800}session\\$onFlushed\\(function\\(\\) \\{[\\s\\S]{0,300}start_followup_queue", server_txt, perl = TRUE),
+    "Secondary cache warming must start only after annotation readiness has been delivered to the browser."
+)
+assert_true(
+    grepl("refresh_autocomplete <- !isTRUE\\(autocomplete_sync\\$complete\\)", server_txt, perl = TRUE) &&
+        grepl("if \\(isTRUE\\(refresh_autocomplete\\)\\)", server_txt, perl = TRUE),
+    "Fast organism preparation must retry autocomplete only when the initial disk lookup was incomplete."
+)
+assert_true(
+    grepl("if \\(length\\(cached\\) > 0 && min_shared <= 1L\\)", autocomplete_txt, perl = TRUE),
+    "Shared Cross-Species autocomplete must defer publication until every selected organism is aggregated."
 )
 assert_true(
     grepl("twobit_seqnames_sidecar_path", paste(readLines(file.path("R", "utils.R"), warn = FALSE), collapse = "\n"), fixed = TRUE),

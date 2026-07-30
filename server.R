@@ -4705,6 +4705,15 @@ function(input, output, session) {
             invisible(TRUE)
         }
 
+        start_followup_queue <- function() {
+            if (length(followup_queue) == 0L || isTRUE(followup_running)) {
+                return(invisible(FALSE))
+            }
+            followup_running <<- TRUE
+            later::later(run_followup_queue, delay = 0.02)
+            invisible(TRUE)
+        }
+
         enqueue_followup <- function(i, ann_i, gp_i, rp_i, sid_i) {
             followup_queue[[length(followup_queue) + 1L]] <<- list(
                 i = i,
@@ -4713,10 +4722,6 @@ function(input, output, session) {
                 report = rp_i,
                 species_id = sid_i
             )
-            if (!isTRUE(followup_running)) {
-                followup_running <<- TRUE
-                later::later(run_followup_queue, delay = 0.02)
-            }
             invisible(TRUE)
         }
 
@@ -4737,6 +4742,17 @@ function(input, output, session) {
                 if (is.function(on_complete)) {
                     tryCatch(on_complete(), error = function(e) NULL)
                 }
+                # Tabix/report/genome/alias warming improves later actions, but
+                # must not compete with the annotation indexes that gate search
+                # or delay delivery of the ready state to the browser.
+                tryCatch(
+                    session$onFlushed(function() {
+                        later::later(start_followup_queue, delay = 0.02)
+                    }, once = TRUE),
+                    error = function(e) {
+                        later::later(start_followup_queue, delay = 0.05)
+                    }
+                )
             } else {
                 msg <- "Search indexes could not be prepared. Re-select the organism or disable fast organism sync."
                 state$status(msg)
@@ -15832,13 +15848,60 @@ function(input, output, session) {
         ignoreInit = FALSE
     )
 
-    observeEvent(list(input$ortho_data_mode, input$ortho_preloaded_species),
+    ortho_selection_debounce_ms <- suppressWarnings(as.integer(
+        Sys.getenv("APP_ORTHO_SELECTION_DEBOUNCE_MS", unset = "500")
+    ))
+    if (!is.finite(ortho_selection_debounce_ms) ||
+        is.na(ortho_selection_debounce_ms) ||
+        ortho_selection_debounce_ms < 0L) {
+        ortho_selection_debounce_ms <- 500L
+    }
+    ortho_selection_debounce_ms <- max(0L, min(2000L, ortho_selection_debounce_ms))
+
+    ortho_preloaded_selection_signal <- reactive({
+        mode <- as.character(input$ortho_data_mode %||% "")
+        ids <- if (mode %in% c("preloaded", "mixed")) {
+            sort(unique(as.character(input$ortho_preloaded_species %||% character(0))))
+        } else {
+            character(0)
+        }
+        list(mode = mode, ids = ids)
+    })
+    ortho_preloaded_selection_debounced <- shiny::debounce(
+        ortho_preloaded_selection_signal,
+        millis = ortho_selection_debounce_ms
+    )
+
+    # Cancel any preparation for the previous selection immediately so a
+    # search cannot slip through while rapid card clicks are being grouped.
+    observeEvent(ortho_preloaded_selection_signal(), {
+        if (!isTRUE(fast_organism_sync_enabled())) {
+            return(invisible(NULL))
+        }
+        selection_state <- ortho_preloaded_selection_signal()
+        selection_mode <- as.character(selection_state$mode %||% "")
+        selection_ids <- as.character(selection_state$ids %||% character(0))
+        selection_key <- paste(selection_ids, collapse = "|")
+        if (selection_mode %in% c("preloaded", "mixed") &&
+            length(selection_ids) > 0L &&
+            !identical(isolate(lastPreparedOrthoSelection()), selection_key)) {
+            invalidate_search_preparation("orthologous", ready = FALSE)
+        } else if (!selection_mode %in% c("preloaded", "mixed") ||
+            (identical(selection_mode, "preloaded") && length(selection_ids) == 0L)) {
+            invalidate_search_preparation("orthologous", ready = TRUE)
+        }
+        invisible(NULL)
+    }, ignoreInit = FALSE, priority = 1000)
+
+    observeEvent(ortho_preloaded_selection_debounced(),
         {
             prep_perf <- app_perf_new_run("ORG_ORTHO_PREP")
             app_perf_mark(prep_perf, "observe start", "ORG_ORTHO")
-            ortho_mode <- as.character(input$ortho_data_mode %||% "")
+            selection_state <- ortho_preloaded_selection_debounced()
+            ortho_mode <- as.character(selection_state$mode %||% "")
+            selected_preloaded_ids <- as.character(selection_state$ids %||% character(0))
             ortho_key_detail <- if (ortho_mode %in% c("preloaded", "mixed")) {
-                paste(sort(as.character(input$ortho_preloaded_species %||% character(0))), collapse = "|")
+                paste(selected_preloaded_ids, collapse = "|")
             } else if (identical(ortho_mode, "ncbi")) {
                 paste(names(isolate(orthoPreparedNcbiOrganisms()) %||% list()), collapse = "|")
             } else if (identical(ortho_mode, "upload")) {
@@ -15858,7 +15921,7 @@ function(input, output, session) {
                 ortho_source_key,
                 reason = sprintf("switching to %s mode", ortho_mode)
             )
-            if (!(as.character(input$ortho_data_mode %||% "") %in% c("preloaded", "mixed"))) {
+            if (!(ortho_mode %in% c("preloaded", "mixed"))) {
                 app_perf_mark(prep_perf, "skip: not preloaded mode", "ORG_ORTHO")
                 if (isTRUE(fast_organism_sync_enabled())) {
                     invalidate_search_preparation("orthologous", ready = TRUE)
@@ -15866,7 +15929,7 @@ function(input, output, session) {
                 set_popup_loading(FALSE, context = "Cross-Species Gene Search")
                 cancel_autocomplete_background("gene_name")
                 # In NCBI mode, preserve state if organisms already downloaded
-                if (identical(input$ortho_data_mode, "ncbi")) {
+                if (identical(ortho_mode, "ncbi")) {
                     ncbi_det <- isolate(currentOrganismOrthologous())
                     if (is.list(ncbi_det) && length(ncbi_det) > 0) {
                         return(invisible(NULL))
@@ -15879,10 +15942,10 @@ function(input, output, session) {
                 }
                 return(invisible(NULL))
             }
-            ids <- as.character(input$ortho_preloaded_species %||% character(0))
+            ids <- selected_preloaded_ids
             if (length(ids) == 0) {
                 app_perf_mark(prep_perf, "no selected organisms", "ORG_ORTHO")
-                if (identical(as.character(input$ortho_data_mode %||% ""), "mixed")) {
+                if (identical(ortho_mode, "mixed")) {
                     return(invisible(NULL))
                 }
                 lastPreparedOrthoSelection("")
@@ -15893,7 +15956,9 @@ function(input, output, session) {
                 return(invisible(NULL))
             }
             prep_key <- paste(sort(ids), collapse = "|")
-            if (identical(lastPreparedOrthoSelection(), prep_key)) {
+            selection_is_ready <- !isTRUE(fast_organism_sync_enabled()) ||
+                isTRUE(isolate(searchPreparationReadyOrtho()))
+            if (identical(lastPreparedOrthoSelection(), prep_key) && isTRUE(selection_is_ready)) {
                 app_perf_mark(prep_perf, "skip: selection already prepared", "ORG_ORTHO")
                 return(invisible(NULL))
             }
@@ -15901,7 +15966,10 @@ function(input, output, session) {
             sel <- reg[reg$species_id %in% ids, , drop = FALSE]
             app_perf_mark(prep_perf, sprintf("selected rows=%d", as.integer(nrow(sel))), "ORG_ORTHO")
             if (nrow(sel) == 0) {
-                if (identical(as.character(input$ortho_data_mode %||% ""), "mixed")) {
+                if (isTRUE(fast_organism_sync_enabled())) {
+                    invalidate_search_preparation("orthologous", ready = TRUE)
+                }
+                if (identical(ortho_mode, "mixed")) {
                     return(invisible(NULL))
                 }
                 lastPreparedOrthoSelection("")
@@ -15946,7 +16014,7 @@ function(input, output, session) {
             with_genome <- sum(nzchar(genome_paths) & file.exists(genome_paths), na.rm = TRUE)
             genomeSourceOrthologous(sprintf("Preloaded genomes available: %d/%d", with_genome, nrow(sel)))
             prep_token <- if (isTRUE(fast_organism_sync_enabled())) {
-                invalidate_search_preparation("orthologous", ready = FALSE)
+                suppressWarnings(as.integer(isolate(searchPreparationTokenOrtho()) %||% 0L))
             } else {
                 NA_integer_
             }
@@ -15954,7 +16022,7 @@ function(input, output, session) {
             epoch_token <- bump_autocomplete_epoch("gene_name")
             app_perf_mark(prep_perf, "autocomplete sync start", "ORG_ORTHO")
             ortho_autocomplete_bg_max <- parse_positive_int_env("APP_ORTHO_AUTOCOMPLETE_BG_MAX_ORGANISMS", 12L)
-            update_gene_autocomplete(
+            autocomplete_sync <- update_gene_autocomplete(
                 "gene_name",
                 as.character(sel$annotation_path),
                 status_rv = searchStatusOrthologous,
@@ -15995,16 +16063,19 @@ function(input, output, session) {
                         tone <- final_tone
                         ann_for_autocomplete <- as.character(sel$annotation_path)
                         min_shared_for_autocomplete <- if (nrow(sel) > 1L) 2L else 1L
+                        refresh_autocomplete <- !isTRUE(autocomplete_sync$complete)
                         function() {
-                            update_gene_autocomplete(
-                                "gene_name",
-                                ann_for_autocomplete,
-                                status_rv = NULL,
-                                allow_build = FALSE,
-                                allow_quick_scan = FALSE,
-                                allow_disk_index = TRUE,
-                                min_shared_organisms = min_shared_for_autocomplete
-                            )
+                            if (isTRUE(refresh_autocomplete)) {
+                                update_gene_autocomplete(
+                                    "gene_name",
+                                    ann_for_autocomplete,
+                                    status_rv = NULL,
+                                    allow_build = FALSE,
+                                    allow_quick_scan = FALSE,
+                                    allow_disk_index = TRUE,
+                                    min_shared_organisms = min_shared_for_autocomplete
+                                )
+                            }
                             searchStatusOrthologous(msg)
                             emit_popup_status("Cross-Species Gene Search", msg, tone = tone, clear = TRUE)
                         }

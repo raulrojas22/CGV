@@ -649,6 +649,10 @@ init_autocomplete_domain <- function(
 
     update_gene_autocomplete <- function(input_id, annotation_paths, status_rv = NULL, max_files = Inf, max_total = 20000L, allow_build = TRUE, allow_quick_scan = TRUE, allow_disk_index = TRUE, min_shared_organisms = 1L) {
         auto_perf <- app_perf_new_run(sprintf("AUTO-%s", as.character(input_id %||% "input")))
+        min_shared <- suppressWarnings(as.integer(min_shared_organisms %||% 1L))
+        if (!is.finite(min_shared) || is.na(min_shared) || min_shared < 1L) {
+            min_shared <- 1L
+        }
         app_perf_mark(
             auto_perf,
             sprintf(
@@ -676,13 +680,19 @@ init_autocomplete_domain <- function(
                 max_total = max_total
             )
             app_perf_mark(auto_perf, "no valid paths -> empty choices", "AUTO")
-            return(invisible(NULL))
+            return(invisible(list(
+                choices = character(0),
+                unresolved_paths = character(0),
+                complete = TRUE
+            )))
         }
 
         if (is.finite(max_files) && length(paths) > as.integer(max_files)) {
             paths <- paths[seq_len(as.integer(max_files))]
         }
-        if (!isTRUE(allow_build) && length(paths) > 12L) {
+        # A union autocomplete may be sampled for responsiveness, but a shared
+        # Cross-Species result must include every selected organism.
+        if (!isTRUE(allow_build) && min_shared <= 1L && length(paths) > 12L) {
             paths <- paths[seq_len(12L)]
         }
         app_perf_mark(auto_perf, sprintf("paths after caps n=%d", as.integer(length(paths))), "AUTO")
@@ -693,6 +703,7 @@ init_autocomplete_domain <- function(
         suggestions_by_path <- list()
         keys_by_path <- list()
         quick_scan_specs <- list()
+        unresolved_paths <- character(0)
         last_published_key <- "\001__unset__"
         path_count <- max(length(paths), 1L)
         per_path_cap <- as.integer(max(600L, min(10000L, ceiling(max_total / path_count))))
@@ -701,7 +712,7 @@ init_autocomplete_domain <- function(
             current_choices <- aggregate_shared_gene_suggestions(
                 suggestions_by_path,
                 keys_by_path = keys_by_path,
-                min_shared_organisms = min_shared_organisms,
+                min_shared_organisms = min_shared,
                 max_total = max_total
             )
             publish_key <- paste(current_choices, collapse = "\r")
@@ -720,12 +731,13 @@ init_autocomplete_domain <- function(
         }
 
         for (p in paths) {
-            if (as.integer(min_shared_organisms %||% 1L) <= 1L && length(all_suggestions) >= max_total) {
+            if (min_shared <= 1L && length(all_suggestions) >= max_total) {
                 app_perf_mark(auto_perf, "max_total reached before finishing paths", "AUTO")
                 break
             }
             ckey <- gene_autocomplete_cache_key(p)
             cached <- if (nzchar(ckey)) cache_map_check[[ckey]] else NULL
+            path_resolved <- !is.null(cached)
             app_perf_mark(
                 auto_perf,
                 sprintf(
@@ -735,7 +747,7 @@ init_autocomplete_domain <- function(
                 ),
                 "AUTO"
             )
-            remaining <- if (as.integer(min_shared_organisms %||% 1L) > 1L) {
+            remaining <- if (min_shared > 1L) {
                 as.integer(max_total)
             } else {
                 as.integer(max_total - length(all_suggestions))
@@ -755,6 +767,7 @@ init_autocomplete_domain <- function(
                         max_suggestions = suggestion_cap
                     )
                     cache_map_check <- geneAutocompleteCache_rv()
+                    path_resolved <- !is.null(cached)
                     app_perf_mark(auto_perf, sprintf("build mode done n=%d", as.integer(length(cached %||% character(0)))), "AUTO")
                 } else {
                     if (isTRUE(allow_disk_index)) {
@@ -767,8 +780,10 @@ init_autocomplete_domain <- function(
                         if (!is.null(cached)) {
                             app_perf_mark(auto_perf, sprintf("disk index hit n=%d", as.integer(length(cached %||% character(0)))), "AUTO")
                         }
+                        path_resolved <- !is.null(cached)
                     } else {
                         cached <- NULL
+                        path_resolved <- FALSE
                         app_perf_mark(auto_perf, "disk index lookup skipped", "AUTO")
                     }
                     if (isTRUE(allow_quick_scan)) {
@@ -802,6 +817,7 @@ init_autocomplete_domain <- function(
                                 max_seconds = quick_seconds
                             )
                             if (!is.null(cached)) {
+                                path_resolved <- TRUE
                                 app_perf_mark(auto_perf, sprintf("quick cache hit n=%d", as.integer(length(cached %||% character(0)))), "AUTO")
                             } else {
                                 if (requireNamespace("later", quietly = TRUE)) {
@@ -813,6 +829,7 @@ init_autocomplete_domain <- function(
                                         chunk_lines = 1000L
                                     )
                                     cached <- character(0)
+                                    path_resolved <- FALSE
                                     app_perf_mark(
                                         auto_perf,
                                         sprintf("quick scan scheduled cap=%d lines=%d secs=%.2f", as.integer(quick_cap), as.integer(quick_lines), as.numeric(quick_seconds)),
@@ -832,6 +849,7 @@ init_autocomplete_domain <- function(
                                         max_lines = quick_lines,
                                         max_seconds = quick_seconds
                                     )
+                                    path_resolved <- TRUE
                                     app_perf_mark(
                                         auto_perf,
                                         sprintf(
@@ -852,6 +870,9 @@ init_autocomplete_domain <- function(
                     }
                 }
             }
+            if (!isTRUE(path_resolved)) {
+                unresolved_paths <- c(unresolved_paths, p)
+            }
             cached <- as.character(cached %||% character(0))
             if (length(cached) > remaining) {
                 cached <- cached[seq_len(remaining)]
@@ -864,14 +885,7 @@ init_autocomplete_domain <- function(
             keys_by_path[[length(keys_by_path) + 1L]] <- autocomplete_keys_for_choices(p, cached)
             names(suggestions_by_path)[length(suggestions_by_path)] <- path_key
             names(keys_by_path)[length(keys_by_path)] <- path_key
-            if (length(cached) > 0 &&
-                (as.integer(min_shared_organisms %||% 1L) <= 1L ||
-                    length(aggregate_shared_gene_suggestions(
-                        suggestions_by_path,
-                        keys_by_path = keys_by_path,
-                        min_shared_organisms = min_shared_organisms,
-                        max_total = max_total
-                    )) > 0L)) {
+            if (length(cached) > 0 && min_shared <= 1L) {
                 publish_current_suggestions(reason = sprintf("path_%d", as.integer(length(suggestions_by_path))))
             }
         }
@@ -889,17 +903,25 @@ init_autocomplete_domain <- function(
                 request_token = request_token,
                 max_total = max_total,
                 delay_sec = 0.02,
-                min_shared_organisms = min_shared_organisms,
+                min_shared_organisms = min_shared,
                 initial_suggestions_by_path = suggestions_by_path,
                 initial_keys_by_path = keys_by_path
             )
             app_perf_mark(auto_perf, sprintf("async quick scan queued paths=%d", as.integer(length(quick_scan_specs))), "AUTO")
         }
-        invisible(NULL)
+        invisible(list(
+            choices = as.character(all_suggestions %||% character(0)),
+            unresolved_paths = unique(as.character(unresolved_paths)),
+            complete = length(unresolved_paths) == 0L
+        ))
     }
 
     schedule_gene_autocomplete_build <- function(input_id, annotation_paths, max_total = 20000L, delay_sec = 0.8, still_valid = NULL, min_shared_organisms = 1L) {
         sched_perf <- app_perf_new_run(sprintf("AUTO_BG-%s", as.character(input_id %||% "input")))
+        min_shared <- suppressWarnings(as.integer(min_shared_organisms %||% 1L))
+        if (!is.finite(min_shared) || is.na(min_shared) || min_shared < 1L) {
+            min_shared <- 1L
+        }
         app_perf_mark(sched_perf, "start", "AUTO_BG")
         if (!requireNamespace("later", quietly = TRUE)) {
             app_perf_mark(sched_perf, "later package unavailable", "AUTO_BG")
@@ -954,7 +976,7 @@ init_autocomplete_domain <- function(
             current_choices <- aggregate_shared_gene_suggestions(
                 suggestions_by_path,
                 keys_by_path = keys_by_path,
-                min_shared_organisms = min_shared_organisms,
+                min_shared_organisms = min_shared,
                 max_total = max_total
             )
             publish_key <- paste(current_choices, collapse = "\r")
@@ -999,14 +1021,7 @@ init_autocomplete_domain <- function(
                 }
                 cache_map_check <<- geneAutocompleteCache_rv()
             }
-            if (length(cached) > 0 &&
-                (as.integer(min_shared_organisms %||% 1L) <= 1L ||
-                    length(aggregate_shared_gene_suggestions(
-                        suggestions_by_path,
-                        keys_by_path = keys_by_path,
-                        min_shared_organisms = min_shared_organisms,
-                        max_total = max_total
-                    )) > 0L)) {
+            if (length(cached) > 0 && min_shared <= 1L) {
                 publish_current_build_suggestions(reason = sprintf("path_%d", as.integer(length(suggestions_by_path))))
             }
             later::later(run_next, delay = 0.04)
@@ -1022,7 +1037,7 @@ init_autocomplete_domain <- function(
                 }
             }
 
-            if (next_idx > length(paths) || (as.integer(min_shared_organisms %||% 1L) <= 1L && length(all_suggestions) >= max_total)) {
+            if (next_idx > length(paths) || (min_shared <= 1L && length(all_suggestions) >= max_total)) {
                 final_choices <- publish_current_build_suggestions(reason = "final")
                 app_perf_mark(sched_perf, sprintf("done final_choices=%d", as.integer(length(final_choices))), "AUTO_BG")
                 return(invisible(TRUE))
@@ -1031,7 +1046,7 @@ init_autocomplete_domain <- function(
             p <- paths[[next_idx]]
             next_idx <<- next_idx + 1L
             app_perf_mark(sched_perf, sprintf("build %d/%d %s", as.integer(next_idx - 1L), as.integer(length(paths)), basename(as.character(p %||% ""))), "AUTO_BG")
-            remaining <- if (as.integer(min_shared_organisms %||% 1L) > 1L) {
+            remaining <- if (min_shared > 1L) {
                 as.integer(max_total)
             } else {
                 as.integer(max_total - length(all_suggestions))
@@ -1094,14 +1109,7 @@ init_autocomplete_domain <- function(
                 key_names[slot] <- path_key
                 names(suggestions_by_path) <<- suggestion_names
                 names(keys_by_path) <<- key_names
-                if (length(cached) > 0 &&
-                    (as.integer(min_shared_organisms %||% 1L) <= 1L ||
-                        length(aggregate_shared_gene_suggestions(
-                            suggestions_by_path,
-                            keys_by_path = keys_by_path,
-                            min_shared_organisms = min_shared_organisms,
-                            max_total = max_total
-                        )) > 0L)) {
+                if (length(cached) > 0 && min_shared <= 1L) {
                     publish_current_build_suggestions(reason = sprintf("cache_%d", as.integer(length(suggestions_by_path))))
                 }
             }
