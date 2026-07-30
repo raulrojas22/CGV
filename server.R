@@ -4281,6 +4281,13 @@ function(input, output, session) {
     emit_popup_status <- popupStatusDomain$emit_popup_status
     set_popup_loading <- popupStatusDomain$set_popup_loading
     close_popup_status <- popupStatusDomain$close_popup_status
+    lastz_patience_notice <- paste(
+        "LASTZ is computationally intensive and may take several minutes.",
+        "Keep CGV open and please wait until the process finishes."
+    )
+    lastz_progress_text <- function(status_text) {
+        paste(trimws(as.character(status_text %||% "")), lastz_patience_notice)
+    }
     if (!is.function(close_popup_status)) {
         close_popup_status <- function(clear = FALSE) {
             session$sendCustomMessage(
@@ -10381,7 +10388,13 @@ function(input, output, session) {
             scoring_rows <- cached$ranking %||% NULL
             if (!is.data.frame(scoring_rows) || nrow(scoring_rows) == 0L) {
                 total_jobs <- max(1L, length(ids) * max(length(ids) - 1L, 1L))
-                set_popup_loading(TRUE, context = "LASTZ Blocks", text = "Scoring candidate references\u2026 (0 / 0)")
+                set_popup_loading(
+                    TRUE,
+                    context = "LASTZ Blocks",
+                    text = lastz_progress_text(sprintf("Scoring candidate references\u2026 (0 / %d).", total_jobs)),
+                    headline = "Please be patient",
+                    auto_open = TRUE
+                )
                 on.exit(set_popup_loading(FALSE, context = "LASTZ Blocks"), add = TRUE)
                 progress_done <- 0L
                 scoring_rows <- {
@@ -10397,7 +10410,13 @@ function(input, output, session) {
                             set_popup_loading(
                                 TRUE,
                                 context = "LASTZ Blocks",
-                                text = sprintf("Scoring candidate references\u2026 (%d / %d)", progress_done, total_jobs)
+                                text = lastz_progress_text(sprintf(
+                                    "Scoring candidate references\u2026 (%d / %d).",
+                                    progress_done,
+                                    total_jobs
+                                )),
+                                headline = "Please be patient",
+                                auto_open = TRUE
                             )
                             qry_ctx <- ctx_all[[qid]] %||% NULL
                             if (is.null(qry_ctx)) {
@@ -10587,11 +10606,13 @@ function(input, output, session) {
             set_popup_loading(
                 TRUE,
                 context = "LASTZ Blocks",
-                text = sprintf(
-                    "Running %d LASTZ job%s in background.",
+                text = lastz_progress_text(sprintf(
+                    "Running %d LASTZ job%s in the background.",
                     length(query_ids),
                     if (length(query_ids) == 1L) "" else "s"
-                )
+                )),
+                headline = "Please be patient",
+                auto_open = TRUE
             )
 
             query_ids_local <- query_ids
@@ -11018,7 +11039,13 @@ function(input, output, session) {
             if (!is.data.frame(scoring_rows) || nrow(scoring_rows) == 0L) {
                 total_jobs <- max(1L, length(ids) * max(length(ids) - 1L, 1L))
                 progress_done_mp <- 0L
-                set_popup_loading(TRUE, context = "MultiPIP", text = "Scoring candidate references\u2026 (0 / 0)")
+                set_popup_loading(
+                    TRUE,
+                    context = "MultiPIP",
+                    text = lastz_progress_text(sprintf("Scoring candidate references\u2026 (0 / %d).", total_jobs)),
+                    headline = "Please be patient",
+                    auto_open = TRUE
+                )
                 on.exit(set_popup_loading(FALSE, context = "MultiPIP"), add = TRUE)
                 scoring_rows <- {
                     candidate_rows <- lapply(ids, function(ref_id) {
@@ -11039,7 +11066,13 @@ function(input, output, session) {
                             set_popup_loading(
                                 TRUE,
                                 context = "MultiPIP",
-                                text = sprintf("Scoring candidate references\u2026 (%d / %d)", progress_done_mp, total_jobs)
+                                text = lastz_progress_text(sprintf(
+                                    "Scoring candidate references\u2026 (%d / %d).",
+                                    progress_done_mp,
+                                    total_jobs
+                                )),
+                                headline = "Please be patient",
+                                auto_open = TRUE
                             )
                             qry_ctx <- ctx_all[[qid]] %||% NULL
                             if (is.null(qry_ctx)) {
@@ -11234,11 +11267,13 @@ function(input, output, session) {
             set_popup_loading(
                 TRUE,
                 context = "MultiPIP",
-                text = sprintf(
+                text = lastz_progress_text(sprintf(
                     "Running %d MultiPIP LASTZ job%s.",
                     length(query_ids),
                     if (length(query_ids) == 1L) "" else "s"
-                )
+                )),
+                headline = "Please be patient",
+                auto_open = TRUE
             )
 
             query_ids_local <- query_ids
@@ -20290,12 +20325,33 @@ function(input, output, session) {
         req(identical(tolower(trimws(as.character(input$homo_visual_mode %||% ""))), "pip_blocks"))
         shinyjs::disable("homo_pip_run_alignments")
         on.exit(shinyjs::enable("homo_pip_run_alignments"), add = TRUE)
+        set_popup_loading(
+            TRUE,
+            context = "Multi-Gene LASTZ",
+            text = lastz_progress_text("Running local transcript alignments."),
+            headline = "Please be patient",
+            auto_open = TRUE
+        )
+        on.exit(set_popup_loading(FALSE, context = "Multi-Gene LASTZ"), add = TRUE)
         homoPipLocalAlignmentState(list(status = "running", runs = list(), contexts = homoLastzLocusContexts(input$homo_pip_span %||% "gene"), reference_id = homoCanonicalReferencePlotId(), query_ids = character(0), stamp = as.character(Sys.time())))
         state <- tryCatch(
             run_homo_local_lastz("blocks", span_mode = input$homo_pip_span %||% "gene"),
             error = function(e) list(status = "error", error = as.character(e$message %||% "unknown error"), runs = list(), contexts = list(), reference_id = homoCanonicalReferencePlotId(), query_ids = character(0), stamp = as.character(Sys.time()))
         )
         homoPipLocalAlignmentState(state)
+        if (identical(state$status, "done")) {
+            emit_popup_status("Multi-Gene LASTZ", "Local LASTZ alignments finished.", tone = "success", clear = TRUE)
+        } else {
+            emit_popup_status(
+                "Multi-Gene LASTZ",
+                paste0(
+                    "Local LASTZ alignments did not finish",
+                    if (nzchar(trimws(as.character(state$error %||% "")))) paste0(": ", state$error) else "."
+                ),
+                tone = if (identical(state$status, "error")) "error" else "warning",
+                clear = TRUE
+            )
+        }
     }, ignoreInit = TRUE)
 
     observeEvent(input$homo_multipip_run_alignments, {
@@ -20303,12 +20359,33 @@ function(input, output, session) {
         req(identical(tolower(trimws(as.character(input$homo_visual_mode %||% ""))), "pip_multipip"))
         shinyjs::disable("homo_multipip_run_alignments")
         on.exit(shinyjs::enable("homo_multipip_run_alignments"), add = TRUE)
+        set_popup_loading(
+            TRUE,
+            context = "Multi-Gene MultiPIP",
+            text = lastz_progress_text("Running local transcript alignments."),
+            headline = "Please be patient",
+            auto_open = TRUE
+        )
+        on.exit(set_popup_loading(FALSE, context = "Multi-Gene MultiPIP"), add = TRUE)
         homoMultipipLocalAlignmentState(list(status = "running", runs = list(), contexts = homoLastzLocusContexts(input$homo_multipip_span %||% "gene"), reference_id = homoCanonicalReferencePlotId(), query_ids = character(0), stamp = as.character(Sys.time())))
         state <- tryCatch(
             run_homo_local_lastz("multipip", span_mode = input$homo_multipip_span %||% "gene"),
             error = function(e) list(status = "error", error = as.character(e$message %||% "unknown error"), runs = list(), contexts = list(), reference_id = homoCanonicalReferencePlotId(), query_ids = character(0), stamp = as.character(Sys.time()))
         )
         homoMultipipLocalAlignmentState(state)
+        if (identical(state$status, "done")) {
+            emit_popup_status("Multi-Gene MultiPIP", "Local MultiPIP alignments finished.", tone = "success", clear = TRUE)
+        } else {
+            emit_popup_status(
+                "Multi-Gene MultiPIP",
+                paste0(
+                    "Local MultiPIP alignments did not finish",
+                    if (nzchar(trimws(as.character(state$error %||% "")))) paste0(": ", state$error) else "."
+                ),
+                tone = if (identical(state$status, "error")) "error" else "warning",
+                clear = TRUE
+            )
+        }
     }, ignoreInit = TRUE)
 
     homo_reference_window_features <- function(ref_ctx) {

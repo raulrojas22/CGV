@@ -78,7 +78,11 @@ init_popup_status_domain <- function(session, as_text_one_fn = NULL) {
         invisible(NULL)
     }
 
-    set_popup_loading <- function(active = TRUE, context = "Status", text = NULL, headline = NULL) {
+    set_popup_loading <- function(active = TRUE,
+                                  context = "Status",
+                                  text = NULL,
+                                  headline = NULL,
+                                  auto_open = FALSE) {
         ctx_out <- as_text_one_safe(as.character(context %||% "Status"))
         text_out <- as_text_one_safe(as.character(text %||% if (isTRUE(active)) "Working..." else ""))
         headline_out <- as_text_one_safe(as.character(headline %||% ""))
@@ -88,7 +92,8 @@ init_popup_status_domain <- function(session, as_text_one_fn = NULL) {
                 active = isTRUE(active),
                 context = ctx_out,
                 text = text_out,
-                headline = headline_out
+                headline = headline_out,
+                auto_open = isTRUE(auto_open)
             )
         )
         invisible(NULL)

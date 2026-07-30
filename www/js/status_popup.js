@@ -10,6 +10,7 @@
   var loadingContext = '';
   var loadingStartedAt = null;
   var loadingTimer = null;
+  var loadingAutoOpened = false;
 
   function escapeHtml(v) {
     return String(v)
@@ -410,6 +411,7 @@
     if (!popup) return;
 
     var active = !!(message && message.active);
+    var autoOpen = !!(message && message.auto_open);
     var text = (message && message.text !== undefined && message.text !== null) ? String(message.text) : '';
     var headline = (message && message.headline !== undefined && message.headline !== null) ? String(message.headline).trim() : '';
     var textTranslated = txt(text);
@@ -418,6 +420,7 @@
     if (isStartingNewRun) {
       resetPopupState(popup, logEl, loaderTextEl);
       loadingStartedAt = new Date();
+      loadingAutoOpened = false;
     }
     if (active) {
       loadingContext = (message && message.context) ? String(message.context) : 'Status';
@@ -439,9 +442,13 @@
 
     if (active) {
       clearAutoCloseTimer();
+      popup.classList.add('loading');
       if (manualOpen) {
         popup.classList.add('open');
         syncPopupBounds(popup);
+      } else if (autoOpen && isStartingNewRun) {
+        openPopup(popup, { manual: false });
+        loadingAutoOpened = true;
       }
       setLoadingActive(true);
       if (loadingTimer) clearInterval(loadingTimer);
@@ -454,8 +461,15 @@
         }
       }, 1000);
     } else {
+      var closeTransientPopup = loadingAutoOpened &&
+        popup.classList.contains('loading') &&
+        !manualOpen;
       popup.classList.remove('loading');
       setLoadingActive(false);
+      if (closeTransientPopup) {
+        closePopup(popup);
+      }
+      loadingAutoOpened = false;
       if (loadingTimer) {
         clearInterval(loadingTimer);
         loadingTimer = null;
@@ -477,6 +491,7 @@
     setLoadingActive(false);
     loadingStartedAt = null;
     loadingContext = '';
+    loadingAutoOpened = false;
     if (loadingTimer) {
       clearInterval(loadingTimer);
       loadingTimer = null;

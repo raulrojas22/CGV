@@ -19102,6 +19102,157 @@ html[data-app-theme='dark'] .home-glance-note {
   padding-right: 3px;
 }
 
+.desktop-organism-remove-panel {
+  width: 100%;
+  max-width: 760px;
+  height: auto;
+  max-height: 760px;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+}
+
+.desktop-organism-removal-intro {
+  display: grid;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid #dfe7ed;
+  border-radius: 7px;
+  background: #f8fafb;
+}
+
+.desktop-organism-removal-intro p {
+  margin: 0;
+  color: #5d6d7e;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.desktop-organism-select-all {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  width: fit-content;
+  margin: 0;
+  color: #334c60;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.desktop-organism-removal-checkbox,
+.desktop-organism-select-all input {
+  width: 17px;
+  height: 17px;
+  margin: 0;
+  accent-color: #18bc9c;
+}
+
+.desktop-organism-removal-list {
+  min-height: 0;
+  display: grid;
+  gap: 8px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 3px;
+}
+
+.desktop-organism-removal-option {
+  display: grid;
+  grid-template-columns: auto 42px minmax(0, 1fr);
+  align-items: center;
+  gap: 11px;
+  min-height: 68px;
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid #d8e0e6;
+  border-radius: 7px;
+  background: #f8fafb;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
+}
+
+.desktop-organism-removal-option:hover {
+  border-color: #abd8ce;
+  background: #f1fbf8;
+}
+
+.desktop-organism-removal-option.is-selected {
+  border-color: #65cdb8;
+  background: #eaf9f5;
+}
+
+.desktop-organism-removal-option img {
+  width: 38px;
+  height: 38px;
+  object-fit: contain;
+}
+
+.desktop-organism-removal-body {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.desktop-organism-removal-body strong,
+.desktop-organism-removal-body small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.desktop-organism-removal-body strong {
+  color: #17212b;
+  font-size: 13px;
+}
+
+.desktop-organism-removal-body small {
+  color: #687d8e;
+  font-size: 11px;
+}
+
+.desktop-organism-removal-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 2px;
+}
+
+.desktop-organism-cancel-button {
+  width: auto;
+  min-width: 86px;
+  padding: 7px 13px;
+}
+
+.desktop-organism-remove-selected {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-width: 150px;
+  min-height: 34px;
+  border: 1px solid #c95151;
+  border-radius: 7px;
+  background: #b83e3e;
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.desktop-organism-remove-selected:hover,
+.desktop-organism-remove-selected:focus {
+  border-color: #a53333;
+  background: #a53333;
+  color: #ffffff;
+}
+
+.desktop-organism-remove-selected:disabled {
+  border-color: #d9e2ea;
+  background: #e9eef2;
+  color: #8a99a6;
+  cursor: not-allowed;
+}
+
 @keyframes desktop-progress-sweep {
   0% {
     transform: translateX(-110%);
@@ -19133,6 +19284,8 @@ html[data-app-theme="dark"] .desktop-organism-paths span {
 html[data-app-theme="dark"] .desktop-organism-icon-wrap,
 html[data-app-theme="dark"] .desktop-organism-paths > div,
 html[data-app-theme="dark"] .desktop-organism-chip,
+html[data-app-theme="dark"] .desktop-organism-removal-intro,
+html[data-app-theme="dark"] .desktop-organism-removal-option,
 html[data-app-theme="dark"] .desktop-organism-search,
 html[data-app-theme="dark"] .desktop-organism-filter,
 html[data-app-theme="dark"] .desktop-organism-icon-button {
@@ -19147,8 +19300,21 @@ html[data-app-theme="dark"] .desktop-organism-modal-panel {
 
 html[data-app-theme="dark"] .desktop-organism-modal-header h4,
 html[data-app-theme="dark"] .desktop-organism-search,
-html[data-app-theme="dark"] .desktop-organism-filter {
+html[data-app-theme="dark"] .desktop-organism-filter,
+html[data-app-theme="dark"] .desktop-organism-select-all,
+html[data-app-theme="dark"] .desktop-organism-removal-body strong {
   color: #ecf3f8;
+}
+
+html[data-app-theme="dark"] .desktop-organism-removal-intro p,
+html[data-app-theme="dark"] .desktop-organism-removal-body small {
+  color: #b9c7d3;
+}
+
+html[data-app-theme="dark"] .desktop-organism-removal-option:hover,
+html[data-app-theme="dark"] .desktop-organism-removal-option.is-selected {
+  border-color: rgba(79, 212, 181, 0.58);
+  background: rgba(24, 188, 156, 0.12);
 }
 
 html[data-app-theme="dark"] .desktop-organism-reset {
@@ -19185,6 +19351,9 @@ html[data-app-theme="dark"] .desktop-organism-reset {
     width: calc(100vw - 24px);
     max-height: calc(100vh - 24px);
     padding: 14px;
+  }
+  .desktop-organism-remove-panel {
+    height: auto;
   }
   .desktop-organism-modal-header,
 .desktop-organism-modal-controls {

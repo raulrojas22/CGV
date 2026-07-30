@@ -1824,14 +1824,23 @@ init_shared_analysis_domain <- function(input,
                 ),
                 shiny::uiOutput("share_analysis_result_ui"),
                 shiny::div(
+                    class = "cgv-share-callout cgv-share-callout-warning",
+                    shiny::icon("clock"),
+                    shiny::strong("Report generation can take several minutes."),
+                    shiny::p(
+                        "This is one of CGV's most intensive processes. Keep CGV and this window open, and please wait until it finishes."
+                    )
+                ),
+                shiny::div(
                     class = "cgv-share-options cgv-share-capture-mode",
                     shiny::radioButtons(
                         "share_capture_mode",
                         "Report detail",
-                        choices = c(
-                            "Complete — generate every available view (recommended)" = "complete",
-                            "Fast — include only views already rendered" = "fast"
+                        choiceNames = list(
+                            shiny::HTML("Complete &mdash; generate every available view (recommended)"),
+                            shiny::HTML("Fast &mdash; include only views already rendered")
                         ),
+                        choiceValues = c("complete", "fast"),
                         selected = "complete"
                     ),
                     shiny::conditionalPanel(
@@ -1906,7 +1915,9 @@ init_shared_analysis_domain <- function(input,
                             "Run LASTZ and MultiPIP before creating the report",
                             value = FALSE
                         ),
-                        shiny::p("Optional. CGV will run the compatible Cross-Species comparison and include both completed alignment views.")
+                        shiny::p(
+                            "Optional and computationally intensive. CGV will run the compatible Cross-Species comparison, which can add several minutes, and include both completed alignment views."
+                        )
                         )
                         if (isTRUE(state$preview$multi_gene > 0L) &&
                             isTRUE(state$preview$cross_species > 0L)) {
@@ -2057,7 +2068,7 @@ init_shared_analysis_domain <- function(input,
         pending$phase <- "lastz"
         state$pending <- pending
         report_perf_mark(pending, "lastz_phase_started")
-        state$busy_message <- "Running and capturing LASTZ and MultiPIP. This can take several minutes…"
+        state$busy_message <- "Running and capturing LASTZ and MultiPIP. This can take several minutes; keep CGV open and please wait…"
         lastz_result <- if (is.function(run_lastz_fn)) {
             tryCatch(
                 run_lastz_fn(pending$lastz_contexts),
@@ -2102,7 +2113,7 @@ init_shared_analysis_domain <- function(input,
         synteny_views <- length(pending$homo_synteny_groups %||% list()) +
             as.integer("ortho" %in% (pending$synteny_contexts %||% character(0)))
         state$busy_message <- sprintf(
-            "Rendering %d aligned synteny view(s) for the complete report…",
+            "Rendering %d aligned synteny view(s) for the complete report. This can take several minutes; please wait…",
             synteny_views
         )
         session$sendCustomMessage("cgv:prepare-synteny-for-report", list(
@@ -2228,9 +2239,9 @@ init_shared_analysis_domain <- function(input,
         state$package_context <- NULL
         state$artifacts <- NULL
         state$busy_message <- if (complete_capture) {
-            "Preparing a complete report. Hidden views will be generated; this can take several minutes…"
+            "Preparing a complete report. This intensive process can take several minutes; keep CGV open and please wait…"
         } else {
-            "Capturing the views that are already available and publishing the report…"
+            "Building the report. This can take several minutes; keep CGV open and please wait…"
         }
         if (isTRUE(state$pending$run_lastz)) {
             start_lastz_phase(state$pending)

@@ -212,7 +212,7 @@ cgv_desktop_downloads_page <- function() {
         div(
           span(class = "cgv-download-eyebrow", "Choose your platform"),
           h2("One workspace. Three operating systems."),
-          p("CGV checks this device and highlights the best match. Download buttons remain disabled until a verified public installer is attached to an official release.")
+          p("CGV checks this device and highlights the best match. Download buttons activate only for installers listed with a verified SHA-256 checksum in the official public release manifest.")
         ),
         div(
           id = "cgv-download-release-status",
@@ -297,32 +297,32 @@ cgv_desktop_downloads_page <- function() {
           )
         ),
         article(
-          class = "cgv-download-platform-card is-development",
+          class = "cgv-download-platform-card",
           `data-cgv-platform-card` = "windows",
           div(class = "cgv-download-recommended-badge", tags$i(class = "fas fa-wand-magic-sparkles"), span("Recommended for this device")),
           div(
             class = "cgv-download-platform-head",
             span(class = "cgv-download-platform-icon", tags$i(class = "fab fa-windows")),
-            span(class = "cgv-download-platform-state", "In development")
+            span(class = "cgv-download-platform-state", "Installer pending")
           ),
           span(class = "cgv-download-platform-kicker", "Desktop"),
           h3("Windows"),
-          p("A signed Windows x64 installer is currently being prepared with the same private local runtime and workflows."),
+          p("A Windows x64 installer with the same private local runtime and CGV workflows."),
           div(
             class = "cgv-download-asset-list",
             div(
               class = "cgv-download-asset-row",
-              div(strong("Windows x64"), span("Windows 10 and 11 · signed setup")),
-              cgv_desktop_asset_action("windows-x64", "Coming soon")
+              div(strong("Windows x64"), span("Windows 10 and 11 · x64 setup")),
+              cgv_desktop_asset_action("windows-x64", "Setup pending")
             )
           ),
           tags$details(
             class = "cgv-download-install-guide",
-            tags$summary(tags$i(class = "fas fa-signature"), "Windows installation notes"),
+            tags$summary(tags$i(class = "fab fa-windows"), "Windows installation notes"),
             ul(
-              tags$li("Download the signed x64 setup only from this page or the official release center."),
+              tags$li("Download the x64 setup from this page."),
               tags$li("Run the setup and follow the installation wizard for your Windows account."),
-              tags$li("The public button will activate only when the signed installer is available.")
+              tags$li("CGV Desktop stores its runtime and workspace locally on your computer.")
             )
           )
         )
@@ -389,14 +389,14 @@ cgv_desktop_downloads_page <- function() {
         h2("Before you install"),
         div(class = "cgv-download-requirement", tags$i(class = "fab fa-apple"), div(strong("macOS"), span("64-bit Apple Silicon or Intel Mac; approve first launch in Privacy & Security when required."))),
         div(class = "cgv-download-requirement", tags$i(class = "fab fa-linux"), div(strong("Linux"), span("64-bit x86_64 system; AppImage or Debian/Ubuntu package support."))),
-        div(class = "cgv-download-requirement", tags$i(class = "fab fa-windows"), div(strong("Windows"), span("Windows 10 or 11 on x64 hardware; installer currently in development."))),
+        div(class = "cgv-download-requirement", tags$i(class = "fab fa-windows"), div(strong("Windows"), span("Windows 10 or 11 on x64 hardware."))),
         div(class = "cgv-download-requirement", tags$i(class = "fas fa-hard-drive"), div(strong("Storage"), span("Allow at least 2 GB for the app, plus space for the reference organisms you install.")))
       ),
       article(
         class = "cgv-download-info-card cgv-download-release-card",
         span(class = "cgv-download-eyebrow", "Current release"),
         h2(`data-cgv-release-title` = "true", "Public installers pending"),
-        p(`data-cgv-release-copy` = "true", "The download center is connected to official GitHub releases. It will display a version and enable only the assets that are actually public."),
+        p(`data-cgv-release-copy` = "true", "The download center reads the official CGV Desktop release manifest and enables only the verified assets that are actually public."),
         dl(
           div(dt("Version"), dd(`data-cgv-release-version` = "true", "Not published")),
           div(dt("Published"), dd(`data-cgv-release-date` = "true", "—")),
@@ -408,14 +408,6 @@ cgv_desktop_downloads_page <- function() {
           `data-cgv-release-notes` = "true",
           tags$li("Release notes will appear here when the first public installers are published.")
         ),
-        p(
-          class = "cgv-download-signing-note",
-          tags$i(class = "fas fa-shield-halved", `aria-hidden` = "true"),
-          span(
-            strong("Windows code signing. "),
-            "Free code signing provided by SignPath.io, certificate by SignPath Foundation."
-          )
-        ),
         div(
           class = "cgv-download-release-links",
           tags$a(
@@ -424,8 +416,8 @@ cgv_desktop_downloads_page <- function() {
             href = "https://github.com/raulrojas22/CGV-Desktop-Releases/releases",
             target = "_blank",
             rel = "noopener noreferrer",
-            tags$i(class = "fab fa-github"),
-            span("Open release center"),
+            tags$i(class = "fas fa-file-shield"),
+            span("Open release manifest"),
             tags$i(class = "fas fa-arrow-up-right-from-square")
           ),
           tags$a(
