@@ -9,6 +9,7 @@ const mainJsPath = path.join(desktopRoot, "src", "main.js");
 const mainJs = fs.readFileSync(mainJsPath, "utf8");
 const downloadJsPath = path.join(repoRoot, "www", "js", "cgv_desktop_downloads.js");
 const downloadUiPath = path.join(repoRoot, "R", "ui_desktop_downloads.R");
+const installerScriptPath = path.join(repoRoot, "regenerar-instalables.sh");
 
 const extraResources = (((packageJson || {}).build || {}).extraResources || []);
 const afterPack = (((packageJson || {}).build || {}).afterPack || "");
@@ -297,14 +298,35 @@ for (const requiredFragment of [
   "npm run build:linux:x64",
   "*-Linux-x86_64.AppImage",
   "*-Linux-amd64.deb",
-  "CGV-Desktop-1.1.0-Linux-x86_64.AppImage",
-  "CGV-Desktop-1.1.0-Linux-amd64.deb",
+  "id: release",
+  "node -p \"require('./package.json').version\"",
+  "CGV-Desktop-Linux-x64-${{ steps.release.outputs.version }}",
+  "CGV-Desktop-${{ steps.release.outputs.version }}-Linux-x86_64.AppImage",
+  "CGV-Desktop-${{ steps.release.outputs.version }}-Linux-amd64.deb",
   "--appimage-extract",
   "SHA256SUMS-linux-x64.txt",
   "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"
 ]) {
   if (!linuxWorkflow.includes(requiredFragment)) {
     throw new Error(`Linux workflow is missing required safeguard: ${requiredFragment}`);
+  }
+}
+
+if (!fs.existsSync(installerScriptPath)) throw new Error("Missing installer regeneration script.");
+const installerScript = fs.readFileSync(installerScriptPath, "utf8");
+if (installerScript.includes("--jq --arg")) {
+  throw new Error("Installer regeneration must not pass jq variables as gh run list options.");
+}
+for (const requiredFragment of [
+  "latest_workflow_run_id",
+  '--commit "$sha"',
+  "--event workflow_dispatch",
+  "run_id > after_id",
+  '(cd "$DESKTOP_DIR" && npm run build:mac:arm64)',
+  '(cd "$DESKTOP_DIR" && npm run build:mac:x64)'
+]) {
+  if (!installerScript.includes(requiredFragment)) {
+    throw new Error(`Installer regeneration is missing required safeguard: ${requiredFragment}`);
   }
 }
 

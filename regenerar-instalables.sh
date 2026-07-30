@@ -72,14 +72,29 @@ rm -rf "$FINAL_DIR"
 mkdir -p "$FINAL_DIR" "$LOGS_DIR"
 ok "Carpeta limpia: $FINAL_DIR"
 
-# ---------- helper: esperar a que aparezca el run de este commit ----------
+# ---------- helpers: identificar el run nuevo de este commit ----------
+latest_workflow_run_id() {
+  local workflow="$1" run_id
+  run_id=$(gh run list --workflow "$workflow" --repo "$REPO" --limit 1 \
+             --json databaseId --jq '.[0].databaseId // 0')
+  [[ "$run_id" =~ ^[0-9]+$ ]] \
+    || die "GitHub devolvió un ID de run inválido para $workflow: $run_id"
+  printf '%s\n' "$run_id"
+}
+
 wait_for_run_id() {
-  local workflow="$1" sha="$2" run_id=""
-  for _ in $(seq 1 24); do
-    run_id=$(gh run list --workflow "$workflow" --repo "$REPO" --limit 10 \
-               --json databaseId,headSha \
-               --jq --arg sha "$sha" '[.[] | select(.headSha == $sha)][0].databaseId // empty')
-    if [ -n "$run_id" ]; then echo "$run_id"; return 0; fi
+  local workflow="$1" sha="$2" after_id="${3:-0}" run_id=""
+  [[ "$after_id" =~ ^[0-9]+$ ]] || after_id=0
+
+  for _ in $(seq 1 36); do
+    run_id=$(gh run list --workflow "$workflow" --repo "$REPO" \
+               --commit "$sha" --event workflow_dispatch --limit 1 \
+               --json databaseId --jq '.[0].databaseId // empty') \
+      || return 1
+    if [[ "$run_id" =~ ^[0-9]+$ ]] && (( run_id > after_id )); then
+      printf '%s\n' "$run_id"
+      return 0
+    fi
     sleep 5
   done
   return 1
@@ -92,8 +107,9 @@ WINDOWS_RUN_ID=""
 # ---------- 2. Lanzar Linux en GitHub Actions ----------
 if [ "${SKIP_LINUX:-0}" != "1" ]; then
   say "2. Lanzando build de Linux en GitHub Actions"
+  LINUX_PREVIOUS_RUN_ID=$(latest_workflow_run_id desktop-linux.yml)
   gh workflow run desktop-linux.yml --repo "$REPO" --ref master
-  LINUX_RUN_ID=$(wait_for_run_id desktop-linux.yml "$HEAD_SHA") \
+  LINUX_RUN_ID=$(wait_for_run_id desktop-linux.yml "$HEAD_SHA" "$LINUX_PREVIOUS_RUN_ID") \
     || die "No apareció el run de Linux en GitHub."
   ok "Run Linux: https://github.com/$REPO/actions/runs/$LINUX_RUN_ID"
 fi
@@ -125,8 +141,9 @@ if [ "${SKIP_WINDOWS:-0}" != "1" ]; then
     git push origin "$TAG"
     ok "Tag $TAG creado y subido."
   fi
+  WINDOWS_PREVIOUS_RUN_ID=$(latest_workflow_run_id desktop-windows-release.yml)
   gh workflow run desktop-windows-release.yml --repo "$REPO" --ref "$TAG"
-  WINDOWS_RUN_ID=$(wait_for_run_id desktop-windows-release.yml "$HEAD_SHA") \
+  WINDOWS_RUN_ID=$(wait_for_run_id desktop-windows-release.yml "$HEAD_SHA" "$WINDOWS_PREVIOUS_RUN_ID") \
     || die "No apareció el run de Windows en GitHub."
   ok "Run Windows: https://github.com/$REPO/actions/runs/$WINDOWS_RUN_ID"
 fi
@@ -136,21 +153,23 @@ if [ "${SKIP_MAC:-0}" != "1" ]; then
   say "4. Compilando Mac arm64 + x64 (local, tarda ~30-40 min)"
   rm -rf "$DESKTOP_DIR/dist"
   mkdir -p "$DESKTOP_DIR/dist"
-  (
-    cd "$DESKTOP_DIR"
-    if ! npm run build:mac:arm64 2>&1 | tee "$LOGS_DIR/build-mac-arm64-$VERSION.log"; then
-      FAILURES+=("mac-arm64"); warn "Falló el build mac-arm64 (ver log en $LOGS_DIR)."
-    fi
-    if ! npm run build:mac:x64 2>&1 | tee "$LOGS_DIR/build-mac-x64-$VERSION.log"; then
-      FAILURES+=("mac-x64"); warn "Falló el build mac-x64 (ver log en $LOGS_DIR)."
-    fi
-  )
+  if ! (cd "$DESKTOP_DIR" && npm run build:mac:arm64) 2>&1 \
+       | tee "$LOGS_DIR/build-mac-arm64-$VERSION.log"; then
+    FAILURES+=("mac-arm64"); warn "Falló el build mac-arm64 (ver log en $LOGS_DIR)."
+  fi
+  if ! (cd "$DESKTOP_DIR" && npm run build:mac:x64) 2>&1 \
+       | tee "$LOGS_DIR/build-mac-x64-$VERSION.log"; then
+    FAILURES+=("mac-x64"); warn "Falló el build mac-x64 (ver log en $LOGS_DIR)."
+  fi
   for arch in arm64 x64; do
     for ext in dmg zip; do
       src="$DESKTOP_DIR/dist/CGV-Desktop-$VERSION-macOS-$arch.$ext"
       if [ -f "$src" ]; then
         cp "$src" "$FINAL_DIR/"
         ok "Copiado $(basename "$src")"
+      else
+        FAILURES+=("missing:mac-$arch.$ext")
+        warn "No se generó $(basename "$src")."
       fi
     done
   done

@@ -10,6 +10,7 @@ NAS_USER="${NAS_USER:-truenas_admin}"
 NAS_HOST="${NAS_HOST:-192.168.1.200}"
 NAS_PATH="${NAS_PATH:-/mnt/Datos4raro/cgv}"
 LOCAL_APP="/Users/rarojas/Documents/A_FULLAPP/"
+LOCAL_ENV_FILE="${LOCAL_APP}.env.local"
 TUNNEL_NAME="cgv"
 TUNNEL_CONFIG="${TUNNEL_CONFIG:-/home/${NAS_USER}/.cloudflared/config.yml}"
 REMOTE_DOCKER="${REMOTE_DOCKER:-docker}"
@@ -108,6 +109,10 @@ echo ""
 
 # --- Paso 1: Sincronizar codigo ---
 echo "[1/5] Sincronizando codigo al NAS..."
+if [[ ! -f "${LOCAL_ENV_FILE}" ]] || ! grep -Eq '^FEEDBACK_RESEND_API_KEY=.+$' "${LOCAL_ENV_FILE}"; then
+  echo "ERROR: falta FEEDBACK_RESEND_API_KEY en ${LOCAL_ENV_FILE}; no se desplegara un formulario de feedback inoperante." >&2
+  exit 1
+fi
 rsync -avz --progress --delete \
   -e "ssh -S $SSH_SOCK" \
   --exclude=annotations --exclude=genomes \
@@ -120,6 +125,11 @@ rsync -avz --progress --delete \
   --exclude='*.docx' --exclude='.env.local' \
   "$LOCAL_APP" \
   "${NAS_USER}@${NAS_HOST}:${NAS_PATH}/app/"
+rsync -az --chmod=F600 \
+  -e "ssh -S $SSH_SOCK" \
+  "${LOCAL_ENV_FILE}" \
+  "${NAS_USER}@${NAS_HOST}:${NAS_PATH}/app/.env.local"
+nssh "chmod 600 '${NAS_PATH}/app/.env.local'"
 
 echo ""
 echo "  Verificando screencasts en NAS..."
@@ -164,7 +174,7 @@ nssh "
   else
     echo '  Reutilizando ${CGV_DEPS_IMAGE}; no se instalarán paquetes R.'
   fi
-  CGV_DEPS_IMAGE='${CGV_DEPS_IMAGE}' ${REMOTE_DOCKER} compose up -d --build
+  CGV_DEPS_IMAGE='${CGV_DEPS_IMAGE}' ${REMOTE_DOCKER} compose --env-file .env --env-file .env.local up -d --build
 "
 
 # --- Paso 4: Esperar a que la app este healthy ---

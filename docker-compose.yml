@@ -44,9 +44,6 @@ services:
       CGV_NCBI_DOWNLOADS_DIR: "/app/ncbi_downloads"
       CGV_NCBI_CACHE_MAX_GB: "${CGV_NCBI_CACHE_MAX_GB:-50}"
       CGV_NCBI_USAGE_LOG_ENABLED: "${CGV_NCBI_USAGE_LOG_ENABLED:-true}"
-      FEEDBACK_RESEND_API_KEY: "${FEEDBACK_RESEND_API_KEY:-}"
-      FEEDBACK_TO_EMAIL: "${FEEDBACK_TO_EMAIL:-}"
-      FEEDBACK_FROM_EMAIL: "${FEEDBACK_FROM_EMAIL:-}"
     volumes:
       - ${CGV_ANNOTATIONS_DIR:-./annotations}:/app/annotations:ro
       - ${CGV_GENOMES_DIR:-./genomes}:/app/genomes:ro

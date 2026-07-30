@@ -13984,6 +13984,18 @@ function(input, output, session) {
             source_panel <- as.character(input$navtabs %||% preferredSearchWorkflow() %||% "homologous")
         }
         if (!source_panel %in% c("homologous", "orthologous")) source_panel <- "homologous"
+        if (identical(source_panel, "orthologous")) {
+            emit_popup_status(
+                "Cross-Species Gene Search",
+                paste0(
+                    "Genomic neighbors and overlaps can be inspected here, but adding them below is available only in Multi-Gene Search. ",
+                    "A cross-species result must first be confirmed across the selected organisms."
+                ),
+                tone = "info",
+                clear = FALSE
+            )
+            return(invisible(NULL))
+        }
 
         relation_detail <- scalar_text(payload$detail)
         relation_note <- if (nzchar(relation_detail)) paste0(" (", relation_detail, ")") else ""
@@ -17788,7 +17800,7 @@ function(input, output, session) {
                 is_preloaded_job <- identical(det_input_source, "preloaded") ||
                     identical(det_source, "preloaded_catalog") ||
                     identical(source_mode, "preloaded")
-                file_plotted_this_result <- FALSE
+                plotted_count_before_result <- plotted_count
 
                 isolate({
                     matched_annotation_name <- normalize_display_id(lookup$matched_gene_name %||% lookup$best_alias_used %||% lookup$display_gene_name %||% gene_name)
@@ -18007,7 +18019,6 @@ function(input, output, session) {
                         local_new_ids <- c(local_new_ids, next_id)
                         phase_added_ids <- c(phase_added_ids, id_chr)
                         plotted_count <<- plotted_count + 1L
-                        file_plotted_this_result <<- TRUE
                         added_plot_ids <<- c(added_plot_ids, next_id)
                         plotted_output_ids <<- c(plotted_output_ids, sprintf("plot_ortho_%s-plot", as.character(next_id)))
                         metrics_plot_ids <- c(metrics_plot_ids, id_chr)
@@ -18049,7 +18060,8 @@ function(input, output, session) {
                         )
                     }
                 })
-                if (isTRUE(file_plotted_this_result) && is.finite(j) && !is.na(j) && j > 0L) {
+                if (plotted_count > plotted_count_before_result &&
+                    is.finite(j) && !is.na(j) && j > 0L) {
                     plotted_file_indices <<- unique(c(plotted_file_indices, as.integer(j)))
                 }
             }
@@ -28617,6 +28629,37 @@ function(input, output, session) {
             div(
                 class = "summary-context-actions",
                 span(class = "summary-context-gene-hint", gene_hint),
+                if (isTRUE(show_cross_species_scope_notice)) {
+                    tags$details(
+                        class = "summary-cross-species-scope",
+                        tags$summary(
+                            class = "summary-cross-species-scope-trigger",
+                            title = "Learn what is included in Cross-Species results",
+                            `aria-label` = "About Cross-Species result scope",
+                            icon("info-circle"),
+                            span(class = "summary-cross-species-scope-trigger-label", "About results")
+                        ),
+                        div(
+                            class = "summary-cross-species-scope-panel",
+                            role = "note",
+                            div(
+                                class = "summary-cross-species-scope-heading",
+                                icon("info-circle"),
+                                span("Comparison scope")
+                            ),
+                            tags$p(
+                                "Cross-Species shows the selected gene when the same gene name or a resolved alias is found in at least two selected organisms."
+                            ),
+                            tags$p(
+                                class = "summary-cross-species-scope-takeaway",
+                                tags$strong("There may be additional family members in each organism."),
+                                " This view does not list members found only within one organism. Use Multi-Gene Search to explore a gene family within a single organism."
+                            )
+                        )
+                    )
+                } else {
+                    NULL
+                },
                 if (length(id_vec) > 0L) {
                     actionButton(
                         inputId = if (isTRUE(is_cross_species_header)) {
@@ -28642,23 +28685,6 @@ function(input, output, session) {
                     span(class = "app-notification-center-badge", "0")
                 )
             ),
-            if (isTRUE(show_cross_species_scope_notice)) {
-                div(
-                    class = "summary-cross-species-scope-notice",
-                    icon("info-circle"),
-                    div(
-                        class = "summary-cross-species-scope-copy",
-                        tags$strong("Comparison view — not a complete family inventory."),
-                        span(
-                            " Cross-Species displays the selected gene when the same gene name or a resolved alias is found in at least two selected organisms. ",
-                            "It does not list additional family members found only within individual organisms. ",
-                            "To explore a gene family within one organism, use Multi-Gene Search."
-                        )
-                    )
-                )
-            } else {
-                NULL
-            },
             if (!is.null(mode_control)) {
                 div(class = "summary-context-mode-slot", mode_control)
             } else {
@@ -34354,7 +34380,7 @@ function(input, output, session) {
     feedback_submit_log <- reactiveVal(numeric(0))
     feedback_last_signature <- reactiveVal("")
     feedback_last_signature_at <- reactiveVal(as.POSIXct(NA))
-    feedback_submission_dir <- file.path("cache", "feedback_submissions")
+    feedback_submission_dir <- file.path(get_cgv_cache_root("."), "feedback_submissions")
     if (!dir.exists(feedback_submission_dir)) {
         dir.create(feedback_submission_dir, recursive = TRUE, showWarnings = FALSE)
     }
@@ -34364,15 +34390,6 @@ function(input, output, session) {
             feedback_viewed_at(Sys.time())
         }
     }, ignoreInit = FALSE)
-
-    normalize_feedback_text <- function(x) {
-        txt <- gsub("\r\n?", "\n", as.character(x %||% ""))
-        trimws(txt)
-    }
-
-    is_valid_feedback_email <- function(x) {
-        grepl("^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$", x, perl = TRUE)
-    }
 
     build_feedback_page_url <- function(session) {
         protocol <- as.character(session$clientData$url_protocol %||% "")
@@ -34394,51 +34411,6 @@ function(input, output, session) {
         )
 
         paste0(origin, pathname, search, hash)
-    }
-
-    send_feedback_notification <- function(payload) {
-        api_key   <- Sys.getenv("FEEDBACK_RESEND_API_KEY", "")
-        to_email  <- Sys.getenv("FEEDBACK_TO_EMAIL", "")
-        from_addr <- Sys.getenv("FEEDBACK_FROM_EMAIL", "CGV Feedback <onboarding@resend.dev>")
-
-        if (!nzchar(api_key) || !nzchar(to_email)) {
-            message("[Feedback] Email skipped — FEEDBACK_RESEND_API_KEY or FEEDBACK_TO_EMAIL not configured.")
-            return(invisible(FALSE))
-        }
-
-        body <- list(
-            from    = from_addr,
-            to      = list(to_email),
-            subject = payload$subject,
-            text    = payload$message
-        )
-
-        result <- tryCatch({
-            resp <- httr2::request("https://api.resend.com/emails") |>
-                httr2::req_headers(
-                    Authorization  = paste("Bearer", api_key),
-                    `Content-Type` = "application/json"
-                ) |>
-                httr2::req_body_json(body) |>
-                httr2::req_timeout(10) |>
-                httr2::req_error(is_error = function(resp) FALSE) |>
-                httr2::req_perform()
-
-            status <- httr2::resp_status(resp)
-            if (status >= 200L && status < 300L) {
-                message("[Feedback] Email notification sent (status ", status, ").")
-                TRUE
-            } else {
-                body_txt <- tryCatch(httr2::resp_body_string(resp), error = function(e) "")
-                message("[Feedback] Email notification failed. Status: ", status, " — ", body_txt)
-                FALSE
-            }
-        }, error = function(e) {
-            message("[Feedback] Email send error: ", e$message)
-            FALSE
-        })
-
-        invisible(result)
     }
 
     reset_feedback_form <- function(is_bug) {
@@ -34472,13 +34444,18 @@ function(input, output, session) {
         now <- Sys.time()
         now_num <- as.numeric(now)
 
-        full_name <- normalize_feedback_text(input$feedback_name)
-        email <- normalize_feedback_text(input$feedback_email)
-        honeypot <- normalize_feedback_text(input$feedback_website)
+        if (!input$feedback_type %in% c("bug", "suggestion")) {
+            notify_feedback("Please select a valid feedback type.", tone = "error")
+            return()
+        }
 
-        title <- if (is_bug) normalize_feedback_text(input$bug_title) else normalize_feedback_text(input$sugg_title)
-        primary_details <- if (is_bug) normalize_feedback_text(input$bug_steps) else normalize_feedback_text(input$sugg_problem)
-        secondary_details <- if (is_bug) normalize_feedback_text(input$bug_expected) else normalize_feedback_text(input$sugg_idea)
+        full_name <- feedback_normalize_header_text(input$feedback_name)
+        email <- feedback_normalize_header_text(input$feedback_email)
+        honeypot <- feedback_normalize_text(input$feedback_website)
+
+        title <- if (is_bug) feedback_normalize_header_text(input$bug_title) else feedback_normalize_header_text(input$sugg_title)
+        primary_details <- if (is_bug) feedback_normalize_text(input$bug_steps) else feedback_normalize_text(input$sugg_problem)
+        secondary_details <- if (is_bug) feedback_normalize_text(input$bug_expected) else feedback_normalize_text(input$sugg_idea)
 
         if (nzchar(honeypot)) {
             notify_feedback("Unable to send feedback right now. Please reload the page and try again.", tone = "error")
@@ -34510,7 +34487,12 @@ function(input, output, session) {
             return()
         }
 
-        if (!is_valid_feedback_email(email)) {
+        if (nchar(full_name, type = "chars") > 120L) {
+            notify_feedback("Please shorten your name to 120 characters or fewer.", tone = "error")
+            return()
+        }
+
+        if (!feedback_is_valid_email(email)) {
             notify_feedback("Please provide a valid email address so we can reply if needed.", tone = "error")
             return()
         }
@@ -34520,11 +34502,23 @@ function(input, output, session) {
             return()
         }
 
+        if (nchar(title, type = "chars") > 160L) {
+            notify_feedback("Please shorten the title to 160 characters or fewer.", tone = "error")
+            return()
+        }
+
         if (nchar(primary_details) < 15) {
             notify_feedback("Please provide a bit more detail so we can understand the issue or suggestion.", tone = "error")
             return()
         }
 
+        if (
+            nchar(primary_details, type = "chars") > 10000L ||
+            nchar(secondary_details, type = "chars") > 10000L
+        ) {
+            notify_feedback("Please keep each feedback detail field under 10,000 characters.", tone = "error")
+            return()
+        }
 
         signature <- paste(
             tolower(c(input$feedback_type, full_name, email, title, primary_details, secondary_details)),
@@ -34546,8 +34540,15 @@ function(input, output, session) {
         feedback_label <- if (is_bug) "Bug report" else "Feature suggestion"
         details_header <- if (is_bug) "What happened / steps to reproduce" else "Current limitation or need"
         followup_header <- if (is_bug) "Expected behavior" else "Requested improvement"
+        file_stub <- paste0(
+            format(now, "%Y%m%d_%H%M%S"),
+            "_",
+            paste(sample(c(letters, LETTERS, 0:9), 6, replace = TRUE), collapse = "")
+        )
+        submission_id <- paste0("feedback_", file_stub)
 
         message_lines <- Filter(Negate(is.null), list(
+            sprintf("Submission ID: %s", submission_id),
             sprintf("Reporter: %s", full_name),
             sprintf("Reply email: %s", email),
             sprintf("Feedback type: %s", feedback_label),
@@ -34574,7 +34575,8 @@ function(input, output, session) {
             app_section = app_section,
             app_version = "Comparative Gene Viewer",
             submitted_at = submitted_at,
-            page_url = page_url
+            page_url = page_url,
+            submission_id = submission_id
         )
 
         if (is_bug) {
@@ -34585,21 +34587,114 @@ function(input, output, session) {
             payload$requested_improvement <- secondary_details
         }
 
-        file_stub <- paste0(
-            format(now, "%Y%m%d_%H%M%S"),
-            "_",
-            paste(sample(c(letters, LETTERS, 0:9), 6, replace = TRUE), collapse = "")
-        )
         save_path <- file.path(feedback_submission_dir, paste0("feedback_", file_stub, ".rds"))
 
         tryCatch({
+            payload$delivery <- list(
+                state = "pending",
+                attempted_at = format(now, "%Y-%m-%d %H:%M:%S %Z")
+            )
             saveRDS(payload, save_path)
-            send_feedback_notification(payload)
-            feedback_submit_log(c(recent_submissions, now_num))
-            feedback_last_signature(signature)
-            feedback_last_signature_at(now)
-            reset_feedback_form(is_bug)
-            notify_feedback("Thanks. Your feedback has been saved for review.", tone = "success")
+
+            delivery <- feedback_send_notification(payload)
+            receipt_delivery <- if (isTRUE(delivery$ok)) {
+                feedback_send_receipt(payload)
+            } else {
+                list(
+                    ok = FALSE,
+                    state = "not_attempted",
+                    status = NA_integer_,
+                    provider_id = "",
+                    error = "Primary CGV inbox delivery was not accepted."
+                )
+            }
+            payload$delivery <- c(
+                delivery[c("state", "status", "provider_id", "error")],
+                list(attempted_at = format(Sys.time(), "%Y-%m-%d %H:%M:%S %Z"))
+            )
+            payload$receipt_delivery <- c(
+                receipt_delivery[c("state", "status", "provider_id", "error")],
+                list(attempted_at = format(Sys.time(), "%Y-%m-%d %H:%M:%S %Z"))
+            )
+            tryCatch(
+                saveRDS(payload, save_path),
+                error = function(e) {
+                    message("[Feedback] Could not persist delivery metadata: ", conditionMessage(e))
+                }
+            )
+
+            if (isTRUE(delivery$ok)) {
+                message(
+                    "[Feedback] Email accepted by Resend (status ",
+                    delivery$status,
+                    ", id ",
+                    delivery$provider_id,
+                    ")."
+                )
+                feedback_submit_log(c(recent_submissions, now_num))
+                feedback_last_signature(signature)
+                feedback_last_signature_at(now)
+                reset_feedback_form(is_bug)
+                if (identical(receipt_delivery$state, "disabled")) {
+                    notify_feedback(
+                        "Thanks. Your feedback was sent to the CGV inbox. Replies will go to the email you provided.",
+                        tone = "success"
+                    )
+                } else if (isTRUE(receipt_delivery$ok)) {
+                    message(
+                        "[Feedback] Reporter confirmation accepted by Resend (status ",
+                        receipt_delivery$status,
+                        ", id ",
+                        receipt_delivery$provider_id,
+                        ")."
+                    )
+                    notify_feedback(
+                        "Thanks. Your feedback was sent to CGV, and a confirmation copy is on its way to your email.",
+                        tone = "success"
+                    )
+                } else {
+                    message(
+                        "[Feedback] Reporter confirmation failed (state ",
+                        receipt_delivery$state,
+                        ", status ",
+                        receipt_delivery$status,
+                        "): ",
+                        receipt_delivery$error
+                    )
+                    notify_feedback(
+                        "Your feedback was sent to CGV, but we could not send the confirmation copy. We can still reply to the email you provided.",
+                        tone = "warning"
+                    )
+                }
+            } else {
+                message(
+                    "[Feedback] Email delivery failed (state ",
+                    delivery$state,
+                    ", status ",
+                    delivery$status,
+                    "): ",
+                    delivery$error
+                )
+                if (
+                    identical(delivery$state, "not_configured") &&
+                    identical(tolower(Sys.getenv("CGV_RUNTIME", "")), "desktop")
+                ) {
+                    notify_feedback(
+                        paste(
+                            "Your feedback was saved locally, but this Desktop build cannot send it yet.",
+                            "Please use Feedback at cgv.mobilomics.org",
+                            "(or cgvapp.com while the official server is unavailable),",
+                            "or email cgvviewer@gmail.com."
+                        ),
+                        tone = "warning"
+                    )
+                } else {
+                    notify_feedback(
+                        "Your feedback was saved, but the email could not be delivered to the CGV inbox. Please try again shortly.",
+                        tone = "error"
+                    )
+                }
+            }
         }, error = function(e) {
             notify_feedback("We could not save your feedback right now. Please try again later.", tone = "error")
             message("[Feedback] Save error: ", e$message)

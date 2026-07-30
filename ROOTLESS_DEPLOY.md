@@ -187,8 +187,13 @@ Optional `.env.local`:
 ```dotenv
 APP_LASTZ_BIN=/home/rarojas/micromamba/envs/cgv-rootless/bin/lastz
 FEEDBACK_RESEND_API_KEY=
-FEEDBACK_TO_EMAIL=
-FEEDBACK_FROM_EMAIL=CGV Feedback <onboarding@resend.dev>
+FEEDBACK_TO_EMAIL=cgvviewer@gmail.com
+FEEDBACK_FROM_EMAIL="CGV Feedback <feedback@cgvapp.com>"
+# cgvapp.com is verified in Resend.
+FEEDBACK_SEND_RECEIPT=1
+FEEDBACK_PUBLIC_URL=https://cgv.mobilomics.org
+FEEDBACK_BACKUP_URL=https://cgvapp.com
+FEEDBACK_LOGO_PATH=www/cgv-email-logo.png
 ```
 
 ## 8) Verify that the required folders exist
