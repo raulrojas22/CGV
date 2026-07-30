@@ -1,9 +1,13 @@
 (function () {
   "use strict";
 
-  var RELEASE_SOURCE = {
+  var RELEASE_SOURCE_CONFIG = "desktop-release-source.json";
+  var DEFAULT_GITHUB_SOURCE = {
     api: "https://api.github.com/repos/raulrojas22/CGV-Desktop-Releases/releases?per_page=20",
-    center: "https://github.com/raulrojas22/CGV-Desktop-Releases/releases"
+    center: "https://github.com/raulrojas22/CGV-Desktop-Releases/releases",
+    label: "GitHub Releases",
+    centerLabel: "Open release center",
+    centerIcon: "fab fa-github"
   };
   var MIN_ASSET_BYTES = 5 * 1024 * 1024;
 
@@ -64,23 +68,106 @@
     return mapped;
   }
 
-  function fetchJson(url) {
-    return fetch(url, { headers: { Accept: "application/vnd.github+json" } }).then(function (response) {
-      if (!response.ok) throw new Error("GitHub release service returned " + response.status);
+  function fetchJson(url, accept) {
+    return fetch(url, {
+      cache: "no-store",
+      headers: { Accept: accept || "application/json" }
+    }).then(function (response) {
+      if (!response.ok) throw new Error("Release service returned " + response.status);
       return response.json();
     });
   }
 
-  function findPublicRelease() {
-    return fetchJson(RELEASE_SOURCE.api).then(function (releases) {
+  function findGithubRelease(source) {
+    return fetchJson(source.api, "application/vnd.github+json").then(function (releases) {
       var list = Array.isArray(releases) ? releases.filter(function (release) {
         return release && !release.draft && !release.prerelease;
       }) : [];
       for (var index = 0; index < list.length; index += 1) {
         var assets = mapRelease(list[index]);
-        if (Object.keys(assets).length) return { release: list[index], assets: assets, source: RELEASE_SOURCE };
+        if (Object.keys(assets).length) return { release: list[index], assets: assets, source: source };
       }
       return null;
+    });
+  }
+
+  function isSha256(value) {
+    return /^[a-f0-9]{64}$/i.test(String(value || ""));
+  }
+
+  function isHttpsUrl(value) {
+    try {
+      return new URL(String(value || "")).protocol === "https:";
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function mapOracleManifest(manifest, manifestUrl) {
+    if (!manifest || Number(manifest.schemaVersion) !== 1 || !String(manifest.version || "").trim()) {
+      throw new Error("Invalid CGV Desktop release manifest");
+    }
+    var assets = {};
+    var manifestAssets = manifest.assets && typeof manifest.assets === "object" ? manifest.assets : {};
+    ["mac-arm64", "mac-x64", "linux-appimage", "linux-deb", "windows-x64"].forEach(function (kind) {
+      var asset = manifestAssets[kind];
+      if (!asset || !isHttpsUrl(asset.url) || !isSha256(asset.sha256) || Number(asset.size || 0) < MIN_ASSET_BYTES) return;
+      assets[kind] = {
+        name: String(asset.name || ""),
+        size: Number(asset.size),
+        browser_download_url: asset.url,
+        sha256: String(asset.sha256).toLowerCase(),
+        signature_url: isHttpsUrl(asset.signatureUrl) ? asset.signatureUrl : ""
+      };
+    });
+    if (!Object.keys(assets).length) throw new Error("Release manifest has no verified installers");
+
+    var notes = Array.isArray(manifest.releaseNotes) ? manifest.releaseNotes : [];
+    var source = manifest.source && typeof manifest.source === "object" ? manifest.source : {};
+    return {
+      release: {
+        name: String(manifest.product || "CGV Desktop") + " " + String(manifest.version),
+        tag_name: "desktop-v" + String(manifest.version),
+        published_at: manifest.publishedAt || "",
+        body: notes.join("\n")
+      },
+      assets: assets,
+      source: {
+        center: isHttpsUrl(source.manifestUrl) ? source.manifestUrl : manifestUrl,
+        label: String(source.label || "Oracle Cloud Object Storage"),
+        centerLabel: "Open release manifest",
+        centerIcon: "fas fa-file-shield"
+      },
+      verification: manifest.verification || {}
+    };
+  }
+
+  function releaseConfigUrl() {
+    try {
+      return new URL(RELEASE_SOURCE_CONFIG, document.baseURI).href;
+    } catch (_) {
+      return RELEASE_SOURCE_CONFIG;
+    }
+  }
+
+  function loadReleaseConfig() {
+    return fetchJson(releaseConfigUrl()).catch(function () {
+      return {};
+    });
+  }
+
+  function findPublicRelease() {
+    return loadReleaseConfig().then(function (config) {
+      var manifestUrl = String((config && config.manifestUrl) || "").trim();
+      var fallback = Object.assign({}, DEFAULT_GITHUB_SOURCE, (config && config.fallback) || {});
+      if (!isHttpsUrl(manifestUrl)) return findGithubRelease(fallback);
+      return fetchJson(manifestUrl)
+        .then(function (manifest) {
+          return mapOracleManifest(manifest, manifestUrl);
+        })
+        .catch(function () {
+          return findGithubRelease(fallback);
+        });
     }).catch(function () {
       return null;
     });
@@ -224,6 +311,8 @@
     action.rel = "noopener noreferrer";
     action.removeAttribute("aria-disabled");
     action.removeAttribute("tabindex");
+    if (asset.sha256) action.setAttribute("data-cgv-sha256", asset.sha256);
+    if (asset.signature_url) action.setAttribute("data-cgv-signature-url", asset.signature_url);
     var label = action.querySelector("span");
     if (label) label.textContent = "Download" + (formatBytes(asset.size) ? " · " + formatBytes(asset.size) : "");
     return true;
@@ -238,7 +327,6 @@
       var state = card.querySelector(".cgv-download-platform-state");
       if (!state) return;
       if (count > 0) state.textContent = count === 1 ? "Available now" : count + " builds available";
-      else if (platform === "windows") state.textContent = "In development";
       else state.textContent = "Installer pending";
     });
   }
@@ -251,7 +339,8 @@
     var labels = { mac: "macOS", linux: "Linux", windows: "Windows" };
 
     setText(root, "[data-cgv-release-title]", version);
-    setText(root, "[data-cgv-release-copy]", "This release contains public Desktop installers. Each download below links directly to its official GitHub release asset.");
+    var sourceLabel = String((result.source && result.source.label) || "the official release service");
+    setText(root, "[data-cgv-release-copy]", "This release contains verified public Desktop installers. Each button links directly to its official asset in " + sourceLabel + ".");
     setText(root, "[data-cgv-release-version]", String(release.tag_name || version));
     setText(root, "[data-cgv-release-date]", formatDate(release.published_at));
     setText(root, "[data-cgv-release-platforms]", platforms.map(function (platform) { return labels[platform] || platform; }).join(" · ") || "Waiting for assets");
@@ -263,7 +352,7 @@
       }).filter(function (line) {
         return line.length >= 8;
       }).slice(0, 4);
-      if (!noteLines.length) noteLines = ["Open the official GitHub release for the complete notes and checksums."];
+      if (!noteLines.length) noteLines = ["Open the official release manifest for checksums and verification links."];
       notesNode.replaceChildren();
       noteLines.forEach(function (line) {
         var item = document.createElement("li");
@@ -273,7 +362,13 @@
     }
 
     var center = root.querySelector("[data-cgv-release-center]");
-    if (center) center.href = result.source.center;
+    if (center) {
+      center.href = result.source.center;
+      var centerLabel = center.querySelector("span");
+      var centerIcon = center.querySelector("i");
+      if (centerLabel) centerLabel.textContent = result.source.centerLabel || "Open release source";
+      if (centerIcon) centerIcon.className = result.source.centerIcon || "fas fa-file-shield";
+    }
   }
 
   function applyRelease(root, context, result) {

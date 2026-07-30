@@ -8,6 +8,7 @@ PROJECT_ROOT="$(cd "${DESKTOP_DIR}/.." && pwd)"
 SCREENCAST_DIR="${PROJECT_ROOT}/www/screencasts"
 CTV_VIDEO="${PROJECT_ROOT}/www/CTV_Animated.mp4"
 BACKUP_DIR="${SCREENCAST_DIR}.orig"
+CTV_BACKUP="${PROJECT_ROOT}/www/ctv_backup/CTV_Animated.mp4"
 
 SCREENCAST_CRF="${CGV_VIDEO_CRF:-20}"
 CTV_CRF="${CGV_CTV_CRF:-20}"
@@ -42,6 +43,11 @@ compress_video() {
   local orig_bytes new_bytes pct
   orig_bytes=$(stat -f%z "$input" 2>/dev/null || stat -c%s "$input" 2>/dev/null)
   new_bytes=$(stat -f%z "$output" 2>/dev/null || stat -c%s "$output" 2>/dev/null)
+  if (( new_bytes >= orig_bytes )); then
+    cp "$input" "$output"
+    printf "  %-55s %6s -> %6s  (kept smaller original)\n" "$label" "$orig_size" "$orig_size"
+    return
+  fi
   pct=$(echo "scale=1; 100 - ($new_bytes * 100 / $orig_bytes)" | bc 2>/dev/null || echo "?")
 
   printf "  %-55s %6s -> %6s  (-%s%%)\n" "$label" "$orig_size" "$new_size" "$pct"
@@ -60,9 +66,6 @@ if [[ -d "$BACKUP_DIR" ]]; then
     [[ -f "$video" ]] || continue
     cp "$video" "$SCREENCAST_DIR/"
   done
-  if [[ -f "${BACKUP_DIR}/CTV_Animated.mp4" ]]; then
-    cp "${BACKUP_DIR}/CTV_Animated.mp4" "$CTV_VIDEO"
-  fi
 else
   echo "[0/3] Creating backup ..."
   mkdir -p "$BACKUP_DIR"
@@ -70,10 +73,13 @@ else
     [[ -f "$video" ]] || continue
     cp "$video" "$BACKUP_DIR/"
   done
-  if [[ -f "$CTV_VIDEO" ]]; then
-    mkdir -p "${BACKUP_DIR}/../ctv_backup"
-    cp "$CTV_VIDEO" "${BACKUP_DIR}/../ctv_backup/CTV_Animated.mp4"
-  fi
+fi
+
+if [[ -f "$CTV_BACKUP" ]]; then
+  cp "$CTV_BACKUP" "$CTV_VIDEO"
+elif [[ -f "$CTV_VIDEO" ]]; then
+  mkdir -p "$(dirname "$CTV_BACKUP")"
+  cp "$CTV_VIDEO" "$CTV_BACKUP"
 fi
 
 echo ""

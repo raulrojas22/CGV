@@ -1,0 +1,10 @@
+{
+  "manifestUrl": "https://objectstorage.sa-santiago-1.oraclecloud.com/n/ax5pgqfvxw37/b/cgv-desktop-releases/o/cgv-desktop/desktop-release.json",
+  "fallback": {
+    "api": "https://api.github.com/repos/raulrojas22/CGV-Desktop-Releases/releases?per_page=20",
+    "center": "https://github.com/raulrojas22/CGV-Desktop-Releases/releases",
+    "label": "GitHub Releases",
+    "centerLabel": "Open release center",
+    "centerIcon": "fab fa-github"
+  }
+}

@@ -7,7 +7,7 @@ contextBridge.exposeInMainWorld("cgvDesktop", {
   listDatasets: () => ipcRenderer.invoke("cgv:list-datasets"),
   downloadDataset: (datasetId) => ipcRenderer.invoke("cgv:download-dataset", datasetId),
   cancelDatasetDownload: (datasetId) => ipcRenderer.invoke("cgv:cancel-dataset-download", datasetId),
-  removeInstalledOrganisms: () => ipcRenderer.invoke("cgv:remove-installed-organisms"),
+  removeInstalledOrganisms: (datasetIds) => ipcRenderer.invoke("cgv:remove-installed-organisms", datasetIds),
   showStartupLog: () => ipcRenderer.invoke("cgv:show-startup-log"),
   onStatus: (callback) => {
     ipcRenderer.on("cgv:status", (_event, payload) => callback(payload));

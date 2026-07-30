@@ -9,7 +9,17 @@ compiled_css <- read_text(file.path("www", "css", "cgv_compiled.css"))
 manual_source <- read_text(file.path("docs", "user_manual", "CGV_User_Manual_Source.md"))
 desktop_downloads <- read_text(file.path("R", "ui_desktop_downloads.R"))
 desktop_package <- read_text(file.path("desktop", "package.json"))
+deploy_text <- read_text("deploy-nas.sh")
+dockerignore <- trimws(readLines(".dockerignore", warn = FALSE, encoding = "UTF-8"))
 metadata <- jsonlite::fromJSON(file.path("www", "docs", "manual.json"))
+desktop_guide_videos <- c(
+  "guide-desktop-downloads-01-open-settings.mp4",
+  "guide-desktop-downloads-02-open-organism-catalog.mp4",
+  "guide-desktop-downloads-03-search-and-filter.mp4",
+  "guide-desktop-downloads-04-download-organism.mp4",
+  "guide-desktop-downloads-05-confirm-availability.mp4",
+  "guide-desktop-downloads-06-remove-installed-organisms.mp4"
+)
 
 latest_pdf <- file.path("www", "docs", "CGV_User_Manual.pdf")
 archive_pdf <- file.path(
@@ -46,15 +56,46 @@ stopifnot(
   grepl('`data-guide-route` = "figure-studio"', ui_text, fixed = TRUE),
   grepl("guide-common-share-analysis-web.mp4", ui_text, fixed = TRUE),
   grepl("guide-common-export-report-desktop.mp4", ui_text, fixed = TRUE),
+  grepl(
+    "media: window\\.cgvDesktop\\s*\\? guideVideo\\('guide-common-export-report-desktop\\.mp4'\\)\\s*:\\s*guideVideo\\('guide-common-share-analysis-web\\.mp4'\\)",
+    ui_text,
+    perl = TRUE
+  ),
   grepl("guide-figure-studio-04-preview-and-export.mp4", ui_text, fixed = TRUE),
+  all(vapply(
+    desktop_guide_videos,
+    function(file) grepl(file, ui_text, fixed = TRUE),
+    logical(1)
+  )),
+  all(vapply(
+    desktop_guide_videos,
+    function(file) grepl(file, deploy_text, fixed = TRUE),
+    logical(1)
+  )),
+  !grepl("guide-cross-04-inspect-visualization.mp4", ui_text, fixed = TRUE),
+  !grepl("guide-cross-04-inspect-visualization.mp4", deploy_text, fixed = TRUE),
+  grepl("delete routeData['desktop-downloads'];", ui_text, fixed = TRUE),
   grepl("Use Share to create an expiring secret read-only URL", ui_text, fixed = TRUE),
   grepl("CGV Desktop does not upload the analysis", ui_text, fixed = TRUE),
   grepl("Local interactive reports", desktop_downloads, fixed = TRUE),
   grepl("## 2.7 Share analysis", manual_source, fixed = TRUE),
+  grepl("## 6.5 Genomic context scale, neighbors, and overlaps", manual_source, fixed = TRUE),
+  grepl("**Complete** or **Fast** report detail", manual_source, fixed = TRUE),
+  grepl("## 12.8 Shared analysis reports - Web", manual_source, fixed = TRUE),
+  grepl("Select all installed organisms", manual_source, fixed = TRUE),
+  grepl("submission reference is sent to the reporter", manual_source, fixed = TRUE),
+  grepl("automatic status popup shows LASTZ or MultiPIP", manual_source, fixed = TRUE),
   grepl("CGV freezes a visual copy", manual_source, fixed = TRUE),
   grepl("**Figure Studio** covers:", manual_source, fixed = TRUE),
   grepl(".feedback-manual-prompt", compiled_css, fixed = TRUE),
-  grepl('"www/**"', desktop_package, fixed = TRUE)
+  grepl('"www/**"', desktop_package, fixed = TRUE),
+  grepl('"!www/screencasts.orig/**"', desktop_package, fixed = TRUE),
+  grepl('"!www/ctv_backup/**"', desktop_package, fixed = TRUE),
+  grepl("--exclude=www/screencasts.orig", deploy_text, fixed = TRUE),
+  grepl("--exclude=www/ctv_backup", deploy_text, fixed = TRUE),
+  !"www/screencasts/" %in% dockerignore,
+  "www/screencasts.orig/" %in% dockerignore,
+  "www/ctv_backup/" %in% dockerignore
 )
 
 message("CGV user manual publishing and UI integration checks passed.")

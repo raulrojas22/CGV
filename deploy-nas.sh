@@ -38,7 +38,6 @@ GUIDE_MEDIA_FILES=(
   guide-cross-03-generate-visualization.mp4
   guide-cross-03a-compact-visualization.mp4
   guide-cross-03b-detailed-visualization.mp4
-  guide-cross-04-inspect-visualization.mp4
   guide-cross-05a-comparative-synteny-align.mp4
   guide-cross-05b-lastz-blocks.mp4
   guide-cross-05c-multipip.mp4
@@ -54,6 +53,18 @@ GUIDE_MEDIA_FILES=(
   guide-common-09a-save-work-session.mp4
   guide-common-09b-load-work-session.mp4
   guide-common-10-clear-visualizations.mp4
+  guide-common-share-analysis-web.mp4
+  guide-common-export-report-desktop.mp4
+  guide-figure-studio-01-open-workspace.mp4
+  guide-figure-studio-02-add-panels.mp4
+  guide-figure-studio-03-arrange-and-style.mp4
+  guide-figure-studio-04-preview-and-export.mp4
+  guide-desktop-downloads-01-open-settings.mp4
+  guide-desktop-downloads-02-open-organism-catalog.mp4
+  guide-desktop-downloads-03-search-and-filter.mp4
+  guide-desktop-downloads-04-download-organism.mp4
+  guide-desktop-downloads-05-confirm-availability.mp4
+  guide-desktop-downloads-06-remove-installed-organisms.mp4
 )
 
 # --- SSH multiplexing: UNA sola autenticacion para todo ---
@@ -120,6 +131,7 @@ rsync -avz --progress --delete \
   --exclude=ncbi_downloads \
   --exclude=.git --exclude=.claude \
   --exclude=paper/node_modules --exclude=node_modules \
+  --exclude=www/screencasts.orig --exclude=www/ctv_backup \
   --exclude=.Rapp.history --exclude=.Rhistory \
   --exclude=.codex_backups --exclude=.qodo \
   --exclude='*.docx' --exclude='.env.local' \

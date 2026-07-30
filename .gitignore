@@ -78,6 +78,7 @@ packages/
 # Screencast videos
 www/screencasts/
 www/screencasts.orig/
+www/ctv_backup/
 
 # Paper (not needed in repo)
 paper/

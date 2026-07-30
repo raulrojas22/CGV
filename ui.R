@@ -65,7 +65,6 @@ guide_media_files <- c(
   "guide-cross-03-generate-visualization.mp4",
   "guide-cross-03a-compact-visualization.mp4",
   "guide-cross-03b-detailed-visualization.mp4",
-  "guide-cross-04-inspect-visualization.mp4",
   "guide-cross-05a-comparative-synteny-align.mp4",
   "guide-cross-05b-lastz-blocks.mp4",
   "guide-cross-05c-multipip.mp4",
@@ -86,7 +85,13 @@ guide_media_files <- c(
   "guide-figure-studio-01-open-workspace.mp4",
   "guide-figure-studio-02-add-panels.mp4",
   "guide-figure-studio-03-arrange-and-style.mp4",
-  "guide-figure-studio-04-preview-and-export.mp4"
+  "guide-figure-studio-04-preview-and-export.mp4",
+  "guide-desktop-downloads-01-open-settings.mp4",
+  "guide-desktop-downloads-02-open-organism-catalog.mp4",
+  "guide-desktop-downloads-03-search-and-filter.mp4",
+  "guide-desktop-downloads-04-download-organism.mp4",
+  "guide-desktop-downloads-05-confirm-availability.mp4",
+  "guide-desktop-downloads-06-remove-installed-organisms.mp4"
 )
 guide_media_map <- stats::setNames(
   vapply(guide_media_files, function(file) guide_media_path(file.path("screencasts", file)), character(1)),
@@ -1031,6 +1036,22 @@ fluidPage(
             if (el) el.textContent = text || '';
           }
 
+          var desktopOrganismStatusTimer = null;
+
+          function setDesktopOrganismStatus(text, clearAfterMs) {
+            if (desktopOrganismStatusTimer) {
+              window.clearTimeout(desktopOrganismStatusTimer);
+              desktopOrganismStatusTimer = null;
+            }
+            setText('desktop-organism-status', text || '');
+            if (text && clearAfterMs) {
+              desktopOrganismStatusTimer = window.setTimeout(function() {
+                setText('desktop-organism-status', '');
+                desktopOrganismStatusTimer = null;
+              }, clearAfterMs);
+            }
+          }
+
           function formatEta(value) {
             var seconds = Number(value || 0);
             if (!isFinite(seconds) || seconds <= 0) return '';
@@ -1068,6 +1089,28 @@ fluidPage(
 
           var desktopDatasetProgress = {};
           var desktopDatasetManifest = null;
+          var desktopDatasetRemovalSelection = new Set();
+
+          function isInstalledDesktopDataset(item) {
+            var status = item && item.local && item.local.status || '';
+            return status === 'installed' || status === 'update_available' || status === 'bundled';
+          }
+
+          function isRemovableDesktopDataset(item) {
+            var status = item && item.local && item.local.status || '';
+            return item && item.downloadable !== false && (status === 'installed' || status === 'update_available');
+          }
+
+          function hasActiveDesktopDatasetProgress() {
+            return Object.keys(desktopDatasetProgress).some(function(datasetId) {
+              var phase = desktopDatasetProgress[datasetId] && desktopDatasetProgress[datasetId].phase || '';
+              return phase && phase !== 'complete' && phase !== 'error' && phase !== 'cancelled';
+            });
+          }
+
+          function clearDesktopOrganismStatusIfIdle() {
+            if (!hasActiveDesktopDatasetProgress()) setDesktopOrganismStatus('');
+          }
 
           function iconForDataset(item) {
             var label = String(item.label || '').trim();
@@ -1135,13 +1178,19 @@ fluidPage(
             var datasets = (manifest && manifest.datasets) || [];
             desktopDatasetManifest = manifest || { datasets: [] };
             root.textContent = '';
-            var installedCount = datasets.filter(function(item) {
-              return item.local && (item.local.status === 'installed' || item.local.status === 'bundled');
-            }).length;
+            var installedCount = datasets.filter(isInstalledDesktopDataset).length;
             var pendingCount = Math.max(0, datasets.length - installedCount);
+            var removableCount = datasets.filter(isRemovableDesktopDataset).length;
             setText('desktop-organism-count', datasets.length ? datasets.length + ' available' : 'No catalog configured');
             setText('desktop-organism-installed-count', installedCount ? installedCount + ' installed' : 'No organisms installed');
             setText('desktop-organism-pending-count', pendingCount ? pendingCount + ' not installed' : 'Catalog complete');
+            var resetBtn = document.getElementById('desktop-organism-reset');
+            if (resetBtn) {
+              resetBtn.disabled = removableCount === 0;
+              resetBtn.title = removableCount
+                ? 'Choose one or more installed organisms to remove'
+                : 'No downloaded organisms are installed';
+            }
             var dataPath = document.getElementById('desktop-organism-data-path');
             var cachePath = document.getElementById('desktop-organism-cache-path');
             if (dataPath && manifest && manifest.dataRoot) dataPath.textContent = manifest.dataRoot;
@@ -1158,15 +1207,14 @@ fluidPage(
 
             renderDesktopOrganismHighlights(datasets);
             renderDesktopOrganismModalList();
+            renderDesktopOrganismRemovalList();
           }
 
           function renderDesktopOrganismHighlights(datasets) {
             var root = document.getElementById('desktop-organism-list');
             if (!root) return;
             root.textContent = '';
-            var installed = datasets.filter(function(item) {
-              return item.local && (item.local.status === 'installed' || item.local.status === 'bundled');
-            }).slice(0, 6);
+            var installed = datasets.filter(isInstalledDesktopDataset).slice(0, 6);
             if (!installed.length) {
               root.innerHTML = '<div class=\"desktop-organism-empty\">No organisms installed yet. Open the catalog to download the references you need.</div>';
               return;
@@ -1184,14 +1232,10 @@ fluidPage(
               chip.append(img, text);
               root.append(chip);
             });
-            if (datasets.filter(function(item) {
-              return item.local && (item.local.status === 'installed' || item.local.status === 'bundled');
-            }).length > installed.length) {
+            if (datasets.filter(isInstalledDesktopDataset).length > installed.length) {
               var more = document.createElement('span');
               more.className = 'desktop-organism-chip desktop-organism-chip-muted';
-              more.textContent = '+' + (datasets.filter(function(item) {
-                return item.local && (item.local.status === 'installed' || item.local.status === 'bundled');
-              }).length - installed.length) + ' more';
+              more.textContent = '+' + (datasets.filter(isInstalledDesktopDataset).length - installed.length) + ' more';
               root.append(more);
             }
           }
@@ -1301,23 +1345,26 @@ fluidPage(
                   return;
                 }
                 updateDesktopDatasetProgress(item.id, { phase: 'preparing', percent: null });
-                setText('desktop-organism-status', 'Preparing ' + (item.label || item.id) + '...');
+                setDesktopOrganismStatus('Preparing ' + (item.label || item.id) + '...');
                 window.cgvDesktop.downloadDataset(item.id).then(function(result) {
                   if (result && result.canceled) {
                     updateDesktopDatasetProgress(item.id, { phase: 'cancelled', message: 'Download canceled.' });
-                    setText('desktop-organism-status', 'Download canceled.');
+                    setDesktopOrganismStatus('Download canceled.', 3000);
                     return null;
                   }
-                  setText('desktop-organism-status', 'Installed ' + (item.label || item.id) + '. Refreshing organism registry...');
                   if (window.Shiny) {
                     Shiny.setInputValue('desktop_dataset_installed', { id: item.id, at: Date.now() }, { priority: 'event' });
                   }
                   return window.cgvDesktop.listDatasets();
                 }).then(function(manifest) {
-                  if (manifest) renderDesktopDatasets(manifest);
+                  if (manifest) {
+                    renderDesktopDatasets(manifest);
+                    delete desktopDatasetProgress[item.id];
+                    clearDesktopOrganismStatusIfIdle();
+                  }
                 }).catch(function(error) {
                   updateDesktopDatasetProgress(item.id, { phase: 'error', percent: null });
-                  setText('desktop-organism-status', error && error.message ? error.message : 'Download failed.');
+                  setDesktopOrganismStatus(error && error.message ? error.message : 'Download failed.');
                 });
               });
 
@@ -1328,13 +1375,95 @@ fluidPage(
             });
           }
 
-          function refreshDesktopDatasets() {
-            if (!window.cgvDesktop) {
-              renderDesktopDatasets({ datasets: [] });
+          function removableDesktopDatasets() {
+            var datasets = desktopDatasetManifest && desktopDatasetManifest.datasets || [];
+            return datasets.filter(isRemovableDesktopDataset);
+          }
+
+          function updateDesktopOrganismRemovalControls(removable) {
+            removable = removable || removableDesktopDatasets();
+            var removableIds = new Set(removable.map(function(item) { return item.id; }));
+            desktopDatasetRemovalSelection.forEach(function(datasetId) {
+              if (!removableIds.has(datasetId)) desktopDatasetRemovalSelection.delete(datasetId);
+            });
+            var selectedCount = desktopDatasetRemovalSelection.size;
+            var selectAll = document.getElementById('desktop-organism-remove-all');
+            var removeBtn = document.getElementById('desktop-organism-remove-selected');
+            if (selectAll) {
+              selectAll.disabled = removable.length === 0;
+              selectAll.checked = removable.length > 0 && selectedCount === removable.length;
+              selectAll.indeterminate = selectedCount > 0 && selectedCount < removable.length;
+            }
+            if (removeBtn) {
+              removeBtn.disabled = selectedCount === 0;
+              var label = removeBtn.querySelector('span');
+              if (label) label.textContent = selectedCount ? 'Remove selected (' + selectedCount + ')' : 'Remove selected';
+            }
+            setText(
+              'desktop-organism-remove-count',
+              selectedCount + ' selected · ' + removable.length + ' removable'
+            );
+          }
+
+          function renderDesktopOrganismRemovalList() {
+            var root = document.getElementById('desktop-organism-remove-list');
+            if (!root) return;
+            var removable = removableDesktopDatasets();
+            root.textContent = '';
+            updateDesktopOrganismRemovalControls(removable);
+            if (!removable.length) {
+              root.innerHTML = '<div class=\"desktop-organism-empty\">No downloaded organisms are installed.</div>';
               return;
             }
-            window.cgvDesktop.listDatasets().then(renderDesktopDatasets).catch(function(error) {
-              setText('desktop-organism-status', error && error.message ? error.message : 'Unable to load organism catalog.');
+            removable.forEach(function(item) {
+              var option = document.createElement('label');
+              option.className = 'desktop-organism-removal-option';
+              option.dataset.desktopDatasetId = item.id || '';
+
+              var checkbox = document.createElement('input');
+              checkbox.type = 'checkbox';
+              checkbox.className = 'desktop-organism-removal-checkbox';
+              checkbox.checked = desktopDatasetRemovalSelection.has(item.id);
+              checkbox.addEventListener('change', function() {
+                if (checkbox.checked) desktopDatasetRemovalSelection.add(item.id);
+                else desktopDatasetRemovalSelection.delete(item.id);
+                option.classList.toggle('is-selected', checkbox.checked);
+                updateDesktopOrganismRemovalControls(removable);
+              });
+
+              var img = document.createElement('img');
+              img.alt = '';
+              img.src = iconForDataset(item);
+              img.onerror = function() { this.onerror = null; this.src = 'icons/DNA.ico'; };
+
+              var body = document.createElement('span');
+              body.className = 'desktop-organism-removal-body';
+              var title = document.createElement('strong');
+              title.className = 'desktop-organism-scientific-name';
+              title.textContent = item.label || item.id;
+              var details = document.createElement('small');
+              details.textContent = [item.version ? 'v' + item.version : '', item.speciesId || item.id].filter(Boolean).join(' · ');
+              body.append(title, details);
+
+              option.classList.toggle('is-selected', checkbox.checked);
+              option.append(checkbox, img, body);
+              root.append(option);
+            });
+          }
+
+          function refreshDesktopDatasets(options) {
+            options = options || {};
+            if (!window.cgvDesktop) {
+              renderDesktopDatasets({ datasets: [] });
+              return Promise.resolve({ datasets: [] });
+            }
+            var listPromise = window.cgvDesktop.listDatasets().then(function(manifest) {
+              renderDesktopDatasets(manifest);
+              if (options.clearStatus) clearDesktopOrganismStatusIfIdle();
+              return manifest;
+            }).catch(function(error) {
+              setDesktopOrganismStatus(error && error.message ? error.message : 'Unable to load organism catalog.');
+              return null;
             });
             if (window.cgvDesktop.getRuntime) {
               window.cgvDesktop.getRuntime().then(function(runtime) {
@@ -1342,6 +1471,7 @@ fluidPage(
                 setText('desktop-organism-cache-path', runtime.cacheRoot || '');
               }).catch(function() {});
             }
+            return listPromise;
           }
 
           document.addEventListener('DOMContentLoaded', function() {
@@ -1352,6 +1482,12 @@ fluidPage(
             var catalogBackdrop = catalogModal && catalogModal.querySelector('.desktop-organism-modal-backdrop');
             var catalogSearch = document.getElementById('desktop-organism-search');
             var catalogFilter = document.getElementById('desktop-organism-filter');
+            var removalModal = document.getElementById('desktop-organism-remove-modal');
+            var removalCloseBtn = document.getElementById('desktop-organism-remove-close');
+            var removalCancelBtn = document.getElementById('desktop-organism-remove-cancel');
+            var removalBackdrop = removalModal && removalModal.querySelector('.desktop-organism-modal-backdrop');
+            var removalSelectAll = document.getElementById('desktop-organism-remove-all');
+            var removalSubmitBtn = document.getElementById('desktop-organism-remove-selected');
             function openCatalogModal() {
               if (!catalogModal) return;
               catalogModal.classList.add('is-open');
@@ -1364,34 +1500,79 @@ fluidPage(
               catalogModal.classList.remove('is-open');
               catalogModal.setAttribute('aria-hidden', 'true');
             }
+            function openRemovalModal() {
+              if (!removalModal || !removableDesktopDatasets().length) return;
+              desktopDatasetRemovalSelection.clear();
+              renderDesktopOrganismRemovalList();
+              removalModal.classList.add('is-open');
+              removalModal.setAttribute('aria-hidden', 'false');
+              if (removalSelectAll) removalSelectAll.focus();
+            }
+            function closeRemovalModal() {
+              if (!removalModal) return;
+              removalModal.classList.remove('is-open');
+              removalModal.setAttribute('aria-hidden', 'true');
+              desktopDatasetRemovalSelection.clear();
+              renderDesktopOrganismRemovalList();
+            }
             if (openCatalogBtn) openCatalogBtn.addEventListener('click', openCatalogModal);
             if (closeCatalogBtn) closeCatalogBtn.addEventListener('click', closeCatalogModal);
             if (catalogBackdrop) catalogBackdrop.addEventListener('click', closeCatalogModal);
+            if (removalCloseBtn) removalCloseBtn.addEventListener('click', closeRemovalModal);
+            if (removalCancelBtn) removalCancelBtn.addEventListener('click', closeRemovalModal);
+            if (removalBackdrop) removalBackdrop.addEventListener('click', closeRemovalModal);
             if (catalogSearch) catalogSearch.addEventListener('input', renderDesktopOrganismModalList);
             if (catalogFilter) catalogFilter.addEventListener('change', renderDesktopOrganismModalList);
             document.addEventListener('keydown', function(event) {
               if (event.key === 'Escape' && catalogModal && catalogModal.classList.contains('is-open')) closeCatalogModal();
+              if (event.key === 'Escape' && removalModal && removalModal.classList.contains('is-open')) closeRemovalModal();
             });
             var refreshBtn = document.getElementById('desktop-organism-refresh');
-            if (refreshBtn) refreshBtn.addEventListener('click', refreshDesktopDatasets);
+            if (refreshBtn) refreshBtn.addEventListener('click', function() {
+              refreshDesktopDatasets({ clearStatus: true });
+            });
             var resetBtn = document.getElementById('desktop-organism-reset');
-            if (resetBtn) resetBtn.addEventListener('click', function() {
+            if (resetBtn) resetBtn.addEventListener('click', openRemovalModal);
+            if (removalSelectAll) removalSelectAll.addEventListener('change', function() {
+              var removable = removableDesktopDatasets();
+              desktopDatasetRemovalSelection.clear();
+              if (removalSelectAll.checked) {
+                removable.forEach(function(item) { desktopDatasetRemovalSelection.add(item.id); });
+              }
+              renderDesktopOrganismRemovalList();
+            });
+            if (removalSubmitBtn) removalSubmitBtn.addEventListener('click', function() {
               if (!window.cgvDesktop || !window.cgvDesktop.removeInstalledOrganisms) return;
-              var ok = window.confirm('Remove installed organisms and local organism caches from this desktop profile?');
+              var selectedIds = Array.from(desktopDatasetRemovalSelection);
+              if (!selectedIds.length) return;
+              var noun = selectedIds.length === 1 ? 'organism' : 'organisms';
+              var possessive = selectedIds.length === 1 ? 'its' : 'their';
+              var ok = window.confirm(
+                'Remove ' + selectedIds.length + ' selected ' + noun + ' and ' + possessive + ' local files and caches from this desktop profile?'
+              );
               if (!ok) return;
-              resetBtn.disabled = true;
-              setText('desktop-organism-status', 'Removing installed organisms...');
-              window.cgvDesktop.removeInstalledOrganisms().then(function() {
-                desktopDatasetProgress = {};
-                setText('desktop-organism-status', 'Installed organisms removed. Refreshing catalog...');
+              removalSubmitBtn.disabled = true;
+              if (resetBtn) resetBtn.disabled = true;
+              setDesktopOrganismStatus('Removing ' + selectedIds.length + ' selected ' + noun + '...');
+              window.cgvDesktop.removeInstalledOrganisms(selectedIds).then(function(result) {
+                var removedIds = result && result.removedDatasetIds || selectedIds;
+                removedIds.forEach(function(datasetId) {
+                  delete desktopDatasetProgress[datasetId];
+                  desktopDatasetRemovalSelection.delete(datasetId);
+                });
                 if (window.Shiny) {
                   Shiny.setInputValue('desktop_dataset_installed', { id: 'reset', at: Date.now() }, { priority: 'event' });
                 }
                 return window.cgvDesktop.listDatasets();
-              }).then(renderDesktopDatasets).catch(function(error) {
-                setText('desktop-organism-status', error && error.message ? error.message : 'Unable to remove installed organisms.');
+              }).then(function(manifest) {
+                renderDesktopDatasets(manifest);
+                closeRemovalModal();
+                clearDesktopOrganismStatusIfIdle();
+              }).catch(function(error) {
+                setDesktopOrganismStatus(error && error.message ? error.message : 'Unable to remove installed organisms.');
               }).finally(function() {
-                resetBtn.disabled = false;
+                updateDesktopOrganismRemovalControls();
+                if (resetBtn) resetBtn.disabled = removableDesktopDatasets().length === 0;
               });
             });
             if (window.cgvDesktop && window.cgvDesktop.onDownloadProgress) {
@@ -1400,30 +1581,34 @@ fluidPage(
                 if (payload.datasetId) updateDesktopDatasetProgress(payload.datasetId, payload);
                 var label = phaseLabel(payload.phase);
                 if (payload.phase === 'error') {
-                  setText('desktop-organism-status', payload.message || 'Download failed.');
+                  setDesktopOrganismStatus(payload.message || 'Download failed.');
                   return;
                 }
                 if (payload.phase === 'cancelled') {
-                  setText('desktop-organism-status', payload.message || 'Download canceled.');
+                  setDesktopOrganismStatus(payload.message || 'Download canceled.', 3000);
+                  return;
+                }
+                if (payload.phase === 'complete') {
+                  clearDesktopOrganismStatusIfIdle();
                   return;
                 }
                 if (payload.phase === 'connecting' || payload.phase === 'preparing') {
-                  setText('desktop-organism-status', label + ' organism package...');
+                  setDesktopOrganismStatus(label + ' organism package...');
                   return;
                 }
                 if (payload.phase === 'extracting' || payload.phase === 'installing_cache' || payload.phase === 'verifying') {
-                  setText('desktop-organism-status', label + ' organism package...');
+                  setDesktopOrganismStatus(label + ' organism package...');
                   return;
                 }
                 if (payload.skipped) {
-                  setText('desktop-organism-status', 'Existing package verified.');
+                  clearDesktopOrganismStatusIfIdle();
                   return;
                 }
                 if (payload.percent != null) {
                   var bits = ['Downloading... ' + Math.round(payload.percent * 100) + '%'];
                   if (payload.speed) bits.push(formatBytes(payload.speed) + '/s');
                   if (payload.eta) bits.push(formatEta(payload.eta) + ' left');
-                  setText('desktop-organism-status', bits.join(' · '));
+                  setDesktopOrganismStatus(bits.join(' · '));
                 }
               });
             }
@@ -5227,12 +5412,12 @@ fluidPage(
                     open: 'settings',
                     desktopOnly: true,
                     steps: [
-                      { title: 'Open Settings', copy: 'Go to Settings and find the Organisms section. This section is available only in CGV Desktop.', short: 'Go to Settings.', media: '' },
-                      { title: 'Open organism catalog', copy: 'Click Open catalog to view the downloadable organism library for this desktop profile.', short: 'View the library.', media: '' },
-                      { title: 'Search or filter', copy: 'Use search and status filters to find an organism. The catalog can provide up to 25 installable organisms, but only downloaded organisms appear in Preloaded selectors.', short: 'Find an organism.', media: '' },
-                      { title: 'Download organism', copy: 'Click Download for the organism you need. CGV Desktop downloads the package, verifies it, extracts it, and installs local caches.', short: 'Install references.', media: '' },
-                      { title: 'Confirm availability', copy: 'After installation, return to Multi-Gene or Cross-Species Search and choose the organism from the Preloaded organism selectors.', short: 'Use the organism.', media: '' },
-                      { title: 'Remove installed organisms', copy: 'Use Remove installed organisms when you want to clear the desktop profile and its local organism caches.', short: 'Optional cleanup.', media: '' }
+                      { title: 'Open Settings', copy: 'Go to Settings and find the Organisms section. This section is available only in CGV Desktop.', short: 'Go to Settings.', media: guideVideo('guide-desktop-downloads-01-open-settings.mp4') },
+                      { title: 'Open organism catalog', copy: 'Click Open catalog to view the downloadable organism library for this desktop profile.', short: 'View the library.', media: guideVideo('guide-desktop-downloads-02-open-organism-catalog.mp4') },
+                      { title: 'Search or filter', copy: 'Use search and status filters to find an organism. The catalog can provide up to 25 installable organisms, but only downloaded organisms appear in Preloaded selectors.', short: 'Find an organism.', media: guideVideo('guide-desktop-downloads-03-search-and-filter.mp4') },
+                      { title: 'Download organism', copy: 'Click Download for the organism you need. CGV Desktop downloads the package, verifies it, extracts it, and installs local caches.', short: 'Install references.', media: guideVideo('guide-desktop-downloads-04-download-organism.mp4') },
+                      { title: 'Confirm availability', copy: 'After installation, return to Multi-Gene or Cross-Species Search and choose the organism from the Preloaded organism selectors.', short: 'Use the organism.', media: guideVideo('guide-desktop-downloads-05-confirm-availability.mp4') },
+                      { title: 'Remove organisms', copy: 'Choose one, several, or all installed catalog organisms and remove only the selected local datasets and caches.', short: 'Selective cleanup.', media: guideVideo('guide-desktop-downloads-06-remove-installed-organisms.mp4') }
                     ]
                   }
                 };
@@ -6660,7 +6845,7 @@ fluidPage(
                       type = "button",
                       class = "btn btn-sm desktop-organism-reset",
                       icon("trash"),
-                      span("Remove installed organisms")
+                      span("Remove organisms")
                     ),
                     tags$button(
                       id = "desktop-organism-refresh",
@@ -6721,6 +6906,66 @@ fluidPage(
                       )
                     ),
                     div(id = "desktop-organism-modal-list", class = "desktop-organism-list desktop-organism-modal-list")
+                  )
+                ),
+                div(
+                  id = "desktop-organism-remove-modal",
+                  class = "desktop-organism-modal desktop-organism-remove-modal",
+                  `aria-hidden` = "true",
+                  div(class = "desktop-organism-modal-backdrop"),
+                  div(
+                    class = "desktop-organism-modal-panel desktop-organism-remove-panel",
+                    role = "dialog",
+                    `aria-modal` = "true",
+                    `aria-labelledby` = "desktop-organism-remove-title",
+                    div(
+                      class = "desktop-organism-modal-header",
+                      div(
+                        h4(id = "desktop-organism-remove-title", icon("trash"), span("Remove installed organisms")),
+                        span(
+                          id = "desktop-organism-remove-count",
+                          class = "desktop-organism-count",
+                          "0 selected"
+                        )
+                      ),
+                      tags$button(
+                        id = "desktop-organism-remove-close",
+                        type = "button",
+                        class = "btn btn-sm desktop-organism-icon-button",
+                        `aria-label` = "Close removal dialog",
+                        icon("xmark")
+                      )
+                    ),
+                    div(
+                      class = "desktop-organism-removal-intro",
+                      p("Choose one, several, or all downloaded organisms. Only the selected organisms and their local dataset files and caches will be removed."),
+                      tags$label(
+                        class = "desktop-organism-select-all",
+                        tags$input(id = "desktop-organism-remove-all", type = "checkbox"),
+                        span("Select all installed organisms")
+                      )
+                    ),
+                    div(
+                      id = "desktop-organism-remove-list",
+                      class = "desktop-organism-removal-list"
+                    ),
+                    div(
+                      class = "desktop-organism-removal-footer",
+                      tags$button(
+                        id = "desktop-organism-remove-cancel",
+                        type = "button",
+                        class = "btn btn-sm desktop-organism-icon-button desktop-organism-cancel-button",
+                        span("Cancel")
+                      ),
+                      tags$button(
+                        id = "desktop-organism-remove-selected",
+                        type = "button",
+                        class = "btn btn-sm desktop-organism-remove-selected",
+                        disabled = "disabled",
+                        icon("trash"),
+                        span("Remove selected")
+                      )
+                    )
                   )
                 )
               ),

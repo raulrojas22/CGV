@@ -3,10 +3,15 @@
 Última ejecución: 28 jul 2026 — versión **1.1.0**
 
 > ⚡ **VÍA RÁPIDA:** ejecuta `./regenerar-instalables.sh` desde la raíz del repo y hace TODO automáticamente (limpieza + builds Mac/Linux/Windows + descargas + checksums + firmas GPG). Esta guía queda como referencia manual de cada paso.
+>
+> 🌐 **PUBLICACIÓN EN ORACLE:** después del build usa
+> `./scripts/preparar-publicacion-desktop.sh`. El procedimiento completo y la
+> configuración inicial están en [`PUBLICACION-ORACLE-DESKTOP.md`](PUBLICACION-ORACLE-DESKTOP.md).
 
 Estado actual:
-- ✅ 7 instalables generados y firmados con GPG (en `INSTALABLES-FINALES/`)
-- ✅ Solicitud enviada a SignPath Foundation (firma Windows gratuita) — **en espera de aprobación**
+- ✅ Instalables de macOS y Linux generados; la carpeta bruta está en `INSTALABLES-FINALES/`
+- ⚠️ El DMG arm64 actual no tiene `.asc`; el preparador de publicación crea y verifica cualquier firma GPG faltante
+- ✅ El instalador Windows x64 está generado y el preparador lo incluye en el paquete de Oracle
 - 🍎 macOS: sin firma Apple (requiere US$99/año) → usuarios usan "Abrir de todas formas"
 
 ---

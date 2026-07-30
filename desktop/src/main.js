@@ -7,6 +7,7 @@ const os = require("os");
 const path = require("path");
 const { execFile, spawn, spawnSync } = require("child_process");
 const { downloadFile, sha256File, throwIfCanceled } = require("./download-file");
+const { removeInstalledDatasets } = require("./dataset-removal");
 const { extractZipArchive, validateZipArchive } = require("./secure-zip");
 const {
   bundledRuntimeResourceParts,
@@ -452,45 +453,11 @@ function ensureDataRootStructure(dataRoot) {
   }
 }
 
-function removePathIfInside(root, relPath) {
-  const target = path.resolve(root, relPath);
-  const rootResolved = path.resolve(root);
-  if (target !== rootResolved && !target.startsWith(`${rootResolved}${path.sep}`)) {
-    throw new Error(`Refusing to remove path outside ${rootResolved}: ${target}`);
-  }
-  fs.rmSync(target, { recursive: true, force: true });
-}
-
-function removeInstalledOrganismData(dataRoot = defaultDataRoot(), cacheRoot = defaultCacheRoot()) {
+function assertOrganismRemovalAllowed(dataRoot = defaultDataRoot()) {
   const explicitDataRoot = process.env.CGV_DESKTOP_DATA_ROOT || process.env.CGV_DATA_ROOT;
   if (!app.isPackaged && !explicitDataRoot && path.resolve(dataRoot) === path.resolve(appRoot())) {
     throw new Error("Refusing to remove organisms from the source workspace. Set CGV_DESKTOP_DATA_ROOT to a disposable profile when testing reset in development.");
   }
-  const dataEntries = [
-    "annotations",
-    "genomes",
-    "go_annotations",
-    "data",
-    "www",
-    "annotation_index",
-    "cache",
-    "packages",
-    "ncbi_downloads",
-    "desktop-datasets.json",
-    "bundled-dataset.json",
-    "data-manifest.json"
-  ];
-  for (const entry of dataEntries) removePathIfInside(dataRoot, entry);
-
-  const cacheEntries = [
-    "annotation_index",
-    "external_alias"
-  ];
-  for (const entry of cacheEntries) removePathIfInside(cacheRoot, entry);
-
-  ensureDataRootStructure(dataRoot);
-  seedCommonGoData(dataRoot);
-  fs.mkdirSync(cacheRoot, { recursive: true });
 }
 
 function getFreePort() {
@@ -1445,11 +1412,40 @@ ipcMain.handle("cgv:show-startup-log", async () => {
 
 ipcMain.handle("cgv:list-datasets", () => readManifestWithState());
 
-ipcMain.handle("cgv:remove-installed-organisms", async () => {
+ipcMain.handle("cgv:remove-installed-organisms", async (_event, datasetIds) => {
   const dataRoot = defaultDataRoot();
   const cacheRoot = defaultCacheRoot();
-  removeInstalledOrganismData(dataRoot, cacheRoot);
-  return { ok: true, dataRoot, cacheRoot };
+  assertOrganismRemovalAllowed(dataRoot);
+  const installRegistry = readInstallRegistry(dataRoot);
+  const manifest = await readMergedManifest();
+  const removableIds = (manifest.datasets || []).filter((dataset) => {
+    if (dataset.downloadable === false) return false;
+    const status = datasetInstallState(dataset, dataRoot).status;
+    return status === "installed" || status === "update_available";
+  }).map((dataset) => dataset.id);
+  const requestedIds = Array.isArray(datasetIds)
+    ? Array.from(new Set(datasetIds.map((id) => String(id || "").trim()).filter(Boolean)))
+    : removableIds;
+  const unavailableIds = requestedIds.filter((id) => !removableIds.includes(id));
+  if (unavailableIds.length) {
+    throw new Error(`These organisms are not installed or cannot be removed: ${unavailableIds.join(", ")}`);
+  }
+  const activeIds = requestedIds.filter((id) => datasetInstallControllers.has(id));
+  if (activeIds.length) {
+    throw new Error(`Cancel or wait for the active download before removing: ${activeIds.join(", ")}`);
+  }
+  const result = await enqueueDatasetInstall(() => removeInstalledDatasets({
+    dataRoot,
+    cacheRoot,
+    datasetIds: requestedIds,
+    manifest,
+    installRegistry,
+    validateZipArchive
+  }));
+  ensureDataRootStructure(dataRoot);
+  seedCommonGoData(dataRoot);
+  fs.mkdirSync(cacheRoot, { recursive: true });
+  return { ...result, dataRoot, cacheRoot };
 });
 
 async function installDataset(datasetId, signal) {

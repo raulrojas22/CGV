@@ -72,6 +72,7 @@
           "go_annotations/go_term_map.rds",
           "www/**",
           "!www/screencasts.orig/**",
+          "!www/ctv_backup/**",
           "docker/run-app.sh",
           "!desktop/resources/bundled-data/**",
           "!desktop/resources/demo-data/**"

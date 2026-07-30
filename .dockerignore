@@ -37,3 +37,7 @@ tmp/
 annotations/
 genomes/
 go_annotations/
+
+# Keep compressed screencasts in the runtime image; exclude source backups.
+www/screencasts.orig/
+www/ctv_backup/

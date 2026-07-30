@@ -163,6 +163,12 @@ The bell in the context header opens notification history. It collects search, d
 
 Long operations display a working state. The interface remains usable while background alias resolution, cache preparation, deferred plot work, or supported external lookups complete.
 
+LASTZ and MultiPIP runs, including automatic reference scoring, open the status
+popup automatically with a patience notice, current progress, and elapsed time.
+Keep CGV open until the run finishes. The transient working popup closes when
+the active run ends, and the completion or failure notice remains available in
+notification history.
+
 ## 2.5 Result context header
 
 After data are loaded, the context header identifies:
@@ -174,6 +180,16 @@ After data are loaded, the context header identifies:
 - the active visual detail level.
 
 The header provides **Visualize mode** and **Alignment mode**. Under Visualize mode, choose **Compact** or **Detailed**. Alignment choices depend on the workflow and loaded data.
+
+Visualize mode also provides three independent context controls:
+
+- **Scale** shows or hides genomic coordinates and the compressed
+  neighbor-distance scale;
+- **Neighbors** shows or hides the nearest flanking genes;
+- **Overlaps** shows or hides genes that overlap the displayed locus.
+
+These controls change presentation only. Their state is retained for the
+current browser or desktop session and is applied to newly rendered cards.
 
 ## 2.6 Summary, analytics, sorting, and zoom
 
@@ -479,6 +495,12 @@ The context header marks organism states such as:
 - external search in progress;
 - no match in the current annotation.
 
+Select **About results** in the Cross-Species context header to review the
+comparison scope. CGV displays the selected gene when the same name or a
+resolved alias is available in at least two selected organisms. Additional
+family members found only within one organism are not added to this result; use
+Multi-Gene Search to explore those genes within that organism.
+
 ## 5.4 Interpret partial availability
 
 Cross-species results may contain fewer cards than selected organisms. Common reasons include:
@@ -613,6 +635,13 @@ The central model may contain:
 
 Hover over an interactive feature to inspect its type, coordinates, length, identifiers, attributes, and GC content where sequence is available.
 
+Select a neighboring-gene marker or overlap band to open its context popup. The
+popup identifies the relation to the current gene, genomic coordinates, and
+strand. In Multi-Gene Search, **Visualize [gene] below** adds that neighbor as a
+new result card. In Cross-Species Search, neighbors remain genomic context
+only; adding one as a result is intentionally available only through
+Multi-Gene Search.
+
 ## 6.3 Compact and Detailed feature behavior
 
 Compact view reduces the number of visible layers and uses combined structural regions. Detailed view displays more annotation layers and attribute-rich tooltips.
@@ -625,7 +654,27 @@ The central transcript is displayed in its biological orientation. Neighbor cont
 
 Alignment modes normalize tracks into left-to-right transcript order. Their x-axis is comparative transcript space, not raw genomic coordinates.
 
-## 6.5 Promoter region
+## 6.5 Genomic context scale, neighbors, and overlaps
+
+The solid center of the **Scale** is a linear chromosome or sequence axis for
+the displayed gene interval. Its labels use bp, kb, or Mb according to the
+span. Hover the line, ticks, or labels to inspect exact positions.
+
+The dashed side sections place the nearest flanking genes on a compressed
+distance scale. Break marks separate these logarithmically compressed side
+sections from the linear gene interval. The side ticks show 100 bp, 1 kb,
+10 kb, and at least 100 kb reference distances.
+
+Overlapping genes are drawn as bands across the locus. Multiple overlaps can
+use separate lanes and a combined label. Use the marker popup or tooltip for
+the exact relation and overlap length; do not estimate a side distance from
+screen width because the neighboring-gene sections are compressed.
+
+Use **Scale**, **Neighbors**, and **Overlaps** in the result context header to
+show or hide these layers independently. Hiding a layer does not change the
+annotation, coordinates, summary, or analysis.
+
+## 6.6 Promoter region
 
 The dashed promoter-side connector is interactive.
 
@@ -638,7 +687,7 @@ CGV extracts the strand-aware upstream interval and downloads it as FASTA. Coord
 
 > NOTE: "Promoter region" in this tool means a configurable upstream sequence window. It does not assert experimentally validated promoter activity.
 
-## 6.6 Card footer
+## 6.7 Card footer
 
 The footer can be horizontally scrolled and provides:
 
@@ -652,7 +701,7 @@ The footer can be horizontally scrolled and provides:
 
 Footer arrows appear when the available width cannot show all items.
 
-## 6.7 Info popup
+## 6.8 Info popup
 
 On a canonical gene card, **Info** opens gene statistics. On an isoform card it opens transcript information. Depending on the record, sections can include:
 
@@ -663,7 +712,7 @@ On a canonical gene card, **Info** opens gene statistics. On an isoform card it 
 - neighboring-gene context;
 - coordinate and strand information.
 
-## 6.8 Charts popup
+## 6.9 Charts popup
 
 Canonical gene cards provide gene and isoform chart groups. Transcript cards provide transcript-oriented charts.
 
@@ -685,7 +734,7 @@ Gene and isoform charts include:
 
 Each chart has an information control and SVG export.
 
-## 6.9 Removing results
+## 6.10 Removing results
 
 Use the close icon on a card to remove only that result. Use **Clear visualizations** in the sidebar to remove all active cards. When **Confirm before deleting** is enabled, CGV asks before destructive workspace actions.
 
@@ -763,12 +812,21 @@ Track order is a presentation choice unless the view explicitly recalculates adj
 
 Select **Run local alignments** after changing reference, window, or other parameters. CGV reports the run state and raw hit count in the view footer.
 
+Because LASTZ is computationally intensive, the notification popup opens
+automatically during LASTZ Blocks, MultiPIP, and reference-scoring runs. It
+shows progress and elapsed time. Keep CGV open and wait for the completion
+message before changing the source or closing Desktop.
+
 If the local engine reports unavailable sequence:
 
 - confirm that each organism has a genome file;
 - confirm that annotation sequence identifiers match the genome;
 - verify that the selected coordinates exist;
 - reduce the organism set to isolate the problematic source.
+
+If CGV reports a safety timeout or a locus window that is too large, select a
+smaller alignment window and retry. Completed results remain available even
+when another query track fails.
 
 ## 7.8 Sequence export from alignment views
 
@@ -1217,8 +1275,9 @@ Restoring replaces current visualizations.
 ## 11.10 Reproducible export set
 
 Select the unobtrusive **Share** action in the active result header after
-generating at least one result. CGV creates a
-versioned reproducibility ZIP containing:
+generating at least one result. CGV prepares a versioned reproducibility
+package. After the report is ready, select **Generate / download ZIP** to create
+the archive containing:
 
 - `analysis.json`, with CGV version, workflows, queries, organisms, source
   provenance (assembly/annotation accession, version, source, and SHA-256
@@ -1234,11 +1293,17 @@ assembly and annotation provenance instead. When private sequences are
 excluded, restored visualizations remain available but sequence-dependent
 downloads may be disabled.
 
+The captured SVG set follows the selected report detail mode described below.
+In CGV Web, enabling reader downloads publishes the ZIP with the secret report;
+when that option is off, the author can still generate a private local copy
+from the Share dialog.
+
 ## 11.11 Read-only interactive reports
 
 On CGV Web, the header **Share** action also creates an immutable secret URL. Before
 publishing, choose:
 
+- **Complete** or **Fast** report detail;
 - when both workflows contain results, whether to include **Multi-Gene**,
   **Cross-Species**, or both;
 - whether to include private or uploaded sequence content;
@@ -1247,14 +1312,27 @@ publishing, choose:
   before capturing both alignment views;
 - an expiry of 7, 14, or 30 days. The default is 7 days.
 
+When reader downloads are disabled, CSV, FASTA, and ZIP files are not published
+with the secret report. Tables and figures already included in the read-only
+HTML remain visible.
+
+**Complete** is the recommended mode. It generates structural views, Analytics
+charts, and eligible aligned-synteny views that have not yet been opened.
+Optional LASTZ/MultiPIP execution is available only in this mode.
+
+**Fast** captures only views that are already rendered and idle. It does not
+activate hidden Analytics, structures, alignments, or synteny. The report
+records those intentional omissions so readers can distinguish them from
+capture failures.
+
 The report gives the gene structure full page width and presents chromosome
 position as a compact location aid. It contains aligned synteny when available,
 completed LASTZ/MultiPIP results, external results used in the analysis, and
-Figure Studio when available. CGV derives the complete analytics chart set and
-summary tables during publication even when the author never opened those
-panels. Readers can use tooltips, zoom, filters, table sorting, and collapsible
-sections. The report cannot run new searches, modify the analysis, or contact
-external databases.
+Figure Studio when available. In Complete mode, CGV derives the complete
+analytics chart set and summary tables during publication even when the author
+never opened those panels. Readers can use tooltips, zoom, filters, table
+sorting, and collapsible sections. The report cannot run new searches, modify
+the analysis, or contact external databases.
 
 When one report contains both workflows, every location, structure, synteny,
 alignment, analytics, and table block is labelled and separated as
@@ -1270,6 +1348,11 @@ renders uncached views behind the Share dialog. CGV freezes a visual copy of
 the current application beneath the modal during this process, so the visible
 workspace does not turn blank or expose intermediate mode changes.
 
+Report generation is one of CGV's most intensive processes and can take several
+minutes, especially in Complete mode or when LASTZ/MultiPIP is requested. Keep
+CGV and the Share dialog open until the final link or local-file message
+appears. The dialog reports the current preparation stage.
+
 If the browser cannot capture an expected element, CGV lists it before
 publication. The author must either cancel or explicitly continue with that
 element excluded; capture failures are never omitted silently.
@@ -1280,8 +1363,9 @@ current browser appear under **Settings > Shared analysis reports**, where they
 can be copied or revoked.
 
 CGV Desktop does not upload analyses. It exports the same interactive report as
-a self-contained HTML file plus the reproducibility ZIP, prompting for each
-destination through the operating-system save dialog.
+a self-contained HTML file plus the reproducibility ZIP. Select **Build files**,
+then save **Download HTML** and **Generate / download ZIP** separately through
+the operating-system save dialogs.
 
 The optional pre-publication LASTZ/MultiPIP action is tied to the current report
 generation and only completed results are included. Persistent background
@@ -1331,7 +1415,7 @@ Controls include:
 
 - installed, available, and pending counts;
 - **Open catalog**;
-- **Remove installed organisms**;
+- **Remove organisms**;
 - **Refresh**;
 - data and cache paths;
 - catalog search;
@@ -1342,6 +1426,15 @@ Installed references appear in the preloaded selectors.
 ## 12.7 Work sessions
 
 Use **Export current session (.rds)** and **Restore session** as described in Section 11. Session files are CGV workspace snapshots, not interchangeable biological data formats.
+
+## 12.8 Shared analysis reports - Web
+
+This section lists secret reports created in the current browser. Use it to
+open or copy a report URL, or to revoke the report before its scheduled expiry.
+
+The list itself is stored only in the browser and does not require a CGV
+account. Clearing browser storage can remove the local receipt without
+revoking the published report; the secret link still expires automatically.
 
 ---PAGE---
 
@@ -1412,7 +1505,7 @@ Use **Verify** for an installed catalog entry. If a newer package is available, 
 
 ## 13.6 Remove local organisms
 
-Select **Remove installed organisms** to clear the installed organism set and associated local caches from the active desktop profile. This is a destructive data-management action. Export sessions and verify the storage path before confirming.
+Select **Remove organisms** to open the installed-organism list. Choose one, several, or **Select all installed organisms**, then confirm **Remove selected**. CGV removes only the selected catalog datasets and their associated local files and caches from the active desktop profile. This is a destructive data-management action. Export sessions and verify the storage path before confirming.
 
 ## 13.7 Change the data folder
 
@@ -1455,6 +1548,7 @@ External features still require network access, including:
 - STRING networks;
 - organism imagery;
 - external database links;
+- Feedback delivery and its optional confirmation email;
 - application and dataset updates.
 
 ## 13.11 Uninstallation
@@ -1469,7 +1563,9 @@ CGV Guide complements this manual with short visual demonstrations.
 
 ## 14.1 Guide routes
 
-**Desktop Downloads** covers opening Settings, browsing the catalog, filtering, downloading, verifying availability, and removing installed organisms.
+**Desktop Downloads** covers opening Settings, browsing the catalog, filtering,
+downloading, verifying availability, and selectively removing one, several, or
+all downloaded organisms.
 
 **Multi-Gene Search** covers:
 
@@ -1616,6 +1712,10 @@ For Cross-Species Search, remember that at least two organism matches are requir
 - Increase the minimum segment or block length.
 - Avoid running multiple large NCBI downloads simultaneously.
 - In Desktop, allow the first run to build reusable caches.
+- Keep CGV open while the automatic status popup shows LASTZ or MultiPIP as
+  active.
+- If a safety timeout or oversized-window message appears, reduce the alignment
+  window before retrying.
 
 ## 15.11 Analytics are missing
 
@@ -1677,6 +1777,21 @@ A useful bug report includes:
 - view and alignment settings;
 - browser or operating system;
 - CGV Desktop log excerpt when applicable.
+
+Full name, a valid reply email, a short title, and a detailed description are
+required. CGV also records the active application section, submission time, and
+page context. The email address is used only for this submission and follow-up.
+
+After successful delivery, CGV clears the submitted detail fields and displays
+a confirmation notice. When confirmation email is enabled, a copy with the
+submission reference is sent to the reporter; failure of that copy does not
+discard feedback already delivered to the CGV inbox.
+
+If Desktop reports that the message was saved locally but cannot be sent, use
+the Feedback page at `cgv.mobilomics.org`, use `cgvapp.com` while the official
+server is unavailable, or email `cgvviewer@gmail.com`. Repeated or duplicate
+submissions can be temporarily rate-limited; follow the notification message
+before retrying.
 
 ---PAGE---
 
@@ -1742,6 +1857,9 @@ Fallback logic supports several transcript and non-coding RNA feature names, but
 | Ctrl+Enter in Multi-Gene input | Adds the current gene as a batch chip |
 | Escape | Closes the active supported popup or modal |
 | Hover a feature | Shows annotation or metric details |
+| Select a neighboring or overlapping gene | Opens relation, coordinate, and strand details |
+| Select **Visualize [gene] below** | Adds that neighbor in Multi-Gene Search only |
+| Select **Scale**, **Neighbors**, or **Overlaps** | Shows or hides that genomic-context layer |
 | Select promoter connector | Opens promoter-length and FASTA controls |
 | Drag Figure Studio panel | Reorders panels |
 | Drag STRING node | Rearranges the network |
