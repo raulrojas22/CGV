@@ -6930,7 +6930,10 @@ fluidPage(
                     class = "feedback-submit-row",
                     div(
                       class = "feedback-submit-meta",
-                      p(class = "feedback-submit-note", "By submitting, you agree that we may use your email only to follow up on this report.")
+                      p(
+                        class = "feedback-submit-note",
+                        "Your email address is used only for this report and any follow-up."
+                      )
                     ),
                     actionButton("submit_feedback_btn", "Send Feedback", icon = icon("paper-plane"), class = "btn-primary feedback-submit-btn")
                   )

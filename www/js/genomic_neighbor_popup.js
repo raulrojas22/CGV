@@ -101,6 +101,11 @@
     return text && text !== 'N/A' ? text : String(fallback == null ? 'N/A' : fallback);
   }
 
+  function isMultiGenePanel(panel) {
+    var normalized = String(panel == null ? '' : panel).trim().toLowerCase();
+    return ['homologous', 'homo', 'multi_gene', 'multigene'].indexOf(normalized) !== -1;
+  }
+
   function ensurePopup() {
     var popup = document.getElementById(POPUP_ID);
     if (popup) return popup;
@@ -156,6 +161,7 @@
   function renderPopup(popup, meta) {
     var neighborName = display(meta.neighbor_name, display(meta.neighbor_id, 'Neighbor gene'));
     var sourceGene = display(meta.source_gene, 'query gene');
+    var canVisualizeBelow = isMultiGenePanel(meta.panel);
     var subtitle = popup.querySelector('.genomic-neighbor-popup-subtitle');
     var title = popup.querySelector('.genomic-neighbor-popup-title');
     if (title) title.textContent = meta.kind === 'overlap' ? 'Overlapping gene' : 'Neighboring gene';
@@ -170,9 +176,19 @@
     setField(popup, 'strand', display(meta.strand));
 
     var button = popup.querySelector('.genomic-neighbor-visualize-btn');
+    var hint = popup.querySelector('.genomic-neighbor-popup-hint');
+    popup.classList.toggle('is-cross-species', !canVisualizeBelow);
+    if (hint) {
+      hint.textContent = canVisualizeBelow
+        ? 'Add this gene as a new card below the current results.'
+        : 'Cross-Species keeps this annotation as genomic context. Adding it below is available only in Multi-Gene Search.';
+    }
     if (button) {
       button.textContent = 'Visualize ' + neighborName + ' below';
       button.setAttribute('aria-label', 'Visualize ' + neighborName + ' below');
+      button.hidden = !canVisualizeBelow;
+      button.disabled = !canVisualizeBelow;
+      button.setAttribute('aria-hidden', canVisualizeBelow ? 'false' : 'true');
     }
   }
 
@@ -215,7 +231,9 @@
     renderPopup(popup, meta);
     positionPopup(popup, target);
     var button = popup.querySelector('.genomic-neighbor-visualize-btn');
-    if (button) window.setTimeout(function () { button.focus(); }, 0);
+    if (button && !button.hidden && !button.disabled) {
+      window.setTimeout(function () { button.focus(); }, 0);
+    }
   }
 
   function closePopup() {
@@ -263,6 +281,10 @@
       var popup = target.closest('#' + POPUP_ID);
       if (!popup) return;
       var payload = getPopupMeta(popup);
+      if (!isMultiGenePanel(payload.panel)) {
+        closePopup();
+        return;
+      }
       payload.triggered_at = Date.now();
       if (window.Shiny && typeof window.Shiny.setInputValue === 'function') {
         window.Shiny.setInputValue('neighbor_gene_visualize_request', payload, { priority: 'event' });

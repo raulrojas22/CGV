@@ -1635,6 +1635,14 @@ create_gene_plot <- function(df, df_gene, df_transcript = NULL, current_transcri
     if (!nzchar(plot_id_txt)) plot_id_txt <- "N/A"
     plot_context_txt <- trimws(as.character(plot_context %||% ""))
     if (!nzchar(plot_context_txt)) plot_context_txt <- "N/A"
+    genomic_neighbor_action_hint <- if (tolower(plot_context_txt) %in% c("homologous", "homo", "multi_gene", "multigene")) {
+        "<span style='opacity:.82;'>Click to visualize this gene below.</span>"
+    } else {
+        paste0(
+            "<span style='opacity:.82;'>Click to inspect this annotation. ",
+            "Adding it below is available only in Multi-Gene Search.</span>"
+        )
+    }
     promoter_popup_data_id <- paste0(
         "promoter_region",
         "|panel=", encode_data_id_value(plot_context_txt),
@@ -2240,7 +2248,7 @@ create_gene_plot <- function(df, df_gene, df_transcript = NULL, current_transcri
                     "<b>Neighbor End:</b> %s<br/>",
                     "<b>Neighbor Strand:</b> %s<br/>",
                     "<b>Glyph:</b> symbolic gene body (length not to scale)<br/>",
-                    "<span style='opacity:.82;'>Click to visualize this gene below.</span>"
+                    genomic_neighbor_action_hint
                 ),
                 side_title,
                 esc_html(neighbor_display_clean),
@@ -2389,7 +2397,7 @@ create_gene_plot <- function(df, df_gene, df_transcript = NULL, current_transcri
                         "<b>Neighbor Start:</b> %s<br/>",
                         "<b>Neighbor End:</b> %s<br/>",
                         "<b>Neighbor Strand:</b> %s<br/>",
-                        "<span style='opacity:.82;'>Click to visualize this gene below.</span>"
+                        genomic_neighbor_action_hint
                     ),
                     esc_html(neighbor_display_clean),
                     relation$relation_label,
