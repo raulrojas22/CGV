@@ -10,9 +10,19 @@ APP_PREWARM_BLOCK_START="${APP_PREWARM_BLOCK_START:-0}"
 CGV_DATA_ROOT="${CGV_DATA_ROOT:-${APP_DIR}}"
 CGV_CACHE_DIR="${CGV_CACHE_DIR:-${APP_DIR}/cache}"
 APP_ALIAS_DISK_CACHE_DIR="${APP_ALIAS_DISK_CACHE_DIR:-${CGV_CACHE_DIR}/external_alias}"
+GDTOOLS_CACHE_DIR="${GDTOOLS_CACHE_DIR:-${CGV_CACHE_DIR}/gdtools}"
+XDG_CACHE_HOME="${XDG_CACHE_HOME:-${CGV_CACHE_DIR}/xdg-cache}"
+XDG_DATA_HOME="${XDG_DATA_HOME:-${CGV_CACHE_DIR}/xdg-data}"
 APP_START_EPOCH="${APP_START_EPOCH:-$(date +%s)}"
 
-export CGV_DATA_ROOT CGV_CACHE_DIR APP_ALIAS_DISK_CACHE_DIR APP_START_EPOCH
+export \
+  CGV_DATA_ROOT \
+  CGV_CACHE_DIR \
+  APP_ALIAS_DISK_CACHE_DIR \
+  GDTOOLS_CACHE_DIR \
+  XDG_CACHE_HOME \
+  XDG_DATA_HOME \
+  APP_START_EPOCH
 
 cd "${APP_DIR}"
 mkdir -p cache/work_sessions
@@ -22,7 +32,10 @@ mkdir -p \
   "${CGV_CACHE_DIR}/annotation_index" \
   "${CGV_CACHE_DIR}/go_index" \
   "${CGV_CACHE_DIR}/string/resolved" \
-  "${CGV_CACHE_DIR}/string/network"
+  "${CGV_CACHE_DIR}/string/network" \
+  "${GDTOOLS_CACHE_DIR}" \
+  "${XDG_CACHE_HOME}" \
+  "${XDG_DATA_HOME}"
 
 if [[ "${APP_SESSION_METRICS:-0}" == "1" ]]; then
   echo "[cgv] startup app_dir=${APP_DIR} data_root=${CGV_DATA_ROOT} cache_dir=${CGV_CACHE_DIR} pid=$$"
