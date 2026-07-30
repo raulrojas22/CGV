@@ -35,6 +35,15 @@
     return [value];
   }
 
+  function sendReportProgress(requestId, message) {
+    if (!window.Shiny || typeof window.Shiny.setInputValue !== "function") return;
+    window.Shiny.setInputValue("cgv_report_progress", {
+      request_id: String(requestId || ""),
+      message: String(message || "").slice(0, 240),
+      nonce: Date.now() + Math.random()
+    }, { priority: "event" });
+  }
+
   function renderReceipts() {
     var root = document.getElementById("cgv-shared-report-list");
     if (!root) return;
@@ -224,7 +233,7 @@
       isFinite(width) && isFinite(height) && height > 0 && width / height >= 4;
   }
 
-  function capturePageSvgs(maxTotalBytes, allowedContexts) {
+  function capturePageSvgs(maxTotalBytes, allowedContexts, captureMode) {
     var allowed = asArray(allowedContexts).map(function (context) {
       return String(context || "").toLowerCase();
     }).filter(Boolean);
@@ -245,15 +254,19 @@
       "#homo_multipip_plot_out svg"
     ];
     var nodes = Array.prototype.slice.call(document.querySelectorAll(selectors.join(",")));
-    var seen = [];
-    var seenMarkup = [];
+    var seen = new Set();
+    var seenMarkup = new Set();
     var assets = [];
     var missing = [];
     var total = 0;
     nodes.forEach(function (svg, index) {
-      if (seen.indexOf(svg) >= 0) return;
+      if (seen.has(svg)) return;
       if (svg.closest && svg.closest("#cgv-report-capture-curtain")) return;
-      seen.push(svg);
+      seen.add(svg);
+      if (captureMode === "fast") {
+        var busyOutput = svg.closest && svg.closest(".recalculating");
+        if (busyOutput) return;
+      }
       var container = sourceContainer(svg);
       var id = String((container && container.id) || svg.id || ("figure_" + (index + 1)));
       if (/figure-studio-(?:canvas|preview)/.test(id)) return;
@@ -264,8 +277,8 @@
         missing.push(id + ": SVG could not be serialized");
         return;
       }
-      if (seenMarkup.indexOf(markup) >= 0) return;
-      seenMarkup.push(markup);
+      if (seenMarkup.has(markup)) return;
+      seenMarkup.add(markup);
       var bytes = new Blob([markup]).size;
       if (bytes > 4 * 1024 * 1024) {
         missing.push(id + ": figure exceeds 4 MB");
@@ -539,14 +552,23 @@
   }
 
   function captureForServer(message) {
+    var captureStartedAt = Date.now();
     var requestId = String((message && message.request_id) || "");
     var limit = Number((message && message.max_total_bytes) || (24 * 1024 * 1024));
     var analyticsContexts = asArray(message && message.analytics_contexts);
-    waitForStructuralFigures(message, function (structuralMissing, preparedTargets) {
-      requestHiddenAnalytics(analyticsContexts);
-      waitForHiddenAnalytics(analyticsContexts, function (analyticsMissing) {
-      var captured = capturePageSvgs(limit, message && message.capture_contexts);
+    var captureMode = String((message && message.capture_mode) || "complete").toLowerCase();
+    if (captureMode !== "fast") captureMode = "complete";
+
+    var completeCapture = function (structuralMissing, analyticsMissing, preparedTargets) {
+      sendReportProgress(requestId, "Serializing and transferring the captured report views…");
+      var captured = capturePageSvgs(
+        limit,
+        message && message.capture_contexts,
+        captureMode
+      );
       var preCaptures = [preSyntenyCaptureByRequest[requestId], preLastzCaptureByRequest[requestId]];
+      var preSyntenyMs = Number(preCaptures[0] && preCaptures[0].duration_ms || 0);
+      var preLastzMs = Number(preCaptures[1] && preCaptures[1].duration_ms || 0);
       delete preSyntenyCaptureByRequest[requestId];
       delete preLastzCaptureByRequest[requestId];
       var queuedAssets = [];
@@ -557,17 +579,17 @@
       });
       if (queuedAssets.length) {
         var mergedAssets = [];
-        var mergedMarkup = [];
+        var mergedMarkup = new Set();
         var mergedBytes = 0;
         queuedAssets.concat(captured.assets).forEach(function (asset) {
           var markup = String(asset && asset.svg || "");
-          if (!markup || mergedMarkup.indexOf(markup) >= 0) return;
+          if (!markup || mergedMarkup.has(markup)) return;
           var bytes = new Blob([markup]).size;
           if (mergedBytes + bytes > limit) {
             captured.missing.push((asset.title || asset.id || "Figure") + ": total capture limit reached while merging report views");
             return;
           }
-          mergedMarkup.push(markup);
+          mergedMarkup.add(markup);
           mergedAssets.push(asset);
           mergedBytes += bytes;
         });
@@ -575,18 +597,52 @@
         captured.bytes = mergedBytes;
       }
       captured.missing = structuralMissing.concat(analyticsMissing, captured.missing || []);
-      finishStructuralFigures(preparedTargets);
-      finishHiddenAnalytics(analyticsContexts);
+      if (captureMode === "complete") {
+        finishStructuralFigures(preparedTargets);
+        finishHiddenAnalytics(analyticsContexts);
+      }
       if (window.Shiny && typeof window.Shiny.setInputValue === "function") {
         window.Shiny.setInputValue("cgv_analysis_assets", {
           request_id: requestId,
+          capture_mode: captureMode,
           assets: captured.assets,
           missing: captured.missing,
+          omitted: captureMode === "fast" ? [
+            "Views that were hidden, unfinished or not yet rendered were not generated."
+          ] : [],
           external_results: message && message.include_global_assets === false ? [] : captureExternalResults(),
           captured_bytes: captured.bytes,
+          timings: {
+            client_capture_ms: Date.now() - captureStartedAt,
+            synteny_ms: preSyntenyMs,
+            alignment_view_ms: preLastzMs
+          },
           nonce: Date.now() + Math.random()
         }, { priority: "event" });
       }
+    };
+
+    if (captureMode === "fast") {
+      window.setTimeout(function () {
+        completeCapture([], [], []);
+      }, 0);
+      return;
+    }
+
+    sendReportProgress(requestId, "Preparing missing structural views for the complete report…");
+    waitForStructuralFigures(message, function (structuralMissing, preparedTargets) {
+      var analyticsToRender = analyticsContexts.filter(function (context) {
+        var state = hiddenAnalyticsState(context);
+        return state.expected === 0 ||
+          state.ready < state.expected ||
+          state.busy > 0;
+      });
+      if (analyticsToRender.length) {
+        sendReportProgress(requestId, "Generating missing Analytics charts for the complete report…");
+        requestHiddenAnalytics(analyticsToRender);
+      }
+      waitForHiddenAnalytics(analyticsContexts, function (analyticsMissing) {
+        completeCapture(structuralMissing, analyticsMissing, preparedTargets);
       });
     });
   }
@@ -675,7 +731,7 @@
     };
   }
 
-  function runSyntenyCaptureTasks(tasks, timeoutMs, callback) {
+  function runSyntenyCaptureTasks(tasks, timeoutMs, requestId, callback) {
     var assets = [];
     var missing = [];
     var index = 0;
@@ -687,6 +743,10 @@
         return;
       }
       var task = tasks[index++];
+      sendReportProgress(
+        requestId,
+        "Rendering aligned synteny view " + index + " of " + tasks.length + "…"
+      );
       var started = Date.now();
       var selectionAppliedAt = 0;
       var stableSvg = null;
@@ -737,6 +797,7 @@
   }
 
   function prepareSyntenyForReport(message) {
+    var phaseStartedAt = Date.now();
     var requestId = String((message && message.request_id) || "");
     var captureLimit = Number((message && message.max_total_bytes) || (24 * 1024 * 1024));
     var taskTimeout = Math.max(15000, Number((message && message.per_view_timeout_ms) || 30000));
@@ -784,7 +845,8 @@
         missing: (beforeSynteny.missing || []).concat(alignedCapture.missing || []),
         bytes: Number(beforeSynteny.bytes || 0) + (alignedCapture.assets || []).reduce(function (sum, asset) {
           return sum + new Blob([String(asset && asset.svg || "")]).size;
-        }, 0)
+        }, 0),
+        duration_ms: Date.now() - phaseStartedAt
       };
       if (originalHomoGroup) {
         setReportSelectValue("homo_aligned_gene_group", originalHomoGroup);
@@ -820,10 +882,11 @@
       });
       return;
     }
-    runSyntenyCaptureTasks(tasks, taskTimeout, finish);
+    runSyntenyCaptureTasks(tasks, taskTimeout, requestId, finish);
   }
 
   function prepareLastzForReport(message) {
+    var phaseStartedAt = Date.now();
     var requestId = String((message && message.request_id) || "");
     var contexts = asArray(message && message.contexts).filter(function (context) {
       return context === "homo" || context === "ortho";
@@ -862,6 +925,7 @@
     var missing = [];
     var runNext = function () {
       if (taskIndex >= tasks.length) {
+        capture.duration_ms = Date.now() - phaseStartedAt;
         preLastzCaptureByRequest[requestId] = capture;
         if (window.Shiny && typeof window.Shiny.setInputValue === "function") {
           window.Shiny.setInputValue("cgv_report_lastz_ready", {
@@ -1102,9 +1166,29 @@
     }
   }
 
+  function notifyZipStart() {
+    var shell = document.getElementById("cgv-share-modal-shell");
+    if (!shell) return;
+    var status = document.getElementById("cgv-zip-generation-status");
+    if (!status) {
+      status = document.createElement("div");
+      status.id = "cgv-zip-generation-status";
+      status.className = "cgv-share-progress";
+      var result = shell.querySelector(".cgv-share-result, .cgv-share-callout-success");
+      if (result && result.parentNode) {
+        result.parentNode.insertBefore(status, result.nextSibling);
+      } else {
+        shell.insertBefore(status, shell.firstChild);
+      }
+    }
+    status.textContent = "Preparing the reproducibility ZIP. This can take several minutes; keep this window open.";
+    scrollShareModalToTop();
+  }
+
   window.CGVSharedAnalysis = {
     capture: captureForServer,
     renderReceipts: renderReceipts,
+    notifyZipStart: notifyZipStart,
     copyLatestUrl: function () {
       var input = document.getElementById("cgv-share-result-url");
       return copyText(input ? input.value : latestUrl);

@@ -65,10 +65,15 @@ cgv_is_absolute_path <- function(path) {
 }
 
 cgv_manifest_path_field <- function(name) {
-    key <- tolower(trimws(cgv_safe_scalar(name)))
+    key <- if (length(name) && !is.na(name[[1L]])) {
+        tolower(trimws(as.character(name[[1L]])))
+    } else {
+        ""
+    }
     nzchar(key) && (
-        grepl("(^|_)(path|paths)$", key, perl = TRUE) ||
-        key %in% c("internal_path", "binary_path", "working_directory")
+        key %in% c("path", "paths", "internal_path", "binary_path", "working_directory") ||
+        endsWith(key, "_path") ||
+        endsWith(key, "_paths")
     )
 }
 
@@ -78,7 +83,7 @@ cgv_redact_absolute_path_fields <- function(value, field_name = "") {
         keys <- names(out)
         if (is.null(keys)) keys <- rep("", length(out))
         for (i in seq_along(out)) {
-            out[[i]] <- cgv_redact_absolute_path_fields(out[[i]], keys[[i]])
+            out[i] <- list(cgv_redact_absolute_path_fields(out[[i]], keys[[i]]))
         }
         return(out)
     }
@@ -96,19 +101,32 @@ cgv_redact_absolute_path_fields <- function(value, field_name = "") {
 
 cgv_collect_absolute_manifest_paths <- function(value, field_name = "", location = "analysis") {
     found <- character(0)
-    if (is.list(value)) {
-        keys <- names(value)
-        if (is.null(keys)) keys <- rep("", length(value))
-        for (i in seq_along(value)) {
-            key <- keys[[i]]
-            child_location <- if (nzchar(key)) paste(location, key, sep = ".") else paste0(location, "[", i, "]")
-            found <- c(found, cgv_collect_absolute_manifest_paths(value[[i]], key, child_location))
+    walk <- function(item, item_field, item_location) {
+        if (is.list(item)) {
+            keys <- names(item)
+            if (is.null(keys)) keys <- rep("", length(item))
+            for (i in seq_along(item)) {
+                key <- keys[[i]]
+                child_location <- if (nzchar(key)) {
+                    paste(item_location, key, sep = ".")
+                } else {
+                    paste0(item_location, "[", i, "]")
+                }
+                walk(item[[i]], key, child_location)
+            }
+            return(invisible(NULL))
         }
-        return(found)
+        if (!is.atomic(item) || !cgv_manifest_path_field(item_field)) {
+            return(invisible(NULL))
+        }
+        text <- as.character(item)
+        if (any(vapply(text, cgv_is_absolute_path, logical(1)))) {
+            found <<- c(found, item_location)
+        }
+        invisible(NULL)
     }
-    if (!is.atomic(value) || !cgv_manifest_path_field(field_name)) return(character(0))
-    text <- as.character(value)
-    if (any(vapply(text, cgv_is_absolute_path, logical(1)))) location else character(0)
+    walk(value, field_name, location)
+    found
 }
 
 cgv_local_asset_data_uri <- function(path, base_dir = ".", max_bytes = 512L * 1024L) {
@@ -323,6 +341,66 @@ cgv_collect_plot_manifest <- function(section, workflow, base_dir = ".") {
             data_columns = I(columns)
         )
     })
+}
+
+cgv_compact_structural_records <- function(plots) {
+    lapply(plots %||% list(), function(plot) {
+        record <- plot %||% list()
+        organism <- record$organism %||% list()
+        organism$icon_data_uri <- NULL
+        record$organism <- organism
+        gene <- record$gene %||% list()
+        for (key in c(
+            "lookup_alias_candidates",
+            "lookup_alias_used",
+            "local_alias_terms",
+            "precomputed_neighbor_context"
+        )) {
+            gene[[key]] <- NULL
+        }
+        record$gene <- gene
+        record
+    })
+}
+
+cgv_alias_decision_manifest <- function(plots) {
+    decisions <- list()
+    decision_index <- new.env(parent = emptyenv(), hash = TRUE)
+    for (plot in plots %||% list()) {
+        record <- plot %||% list()
+        gene <- record$gene %||% list()
+        organism <- record$organism %||% list()
+        key <- paste(
+            cgv_first_nonempty(organism$id, organism$name),
+            cgv_first_nonempty(gene$query_gene_input, gene$query_gene),
+            cgv_first_nonempty(gene$matched_gene_id, gene$matched_gene_name),
+            sep = "|"
+        )
+        if (!nzchar(gsub("\\|", "", key, fixed = FALSE))) next
+        if (exists(key, envir = decision_index, inherits = FALSE)) {
+            idx <- get(key, envir = decision_index, inherits = FALSE)
+            decisions[[idx]]$record_ids <- unique(c(
+                as.character(decisions[[idx]]$record_ids %||% character(0)),
+                cgv_safe_scalar(record$id)
+            ))
+            next
+        }
+        decisions[[length(decisions) + 1L]] <- list(
+            record_ids = I(Filter(nzchar, c(cgv_safe_scalar(record$id)))),
+            organism_id = cgv_first_nonempty(organism$id, organism$name),
+            query_gene = cgv_safe_scalar(gene$query_gene),
+            query_gene_input = cgv_safe_scalar(gene$query_gene_input),
+            matched_gene_name = cgv_safe_scalar(gene$matched_gene_name),
+            display_gene_name = cgv_safe_scalar(gene$display_gene_name),
+            matched_gene_id = cgv_safe_scalar(gene$matched_gene_id),
+            lookup_alias_candidates = gene$lookup_alias_candidates %||% list(),
+            lookup_alias_used = gene$lookup_alias_used %||% list(),
+            local_alias_terms = gene$local_alias_terms %||% list(),
+            precomputed_neighbor_context = gene$precomputed_neighbor_context %||% list()
+        )
+        assign(key, length(decisions), envir = decision_index)
+    }
+    unname(decisions)
 }
 
 cgv_reference_accession <- function(...) {
@@ -649,6 +727,9 @@ cgv_build_analysis_manifest <- function(snapshot,
         "cross_species",
         base_dir
     ))
+    structural_records <- cgv_compact_structural_records(c(homo_plots, ortho_plots))
+    capture_mode <- tolower(cgv_safe_scalar(client_payload$capture_mode, "complete"))
+    if (!capture_mode %in% c("complete", "fast")) capture_mode <- "complete"
     workflows <- character(0)
     if (length(homo_plots)) workflows <- c(workflows, "multi_gene")
     if (length(ortho_plots)) workflows <- c(workflows, "cross_species")
@@ -784,7 +865,7 @@ cgv_build_analysis_manifest <- function(snapshot,
             ))))
         ),
         provenance = list(
-            alias_decisions = unname(lapply(c(homo_plots, ortho_plots), function(plot) plot$gene %||% list())),
+            alias_decisions = cgv_alias_decision_manifest(c(homo_plots, ortho_plots)),
             sources = unname(lapply(c(homo_plots, ortho_plots), function(plot) plot$source %||% list())),
             organisms_without_result = unresolved_organisms,
             no_result = list(
@@ -802,7 +883,7 @@ cgv_build_analysis_manifest <- function(snapshot,
             )
         ),
         results = list(
-            structural = c(homo_plots, ortho_plots),
+            structural = structural_records,
             alignments = list(
                 lastz = cgv_alignment_manifest(pip_runs, "lastz"),
                 multipip = cgv_alignment_manifest(multipip_runs, "multipip")
@@ -832,7 +913,9 @@ cgv_build_analysis_manifest <- function(snapshot,
             warning = "Anyone with the secret URL can view and copy information visible in this report."
         ),
         capture = list(
+            mode = capture_mode,
             missing = I(as.character(client_payload$missing %||% character(0))),
+            omitted = I(as.character(client_payload$omitted %||% character(0))),
             captured_figure_count = length(assets)
         )
     )
@@ -903,7 +986,7 @@ cgv_report_js <- function() {
         "var genes=array(a.query&&a.query.genes);document.getElementById('report-title').textContent=(genes.length?'CGV analysis: '+genes.join(', '):'CGV interactive analysis');",
         "document.getElementById('report-subtitle').textContent='Read-only snapshot created '+value(a.created_at);",
         "var logo=a.branding&&a.branding.logo_data_uri;if(logo){document.getElementById('report-logo').src=logo}else{document.getElementById('report-logo').hidden=true}",
-        "var badges=document.getElementById('report-badges');[value(a.generator&&a.generator.version),array(a.workflows).map(function(w){return w==='multi_gene'?'Multi-Gene':w==='cross_species'?'Cross-Species':w}).join(' + '),'Expires '+value(a.expires_at)].forEach(function(x){add(badges,el('span','badge',x))});",
+        "var badges=document.getElementById('report-badges');var captureMode=text(a.capture&&a.capture.mode||'complete');[value(a.generator&&a.generator.version),array(a.workflows).map(function(w){return w==='multi_gene'?'Multi-Gene':w==='cross_species'?'Cross-Species':w}).join(' + '),(captureMode==='fast'?'Fast capture':'Complete capture'),'Expires '+value(a.expires_at)].forEach(function(x){add(badges,el('span','badge',x))});",
         "if(a.privacy&&a.privacy.public_downloads){var dl=add(badges,el('a','badge badge-download','Download reproducibility ZIP'));dl.href='downloads/cgv_reproducibility.zip';dl.download='cgv_reproducibility.zip'}",
         "var organisms=array(a.organisms);var overview=document.getElementById('overview-cards');var cards=[['Genes',genes.join(', ')],['Organisms',organisms.length],['Transcripts',array(a.query&&a.query.selected_transcripts).length],['Captured views',array(a.figures).length]];cards.forEach(function(c){var d=add(overview,el('div','overview-card'));add(d,el('b','',c[0]));add(d,el('span','',value(c[1])))});",
         "var orgRoot=document.getElementById('organism-row');var seenOrg={};organisms.forEach(function(o){var key=text(o.id||o.name);if(!key||seenOrg[key])return;seenOrg[key]=true;var chip=add(orgRoot,el('div','organism-chip'));if(o.icon_data_uri){var img=add(chip,el('img'));img.src=o.icon_data_uri;img.alt=''}add(chip,el('span','',o.name||o.id))});if(!orgRoot.children.length)orgRoot.hidden=true;",
@@ -934,7 +1017,7 @@ cgv_report_js <- function() {
         "function table(rootId,rows){var root=document.getElementById(rootId);rows=Array.isArray(rows)?rows:[];if(!rows.length)return false;var keys=Object.keys(rows[0]||{});var tools=add(root,el('div','table-tools'));var search=add(tools,el('input'));search.type='search';search.placeholder='Filter rows';var wrap=add(root,el('div','table-wrap'));var t=add(wrap,el('table'));var head=add(t,el('thead'));var hr=add(head,el('tr'));var body=add(t,el('tbody'));var orderKey='',asc=true;keys.forEach(function(k){var th=add(hr,el('th','',k));th.addEventListener('click',function(){asc=orderKey===k?!asc:true;orderKey=k;draw()})});function draw(){var q=(search.value||'').toLowerCase();var data=rows.filter(function(r){return !q||keys.some(function(k){return value(r[k]).toLowerCase().indexOf(q)>=0})});if(orderKey)data.sort(function(x,y){return value(x[orderKey]).localeCompare(value(y[orderKey]),undefined,{numeric:true})*(asc?1:-1)});body.textContent='';data.forEach(function(r){var tr=add(body,el('tr'));keys.forEach(function(k){add(tr,el('td','',value(r[k])))})})}search.addEventListener('input',draw);draw();return true}",
         "renderLoci();renderFigures();document.getElementById('details-table-multi').hidden=!table('table-multi',a.tables&&a.tables.multi_gene);document.getElementById('details-table-cross').hidden=!table('table-cross',a.tables&&a.tables.cross_species);",
         "document.getElementById('provenance').textContent=JSON.stringify(a.provenance||{},null,2);document.getElementById('parameters').textContent=JSON.stringify(a.parameters||{},null,2);document.getElementById('external-results').textContent=JSON.stringify(a.results&&a.results.external||[],null,2);",
-        "var missing=array(a.capture&&a.capture.missing);document.getElementById('missing').textContent=missing.length?missing.join('\\n'):'No missing capture items were reported.';",
+        "var missing=array(a.capture&&a.capture.missing);var omitted=array(a.capture&&a.capture.omitted);var notes=[];if(omitted.length)notes.push('Intentionally omitted in fast mode:\\n- '+omitted.join('\\n- '));if(missing.length)notes.push('Items that could not be captured:\\n- '+missing.join('\\n- '));document.getElementById('missing').textContent=notes.length?notes.join('\\n\\n'):'No missing or intentionally omitted capture items were reported.';",
         "function decodeTooltipEntities(raw){var decoder=document.createElement('textarea');var current=text(raw);for(var i=0;i<3;i++){decoder.innerHTML=current;var next=decoder.value;if(next===current)break;current=next}return current}",
         "function plainTooltip(raw){var decoded=decodeTooltipEntities(raw).replace(/<br\\s*\\/?>/gi,'\\n').replace(/<hr\\s*\\/?>/gi,'\\n').replace(/<\\/(?:div|p|li|h[1-6])>/gi,'\\n');var doc=new DOMParser().parseFromString('<div>'+decoded+'</div>','text/html');return text(doc.body&&doc.body.textContent).replace(/\\u00a0/g,' ').replace(/[ \\t]+\\n/g,'\\n').replace(/\\n{3,}/g,'\\n\\n').trim()}",
         "var tip=el('div','tooltip');tip.hidden=true;document.body.appendChild(tip);document.addEventListener('mouseover',function(e){var n=e.target.closest&&e.target.closest('[data-tooltip],[title]');if(!n)return;var raw=n.getAttribute('data-tooltip')||n.getAttribute('title');var copy=plainTooltip(raw);if(!copy)return;tip.textContent=copy;tip.hidden=false});document.addEventListener('mousemove',function(e){if(!tip.hidden){tip.style.left=Math.max(8,Math.min(innerWidth-356,e.clientX+14))+'px';tip.style.top=Math.max(8,Math.min(innerHeight-tip.offsetHeight-12,e.clientY+14))+'px'}});document.addEventListener('mouseout',function(e){if(e.target.closest&&e.target.closest('[data-tooltip],[title]'))tip.hidden=true});",
@@ -943,12 +1026,20 @@ cgv_report_js <- function() {
 }
 
 cgv_report_script_csp_hash <- function() {
-    "sha256-hzu6tHcnWHA4k15V7TSOwQ9voERkwOk5iJWRIHKmwTE="
+    "sha256-VJ57di/IQ0e4GQS4gxb2N0MxDIJ1cTW0ycxWaMfXqog="
 }
 
-cgv_render_report_html <- function(analysis) {
-    cgv_validate_analysis_manifest(analysis)
-    json <- jsonlite::toJSON(analysis, auto_unbox = TRUE, null = "null", na = "null", digits = NA)
+cgv_render_report_html <- function(analysis, validated = FALSE, json = NULL) {
+    if (!isTRUE(validated)) cgv_validate_analysis_manifest(analysis)
+    if (is.null(json)) {
+        json <- jsonlite::toJSON(
+            analysis,
+            auto_unbox = TRUE,
+            null = "null",
+            na = "null",
+            digits = NA
+        )
+    }
     json <- gsub("</script", "<\\\\/script", json, ignore.case = TRUE, fixed = FALSE)
     paste0(
         "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">",
@@ -975,6 +1066,35 @@ cgv_render_report_html <- function(analysis) {
         "<p class=\"footer\">Generated by CGV. No live database requests or analysis jobs run from this report.</p></main>",
         "<script id=\"cgv-analysis-data\" type=\"application/json\">", json, "</script><script>", cgv_report_js(), "</script></body></html>"
     )
+}
+
+cgv_prepare_report_artifacts <- function(analysis) {
+    cgv_validate_analysis_manifest(analysis)
+    json <- jsonlite::toJSON(
+        analysis,
+        auto_unbox = TRUE,
+        null = "null",
+        na = "null",
+        digits = NA
+    )
+    structure(list(
+        analysis = analysis,
+        json = as.character(json),
+        html = cgv_render_report_html(
+            analysis,
+            validated = TRUE,
+            json = json
+        )
+    ), class = "cgv_report_artifacts")
+}
+
+cgv_is_prepared_report_artifacts <- function(value) {
+    inherits(value, "cgv_report_artifacts") &&
+        is.list(value$analysis) &&
+        is.character(value$json) &&
+        length(value$json) == 1L &&
+        is.character(value$html) &&
+        length(value$html) == 1L
 }
 
 cgv_write_alignment_tables <- function(runs, mode, directory) {
@@ -1135,8 +1255,14 @@ cgv_write_reproducibility_package <- function(analysis,
                                               pip_runs = list(),
                                               multipip_runs = list(),
                                               include_private = FALSE,
-                                              base_dir = ".") {
-    cgv_validate_analysis_manifest(analysis)
+                                              base_dir = ".",
+                                              artifacts = NULL) {
+    prepared <- cgv_is_prepared_report_artifacts(artifacts)
+    if (prepared) {
+        analysis <- artifacts$analysis
+    } else {
+        cgv_validate_analysis_manifest(analysis)
+    }
     package_root <- cgv_packages_root(base_dir)
     dir.create(package_root, recursive = TRUE, showWarnings = FALSE)
     work_dir <- tempfile("cgv-package-")
@@ -1146,15 +1272,19 @@ cgv_write_reproducibility_package <- function(analysis,
     invisible(lapply(dirs, dir.create, recursive = TRUE, showWarnings = FALSE))
 
     safe_snapshot <- cgv_redact_session_snapshot(session_snapshot, include_private, base_dir)
-    jsonlite::write_json(
-        analysis,
-        file.path(work_dir, "analysis.json"),
-        auto_unbox = TRUE,
-        pretty = TRUE,
-        null = "null",
-        na = "null",
-        digits = NA
-    )
+    if (prepared) {
+        writeLines(artifacts$json, file.path(work_dir, "analysis.json"), useBytes = TRUE)
+    } else {
+        jsonlite::write_json(
+            analysis,
+            file.path(work_dir, "analysis.json"),
+            auto_unbox = TRUE,
+            pretty = FALSE,
+            null = "null",
+            na = "null",
+            digits = NA
+        )
+    }
     writeLines(cgv_bundle_readme(analysis), file.path(work_dir, "README.md"), useBytes = TRUE)
     saveRDS(safe_snapshot, file.path(work_dir, "session", "cgv_session.rds"), compress = "gzip")
     if (is.data.frame(homo_summary) && nrow(homo_summary)) {
@@ -1219,8 +1349,12 @@ cgv_write_reproducibility_package <- function(analysis,
 cgv_publish_static_report <- function(analysis,
                                       package_path = "",
                                       allow_downloads = FALSE,
-                                      base_dir = ".") {
-    cgv_validate_analysis_manifest(analysis)
+                                      base_dir = ".",
+                                      artifacts = NULL) {
+    if (!cgv_is_prepared_report_artifacts(artifacts)) {
+        artifacts <- cgv_prepare_report_artifacts(analysis)
+    }
+    analysis <- artifacts$analysis
     report_root <- cgv_reports_root(base_dir)
     meta_root <- cgv_report_meta_root(base_dir)
     dir.create(report_root, recursive = TRUE, showWarnings = FALSE)
@@ -1238,17 +1372,7 @@ cgv_publish_static_report <- function(analysis,
     dir.create(staging, recursive = TRUE, showWarnings = FALSE)
     on.exit(if (dir.exists(staging)) unlink(staging, recursive = TRUE, force = TRUE), add = TRUE)
 
-    html <- cgv_render_report_html(analysis)
-    writeLines(html, file.path(staging, "index.html"), useBytes = TRUE)
-    jsonlite::write_json(
-        analysis,
-        file.path(staging, "analysis.json"),
-        auto_unbox = TRUE,
-        pretty = TRUE,
-        null = "null",
-        na = "null",
-        digits = NA
-    )
+    writeLines(artifacts$html, file.path(staging, "index.html"), useBytes = TRUE)
     if (isTRUE(allow_downloads) && nzchar(package_path) && file.exists(package_path)) {
         dir.create(file.path(staging, "downloads"), showWarnings = FALSE)
         file.copy(package_path, file.path(staging, "downloads", "cgv_reproducibility.zip"), overwrite = TRUE)
@@ -1389,7 +1513,9 @@ init_shared_analysis_domain <- function(input,
     state <- shiny::reactiveValues(
         pending = NULL,
         package_path = "",
+        package_context = NULL,
         desktop_html_path = "",
+        artifacts = NULL,
         result = NULL,
         error = "",
         missing = character(0),
@@ -1401,6 +1527,17 @@ init_shared_analysis_domain <- function(input,
     has_results <- shiny::reactive({
         length(active_homo_ids_rv() %||% integer(0)) + length(active_ortho_ids_rv() %||% integer(0)) > 0L
     })
+
+    report_perf_mark <- function(pending, step) {
+        if (exists("app_perf_mark", mode = "function")) {
+            try(app_perf_mark(
+                (pending %||% list())$perf_run,
+                step,
+                "SHARED_REPORT"
+            ), silent = TRUE)
+        }
+        invisible(NULL)
+    }
 
     shiny::observe({
         shinyjs::toggle(
@@ -1501,6 +1638,8 @@ init_shared_analysis_domain <- function(input,
     output$share_analysis_preview_ui <- shiny::renderUI({
         preview <- state$preview %||% list()
         if (!length(preview)) return(NULL)
+        capture_mode <- tolower(cgv_safe_scalar(input$share_capture_mode, "complete"))
+        complete <- !identical(capture_mode, "fast")
         shiny::div(
             class = "cgv-share-preview",
             shiny::tags$h4("Content preview"),
@@ -1509,9 +1648,15 @@ init_shared_analysis_domain <- function(input,
                     "%d structural result(s) with included transcript selection",
                     as.integer(preview$structural %||% 0L)
                 )),
-                shiny::tags$li("Derived statistics and summary tables (including charts not opened yet)"),
-                shiny::tags$li(if (isTRUE(preview$synteny_possible)) {
-                    "Aligned synteny comparison (rendered for the report even if not opened yet)"
+                shiny::tags$li(if (complete) {
+                    "Derived statistics and summary tables, including charts not opened yet"
+                } else {
+                    "Summary tables plus Analytics charts that are already rendered"
+                }),
+                shiny::tags$li(if (complete && isTRUE(preview$synteny_possible)) {
+                    "Aligned synteny comparison, rendered even if it has not been opened yet"
+                } else if (!complete && isTRUE(preview$synteny_possible)) {
+                    "Aligned synteny only when its SVG is already available"
                 } else {
                     "Aligned synteny is not available for the current result set"
                 }),
@@ -1530,6 +1675,28 @@ init_shared_analysis_domain <- function(input,
         )
     })
 
+    ensure_reproducibility_package <- function() {
+        existing <- shiny::isolate(state$package_path)
+        if (nzchar(existing) && file.exists(existing)) return(existing)
+        context <- shiny::isolate(state$package_context)
+        if (!is.list(context)) {
+            stop("The report package context is no longer available. Recreate the report and try again.")
+        }
+        package_path <- cgv_write_reproducibility_package(
+            analysis = context$analysis,
+            session_snapshot = context$snapshot,
+            homo_summary = context$homo_summary,
+            ortho_summary = context$ortho_summary,
+            pip_runs = context$pip_runs,
+            multipip_runs = context$multipip_runs,
+            include_private = isTRUE(context$include_private),
+            base_dir = base_dir,
+            artifacts = context$artifacts
+        )
+        state$package_path <- package_path
+        package_path
+    }
+
     output$download_reproducibility_package <- shiny::downloadHandler(
         filename = function() {
             if (nzchar(state$package_path) && file.exists(state$package_path)) {
@@ -1539,8 +1706,10 @@ init_shared_analysis_domain <- function(input,
             }
         },
         content = function(file) {
-            shiny::req(nzchar(state$package_path), file.exists(state$package_path))
-            file.copy(state$package_path, file, overwrite = TRUE)
+            package_path <- ensure_reproducibility_package()
+            if (!file.copy(package_path, file, overwrite = TRUE)) {
+                stop("Could not prepare the ZIP download.")
+            }
         },
         contentType = "application/zip"
     )
@@ -1563,7 +1732,9 @@ init_shared_analysis_domain <- function(input,
         state$missing <- character(0)
         state$pending <- NULL
         state$package_path <- ""
+        state$package_context <- NULL
         state$desktop_html_path <- ""
+        state$artifacts <- NULL
         state$busy_message <- ""
         preview_snapshot <- tryCatch(build_session_snapshot_fn(), error = function(e) list())
         preview_state <- preview_snapshot$app %||% list()
@@ -1640,6 +1811,32 @@ init_shared_analysis_domain <- function(input,
                     )
                 ),
                 shiny::uiOutput("share_analysis_result_ui"),
+                shiny::div(
+                    class = "cgv-share-options cgv-share-capture-mode",
+                    shiny::radioButtons(
+                        "share_capture_mode",
+                        "Report detail",
+                        choices = c(
+                            "Complete — generate every available view (recommended)" = "complete",
+                            "Fast — include only views already rendered" = "fast"
+                        ),
+                        selected = "complete"
+                    ),
+                    shiny::conditionalPanel(
+                        condition = "input.share_capture_mode == 'complete'",
+                        shiny::p(
+                            class = "help-block",
+                            "CGV will generate views that have not been opened. Depending on the number of results, this can take several minutes."
+                        )
+                    ),
+                    shiny::conditionalPanel(
+                        condition = "input.share_capture_mode == 'fast'",
+                        shiny::p(
+                            class = "help-block",
+                            "CGV will not activate hidden Analytics, structures, alignments or synteny views."
+                        )
+                    )
+                ),
                 if (isTRUE(state$preview$multi_gene > 0L) &&
                     isTRUE(state$preview$cross_species > 0L)) shiny::div(
                     class = "cgv-share-scope",
@@ -1702,11 +1899,14 @@ init_shared_analysis_domain <- function(input,
                         if (isTRUE(state$preview$multi_gene > 0L) &&
                             isTRUE(state$preview$cross_species > 0L)) {
                             shiny::conditionalPanel(
-                                condition = "input.share_include_cross_species",
+                                condition = "input.share_capture_mode == 'complete' && input.share_include_cross_species",
                                 lastz_option
                             )
                         } else {
-                            lastz_option
+                            shiny::conditionalPanel(
+                                condition = "input.share_capture_mode == 'complete'",
+                                lastz_option
+                            )
                         }
                     } else NULL
                 ),
@@ -1740,8 +1940,9 @@ init_shared_analysis_domain <- function(input,
                     condition = "output.share_analysis_has_package",
                     shiny::downloadButton(
                         "download_reproducibility_package",
-                        "Download ZIP",
-                        class = "btn btn-default"
+                        "Generate / download ZIP",
+                        class = "btn btn-default",
+                        onclick = "window.CGVSharedAnalysis && window.CGVSharedAnalysis.notifyZipStart();"
                     )
                 ),
                 shiny::conditionalPanel(
@@ -1787,7 +1988,8 @@ init_shared_analysis_domain <- function(input,
     })
 
     output$share_analysis_has_package <- shiny::reactive({
-        nzchar(state$package_path) && file.exists(state$package_path)
+        (nzchar(state$package_path) && file.exists(state$package_path)) ||
+            is.list(state$package_context)
     })
     shiny::outputOptions(output, "share_analysis_has_package", suspendWhenHidden = FALSE)
     output$share_analysis_has_html <- shiny::reactive({
@@ -1815,9 +2017,15 @@ init_shared_analysis_domain <- function(input,
     request_browser_capture <- function(pending) {
         pending$phase <- "capture"
         state$pending <- pending
-        state$busy_message <- "Generating the interactive report and reproducibility package…"
+        report_perf_mark(pending, "browser_capture_requested")
+        state$busy_message <- if (identical(pending$capture_mode, "fast")) {
+            "Capturing the views that are already available…"
+        } else {
+            "Preparing structures and Analytics for the complete report…"
+        }
         session$sendCustomMessage("cgv:capture-analysis-assets", list(
             request_id = pending$request_id,
+            capture_mode = pending$capture_mode %||% "complete",
             max_total_bytes = 24L * 1024L * 1024L,
             analytics_contexts = pending$analytics_contexts %||% character(0),
             structural_targets = pending$structural_targets %||% list(),
@@ -1836,7 +2044,8 @@ init_shared_analysis_domain <- function(input,
     start_lastz_phase <- function(pending) {
         pending$phase <- "lastz"
         state$pending <- pending
-        state$busy_message <- "Generating the interactive report and reproducibility package…"
+        report_perf_mark(pending, "lastz_phase_started")
+        state$busy_message <- "Running and capturing LASTZ and MultiPIP. This can take several minutes…"
         lastz_result <- if (is.function(run_lastz_fn)) {
             tryCatch(
                 run_lastz_fn(pending$lastz_contexts),
@@ -1877,7 +2086,13 @@ init_shared_analysis_domain <- function(input,
     start_synteny_phase <- function(pending) {
         pending$phase <- "synteny"
         state$pending <- pending
-        state$busy_message <- "Generating the interactive report and reproducibility package…"
+        report_perf_mark(pending, "synteny_phase_started")
+        synteny_views <- length(pending$homo_synteny_groups %||% list()) +
+            as.integer("ortho" %in% (pending$synteny_contexts %||% character(0)))
+        state$busy_message <- sprintf(
+            "Rendering %d aligned synteny view(s) for the complete report…",
+            synteny_views
+        )
         session$sendCustomMessage("cgv:prepare-synteny-for-report", list(
             request_id = pending$request_id,
             contexts = pending$synteny_contexts,
@@ -1891,8 +2106,6 @@ init_shared_analysis_domain <- function(input,
             per_view_timeout_ms = 30000L,
             capture_after_synteny = TRUE
         ))
-        synteny_views <- length(pending$homo_synteny_groups %||% list()) +
-            as.integer("ortho" %in% (pending$synteny_contexts %||% character(0)))
         arm_report_stage_timeout(
             pending$request_id,
             "synteny",
@@ -1905,6 +2118,9 @@ init_shared_analysis_domain <- function(input,
     shiny::observeEvent(input$publish_shared_analysis, {
         if (isTRUE(state$busy)) return(invisible(NULL))
         desktop <- cgv_runtime_is_desktop()
+        capture_mode <- tolower(cgv_safe_scalar(input$share_capture_mode, "complete"))
+        if (!capture_mode %in% c("complete", "fast")) capture_mode <- "complete"
+        complete_capture <- identical(capture_mode, "complete")
         ttl <- if (desktop) 7L else suppressWarnings(as.integer(input$share_ttl_days %||% 7L))
         homo_count <- length(active_homo_ids_rv() %||% integer(0))
         ortho_count <- length(active_ortho_ids_rv() %||% integer(0))
@@ -1919,7 +2135,7 @@ init_shared_analysis_domain <- function(input,
         }
         lastz_contexts <- character(0)
         if (include_cross_species && ortho_count > 1L) lastz_contexts <- c(lastz_contexts, "ortho")
-        homo_synteny_available <- isTRUE(tryCatch(
+        homo_synteny_available <- complete_capture && isTRUE(tryCatch(
             if (is.function(homo_synteny_available_fn)) homo_synteny_available_fn() else FALSE,
             error = function(e) FALSE
         ))
@@ -1935,7 +2151,7 @@ init_shared_analysis_domain <- function(input,
         if (include_multi_gene && length(homo_synteny_groups)) {
             synteny_contexts <- c(synteny_contexts, "homo")
         }
-        if (include_cross_species && ortho_count > 1L) {
+        if (complete_capture && include_cross_species && ortho_count > 1L) {
             synteny_contexts <- c(synteny_contexts, "ortho")
         }
         capture_contexts <- c(
@@ -1948,36 +2164,62 @@ init_shared_analysis_domain <- function(input,
         }
         state$pending <- list(
             request_id = cgv_random_secret(12L),
+            perf_run = if (exists("app_perf_new_run", mode = "function")) {
+                app_perf_new_run("SHARED_REPORT")
+            } else {
+                NULL
+            },
             include_multi_gene = include_multi_gene,
             include_cross_species = include_cross_species,
             include_private = isTRUE(input$share_include_private),
             allow_downloads = if (desktop) FALSE else isTRUE(input$share_allow_downloads),
             ttl_days = ttl,
             desktop = desktop,
+            capture_mode = capture_mode,
             accept_missing = FALSE,
-            run_lastz = isTRUE(input$share_run_lastz) && length(lastz_contexts) > 0L,
+            run_lastz = complete_capture &&
+                isTRUE(input$share_run_lastz) &&
+                length(lastz_contexts) > 0L,
             lastz_contexts = lastz_contexts,
             synteny_contexts = synteny_contexts,
             homo_synteny_groups = unname(homo_synteny_groups),
             homo_selected_group = cgv_safe_scalar(input$homo_aligned_gene_group),
             capture_contexts = capture_contexts,
             include_global_assets = include_global_assets,
-            analytics_contexts = c(
+            analytics_contexts = if (complete_capture) c(
                 if (include_multi_gene) "homo",
                 if (include_cross_species) "ortho"
-            ),
+            ) else character(0),
             structural_targets = list(
-                homo = I(if (include_multi_gene) as.character(active_homo_ids_rv() %||% character(0)) else character(0)),
-                ortho = I(if (include_cross_species) as.character(active_ortho_ids_rv() %||% character(0)) else character(0))
+                homo = I(if (complete_capture && include_multi_gene) as.character(active_homo_ids_rv() %||% character(0)) else character(0)),
+                ortho = I(if (complete_capture && include_cross_species) as.character(active_ortho_ids_rv() %||% character(0)) else character(0))
             ),
             pre_capture_missing = character(0),
             lastz_runs = list(),
             phase = "ready"
         )
         state$busy <- TRUE
+        report_perf_mark(
+            state$pending,
+            sprintf(
+                "publication_started mode=%s homo=%d ortho=%d public_zip=%d",
+                capture_mode,
+                homo_count,
+                ortho_count,
+                as.integer(isTRUE(state$pending$allow_downloads))
+            )
+        )
         state$error <- ""
         state$missing <- character(0)
         state$result <- NULL
+        state$package_path <- ""
+        state$package_context <- NULL
+        state$artifacts <- NULL
+        state$busy_message <- if (complete_capture) {
+            "Preparing a complete report. Hidden views will be generated; this can take several minutes…"
+        } else {
+            "Capturing the views that are already available and publishing the report…"
+        }
         if (isTRUE(state$pending$run_lastz)) {
             start_lastz_phase(state$pending)
         } else if (length(synteny_contexts) > 0L) {
@@ -2006,6 +2248,18 @@ init_shared_analysis_domain <- function(input,
         } else {
             request_browser_capture(pending)
         }
+    }, ignoreInit = TRUE)
+
+    shiny::observeEvent(input$cgv_report_progress, {
+        pending <- shiny::isolate(state$pending)
+        progress <- input$cgv_report_progress %||% list()
+        if (!is.list(pending) ||
+            !identical(cgv_safe_scalar(progress$request_id), pending$request_id)) {
+            return(invisible(NULL))
+        }
+        message <- substr(cgv_safe_scalar(progress$message), 1L, 240L)
+        if (nzchar(message)) state$busy_message <- message
+        invisible(NULL)
     }, ignoreInit = TRUE)
 
     shiny::observeEvent(input$cgv_report_lastz_ready, {
@@ -2039,6 +2293,16 @@ init_shared_analysis_domain <- function(input,
             as.character(pending$pre_capture_missing %||% character(0)),
             as.character(unlist(payload$missing %||% character(0), use.names = FALSE))
         ))
+        payload$capture_mode <- pending$capture_mode %||% "complete"
+        report_perf_mark(
+            pending,
+            sprintf(
+                "browser_capture_received figures=%d bytes=%.0f client_capture_ms=%.0f",
+                length(payload$assets %||% list()),
+                suppressWarnings(as.numeric(payload$captured_bytes %||% 0)),
+                suppressWarnings(as.numeric((payload$timings %||% list())$client_capture_ms %||% 0))
+            )
+        )
         missing <- unique(as.character(unlist(payload$missing %||% character(0), use.names = FALSE)))
         missing <- missing[nzchar(missing)]
         if (length(missing) && !isTRUE(pending$accept_missing)) {
@@ -2053,6 +2317,7 @@ init_shared_analysis_domain <- function(input,
             state$missing <- character(0)
         }, add = TRUE)
         tryCatch({
+            state$busy_message <- "Building and validating the report…"
             snapshot <- cgv_scope_shared_snapshot(
                 build_session_snapshot_fn(),
                 include_multi_gene = pending$include_multi_gene,
@@ -2134,29 +2399,57 @@ init_shared_analysis_domain <- function(input,
                 app_version = app_version,
                 base_dir = base_dir
             )
-            package_path <- cgv_write_reproducibility_package(
+            report_perf_mark(
+                pending,
+                sprintf(
+                    "manifest_built figures=%d mode=%s",
+                    length(analysis$figures %||% list()),
+                    cgv_safe_scalar(analysis$capture$mode)
+                )
+            )
+            artifacts <- cgv_prepare_report_artifacts(analysis)
+            report_perf_mark(
+                pending,
+                sprintf(
+                    "artifacts_prepared html_bytes=%d json_bytes=%d",
+                    nchar(artifacts$html, type = "bytes"),
+                    nchar(artifacts$json, type = "bytes")
+                )
+            )
+            state$artifacts <- artifacts
+            state$package_context <- list(
                 analysis = analysis,
-                session_snapshot = snapshot,
+                snapshot = snapshot,
                 homo_summary = homo_summary,
                 ortho_summary = ortho_summary,
                 pip_runs = pip_runs,
                 multipip_runs = multipip_runs,
                 include_private = pending$include_private,
-                base_dir = base_dir
+                artifacts = artifacts
             )
-            state$package_path <- package_path
-            html_path <- tempfile("cgv-interactive-report-", fileext = ".html")
-            writeLines(cgv_render_report_html(analysis), html_path, useBytes = TRUE)
-            state$desktop_html_path <- html_path
+            package_path <- ""
+            if (isTRUE(pending$allow_downloads)) {
+                state$busy_message <- "Building the public reproducibility ZIP before publication…"
+                package_path <- ensure_reproducibility_package()
+                report_perf_mark(
+                    pending,
+                    sprintf("public_zip_built bytes=%.0f", file.info(package_path)$size)
+                )
+            }
 
             if (isTRUE(pending$desktop)) {
+                html_path <- tempfile("cgv-interactive-report-", fileext = ".html")
+                writeLines(artifacts$html, html_path, useBytes = TRUE)
+                state$desktop_html_path <- html_path
                 state$result <- list(desktop = TRUE, expires_at = analysis$expires_at)
             } else {
+                state$busy_message <- "Publishing the immutable report…"
                 published <- cgv_publish_static_report(
                     analysis,
                     package_path = package_path,
                     allow_downloads = pending$allow_downloads,
-                    base_dir = base_dir
+                    base_dir = base_dir,
+                    artifacts = artifacts
                 )
                 url <- paste0(cgv_public_base_url(session), "/share/", published$token, "/index.html")
                 state$result <- list(
@@ -2168,6 +2461,7 @@ init_shared_analysis_domain <- function(input,
                 )
                 session$sendCustomMessage("cgv:shared-report-created", state$result)
             }
+            report_perf_mark(pending, "publication_completed")
         }, error = function(e) {
             state$error <- paste0("Could not create the report: ", conditionMessage(e))
         })
