@@ -1783,10 +1783,22 @@ init_shared_analysis_domain <- function(input,
             has_private_uploads = any(vapply(snapshot_plots, plot_has_uploaded_source, logical(1)))
         )
         desktop <- cgv_runtime_is_desktop()
+        light_logo_src <- versioned_asset_path("favicon2.ico?v=2")
+        dark_logo_src <- versioned_asset_path("favicon.ico?v=2")
+        modal_logo_src <- if (identical(
+            tolower(cgv_safe_scalar(input$app_theme, "light")),
+            "dark"
+        )) dark_logo_src else light_logo_src
         shiny::showModal(shiny::modalDialog(
             title = shiny::div(
                 class = "cgv-share-modal-title",
-                shiny::tags$img(src = "/favicon.ico", alt = "", class = "cgv-share-modal-logo"),
+                shiny::tags$img(
+                    src = modal_logo_src,
+                    `data-light-src` = light_logo_src,
+                    `data-dark-src` = dark_logo_src,
+                    alt = "CGV logo",
+                    class = "cgv-share-modal-logo"
+                ),
                 shiny::div(
                     shiny::span(class = "cgv-share-modal-kicker", if (desktop) "LOCAL EXPORT" else "READ-ONLY SNAPSHOT"),
                     shiny::span(if (desktop) "Export interactive analysis" else "Share analysis")
