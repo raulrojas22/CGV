@@ -99,6 +99,11 @@ guide_media_map <- stats::setNames(
 )
 
 initial_summary_context_header <- function(search_mode_label = "Multi-Gene", gene_hint = "Genes: pending", align_detail = "Compare transcripts") {
+  orientation_input_id <- if (grepl("Cross", as.character(search_mode_label), ignore.case = TRUE)) {
+    "ortho_orientation_pick"
+  } else {
+    "homo_orientation_pick"
+  }
   div(
     class = "summary-context-card summary-context-card-inline summary-context-card-initial",
     div(
@@ -138,7 +143,7 @@ initial_summary_context_header <- function(search_mode_label = "Multi-Gene", gen
             `aria-label` = "Hide neighboring genes",
             title = "Hide neighboring genes on gene cards",
             icon("location-arrow"),
-            span("Neighbors")
+            span(class = "summary-genomic-context-toggle-label", "Hide neighbors")
           ),
           tags$button(
             type = "button",
@@ -148,7 +153,7 @@ initial_summary_context_header <- function(search_mode_label = "Multi-Gene", gen
             `aria-label` = "Hide overlapping genes",
             title = "Hide overlapping genes on gene cards",
             icon("layer-group"),
-            span("Overlaps")
+            span(class = "summary-genomic-context-toggle-label", "Hide overlaps")
           )
         ),
         div(
@@ -194,6 +199,25 @@ initial_summary_context_header <- function(search_mode_label = "Multi-Gene", gen
             icon("ruler-horizontal"),
             span("Scale")
           )
+        ),
+        div(
+          class = "summary-display-mode-subbar summary-display-orientation-subbar",
+          span(class = "summary-display-submode-label", "Direction"),
+          tags$button(
+            type = "button",
+            class = "summary-display-submode-button is-active",
+            `aria-pressed` = "true",
+            onclick = sprintf("if(window.Shiny){Shiny.setInputValue('%s','genomic',{priority:'event'});}", orientation_input_id),
+            "Genomic"
+          ),
+          tags$button(
+            type = "button",
+            class = "summary-display-submode-button",
+            `aria-pressed` = "false",
+            onclick = sprintf("if(window.Shiny){Shiny.setInputValue('%s','transcription',{priority:'event'});}", orientation_input_id),
+            "5\u2032\u21923\u2032"
+          ),
+          span(class = "summary-display-orientation-note", "Native genomic coordinates")
         )
       )
     )
@@ -692,12 +716,13 @@ figure_studio_page <- function() {
           hidden = "hidden",
           tags$label(
             class = "figure-studio-field figure-studio-field-block",
-            title = "This heading appears beside the automatic A, B, C… panel label.",
+            title = "This heading appears beside the automatic A, B, C… panel label. Scientific names such as Homo sapiens are italicized automatically in preview and export.",
             span("Panel title"),
             tags$input(
               id = "figure-studio-panel-title",
               type = "text",
               maxlength = "120",
+              placeholder = "Example: TP53 in Homo sapiens",
               autocomplete = "off"
             )
           ),
@@ -2053,6 +2078,7 @@ fluidPage(
     ")),
       tags$script(src = versioned_asset_path("js/keepalive.js")),
       tags$script(src = versioned_asset_path("js/dna_loader_unifier.js")),
+      tags$script(src = versioned_asset_path("js/activity_feedback.js")),
       tags$script(src = versioned_asset_path("js/plot_zoom.js")),
       tags$script(src = versioned_asset_path("js/genomic_ruler_toggle.js")),
       tags$script(src = versioned_asset_path("js/export_svg.js")),
@@ -4403,6 +4429,32 @@ fluidPage(
         div(id = "app-status-popup-loader-text", class = "app-status-popup-loader-text", "Working...")
       ),
       div(id = "app-status-popup-log", class = "app-status-popup-log")
+    ),
+    div(
+      id = "app-work-indicator",
+      class = "app-work-indicator",
+      role = "status",
+      `aria-live` = "polite",
+      `aria-atomic` = "true",
+      `aria-hidden` = "true",
+      hidden = TRUE,
+      div(
+        class = "app-dna-loader app-dna-loader--spinner-sm",
+        `aria-hidden` = "true",
+        div(
+          class = "app-dna-wave app-dna-wave-top",
+          lapply(seq_len(16), function(i) span(class = "app-dna-node", style = sprintf("--i:%d;", i - 1)))
+        ),
+        div(
+          class = "app-dna-wave app-dna-wave-bottom",
+          lapply(seq_len(16), function(i) span(class = "app-dna-node", style = sprintf("--i:%d;", i - 1)))
+        )
+      ),
+      div(
+        class = "app-work-indicator-copy",
+        tags$strong(id = "app-work-indicator-headline", "CGV is working"),
+        span(id = "app-work-indicator-detail", "Processing data…")
+      )
     ),
     shinyjs::useShinyjs()
   ),

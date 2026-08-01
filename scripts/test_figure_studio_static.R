@@ -320,5 +320,25 @@ expect_pattern(
   'grid-template-columns: repeat\\(var\\(--figure-columns\\), minmax\\(0, 1fr\\)\\)',
   "dynamic one-to-three-column canvas"
 )
+expect_pattern(
+  studio_js,
+  'function scientificTitleRanges\\(text, candidates\\)[\\s\\S]*function appendScientificHtmlText[\\s\\S]*figure-scientific-name',
+  "scientific names are detected and italicized in the live panel title"
+)
+expect_pattern(
+  studio_js,
+  'function appendScientificSvgText[\\s\\S]*createElementNS\\(SVG_NS, "tspan"\\)[\\s\\S]*setAttribute\\("font-style", "italic"\\)',
+  "scientific names use real italic tspans in SVG exports"
+)
+expect_pattern(
+  studio_js,
+  'scientificNames: normalizeScientificNames[\\s\\S]*scientificNames: \\[dynamic\\.organismName\\][\\s\\S]*scientificNames: contextScientificNames\\(context\\)',
+  "source organism names persist with result and analytics panels"
+)
+expect_pattern(
+  ui_txt,
+  'Scientific names such as Homo sapiens are italicized automatically[\\s\\S]*placeholder = "Example: TP53 in Homo sapiens"',
+  "panel-title guidance explains automatic scientific italics"
+)
 
 cat("figure-studio-static-ok\n")

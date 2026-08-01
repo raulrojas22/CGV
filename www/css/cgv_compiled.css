@@ -6617,6 +6617,21 @@ html[data-app-theme="dark"] .plot-card-footer .footer-base-pill {
   justify-content: flex-start;
 }
 
+.summary-display-orientation-subbar {
+  grid-column: 1 / -1;
+  justify-self: center;
+  justify-content: center;
+  overflow: visible;
+}
+
+.summary-display-orientation-note {
+  padding: 0 8px 0 4px;
+  color: #60788b;
+  font-size: 9.5px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
 .summary-display-mode-subbar::-webkit-scrollbar {
   display: none;
 }
@@ -7084,6 +7099,10 @@ html[data-app-theme="dark"] .summary-display-mode-subbar {
 
 html[data-app-theme="dark"] .summary-display-submode-label {
   color: #9db6cb;
+}
+
+html[data-app-theme="dark"] .summary-display-orientation-note {
+  color: #a9c0d2;
 }
 
 html[data-app-theme="dark"] .summary-display-submode-button {
@@ -21142,4 +21161,121 @@ html[data-app-theme="dark"] .genomic-neighbor-popup-hint {
 
 html[data-app-theme="dark"] .genomic-neighbor-details dd {
   color: #e7f1fb;
+}
+
+/* Unified, non-blocking progress feedback for searches and render work. */
+.app-work-indicator[hidden] {
+  display: none !important;
+}
+
+.app-work-indicator {
+  position: fixed;
+  left: 50%;
+  bottom: 20px;
+  z-index: 12060;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  width: calc(100vw - 28px);
+  max-width: 460px;
+  min-height: 58px;
+  padding: 8px 15px 8px 11px;
+  transform: translateX(-50%);
+  border: 1px solid rgba(24, 188, 156, 0.42);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 12px 34px rgba(27, 54, 71, 0.2);
+  color: #294353;
+  pointer-events: none;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+.app-work-indicator .app-dna-loader.app-dna-loader--spinner-sm {
+  flex: 0 0 102px;
+  width: 102px;
+  margin: 0;
+}
+
+.app-work-indicator-copy {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+  line-height: 1.25;
+}
+
+.app-work-indicator-copy strong {
+  overflow: hidden;
+  color: #173b4c;
+  font-size: 12.5px;
+  font-weight: 750;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.app-work-indicator-copy span {
+  overflow: hidden;
+  color: #617583;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.plot-loading-placeholder-content,
+.app-dna-spinner-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+}
+
+.plot-loading-placeholder[hidden] {
+  display: none !important;
+}
+
+.plot-loading-placeholder-text,
+.app-dna-spinner-message {
+  color: #718593;
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+  line-height: 1.25;
+  text-align: center;
+}
+
+.analytics-chart-wrap .shiny-bound-output.recalculating {
+  visibility: visible !important;
+  opacity: 0.34 !important;
+}
+
+html[data-app-theme="dark"] .app-work-indicator {
+  border-color: rgba(56, 205, 178, 0.46);
+  background: rgba(18, 42, 64, 0.96);
+  box-shadow: 0 14px 38px rgba(0, 0, 0, 0.42);
+  color: #e6f1f7;
+}
+
+html[data-app-theme="dark"] .app-work-indicator-copy strong {
+  color: #f1f8fb;
+}
+
+html[data-app-theme="dark"] .app-work-indicator-copy span,
+html[data-app-theme="dark"] .plot-loading-placeholder-text,
+html[data-app-theme="dark"] .app-dna-spinner-message {
+  color: #a8c1d3;
+}
+
+@media (max-width: 620px) {
+  .app-work-indicator {
+    bottom: 12px;
+    gap: 8px;
+    min-height: 52px;
+    padding: 7px 11px 7px 8px;
+  }
+
+  .app-work-indicator .app-dna-loader.app-dna-loader--spinner-sm {
+    flex-basis: 82px;
+    width: 82px;
+  }
 }

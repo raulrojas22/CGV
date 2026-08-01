@@ -53,7 +53,21 @@
     if (loaderText) {
       loaderText.textContent = workflow + '\n' + detail;
     }
-    popup.classList.add('open', 'loading');
+    // Keep the notification center synchronized without opening a second,
+    // competing loader. The compact global indicator is the visible feedback.
+    popup.classList.add('loading');
+  }
+
+  function beginActivity(mode, query) {
+    if (!window.cgvActivity) return;
+    var workflow = mode === 'orthologous' ? 'Cross-species gene search' : 'Multi-gene search';
+    var gene = String(query == null ? '' : query).trim();
+    window.cgvActivity.begin('search-submit', {
+      headline: workflow,
+      detail: gene ? 'Preparing results for ' + gene + '…' : 'Preparing search results…',
+      priority: 50,
+      delay: 80
+    });
   }
 
   function inferMode() {
@@ -86,6 +100,7 @@
 
     var normalizedMode = mode === 'orthologous' ? 'orthologous' : 'homologous';
     showImmediatePopup(normalizedMode, query);
+    beginActivity(normalizedMode, query);
 
     // Allow the original click and Shiny's input binding to finish before
     // replacing button contents or applying native disabled state.
@@ -106,6 +121,7 @@
 
   window.cgvEndSearchFeedback = function () {
     busy = false;
+    if (window.cgvActivity) window.cgvActivity.end('search-submit');
     window.clearTimeout(releaseTimer);
     releaseTimer = null;
     visibleButtons().forEach(function (button) {

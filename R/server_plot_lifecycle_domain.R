@@ -104,7 +104,7 @@ init_plot_lifecycle_domain <- function(
             normalize_sequence_download_type(raw, default = default_type)
         } else {
             typ <- tolower(trimws(as.character(raw %||% default_type)))
-            if (!typ %in% c("gene", "transcript", "cds", "introns")) default_type else typ
+            if (!typ %in% c("gene", "transcript", "cds", "cds_segments", "introns")) default_type else typ
         }
     }
 
@@ -293,7 +293,7 @@ init_plot_lifecycle_domain <- function(
         if (!nzchar(id_chr)) {
             return(invisible(NULL))
         }
-        for (sequence_type in c("gene", "transcript", "cds", "introns")) local({
+        for (sequence_type in c("gene", "transcript", "cds", "cds_segments", "introns")) local({
             id_local <- id_chr
             selected_type_local <- sequence_type
             output[[paste0("download_homo_", id_local, "_", selected_type_local)]] <- downloadHandler(
@@ -374,7 +374,7 @@ init_plot_lifecycle_domain <- function(
     register_homologous_transcript_download <- function(tx_plot_id, id_chr, tx_id) {
         tx_plot_id <- as.character(tx_plot_id %||% "")
         if (!nzchar(tx_plot_id)) return(invisible(NULL))
-        for (sequence_type in c("gene", "transcript", "cds", "introns")) local({
+        for (sequence_type in c("gene", "transcript", "cds", "cds_segments", "introns")) local({
             tx_local_id <- tx_plot_id
             parent_id <- id_chr
             t_id <- tx_id
@@ -440,7 +440,7 @@ init_plot_lifecycle_domain <- function(
         if (!nzchar(id_chr)) {
             return(invisible(NULL))
         }
-        for (sequence_type in c("gene", "transcript", "cds", "introns")) local({
+        for (sequence_type in c("gene", "transcript", "cds", "cds_segments", "introns")) local({
             id_local <- id_chr
             selected_type_local <- sequence_type
             output[[paste0("download_ortho_", id_local, "_", selected_type_local)]] <- downloadHandler(
@@ -521,7 +521,7 @@ init_plot_lifecycle_domain <- function(
     register_orthologous_transcript_download <- function(tx_plot_id, id_chr, tx_id) {
         tx_plot_id <- as.character(tx_plot_id %||% "")
         if (!nzchar(tx_plot_id)) return(invisible(NULL))
-        for (sequence_type in c("gene", "transcript", "cds", "introns")) local({
+        for (sequence_type in c("gene", "transcript", "cds", "cds_segments", "introns")) local({
             tx_local_id <- tx_plot_id
             parent_id <- id_chr
             t_id <- tx_id
@@ -586,7 +586,7 @@ init_plot_lifecycle_domain <- function(
         if (!nzchar(id_chr)) {
             return(invisible(NULL))
         }
-        for (sequence_type in c("gene", "transcript", "cds", "introns")) {
+        for (sequence_type in c("gene", "transcript", "cds", "cds_segments", "introns")) {
             clear_dynamic_output_binding(paste0("download_homo_", id_chr, "_", sequence_type))
         }
         bound_now <- as.character(homoDownloadOutputsBound_rv() %||% character(0))
@@ -602,7 +602,7 @@ init_plot_lifecycle_domain <- function(
         if (!nzchar(id_chr)) {
             return(invisible(NULL))
         }
-        for (sequence_type in c("gene", "transcript", "cds", "introns")) {
+        for (sequence_type in c("gene", "transcript", "cds", "cds_segments", "introns")) {
             clear_dynamic_output_binding(paste0("download_ortho_", id_chr, "_", sequence_type))
         }
         bound_now <- as.character(orthoDownloadOutputsBound_rv() %||% character(0))
@@ -1099,6 +1099,11 @@ init_plot_lifecycle_domain <- function(
                     if (!mode %in% c("compact", "detailed")) mode <- "compact"
                     mode
                 }),
+                orientation_mode = reactive({
+                    mode <- tolower(trimws(as.character(input$homo_orientation_pick %||% "genomic")))
+                    if (!mode %in% c("genomic", "transcription")) mode <- "genomic"
+                    mode
+                }),
                 organism_name = this_org,
                 use_report_map = this_use_report,
                 report_path = this_report,
@@ -1196,6 +1201,11 @@ init_plot_lifecycle_domain <- function(
                 visual_mode = reactive({
                     mode <- tolower(as.character(input$ortho_visual_mode %||% "compact"))
                     if (!mode %in% c("compact", "detailed", "aligned")) mode <- "compact"
+                    mode
+                }),
+                orientation_mode = reactive({
+                    mode <- tolower(trimws(as.character(input$ortho_orientation_pick %||% "genomic")))
+                    if (!mode %in% c("genomic", "transcription")) mode <- "genomic"
                     mode
                 }),
                 organism_name = this_org,

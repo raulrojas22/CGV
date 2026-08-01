@@ -21,9 +21,11 @@
     var historyStack = [];
     var futureStack = [];
     var runtimeSvg = Object.create(null);
+    var runtimeLoading = Object.create(null);
     var dynamicSources = Object.create(null);
     var catalogGroupExpanded = Object.create(null);
     var textEditSnapshots = Object.create(null);
+    var activitySequence = 0;
 
     var state = {
         version: 2,
@@ -75,6 +77,131 @@
         return node;
     }
 
+    function beginFigureActivity(detail) {
+        activitySequence += 1;
+        var source = "figure-studio:" + activitySequence;
+        if (window.cgvActivity) {
+            window.cgvActivity.begin(source, {
+                headline: "Figure Studio",
+                detail: String(detail || "Preparing figure…"),
+                priority: 45,
+                delay: 160
+            });
+        }
+        return source;
+    }
+
+    function endFigureActivity(source) {
+        if (window.cgvActivity && source) window.cgvActivity.end(source);
+    }
+
+    function withFigureActivity(detail, work) {
+        var source = beginFigureActivity(detail);
+        return Promise.resolve().then(work).finally(function () {
+            endFigureActivity(source);
+        });
+    }
+
+    function normalizeScientificNames(values) {
+        var seen = Object.create(null);
+        return (Array.isArray(values) ? values : [values]).map(function (value) {
+            return String(value || "").replace(/\s+/g, " ").trim();
+        }).filter(function (value) {
+            var key = value.toLowerCase();
+            if (!value || seen[key]) return false;
+            seen[key] = true;
+            return true;
+        }).slice(0, 40);
+    }
+
+    function heuristicScientificNames(text) {
+        var stop = {
+            analysis: true, architecture: true, composition: true, context: true,
+            distribution: true, expression: true, figure: true, gene: true,
+            introns: true, lengths: true, model: true, panel: true,
+            sequence: true, structure: true, summary: true, transcript: true
+        };
+        var found = [];
+        var pattern = /\b[A-Z][a-z]{2,}\s+[a-z][a-z-]{2,}/g;
+        var match;
+        while ((match = pattern.exec(String(text || ""))) !== null) {
+            var words = match[0].split(/\s+/);
+            if (!stop[String(words[1] || "").toLowerCase()]) found.push(match[0]);
+        }
+        return found;
+    }
+
+    function scientificTitleRanges(text, candidates) {
+        var value = String(text || "");
+        var names = normalizeScientificNames(
+            normalizeScientificNames(candidates).concat(heuristicScientificNames(value))
+        );
+        var ranges = [];
+        names.forEach(function (name) {
+            var from = 0;
+            var index;
+            while ((index = value.indexOf(name, from)) >= 0) {
+                ranges.push({ start: index, end: index + name.length });
+                from = index + name.length;
+            }
+        });
+        ranges.sort(function (a, b) {
+            if (a.start !== b.start) return a.start - b.start;
+            return (b.end - b.start) - (a.end - a.start);
+        });
+        return ranges.reduce(function (selected, range) {
+            for (var i = 0; i < selected.length; i += 1) {
+                if (range.start < selected[i].end && range.end > selected[i].start) return selected;
+            }
+            selected.push(range);
+            return selected;
+        }, []);
+    }
+
+    function appendScientificHtmlText(node, text, candidates) {
+        var value = String(text || "");
+        var ranges = scientificTitleRanges(value, candidates);
+        var cursor = 0;
+        ranges.forEach(function (range) {
+            if (range.start > cursor) node.appendChild(document.createTextNode(value.slice(cursor, range.start)));
+            var scientific = document.createElement("em");
+            scientific.className = "figure-scientific-name";
+            scientific.textContent = value.slice(range.start, range.end);
+            node.appendChild(scientific);
+            cursor = range.end;
+        });
+        if (cursor < value.length) node.appendChild(document.createTextNode(value.slice(cursor)));
+        if (!ranges.length) node.textContent = value;
+    }
+
+    function appendScientificSvgText(node, text, candidates) {
+        var value = String(text || "");
+        var ranges = scientificTitleRanges(value, candidates);
+        if (!ranges.length) {
+            node.textContent = value;
+            return;
+        }
+        var cursor = 0;
+        ranges.forEach(function (range) {
+            if (range.start > cursor) {
+                var plain = document.createElementNS(SVG_NS, "tspan");
+                plain.textContent = value.slice(cursor, range.start);
+                node.appendChild(plain);
+            }
+            var scientific = document.createElementNS(SVG_NS, "tspan");
+            scientific.setAttribute("font-style", "italic");
+            scientific.setAttribute("class", "cgv-scientific-name");
+            scientific.textContent = value.slice(range.start, range.end);
+            node.appendChild(scientific);
+            cursor = range.end;
+        });
+        if (cursor < value.length) {
+            var tail = document.createElementNS(SVG_NS, "tspan");
+            tail.textContent = value.slice(cursor);
+            node.appendChild(tail);
+        }
+    }
+
     function cloneJson(value) {
         return JSON.parse(JSON.stringify(value));
     }
@@ -116,6 +243,7 @@
                 sourceKind: String((panel && panel.sourceKind) || "chart"),
                 sourceLabel: String((panel && panel.sourceLabel) || "CGV visualization"),
                 title: String((panel && panel.title) || "CGV visualization").slice(0, 120),
+                scientificNames: normalizeScientificNames(panel && panel.scientificNames),
                 span: safeInt(panel && panel.span, 1, 1, 3),
                 height: height,
                 showTitle: !panel || panel.showTitle !== false
@@ -463,6 +591,38 @@
         return null;
     }
 
+    function contextScientificNames(context) {
+        var contextName = context === "ortho" ? "ortho" : "homo";
+        var names = [];
+        Object.keys(dynamicSources).forEach(function (key) {
+            var source = dynamicSources[key];
+            if (source && source.context === contextName && source.organismName) {
+                names.push(source.organismName);
+            }
+        });
+        var section = byId(contextName === "ortho" ? "ortho_context_section" : "homo_context_section");
+        if (section) {
+            section.querySelectorAll(".summary-organism-name").forEach(function (node) {
+                names.push(node.textContent);
+            });
+        }
+        return normalizeScientificNames(names);
+    }
+
+    function figureScientificNames() {
+        var names = contextScientificNames("homo").concat(contextScientificNames("ortho"));
+        state.panels.forEach(function (panel) {
+            names = names.concat(panel.scientificNames || []);
+        });
+        return normalizeScientificNames(names);
+    }
+
+    function panelScientificNames(panel) {
+        return normalizeScientificNames(
+            (panel && panel.scientificNames || []).concat(figureScientificNames())
+        );
+    }
+
     function addPanelFromMarkup(options) {
         var opts = options || {};
         var id = makePanelId();
@@ -479,6 +639,7 @@
             sourceKind: String(opts.sourceKind || "chart"),
             sourceLabel: String(opts.sourceLabel || "CGV visualization"),
             title: String(opts.title || "CGV visualization").slice(0, 120),
+            scientificNames: normalizeScientificNames(opts.scientificNames),
             span: Math.min(state.columns, safeInt(opts.span, defaultSpan, 1, 3)),
             height: validHeightMode(opts.height) ? opts.height : "auto",
             showTitle: opts.showTitle !== false
@@ -495,7 +656,7 @@
         return panel;
     }
 
-    function addFromCatalog(key) {
+    function addFromCatalogCore(key) {
         if (dynamicSources[key]) {
             var dynamic = dynamicSources[key];
             var dynamicRoot = byId(dynamic.rootId);
@@ -508,6 +669,7 @@
                     sourceKind: "result",
                     sourceLabel: dynamic.sourceLabel,
                     title: dynamic.title,
+                    scientificNames: [dynamic.organismName],
                     markup: normalizeSourceSvg(dynamicSvg)
                 });
                 return Promise.resolve();
@@ -536,6 +698,7 @@
                     sourceKind: "result",
                     sourceLabel: dynamic.sourceLabel,
                     title: dynamic.title,
+                    scientificNames: [dynamic.organismName],
                     markup: result.markup
                 });
                 return result;
@@ -563,11 +726,21 @@
                 sourceKind: definition.group.toLowerCase(),
                 sourceLabel: definition.group,
                 title: definition.title,
+                scientificNames: contextScientificNames(context),
                 markup: result.markup
             });
         }).catch(function (err) {
             toast(err && err.message ? err.message : "This chart is not available yet.");
             throw err;
+        });
+    }
+
+    function addFromCatalog(key) {
+        var dynamic = dynamicSources[key];
+        var definition = getCatalogDefinition(key);
+        var title = dynamic ? dynamic.title : definition ? definition.title : "selected panel";
+        return withFigureActivity("Preparing " + title + "…", function () {
+            return addFromCatalogCore(key);
         });
     }
 
@@ -805,7 +978,14 @@
                         toast(item.availability.note + ".");
                         return;
                     }
-                    addFromCatalog(item.key).catch(function () {});
+                    if (button.getAttribute("aria-busy") === "true") return;
+                    button.setAttribute("aria-busy", "true");
+                    add.textContent = "Preparing…";
+                    addFromCatalog(item.key).catch(function () {}).finally(function () {
+                        if (!button.isConnected) return;
+                        button.removeAttribute("aria-busy");
+                        add.textContent = "+ Add";
+                    });
                 });
                 groupBody.appendChild(button);
             });
@@ -1146,6 +1326,18 @@
     }
 
     function renderPanelPreview(panel, preview) {
+        if (runtimeLoading[panel.id]) {
+            preview.innerHTML = "";
+            var loading = make("div", "figure-panel-loading");
+            var loaderMarkup = typeof window.appBuildDnaLoader === "function"
+                ? window.appBuildDnaLoader("app-dna-loader--spinner-sm")
+                : '<i class="fa fa-spinner fa-spin" aria-hidden="true"></i>';
+            loading.innerHTML = loaderMarkup + '<strong>Restoring panel…</strong><span>Waiting for the source visualization.</span>';
+            loading.setAttribute("role", "status");
+            loading.setAttribute("aria-live", "polite");
+            preview.appendChild(loading);
+            return;
+        }
         var svg = panelPreparedSvg(panel);
         if (!svg) {
             preview.innerHTML = "";
@@ -1180,7 +1372,9 @@
             var header = make("header", "figure-panel-header");
             if (!panel.showTitle) header.hidden = true;
             header.appendChild(make("span", "figure-panel-label", panelLabel(index)));
-            header.appendChild(make("strong", "figure-panel-title", panel.title));
+            var panelHeading = make("strong", "figure-panel-title");
+            appendScientificHtmlText(panelHeading, panel.title, panelScientificNames(panel));
+            header.appendChild(panelHeading);
             header.appendChild(make("span", "figure-panel-source-chip", panel.sourceLabel));
             var quick = make("span", "figure-panel-quick-actions");
             var duplicate = make("button", "", "");
@@ -1341,6 +1535,7 @@
         saveHistory();
         state.panels.splice(index, 1);
         delete runtimeSvg[id];
+        delete runtimeLoading[id];
         if (state.selectedId === id) {
             state.selectedId = state.panels.length ? state.panels[Math.min(index, state.panels.length - 1)].id : null;
         }
@@ -1410,6 +1605,7 @@
         state.panels = [];
         state.selectedId = null;
         runtimeSvg = Object.create(null);
+        runtimeLoading = Object.create(null);
         renderAll();
         persistSoon();
         toast("Figure Studio canvas cleared. CGV results were preserved.");
@@ -1431,6 +1627,7 @@
             panels: []
         });
         runtimeSvg = Object.create(null);
+        runtimeLoading = Object.create(null);
         syncControls();
         renderAll();
         persistSoon();
@@ -1479,9 +1676,22 @@
 
     function rehydratePanels() {
         if (!state.panels.length) return;
+        var pendingIds = state.panels.filter(function (panel) {
+            return !runtimeSvg[panel.id];
+        }).map(function (panel) {
+            runtimeLoading[panel.id] = true;
+            return panel.id;
+        });
+        if (!pendingIds.length) return;
+        var activity = beginFigureActivity("Restoring saved figure panels…");
+        renderPanels();
         Promise.all(state.panels.map(rehydratePanel)).then(function () {
             renderPanels();
             renderCatalog();
+        }).finally(function () {
+            pendingIds.forEach(function (id) { delete runtimeLoading[id]; });
+            endFigureActivity(activity);
+            renderPanels();
         });
     }
 
@@ -1600,7 +1810,7 @@
             title.setAttribute("y", "38");
             title.setAttribute("text-anchor", "middle");
             title.setAttribute("class", "cgv-figure-title");
-            title.textContent = state.title;
+            appendScientificSvgText(title, state.title, figureScientificNames());
             root.appendChild(title);
         }
         if (hasSubtitle) {
@@ -1609,7 +1819,7 @@
             subtitle.setAttribute("y", hasTitle ? "67" : "38");
             subtitle.setAttribute("text-anchor", "middle");
             subtitle.setAttribute("class", "cgv-figure-subtitle");
-            subtitle.textContent = state.subtitle;
+            appendScientificSvgText(subtitle, state.subtitle, figureScientificNames());
             root.appendChild(subtitle);
         }
 
@@ -1645,7 +1855,7 @@
                     panelTitle.setAttribute("x", "62");
                     panelTitle.setAttribute("y", "35");
                     panelTitle.setAttribute("class", "cgv-panel-title");
-                    panelTitle.textContent = panel.title;
+                    appendScientificSvgText(panelTitle, panel.title, panelScientificNames(panel));
                     group.appendChild(panelTitle);
                 }
 
@@ -1953,6 +2163,11 @@
         var blob = new Blob([serialized], { type: "image/svg+xml;charset=utf-8" });
         var url = URL.createObjectURL(blob);
         var image = new Image();
+        var exportActivity = beginFigureActivity("Rendering publication PNG…");
+        var finishExportActivity = function () {
+            endFigureActivity(exportActivity);
+            exportActivity = "";
+        };
         image.onload = function () {
             try {
                 var canvas = document.createElement("canvas");
@@ -1964,6 +2179,7 @@
                 context.drawImage(image, 0, 0, canvas.width, canvas.height);
                 canvas.toBlob(function (pngBlob) {
                     URL.revokeObjectURL(url);
+                    finishExportActivity();
                     if (!pngBlob) {
                         toast("PNG conversion failed. SVG export remains available.");
                         return;
@@ -1973,11 +2189,13 @@
                 }, "image/png");
             } catch (err) {
                 URL.revokeObjectURL(url);
+                finishExportActivity();
                 toast("PNG conversion failed. SVG export remains available.");
             }
         };
         image.onerror = function () {
             URL.revokeObjectURL(url);
+            finishExportActivity();
             toast("PNG conversion failed. SVG export remains available.");
         };
         image.src = url;

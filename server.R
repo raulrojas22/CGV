@@ -19035,7 +19035,13 @@ function(input, output, session) {
         id_chr <- as.character(id_chr %||% "")
         prefix <- if (identical(context, "homo")) "download_homo" else "download_ortho"
         default_type <- normalize_sequence_download_type(default_type, default = "transcript")
-        option_values <- c(gene = "Gene", transcript = "Transcript", cds = "CDS", introns = "Introns")
+        option_values <- c(
+            gene = "Gene — complete region",
+            transcript = "Transcript — spliced",
+            cds = "CDS — spliced",
+            cds_segments = "CDS — individual segments",
+            introns = "Introns — individual sequences"
+        )
         option_values <- option_values[c(default_type, setdiff(names(option_values), default_type))]
         btn_style <- if (isTRUE(compact)) {
             "padding:2px 8px; font-size:11px; white-space:nowrap;"
@@ -19058,7 +19064,7 @@ function(input, output, session) {
             tags$ul(
                 class = "dropdown-menu dropdown-menu-end sequence-download-menu",
                 role = "menu",
-                style = "min-width:150px;",
+                style = "min-width:230px;",
                 lapply(names(option_values), function(value) {
                     tags$li(
                         role = "presentation",
@@ -28224,6 +28230,7 @@ function(input, output, session) {
 
     header_genomic_context_button <- function(kind, label, icon_name) {
         kind_txt <- tolower(trimws(as.character(kind %||% "")))
+        short_label <- if (identical(kind_txt, "overlaps")) "overlaps" else "neighbors"
         tags$button(
             type = "button",
             class = paste(
@@ -28240,14 +28247,17 @@ function(input, output, session) {
             },
             title = paste("Show or hide", tolower(label), "on gene cards"),
             icon(icon_name),
-            span(label)
+            span(class = "summary-genomic-context-toggle-label", paste("Hide", short_label))
         )
     }
 
-    build_header_mode_switch <- function(scope, current_mode, align_available = TRUE, align_disabled_title = "", align_choices = NULL) {
+    build_header_mode_switch <- function(scope, current_mode, current_orientation = "genomic", align_available = TRUE, align_disabled_title = "", align_choices = NULL) {
         scope <- as.character(scope %||% "homo")
         input_id <- paste0(scope, "_header_mode_pick")
+        orientation_input_id <- paste0(scope, "_orientation_pick")
         current_mode <- tolower(trimws(as.character(current_mode %||% "compact")))
+        current_orientation <- tolower(trimws(as.character(current_orientation %||% "genomic")))
+        if (!current_orientation %in% c("genomic", "transcription")) current_orientation <- "genomic"
         if (identical(current_mode, "pip")) current_mode <- "pip_blocks"
         alignment_modes <- c("aligned", "pip_blocks", "pip_multipip")
         is_alignment <- current_mode %in% alignment_modes
@@ -28304,6 +28314,34 @@ function(input, output, session) {
         } else {
             NULL
         }
+        orientation_subbar <- if (!is_alignment) {
+            div(
+                class = "summary-display-mode-subbar summary-display-orientation-subbar",
+                span(class = "summary-display-submode-label", "Direction"),
+                header_submode_button(
+                    orientation_input_id,
+                    "genomic",
+                    "Genomic",
+                    active = identical(current_orientation, "genomic")
+                ),
+                header_submode_button(
+                    orientation_input_id,
+                    "transcription",
+                    "5\u2032\u21923\u2032",
+                    active = identical(current_orientation, "transcription")
+                ),
+                span(
+                    class = "summary-display-orientation-note",
+                    if (identical(current_orientation, "transcription")) {
+                        "All genes face 5\u2032\u21923\u2032; minus-strand loci are mirrored"
+                    } else {
+                        "Native genomic coordinates"
+                    }
+                )
+            )
+        } else {
+            NULL
+        }
 
         div(
             class = "summary-display-mode-control",
@@ -28332,7 +28370,8 @@ function(input, output, session) {
                     title = align_title
                 )
             ),
-            subbar
+            subbar,
+            orientation_subbar
         )
     }
 
@@ -29301,6 +29340,7 @@ function(input, output, session) {
         build_header_mode_switch(
             scope = "homo",
             current_mode = current_mode,
+            current_orientation = input$homo_orientation_pick %||% "genomic",
             align_available = length(groups) > 0L,
             align_disabled_title = "Available when one loaded gene has more than one transcript",
             align_choices = homo_align_choices
@@ -29312,6 +29352,7 @@ function(input, output, session) {
         build_header_mode_switch(
             scope = "ortho",
             current_mode = input$ortho_visual_mode %||% "compact",
+            current_orientation = input$ortho_orientation_pick %||% "genomic",
             align_available = length(primaryPlotIdsOrthologous()) >= 2L,
             align_disabled_title = "Available after loading at least two organism tracks",
             align_choices = c(
@@ -30530,6 +30571,31 @@ function(input, output, session) {
         analytics_compact_axis_labels(labels, n_items)
     }
 
+    # Keep the per-group sample size visible even when long gene labels need
+    # truncation. The total sample size is reported separately in the subtitle.
+    analytics_labels_with_n <- function(labels, counts, n_items) {
+        labels_txt <- as.character(labels %||% character(0))
+        counts_num <- suppressWarnings(as.integer(counts %||% integer(0)))
+        if (length(labels_txt) == 0L) return(character(0))
+        if (length(counts_num) == 0L) {
+            counts_num <- rep(0L, length(labels_txt))
+        }
+        if (length(counts_num) != length(labels_txt)) {
+            counts_num <- rep_len(counts_num, length(labels_txt))
+        }
+        counts_num[!is.finite(counts_num) | counts_num < 0L] <- 0L
+        suffix <- paste0(" (n = ", counts_num, ")")
+        max_width <- analytics_axis_density(n_items)$label_width
+        base_width <- pmax(4L, as.integer(max_width) - nchar(suffix, type = "width"))
+        base_label <- mapply(
+            function(lbl, width) stringr::str_trunc(lbl, width = width, ellipsis = "..."),
+            labels_txt,
+            base_width,
+            USE.NAMES = FALSE
+        )
+        paste0(base_label, suffix)
+    }
+
     # Build axis labels: gene name + italic organism (for ortho mode).
     # Returns named list of plotmath expressions (ortho) or named character vector (homo).
     analytics_build_axis_labels <- function(gene_labels, organism_labels, axis_keys, n_genes) {
@@ -31588,11 +31654,20 @@ function(input, output, session) {
 
             n_genes <- length(axis_order)
             dens <- analytics_axis_density(n_genes)
+            exon_n_by_axis <- stats::setNames(
+                as.integer(box_stats$n),
+                as.character(box_stats$axis_key)
+            )
+            exon_labels_with_n <- analytics_labels_with_n(
+                label_map_exon$x_label,
+                unname(exon_n_by_axis[as.character(label_map_exon$axis_id)]),
+                n_genes
+            )
             axis_label_map <- analytics_build_axis_labels(
-                label_map_exon$x_label, label_map_exon$x_label_organism, label_map_exon$axis_id, n_genes
+                exon_labels_with_n, label_map_exon$x_label_organism, label_map_exon$axis_id, n_genes
             )
             label_rows <- analytics_build_label_rows(
-                label_map_exon$x_label, label_map_exon$x_label_organism, label_map_exon$axis_id, n_genes
+                exon_labels_with_n, label_map_exon$x_label_organism, label_map_exon$axis_id, n_genes
             )
             use_label_panel <- any(nzchar(trimws(as.character(label_map_exon$x_label_organism %||% ""))))
             h_svg <- analytics_svg_height(
@@ -31659,6 +31734,7 @@ function(input, output, session) {
                 ggplot2::labs(
                     title = "Exon Length Distribution",
                     subtitle = paste0(
+                        "N = ", format(nrow(all_exons), big.mark = ","), " exons \u00b7 ",
                         "Log\u2081\u2080 scale \u00b7 box = IQR \u00b7",
                         " line = median \u00b7 dots = individual exons"
                     ),
@@ -31798,11 +31874,20 @@ function(input, output, session) {
             n_with_introns <- dplyr::n_distinct(as.character(all_introns$axis_key))
             omitted_no_introns <- max(0L, nrow(label_map_intron) - n_with_introns)
             dens <- analytics_axis_density(n_genes)
+            intron_n_by_axis <- stats::setNames(
+                as.integer(intron_stats$n),
+                as.character(intron_stats$axis_key)
+            )
+            intron_labels_with_n <- analytics_labels_with_n(
+                label_map_intron_plot$x_label,
+                unname(intron_n_by_axis[as.character(label_map_intron_plot$axis_id)]),
+                n_genes
+            )
             axis_label_map <- analytics_build_axis_labels(
-                label_map_intron_plot$x_label, label_map_intron_plot$x_label_organism, label_map_intron_plot$axis_id, n_genes
+                intron_labels_with_n, label_map_intron_plot$x_label_organism, label_map_intron_plot$axis_id, n_genes
             )
             label_rows <- analytics_build_label_rows(
-                label_map_intron_plot$x_label, label_map_intron_plot$x_label_organism, label_map_intron_plot$axis_id, n_genes
+                intron_labels_with_n, label_map_intron_plot$x_label_organism, label_map_intron_plot$axis_id, n_genes
             )
             use_label_panel <- any(nzchar(trimws(as.character(label_map_intron_plot$x_label_organism %||% ""))))
             h_svg <- analytics_svg_height(
@@ -31861,6 +31946,7 @@ function(input, output, session) {
                 ggplot2::labs(
                     title = "Intron Length Distribution",
                     subtitle = paste0(
+                        "N = ", format(nrow(all_introns), big.mark = ","), " introns \u00b7 ",
                         "Log\u2081\u2080 scale \u00b7 box = IQR \u00b7 line = median \u00b7 dots = individual introns",
                         if (omitted_no_introns > 0L) {
                             paste0(" \u00b7 omitted ", omitted_no_introns, " no-intron entr", ifelse(omitted_no_introns == 1L, "y", "ies"))
@@ -31913,7 +31999,7 @@ function(input, output, session) {
             df_prep <- get_cached_scatter_prepared_df(df, order_mode = order_mode)
             shiny::req(nrow(df_prep) > 0)
             scatter_cache_key <- paste(
-                "analytics-scatter-render-v5",
+                "analytics-scatter-render-v6",
                 tolower(trimws(as.character(mode %||% "homo"))),
                 tolower(trimws(as.character(order_mode %||% "load"))),
                 if (isTRUE(is_dark)) "dark" else "light",
@@ -31961,7 +32047,8 @@ function(input, output, session) {
                 ) +
                 ggrepel::geom_label_repel(
                     data = df_prep,
-                    ggplot2::aes(x = gc, y = len_bp, label = scatter_label_compact),
+                    ggplot2::aes(x = gc, y = len_bp, label = scatter_label_plotmath),
+                    parse = TRUE,
                     size = label_size,
                     fontface = "plain",
                     lineheight = 0.72,

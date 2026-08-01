@@ -6931,12 +6931,15 @@ normalize_sequence_download_type <- function(sequence_type, default = "transcrip
         "mrna" = "transcript",
         "cds" = "cds",
         "coding_sequence" = "cds",
+        "cds_segment" = "cds_segments",
+        "cds_segments" = "cds_segments",
+        "coding_segments" = "cds_segments",
         "intron" = "introns",
         "introns" = "introns",
         "intrones" = "introns",
         default
     )
-    if (!typ %in% c("gene", "transcript", "cds", "introns")) {
+    if (!typ %in% c("gene", "transcript", "cds", "cds_segments", "introns")) {
         typ <- default
     }
     typ
@@ -6969,6 +6972,35 @@ sequence_download_clean_id <- function(x, fallback = "sequence") {
         out <- as.character(fallback %||% "sequence")
     }
     out
+}
+
+sequence_download_scope_to_transcript <- function(plot_data, title_txt = "") {
+    if (is.null(plot_data) || nrow(plot_data) == 0L ||
+        !exists("split_gene_data_by_transcript", mode = "function")) {
+        return(plot_data)
+    }
+    target <- sequence_download_clean_id(
+        sequence_download_extract_title_field(title_txt, "Transcript"),
+        fallback = ""
+    )
+    if (!nzchar(target) || identical(toupper(target), "N/A")) {
+        return(plot_data)
+    }
+    transcript_blocks <- tryCatch(split_gene_data_by_transcript(plot_data), error = function(e) list())
+    if (length(transcript_blocks) == 0L || is.null(names(transcript_blocks))) {
+        return(plot_data)
+    }
+    block_ids <- vapply(
+        names(transcript_blocks),
+        sequence_download_clean_id,
+        character(1),
+        fallback = ""
+    )
+    match_idx <- which(tolower(block_ids) == tolower(target))[1]
+    if (length(match_idx) == 0L || is.na(match_idx)) {
+        return(plot_data)
+    }
+    transcript_blocks[[match_idx]]
 }
 
 sequence_download_tx_types <- function() {
@@ -7052,6 +7084,41 @@ sequence_download_ranges <- function(df_plot, feature_type) {
     ))
 }
 
+sequence_download_feature_segments <- function(df_plot, feature_type) {
+    empty <- data.frame(
+        start = numeric(0),
+        end = numeric(0),
+        phase = character(0),
+        stringsAsFactors = FALSE
+    )
+    if (is.null(df_plot) || nrow(df_plot) == 0L) {
+        return(empty)
+    }
+    ft <- tolower(trimws(as.character(df_plot$feature_type %||% rep("", nrow(df_plot)))))
+    idx <- which(ft == tolower(feature_type))
+    if (length(idx) == 0L) {
+        return(empty)
+    }
+    phase_values <- if ("phase" %in% names(df_plot)) {
+        as.character(df_plot$phase[idx])
+    } else {
+        rep("", length(idx))
+    }
+    out <- data.frame(
+        start = suppressWarnings(as.numeric(df_plot$xstart[idx])),
+        end = suppressWarnings(as.numeric(df_plot$xend[idx])),
+        phase = phase_values,
+        stringsAsFactors = FALSE
+    )
+    out <- out[is.finite(out$start) & is.finite(out$end) & out$end >= out$start, , drop = FALSE]
+    if (nrow(out) == 0L) return(empty)
+    duplicate_key <- paste(out$start, out$end, sep = "|")
+    out <- out[!duplicated(duplicate_key), , drop = FALSE]
+    out <- out[order(out$start, out$end), , drop = FALSE]
+    rownames(out) <- NULL
+    out
+}
+
 sequence_download_intron_ranges <- function(exon_ranges) {
     ex <- normalize_exon_ranges(exon_ranges)
     if (nrow(ex) < 2L) {
@@ -7064,6 +7131,68 @@ sequence_download_intron_ranges <- function(exon_ranges) {
     normalize_exon_ranges(out)
 }
 
+build_segmented_sequence_fasta <- function(header_id,
+                                           segment_type,
+                                           ranges,
+                                           genome_path,
+                                           seqid,
+                                           strand = "+") {
+    seg <- as.data.frame(ranges, stringsAsFactors = FALSE)
+    if (nrow(seg) == 0L) return("")
+    strand_txt <- trimws(as.character(strand %||% "+"))
+    if (!strand_txt %in% c("+", "-")) strand_txt <- "+"
+    ord <- if (identical(strand_txt, "-")) {
+        order(-as.numeric(seg$start), -as.numeric(seg$end))
+    } else {
+        order(as.numeric(seg$start), as.numeric(seg$end))
+    }
+    seg <- seg[ord, , drop = FALSE]
+    rownames(seg) <- NULL
+    n_segments <- nrow(seg)
+    gp <- trimws(as.character(genome_path %||% ""))
+    seqid_txt <- trimws(as.character(seqid %||% ""))
+    type_txt <- if (identical(segment_type, "cds")) "cds_segment" else "intron"
+
+    records <- vapply(seq_len(n_segments), function(i) {
+        start_i <- as.integer(round(as.numeric(seg$start[i])))
+        end_i <- as.integer(round(as.numeric(seg$end[i])))
+        seq_i <- ""
+        if (nzchar(gp) && file.exists(gp) && nzchar(seqid_txt)) {
+            seq_i <- tryCatch(
+                extract_sequence_from_fasta(gp, seqid_txt, start_i, end_i),
+                error = function(e) ""
+            )
+            if (nzchar(seq_i) && identical(strand_txt, "-")) {
+                seq_i <- tryCatch(reverse_complement_dna(seq_i), error = function(e) seq_i)
+            }
+        }
+        meta_bits <- c(
+            paste0("type=", type_txt),
+            paste0("segment=", i, "/", n_segments)
+        )
+        if (nzchar(seqid_txt)) meta_bits <- c(meta_bits, paste0("chr=", seqid_txt))
+        meta_bits <- c(
+            meta_bits,
+            paste0("start=", start_i),
+            paste0("end=", end_i),
+            paste0("strand=", strand_txt),
+            paste0("length_bp=", end_i - start_i + 1L),
+            "order=5prime_to_3prime"
+        )
+        phase_i <- trimws(as.character(seg$phase[i] %||% ""))
+        if (identical(segment_type, "cds") && phase_i %in% c("0", "1", "2")) {
+            meta_bits <- c(meta_bits, paste0("phase=", phase_i))
+        }
+        record_header <- paste0(
+            ">", header_id, "_", segment_type, "_", i,
+            " | ", paste(meta_bits, collapse = " | ")
+        )
+        seq_wrapped <- wrap_fasta_sequence(seq_i, width = 80L)
+        if (!nzchar(seq_wrapped)) record_header else paste0(record_header, "\n", seq_wrapped)
+    }, character(1))
+    paste(records, collapse = "\n\n")
+}
+
 build_selected_sequence_fasta_content <- function(sequence_type = "transcript",
                                                   plot_data,
                                                   gene_meta = NULL,
@@ -7072,6 +7201,9 @@ build_selected_sequence_fasta_content <- function(sequence_type = "transcript",
                                                   fallback_id = "sequence") {
     typ <- normalize_sequence_download_type(sequence_type)
     gp <- trimws(as.character(genome_path %||% ""))
+    if (!identical(typ, "gene")) {
+        plot_data <- sequence_download_scope_to_transcript(plot_data, title_txt = title_txt)
+    }
     model <- sequence_download_model(plot_data)
     df_plot <- model$df
     raw <- model$raw
@@ -7133,10 +7265,12 @@ build_selected_sequence_fasta_content <- function(sequence_type = "transcript",
     } else {
         exon_ranges <- sequence_download_ranges(df_plot, "exon")
         cds_ranges <- sequence_download_ranges(df_plot, "cds")
+        cds_segment_ranges <- sequence_download_feature_segments(df_plot, "cds")
         ranges <- switch(
             typ,
             "transcript" = if (nrow(exon_ranges) > 0L) exon_ranges else cds_ranges,
             "cds" = cds_ranges,
+            "cds_segments" = cds_segment_ranges,
             "introns" = sequence_download_intron_ranges(exon_ranges),
             data.frame(start = numeric(0), end = numeric(0))
         )
@@ -7147,6 +7281,17 @@ build_selected_sequence_fasta_content <- function(sequence_type = "transcript",
         } else if (identical(typ, "transcript")) {
             range_start <- suppressWarnings(as.numeric(tx_span$start))
             range_end <- suppressWarnings(as.numeric(tx_span$end))
+        }
+        if (typ %in% c("cds_segments", "introns") && segments_n > 0L) {
+            segment_type <- if (identical(typ, "cds_segments")) "cds" else "intron"
+            return(build_segmented_sequence_fasta(
+                header_id = header_id,
+                segment_type = segment_type,
+                ranges = ranges,
+                genome_path = gp,
+                seqid = seqid_txt,
+                strand = strand_txt
+            ))
         }
         if (nzchar(gp) && file.exists(gp) && nzchar(seqid_txt)) {
             if (segments_n > 0L) {
@@ -7172,7 +7317,7 @@ build_selected_sequence_fasta_content <- function(sequence_type = "transcript",
     if (is.finite(range_start)) meta_bits <- c(meta_bits, paste0("start=", as.integer(round(range_start))))
     if (is.finite(range_end)) meta_bits <- c(meta_bits, paste0("end=", as.integer(round(range_end))))
     meta_bits <- c(meta_bits, paste0("strand=", strand_txt))
-    if (identical(typ, "introns") || segments_n > 1L) {
+    if (typ %in% c("introns", "cds_segments") || segments_n > 1L) {
         meta_bits <- c(meta_bits, paste0("segments=", as.integer(segments_n)))
     }
 

@@ -845,6 +845,10 @@
   white-space: nowrap;
 }
 
+.figure-panel-title .figure-scientific-name {
+  font-style: italic;
+}
+
 .figure-panel-source-chip {
   max-width: 100px;
   padding: 3px 6px;
@@ -1074,6 +1078,16 @@ html.figure-studio-preview-open body {
 
 .figure-panel-unavailable .fa {
   color: #c48543;
+}
+
+.figure-catalog-item[aria-busy="true"] {
+  cursor: progress;
+  opacity: 0.76;
+}
+
+.figure-catalog-item[aria-busy="true"] .figure-catalog-add {
+  color: #167d6b;
+  font-weight: 700;
 }
 
 .figure-panel-quick-actions {

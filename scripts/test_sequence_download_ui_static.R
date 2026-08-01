@@ -50,7 +50,7 @@ expect_pattern(
 )
 expect_pattern(
   lifecycle_txt,
-  'for \\(sequence_type in c\\("gene", "transcript", "cds", "introns"\\)\\) local\\(\\{[\\s\\S]*selected_type_local <- sequence_type[\\s\\S]*output\\[\\[paste0\\("download_homo_", id_local, "_", selected_type_local\\)\\]\\]',
+  'for \\(sequence_type in c\\("gene", "transcript", "cds", "cds_segments", "introns"\\)\\) local\\(\\{[\\s\\S]*selected_type_local <- sequence_type[\\s\\S]*output\\[\\[paste0\\("download_homo_", id_local, "_", selected_type_local\\)\\]\\]',
   "homologous menu options bind fixed lazy download handlers"
 )
 expect_pattern(
@@ -62,6 +62,16 @@ expect_pattern(
   utils_txt,
   'build_selected_sequence_fasta_content <- function\\(sequence_type = "transcript"',
   "selected FASTA builder exists"
+)
+expect_pattern(
+  server_txt,
+  'cds_segments = "CDS — individual segments"[\\s\\S]*introns = "Introns — individual sequences"',
+  "segmented CDS and intron download choices are explicit"
+)
+expect_pattern(
+  utils_txt,
+  'build_segmented_sequence_fasta <- function',
+  "multi-record segmented FASTA builder exists"
 )
 
 cat("sequence-download-ui-static-ok\n")
