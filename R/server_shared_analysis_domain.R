@@ -2069,6 +2069,53 @@ init_shared_analysis_domain <- function(input,
         state$pending <- pending
         report_perf_mark(pending, "lastz_phase_started")
         state$busy_message <- "Running and capturing LASTZ and MultiPIP. This can take several minutes; keep CGV open and please wait…"
+        arm_report_stage_timeout(
+            pending$request_id,
+            "lastz",
+            370,
+            "LASTZ or MultiPIP did not finish within 6 minutes. Nothing was published; you can retry without running alignments or complete them from the analysis view first."
+        )
+        finish_lastz_phase <- function(lastz_result) {
+            current_pending <- shiny::isolate(state$pending)
+            if (is.null(current_pending) || !identical(
+                cgv_safe_scalar(current_pending$request_id),
+                cgv_safe_scalar(pending$request_id)
+            )) {
+                return(invisible(NULL))
+            }
+            pending_after_lastz <- current_pending
+            pending_after_lastz$pre_capture_missing <- unique(as.character(
+                unlist(lastz_result$missing %||% character(0), use.names = FALSE)
+            ))
+            pending_after_lastz$lastz_runs <- if (is.list(lastz_result$pip_runs)) {
+                lastz_result$pip_runs
+            } else {
+                list()
+            }
+            state$pending <- pending_after_lastz
+            session$sendCustomMessage("cgv:prepare-lastz-for-report", list(
+                request_id = pending_after_lastz$request_id,
+                contexts = pending_after_lastz$lastz_contexts,
+                max_total_bytes = 24L * 1024L * 1024L,
+                skip_run = is.function(run_lastz_fn),
+                run_multipip = !isTRUE(lastz_result$multipip_prepared),
+                capture_contexts = pending_after_lastz$capture_contexts %||% character(0)
+            ))
+            arm_report_stage_timeout(
+                pending_after_lastz$request_id,
+                "lastz",
+                370,
+                "LASTZ or MultiPIP did not finish within 6 minutes. Nothing was published; you can retry without running alignments or complete them from the analysis view first."
+            )
+            invisible(NULL)
+        }
+        fail_lastz_phase <- function(err) {
+            finish_lastz_phase(list(
+                missing = paste0("LASTZ: ", conditionMessage(err)),
+                pip_runs = list(),
+                multipip_prepared = FALSE
+            ))
+        }
         lastz_result <- if (is.function(run_lastz_fn)) {
             tryCatch(
                 run_lastz_fn(pending$lastz_contexts),
@@ -2079,30 +2126,11 @@ init_shared_analysis_domain <- function(input,
         } else {
             list()
         }
-        pending_after_lastz <- shiny::isolate(state$pending)
-        pending_after_lastz$pre_capture_missing <- unique(as.character(
-            unlist(lastz_result$missing %||% character(0), use.names = FALSE)
-        ))
-        pending_after_lastz$lastz_runs <- if (is.list(lastz_result$pip_runs)) {
-            lastz_result$pip_runs
+        if (promises::is.promise(lastz_result)) {
+            lastz_result %...>% finish_lastz_phase %...!% fail_lastz_phase
         } else {
-            list()
+            finish_lastz_phase(lastz_result)
         }
-        state$pending <- pending_after_lastz
-        session$sendCustomMessage("cgv:prepare-lastz-for-report", list(
-            request_id = pending_after_lastz$request_id,
-            contexts = pending_after_lastz$lastz_contexts,
-            max_total_bytes = 24L * 1024L * 1024L,
-            skip_run = is.function(run_lastz_fn),
-            run_multipip = TRUE,
-            capture_contexts = pending_after_lastz$capture_contexts %||% character(0)
-        ))
-        arm_report_stage_timeout(
-            pending_after_lastz$request_id,
-            "lastz",
-            370,
-            "LASTZ or MultiPIP did not finish within 6 minutes. Nothing was published; you can retry without running alignments or complete them from the analysis view first."
-        )
         invisible(NULL)
     }
 

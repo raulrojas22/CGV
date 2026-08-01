@@ -77,7 +77,7 @@ if (linux.syncDesktopName !== true || linux.desktop?.entry?.StartupWMClass !== "
 for (const requiredMainFragment of [
   "icon: windowIconPath()",
   "findRscript(preparedRuntimeRoot)",
-  "APP_LASTZ_WORKERS: process.env.APP_LASTZ_WORKERS || \"1\"",
+  "APP_LASTZ_WORKERS: process.env.APP_LASTZ_WORKERS || String(Math.max(1, Math.min(2, os.cpus().length - 1)))",
   "APP_LASTZ_TIMEOUT_SECONDS: process.env.APP_LASTZ_TIMEOUT_SECONDS || \"90\"",
   "env.FONTCONFIG_FILE = fontconfigFile",
   "env.FONTCONFIG_PATH = fontconfigPath"

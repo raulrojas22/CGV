@@ -555,8 +555,9 @@ Controls include:
 - track order;
 - minimum block length: 50, 100, 250, or 500 bp;
 - minimum local identity;
-- **Run local alignments**;
-- **Suggest best reference**.
+- **Run local alignments**.
+
+After the run, CGV evaluates the selected reference using the same alignments already displayed: supported organisms, reference-window coverage, weighted identity, and reduced block count. It does not run an all-against-all reference search.
 
 The full genomic window is used, including introns and selected flanking sequence. Conserved blocks outside the transcribed region can therefore represent non-coding regulatory context, but they require independent biological validation.
 
@@ -569,14 +570,15 @@ MultiPIP presents reference-centered conservation across the organism set. Confi
 - track order;
 - minimum segment length: 10, 25, 50, or 100 bp;
 - minimum local identity;
-- **Run local alignments**;
-- **Suggest best reference**.
+- **Run local alignments**.
+
+LASTZ Block View and MultiPIP reuse one canonical LASTZ result when the reference, loci, window, and engine inputs are unchanged. Identity and length filters reinterpret that result without rerunning LASTZ; changing the alignment window creates a new exact alignment. Switching between the two views therefore does not repeat the alignment when their windows match.
 
 Use the view to identify conserved intervals that recur across several organisms. It summarizes local alignment support; it is not a multiple-sequence alignment for phylogenetic inference.
 
 ## 5.10 Reference selection
 
-Choose a biologically meaningful, well-annotated reference with a complete genome sequence. **Suggest best reference** evaluates the loaded tracks and selects a strong reference candidate. The choice affects projection and visual order, so record it with exported results.
+Choose a biologically meaningful, well-annotated reference with a complete genome sequence. Run the selected reference once and inspect the resulting support metrics before interpreting the visualization. The choice affects projection and visual order, so record it with exported results. CGV deliberately avoids testing every organism as a candidate reference because that all-against-all sweep scales quadratically and can consume substantial CPU.
 
 ## 5.11 Sort cross-species cards
 

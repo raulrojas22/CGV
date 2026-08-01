@@ -134,57 +134,38 @@ function(input, output, session) {
     }
 
     with_lastz_future_plan <- function(expr, label = "LASTZ") {
-        current_plan <- tryCatch(future::plan(), error = function(e) NULL)
-        current_workers <- tryCatch(as.integer(future::nbrOfWorkers()), error = function(e) 1L)
-        if (!is.finite(current_workers) || is.na(current_workers) || current_workers < 1L) {
-            current_workers <- 1L
-        }
-        target_workers <- read_lastz_worker_count(default_workers = current_workers)
-        current_backend <- if (!is.null(current_plan)) attr(current_plan, "backend") else NULL
-        current_is_sequential <- inherits(current_backend, "SequentialFutureBackend")
-        needs_background_worker <- identical(as.integer(target_workers), 1L) && isTRUE(current_is_sequential)
-        if (!is.finite(target_workers) || is.na(target_workers) || target_workers < 1L ||
-            (target_workers == current_workers && !needs_background_worker)) {
-            lastz_dbg(
-                paste0(label, " worker plan"),
-                detail = sprintf("using global future workers=%d", as.integer(current_workers))
-            )
-            return(force(expr))
-        }
-
-        tryCatch({
-            # future treats workers=1 as a sequential plan unless the scalar is
-            # wrapped in AsIs. LASTZ must stay in a real background R process
-            # so the Shiny session remains responsive.
-            workers_arg <- if (identical(as.integer(target_workers), 1L)) {
-                I(as.integer(target_workers))
-            } else {
-                as.integer(target_workers)
-            }
-            future::plan(future::multisession, workers = workers_arg)
-            lastz_dbg(
-                paste0(label, " worker plan"),
-                detail = sprintf(
-                    "persistent background APP_LASTZ_WORKERS=%d (previous global was %d)",
-                    as.integer(target_workers),
-                    as.integer(current_workers)
-                )
-            )
-        }, error = function(e) {
-            lastz_dbg(
-                paste0(label, " worker plan fallback"),
-                detail = sprintf("could not use APP_LASTZ_WORKERS=%d: %s", as.integer(target_workers), as.character(e$message %||% "unknown")),
-                level = "warn"
-            )
-        })
-        # Do not restore the previous plan here: LASTZ jobs are launched as
-        # future_promise() tasks and may still be running after this helper
-        # returns. Restoring a multisession plan immediately can cancel those
-        # child processes.
+        target_workers <- read_lastz_worker_count(default_workers = 1L)
+        lastz_dbg(
+            paste0(label, " worker queue"),
+            detail = sprintf("dedicated APP_LASTZ_WORKERS=%d; global future plan unchanged", as.integer(target_workers))
+        )
         force(expr)
     }
 
+    lastzFutureQueue <- tryCatch({
+        target_workers <- read_lastz_worker_count(default_workers = 1L)
+        promises:::WorkQueue$new(can_proceed = function() {
+            total_workers <- tryCatch(as.integer(future::nbrOfWorkers()), error = function(e) 1L)
+            free_workers <- tryCatch(as.integer(future::nbrOfFreeWorkers()), error = function(e) 0L)
+            if (!is.finite(total_workers) || total_workers < 1L) total_workers <- 1L
+            if (!is.finite(free_workers) || free_workers < 0L) free_workers <- 0L
+            active_workers <- max(0L, total_workers - free_workers)
+            free_workers > 0L && active_workers < min(as.integer(target_workers), total_workers)
+        })
+    }, error = function(e) promises::future_promise_queue())
+
+    lastz_future_promise <- function(expr, envir = parent.frame(), ...) {
+        promises::future_promise(
+            expr = substitute(expr),
+            envir = envir,
+            ...,
+            substitute = FALSE,
+            queue = lastzFutureQueue
+        )
+    }
+
     lastzAlignmentResultCache <- new.env(parent = emptyenv())
+    lastzBinaryFingerprintCache <- new.env(parent = emptyenv())
 
     read_lastz_cache_max_entries <- function(default_value = 48L) {
         raw_txt <- trimws(as.character(Sys.getenv("APP_LASTZ_CACHE_MAX_ENTRIES", as.character(default_value)) %||% as.character(default_value)))
@@ -193,6 +174,34 @@ function(input, output, session) {
             parsed <- as.integer(default_value)
         }
         parsed
+    }
+
+    read_lastz_cache_max_bytes <- function(default_mb = 128) {
+        raw_txt <- trimws(as.character(Sys.getenv("APP_LASTZ_CACHE_MAX_MB", as.character(default_mb)) %||% as.character(default_mb)))
+        parsed <- suppressWarnings(as.numeric(raw_txt))
+        if (!is.finite(parsed) || is.na(parsed) || parsed <= 0) parsed <- as.numeric(default_mb)
+        parsed * 1024^2
+    }
+
+    lastz_binary_fingerprint <- function(bin_info = NULL) {
+        path <- trimws(as.character((bin_info %||% list())$path %||% Sys.getenv("APP_LASTZ_BIN", "lastz") %||% "lastz"))
+        path <- if (nzchar(path) && file.exists(path)) normalizePath(path, winslash = "/", mustWork = FALSE) else path
+        info <- if (nzchar(path) && file.exists(path)) tryCatch(file.info(path), error = function(e) NULL) else NULL
+        identity <- paste(
+            path,
+            if (!is.null(info) && nrow(info) > 0L) as.character(info$size[[1L]] %||% "") else "",
+            if (!is.null(info) && nrow(info) > 0L) as.character(as.numeric(info$mtime[[1L]] %||% NA_real_)) else "",
+            sep = "|"
+        )
+        cached <- cache_env_get(lastzBinaryFingerprintCache, identity, default = NULL)
+        if (!is.null(cached)) return(as.character(cached))
+        fingerprint <- if (nzchar(path) && file.exists(path) && requireNamespace("digest", quietly = TRUE)) {
+            paste0(path, "|sha256:", digest::digest(file = path, algo = "sha256", serialize = FALSE))
+        } else {
+            identity
+        }
+        cache_env_set(lastzBinaryFingerprintCache, identity, fingerprint, max_size = 8L)
+        fingerprint
     }
 
     lastz_ctx_cache_parts <- function(ctx, prefix = "ctx") {
@@ -230,32 +239,119 @@ function(input, output, session) {
                                           format_name = "general",
                                           bin_info = NULL,
                                           extra_args = character(0)) {
-        binary_txt <- trimws(as.character((bin_info %||% list())$path %||% Sys.getenv("APP_LASTZ_BIN", "lastz") %||% "lastz"))
-        stable_short_cache_key(
-            "lastz-align-v1",
+        parts <- c(
+            "lastz-align-v2",
             as.character(mode %||% "lastz"),
             as.character(format_name %||% ""),
-            binary_txt,
+            lastz_binary_fingerprint(bin_info),
             paste(as.character(extra_args %||% character(0)), collapse = "\001"),
             lastz_ctx_cache_parts(reference_ctx, "ref"),
             lastz_ctx_cache_parts(query_ctx, "qry")
         )
+        if (requireNamespace("digest", quietly = TRUE)) {
+            return(paste0("lastz-align-v2-", digest::digest(parts, algo = "sha256")))
+        }
+        stable_short_cache_key("lastz-align-v2", parts)
     }
 
-    get_lastz_alignment_cached_result <- function(cache_key) {
-        cache_env_get(lastzAlignmentResultCache, cache_key, default = NULL)
+    get_lastz_alignment_cached_result <- function(cache_key, reference_ctx = NULL, query_ctx = NULL) {
+        cached <- cache_env_get(lastzAlignmentResultCache, cache_key, default = NULL)
+        if (!is.null(cached)) return(cached)
+        cached <- tryCatch(
+            lastz_disk_cache_get(cache_key, reference_ctx = reference_ctx, query_ctx = query_ctx),
+            error = function(e) NULL
+        )
+        if (!is.null(cached)) {
+            cache_env_set(
+                lastzAlignmentResultCache,
+                cache_key,
+                cached,
+                max_size = read_lastz_cache_max_entries(),
+                max_bytes = read_lastz_cache_max_bytes()
+            )
+        }
+        cached
     }
 
     set_lastz_alignment_cached_result <- function(cache_key, result) {
-        if (!is.list(result)) {
+        if (!is.list(result) || !identical(trimws(as.character(result$status %||% "")), "ok")) {
             return(invisible(result))
         }
         cache_env_set(
             lastzAlignmentResultCache,
             cache_key,
             result,
-            max_size = read_lastz_cache_max_entries()
+            max_size = read_lastz_cache_max_entries(),
+            max_bytes = read_lastz_cache_max_bytes()
         )
+    }
+
+    run_canonical_lastz_contexts_async <- function(contexts, reference_ctx, ordered_ids = names(contexts)) {
+        contexts <- contexts %||% list()
+        reference_id <- trimws(as.character((reference_ctx %||% list())$plot_id %||% ""))
+        ids <- unique(as.character(ordered_ids %||% names(contexts) %||% character(0)))
+        query_ids <- ids[nzchar(ids) & ids != reference_id & ids %in% names(contexts)]
+        invalid_state <- list(
+            status = "invalid_input",
+            runs = list(),
+            contexts = contexts,
+            reference_id = reference_id,
+            query_ids = query_ids,
+            stamp = as.character(Sys.time())
+        )
+        if (is.null(reference_ctx) || !nzchar(reference_id) || length(query_ids) == 0L) {
+            return(promises::promise_resolve(invalid_state))
+        }
+        bin_info <- tryCatch(resolve_lastz_binary(), error = function(e) list(available = FALSE, path = ""))
+        jobs <- lapply(query_ids, function(qid) {
+            query_ctx <- contexts[[qid]]
+            cache_key <- lastz_alignment_cache_key(
+                mode = "canonical_lastz",
+                reference_ctx = reference_ctx,
+                query_ctx = query_ctx,
+                format_name = "general-cigarx",
+                bin_info = bin_info
+            )
+            cached <- get_lastz_alignment_cached_result(cache_key, reference_ctx, query_ctx)
+            if (is.list(cached)) {
+                return(promises::promise_resolve(list(qid = qid, cache_key = cache_key, cache_hit = TRUE, run = cached)))
+            }
+            lastz_future_promise({
+                result <- tryCatch(
+                    run_cached_canonical_lastz(
+                        cache_key = cache_key,
+                        reference_ctx = reference_ctx,
+                        query_ctx = query_ctx,
+                        engine = "lastz"
+                    ),
+                    error = function(e) list(
+                        status = "engine_error",
+                        stderr = conditionMessage(e),
+                        blocks = data.frame(stringsAsFactors = FALSE),
+                        segments = data.frame(stringsAsFactors = FALSE)
+                    )
+                )
+                list(qid = qid, cache_key = cache_key, cache_hit = FALSE, run = result)
+            }, seed = FALSE)
+        })
+        names(jobs) <- query_ids
+        promises::promise_all(.list = jobs) %...>% (function(payloads) {
+            payloads <- unname(as.list(payloads %||% list()))
+            runs <- lapply(payloads, function(item) {
+                result <- item$run %||% list(status = "engine_error", stderr = "empty result")
+                if (!isTRUE(item$cache_hit)) set_lastz_alignment_cached_result(item$cache_key, result)
+                result
+            })
+            names(runs) <- vapply(payloads, function(item) as.character(item$qid %||% ""), character(1))
+            list(
+                status = "done",
+                runs = runs,
+                contexts = contexts,
+                reference_id = reference_id,
+                query_ids = query_ids,
+                stamp = as.character(Sys.time())
+            )
+        })
     }
 
     # Summarize a locus context for debug logging
@@ -842,7 +938,7 @@ function(input, output, session) {
                 warm_perf <- app_perf_new_run("STRING_PREWARM")
                 app_perf_mark(warm_perf, "launch", "STRING_PREWARM")
                 tryCatch({
-                    promises::future_promise({
+                    lastz_future_promise({
                         TRUE
                     }, seed = TRUE) %...>% (function(ok) {
                         app_perf_mark(warm_perf, "ready", "STRING_PREWARM")
@@ -2805,6 +2901,106 @@ function(input, output, session) {
             segment_count = as.integer(nrow(seg_df)),
             coverage_fraction = if (is.finite(covered_bp) && is.finite(window_span) && window_span > 0) covered_bp / window_span else 0,
             segments_df = seg_df
+        )
+    }
+
+    assess_current_lastz_reference <- function(runs,
+                                               reference_ctx,
+                                               kind = c("blocks", "multipip"),
+                                               min_identity = 70,
+                                               min_length = 100L) {
+        kind <- match.arg(kind)
+        runs <- runs %||% list()
+        min_identity <- suppressWarnings(as.numeric(min_identity %||% 70))
+        if (!is.finite(min_identity)) min_identity <- 70
+        min_length <- suppressWarnings(as.integer(min_length %||% if (identical(kind, "multipip")) 25L else 100L))
+        if (!is.finite(min_length) || min_length < 1L) min_length <- if (identical(kind, "multipip")) 25L else 100L
+        reference_id <- trimws(as.character((reference_ctx %||% list())$plot_id %||% ""))
+        total_species <- length(runs)
+        if (total_species == 0L) {
+            return(list(
+                status = "pending",
+                basis = "selected_reference",
+                reference_id = reference_id,
+                summary = "Run local alignments to evaluate the selected reference.",
+                detail = "The app evaluates only this reference against the visible organisms; it does not launch an all-against-all candidate sweep.",
+                metrics = NULL,
+                stamp = ""
+            ))
+        }
+        supports <- lapply(runs, function(run_obj) {
+            if (identical(kind, "multipip")) {
+                summarize_multipip_reference_support(
+                    (run_obj %||% list())$segments,
+                    min_identity = min_identity,
+                    min_segment_bp = min_length,
+                    ref_feature_df = NULL
+                )
+            } else {
+                summarize_pip_reference_support(
+                    (run_obj %||% list())$blocks,
+                    min_identity = min_identity,
+                    min_block_length = min_length
+                )
+            }
+        })
+        ok_mask <- vapply(runs, function(run_obj) identical(trimws(as.character((run_obj %||% list())$status %||% "")), "ok"), logical(1))
+        supported_mask <- vapply(supports, function(item) isTRUE(item$visible), logical(1))
+        covered_bp <- vapply(supports, function(item) as.numeric(item$covered_bp %||% 0), numeric(1))
+        aligned_bp <- vapply(supports, function(item) as.numeric(item$aligned_bp %||% 0), numeric(1))
+        identities <- vapply(supports, function(item) as.numeric(item$weighted_identity %||% NA_real_), numeric(1))
+        fragment_counts <- vapply(supports, function(item) {
+            as.integer(if (identical(kind, "multipip")) item$segment_count %||% 0L else item$reduced_block_count %||% 0L)
+        }, integer(1))
+        window_start <- suppressWarnings(as.numeric((reference_ctx %||% list())$window_start %||% NA_real_))
+        window_end <- suppressWarnings(as.numeric((reference_ctx %||% list())$window_end %||% NA_real_))
+        window_bp <- window_end - window_start + 1
+        coverage_fraction <- if (is.finite(window_bp) && window_bp > 0) covered_bp / window_bp else rep(NA_real_, length(covered_bp))
+        weighted_keep <- is.finite(identities) & is.finite(aligned_bp) & aligned_bp > 0
+        weighted_identity <- if (any(weighted_keep)) {
+            sum(identities[weighted_keep] * aligned_bp[weighted_keep], na.rm = TRUE) / sum(aligned_bp[weighted_keep], na.rm = TRUE)
+        } else {
+            NA_real_
+        }
+        mean_coverage <- if (any(is.finite(coverage_fraction))) mean(coverage_fraction[is.finite(coverage_fraction)], na.rm = TRUE) else NA_real_
+        metrics <- data.frame(
+            reference_id = reference_id,
+            supported_species = as.integer(sum(supported_mask, na.rm = TRUE)),
+            successful_species = as.integer(sum(ok_mask, na.rm = TRUE)),
+            total_species = as.integer(total_species),
+            mean_coverage_fraction = as.numeric(mean_coverage),
+            weighted_identity = as.numeric(weighted_identity),
+            fragment_count = as.integer(sum(fragment_counts, na.rm = TRUE)),
+            covered_bp = as.numeric(sum(covered_bp, na.rm = TRUE)),
+            aligned_bp = as.numeric(sum(aligned_bp, na.rm = TRUE)),
+            stringsAsFactors = FALSE
+        )
+        metric_label <- if (identical(kind, "multipip")) "visible gap-free segments" else "reduced blocks"
+        evaluation_available <- any(ok_mask)
+        list(
+            status = if (evaluation_available) "evaluated" else "unavailable",
+            basis = "selected_reference",
+            reference_id = reference_id,
+            summary = if (evaluation_available) {
+                sprintf(
+                    "Selected reference evaluated: conservation support in %d of %d visible organisms.",
+                    metrics$supported_species[[1L]],
+                    metrics$total_species[[1L]]
+                )
+            } else {
+                "The selected reference could not be evaluated because no local alignment completed successfully."
+            },
+            detail = sprintf(
+                "Successful alignments %d/%d | mean reference-window coverage %s | support-weighted identity %s | %s %d. No candidate-reference sweep was run.",
+                metrics$successful_species[[1L]],
+                metrics$total_species[[1L]],
+                if (is.finite(mean_coverage)) sprintf("%.1f%%", 100 * mean_coverage) else "N/A",
+                if (is.finite(weighted_identity)) sprintf("%.1f%%", weighted_identity) else "N/A",
+                metric_label,
+                metrics$fragment_count[[1L]]
+            ),
+            metrics = metrics,
+            stamp = format(Sys.time(), "%Y-%m-%d %H:%M:%S")
         )
     }
 
@@ -10323,15 +10519,14 @@ function(input, output, session) {
             invisible(value)
         }
         pipReferenceAssessmentOrthologous <- reactiveVal(list(
-            status = "provisional",
+            status = "pending",
             basis = "default",
             reference_id = "",
-            summary = "Reference is provisional until compared across the loaded organisms.",
-            detail = "Use 'Suggest best reference' to score candidates by cross-species local support, not by locus size alone.",
+            summary = "Choose a reference and run local alignments to evaluate it.",
+            detail = "The evaluation reuses the selected reference alignment and does not run an all-against-all candidate sweep.",
             metrics = NULL,
             stamp = ""
         ))
-        pipReferenceSuggestionCacheOrthologous <- reactiveVal(list())
 
         observeEvent(
             list(
@@ -10347,201 +10542,19 @@ function(input, output, session) {
                 }
                 setPipLocalAlignmentStateOrthologous(reset = TRUE)
                 current_ref <- trimws(as.character(pipReferencePlotIdOrthologous() %||% ""))
-                assess <- pipReferenceAssessmentOrthologous() %||% list()
-                if (!identical(trimws(as.character(assess$reference_id %||% "")), current_ref) ||
-                    !identical(trimws(as.character(assess$status %||% "")), "suggested")) {
-                    pipReferenceAssessmentOrthologous(list(
-                        status = "provisional",
-                        basis = if (nzchar(trimws(as.character(input$ortho_pip_reference_track %||% "")))) "manual" else "default",
-                        reference_id = current_ref,
-                        summary = "Reference is provisional until compared across the loaded organisms.",
-                        detail = "Changing the reference can reveal or hide conservation because this view is projected in reference coordinates.",
-                        metrics = NULL,
-                        stamp = ""
-                    ))
-                }
+                pipReferenceAssessmentOrthologous(list(
+                    status = "pending",
+                    basis = if (nzchar(trimws(as.character(input$ortho_pip_reference_track %||% "")))) "manual" else "default",
+                    reference_id = current_ref,
+                    summary = "Run local alignments to evaluate the selected reference.",
+                    detail = "Changing the reference changes the coordinate projection. The app evaluates only the selected reference against the visible organisms.",
+                    metrics = NULL,
+                    stamp = ""
+                ))
             },
             ignoreInit = TRUE
         )
 
-        observeEvent(input$ortho_pip_suggest_reference, {
-            ids <- as.character(pipRepresentativePlotIdsOrthologous() %||% character(0))
-            ctx_all <- pipRepresentativeWindowTracksOrthologous() %||% list()
-            if (length(ids) <= 1L) {
-                emit_popup_status("LASTZ Blocks", "Load at least two organism representatives to suggest a reference.", tone = "info", clear = FALSE)
-                return(invisible(NULL))
-            }
-            min_identity <- max(0, min(100, suppressWarnings(as.numeric(input$ortho_pip_min_identity %||% 70))))
-            if (!is.finite(min_identity)) min_identity <- 70
-            min_length <- suppressWarnings(as.integer(input$ortho_pip_min_length %||% 100))
-            if (!is.finite(min_length)) min_length <- 100L
-            span_mode <- trimws(as.character(input$ortho_pip_span %||% "gene"))
-            suggestion_key <- stable_short_cache_key(
-                "pip-ref-suggest-v1",
-                ids,
-                span_mode,
-                min_identity,
-                min_length
-            )
-            cache_map <- pipReferenceSuggestionCacheOrthologous() %||% list()
-            cached <- cache_map[[suggestion_key]] %||% NULL
-            scoring_rows <- cached$ranking %||% NULL
-            if (!is.data.frame(scoring_rows) || nrow(scoring_rows) == 0L) {
-                total_jobs <- max(1L, length(ids) * max(length(ids) - 1L, 1L))
-                set_popup_loading(
-                    TRUE,
-                    context = "LASTZ Blocks",
-                    text = lastz_progress_text(sprintf("Scoring candidate references\u2026 (0 / %d).", total_jobs)),
-                    headline = "Please be patient",
-                    auto_open = TRUE
-                )
-                on.exit(set_popup_loading(FALSE, context = "LASTZ Blocks"), add = TRUE)
-                progress_done <- 0L
-                scoring_rows <- {
-                    candidate_rows <- lapply(ids, function(ref_id) {
-                        ref_ctx <- ctx_all[[ref_id]] %||% NULL
-                        if (is.null(ref_ctx)) {
-                            progress_done <<- progress_done + max(length(ids) - 1L, 1L)
-                            return(NULL)
-                        }
-                        query_ids <- ids[ids != ref_id]
-                        per_query <- lapply(query_ids, function(qid) {
-                            progress_done <<- progress_done + 1L
-                            set_popup_loading(
-                                TRUE,
-                                context = "LASTZ Blocks",
-                                text = lastz_progress_text(sprintf(
-                                    "Scoring candidate references\u2026 (%d / %d).",
-                                    progress_done,
-                                    total_jobs
-                                )),
-                                headline = "Please be patient",
-                                auto_open = TRUE
-                            )
-                            qry_ctx <- ctx_all[[qid]] %||% NULL
-                            if (is.null(qry_ctx)) {
-                                return(NULL)
-                            }
-                            run_obj <- tryCatch(
-                                run_local_locus_alignment(
-                                    reference_ctx = ref_ctx,
-                                    query_ctx = qry_ctx,
-                                    engine = "lastz"
-                                ),
-                                error = function(e) list(status = "engine_error", stderr = conditionMessage(e), blocks = NULL)
-                            )
-                            run_blocks <- run_obj$blocks
-                            support <- summarize_pip_reference_support(
-                                run_blocks,
-                                min_identity = min_identity,
-                                min_block_length = min_length
-                            )
-                            list(
-                                query_id = qid,
-                                status = as.character(run_obj$status %||% "unknown"),
-                                support = support
-                            )
-                        })
-                        kept <- Filter(Negate(is.null), per_query)
-                        if (length(kept) == 0L) {
-                            return(data.frame(
-                                ref_id = ref_id,
-                                supported_species = 0L,
-                                total_species = length(query_ids),
-                                covered_bp = 0,
-                                mean_coverage_fraction = 0,
-                                weighted_identity = NA_real_,
-                                fragment_count = 0L,
-                                aligned_bp = 0,
-                                stringsAsFactors = FALSE
-                            ))
-                        }
-                        supported_mask <- vapply(kept, function(x) isTRUE(x$support$visible), logical(1))
-                        covered_bp <- sum(vapply(kept, function(x) as.numeric(x$support$covered_bp %||% 0), numeric(1)), na.rm = TRUE)
-                        aligned_bp <- sum(vapply(kept, function(x) as.numeric(x$support$aligned_bp %||% 0), numeric(1)), na.rm = TRUE)
-                        coverage_fraction <- mean(vapply(kept, function(x) as.numeric(x$support$coverage_fraction %||% 0), numeric(1)), na.rm = TRUE)
-                        fragment_count <- sum(vapply(kept, function(x) as.integer(x$support$reduced_block_count %||% 0L), integer(1)), na.rm = TRUE)
-                        weighted_identity <- {
-                            id_vec <- vapply(kept, function(x) as.numeric(x$support$weighted_identity %||% NA_real_), numeric(1))
-                            len_vec <- vapply(kept, function(x) as.numeric(x$support$aligned_bp %||% 0), numeric(1))
-                            keep_idx <- is.finite(id_vec) & is.finite(len_vec) & len_vec > 0
-                            if (any(keep_idx)) {
-                                sum(id_vec[keep_idx] * len_vec[keep_idx], na.rm = TRUE) / sum(len_vec[keep_idx], na.rm = TRUE)
-                            } else {
-                                NA_real_
-                            }
-                        }
-                        data.frame(
-                            ref_id = ref_id,
-                            supported_species = as.integer(sum(supported_mask, na.rm = TRUE)),
-                            total_species = length(query_ids),
-                            covered_bp = as.numeric(covered_bp %||% 0),
-                            mean_coverage_fraction = as.numeric(coverage_fraction %||% 0),
-                            weighted_identity = suppressWarnings(as.numeric(weighted_identity)),
-                            fragment_count = as.integer(fragment_count %||% 0L),
-                            aligned_bp = as.numeric(aligned_bp %||% 0),
-                            stringsAsFactors = FALSE
-                        )
-                    })
-                    do.call(rbind,  Filter(Negate(is.null), candidate_rows))
-                }
-                if (!is.data.frame(scoring_rows) || nrow(scoring_rows) == 0L) {
-                    emit_popup_status("LASTZ Blocks", "No candidate references could be scored with the current locus windows.", tone = "warning", clear = TRUE)
-                    return(invisible(NULL))
-                }
-                scoring_rows <- scoring_rows[order(
-                    -scoring_rows$supported_species,
-                    -scoring_rows$mean_coverage_fraction,
-                    -ifelse(is.finite(scoring_rows$weighted_identity), scoring_rows$weighted_identity, -Inf),
-                    scoring_rows$fragment_count,
-                    -scoring_rows$covered_bp,
-                    scoring_rows$ref_id
-                ), , drop = FALSE]
-                cache_map[[suggestion_key]] <- list(
-                    ranking = scoring_rows,
-                    generated_at = format(Sys.time(), "%Y-%m-%d %H:%M:%S")
-                )
-                pipReferenceSuggestionCacheOrthologous(cache_map)
-            }
-            best_id <- trimws(as.character(scoring_rows$ref_id[1] %||% ""))
-            if (!nzchar(best_id)) {
-                emit_popup_status("LASTZ Blocks", "No evidence-based reference suggestion is available for this locus set.", tone = "warning", clear = TRUE)
-                return(invisible(NULL))
-            }
-            best_row <- scoring_rows[1, , drop = FALSE]
-            updateSelectInput(session, "ortho_pip_reference_track", selected = best_id)
-            pipReferenceAssessmentOrthologous(list(
-                status = "suggested",
-                basis = "evidence",
-                reference_id = best_id,
-                summary = sprintf(
-                    "Suggested from evidence: %s supported %d of %d cross-species comparisons.",
-                    best_id,
-                    as.integer(best_row$supported_species %||% 0L),
-                    as.integer(best_row$total_species %||% 0L)
-                ),
-                detail = sprintf(
-                    "Mean covered fraction %.1f%% | support-weighted identity %s | reduced block count %d. Suggestion is based on LASTZ local support under the current identity and length filters.",
-                    100 * as.numeric(best_row$mean_coverage_fraction %||% 0),
-                    if (is.finite(suppressWarnings(as.numeric(best_row$weighted_identity)))) sprintf("%.1f%%", as.numeric(best_row$weighted_identity)) else "N/A",
-                    as.integer(best_row$fragment_count %||% 0L)
-                ),
-                metrics = best_row,
-                stamp = format(Sys.time(), "%Y-%m-%d %H:%M:%S")
-            ))
-            emit_popup_status(
-                "LASTZ Blocks",
-                sprintf(
-                    "Best reference selected: %s (supported %d/%d species, mean coverage %.1f%%).",
-                    best_id,
-                    as.integer(best_row$supported_species %||% 0L),
-                    as.integer(best_row$total_species %||% 0L),
-                    100 * as.numeric(best_row$mean_coverage_fraction %||% 0)
-                ),
-                tone = "success",
-                clear = TRUE
-            )
-        }, ignoreInit = TRUE)
 
         observeEvent(input$ortho_pip_run_alignments, {
             lastz_dbg("=== LASTZ BLOCKS START ===", detail = format(Sys.time()))
@@ -10657,6 +10670,13 @@ function(input, output, session) {
                     running = FALSE,
                     token = run_token_local
                 )
+                pipReferenceAssessmentOrthologous(assess_current_lastz_reference(
+                    runs = runs,
+                    reference_ctx = ref_ctx_local,
+                    kind = "blocks",
+                    min_identity = max(0, min(100, suppressWarnings(as.numeric(input$ortho_pip_min_identity %||% 70)))),
+                    min_length = suppressWarnings(as.integer(input$ortho_pip_min_length %||% 100L))
+                ))
                 shinyjs::enable("ortho_pip_run_alignments")
                 set_popup_loading(FALSE, context = "LASTZ Blocks")
 
@@ -10696,14 +10716,14 @@ function(input, output, session) {
                     return(promises::promise_resolve(NULL))
                 }
                 cache_key <- lastz_alignment_cache_key(
-                    mode = "lastz_blocks",
+                    mode = "canonical_lastz",
                     reference_ctx = ref_ctx_local,
                     query_ctx = qry_ctx,
-                    format_name = "general",
+                    format_name = "general-cigarx",
                     bin_info = bin_info,
                     extra_args = character(0)
                 )
-                cached_result <- get_lastz_alignment_cached_result(cache_key)
+                cached_result <- get_lastz_alignment_cached_result(cache_key, ref_ctx_local, qry_ctx)
                 if (!is.null(cached_result)) {
                     app_perf_mark(NULL, sprintf("lastz_blocks_cache_hit pid=%s", as.character(pid)), "ORTHO_LASTZ")
                     lastz_dbg(sprintf("Step 5[%d]: cache hit", i), detail = as.character(cache_key))
@@ -10730,7 +10750,8 @@ function(input, output, session) {
                             list(ok = FALSE, error = e$message)
                         })
                         result <- tryCatch(
-                            run_local_locus_alignment(
+                            run_cached_canonical_lastz(
+                                cache_key = cache_key,
                                 reference_ctx = ref_ctx_local,
                                 query_ctx = qry_ctx,
                                 engine = "lastz"
@@ -10972,15 +10993,14 @@ function(input, output, session) {
             invisible(value)
         }
         multipipReferenceAssessmentOrthologous <- reactiveVal(list(
-            status = "provisional",
+            status = "pending",
             basis = "default",
             reference_id = "",
-            summary = "Reference is provisional until compared across the loaded organisms.",
-            detail = "Use 'Suggest best reference' to score candidates using pruned MultiPIP gap-free segments.",
+            summary = "Choose a reference and run local alignments to evaluate it.",
+            detail = "The evaluation reuses the selected reference alignment and does not run an all-against-all candidate sweep.",
             metrics = NULL,
             stamp = ""
         ))
-        multipipReferenceSuggestionCacheOrthologous <- reactiveVal(list())
 
         observeEvent(
             list(
@@ -10996,208 +11016,19 @@ function(input, output, session) {
                 }
                 setMultipipLocalAlignmentStateOrthologous(reset = TRUE)
                 current_ref <- trimws(as.character(multipipReferencePlotIdOrthologous() %||% ""))
-                assess <- multipipReferenceAssessmentOrthologous() %||% list()
-                if (!identical(trimws(as.character(assess$reference_id %||% "")), current_ref) ||
-                    !identical(trimws(as.character(assess$status %||% "")), "suggested")) {
-                    multipipReferenceAssessmentOrthologous(list(
-                        status = "provisional",
-                        basis = if (nzchar(trimws(as.character(input$ortho_multipip_reference_track %||% "")))) "manual" else "default",
-                        reference_id = current_ref,
-                        summary = "Reference is provisional until compared across the loaded organisms.",
-                        detail = "Changing the reference changes the coordinate system and can materially alter which ungapped local segments remain visible.",
-                        metrics = NULL,
-                        stamp = ""
-                    ))
-                }
+                multipipReferenceAssessmentOrthologous(list(
+                    status = "pending",
+                    basis = if (nzchar(trimws(as.character(input$ortho_multipip_reference_track %||% "")))) "manual" else "default",
+                    reference_id = current_ref,
+                    summary = "Run local alignments to evaluate the selected reference.",
+                    detail = "Changing the reference changes the coordinate system. The app evaluates only the selected reference against the visible organisms.",
+                    metrics = NULL,
+                    stamp = ""
+                ))
             },
             ignoreInit = TRUE
         )
 
-        observeEvent(input$ortho_multipip_suggest_reference, {
-            ids <- as.character(pipRepresentativePlotIdsOrthologous() %||% character(0))
-            ctx_all <- multipipWindowTracksOrthologous() %||% list()
-            if (length(ids) <= 1L) {
-                emit_popup_status("MultiPIP", "Load at least two organism representatives to suggest a reference.", tone = "info", clear = FALSE)
-                return(invisible(NULL))
-            }
-            run_multipip <- resolve_multipip_alignment_runner()
-            min_identity <- max(50, min(100, suppressWarnings(as.numeric(input$ortho_multipip_min_identity %||% 70))))
-            if (!is.finite(min_identity)) min_identity <- 70
-            min_segment_bp <- suppressWarnings(as.integer(input$ortho_multipip_min_segment_bp %||% 25))
-            if (!is.finite(min_segment_bp)) min_segment_bp <- 25L
-            span_mode <- trimws(as.character(input$ortho_multipip_span %||% "gene"))
-            suggestion_key <- stable_short_cache_key(
-                "multipip-ref-suggest-v1",
-                ids,
-                span_mode,
-                min_identity,
-                min_segment_bp
-            )
-            cache_map <- multipipReferenceSuggestionCacheOrthologous() %||% list()
-            cached <- cache_map[[suggestion_key]] %||% NULL
-            scoring_rows <- cached$ranking %||% NULL
-            if (!is.data.frame(scoring_rows) || nrow(scoring_rows) == 0L) {
-                total_jobs <- max(1L, length(ids) * max(length(ids) - 1L, 1L))
-                progress_done_mp <- 0L
-                set_popup_loading(
-                    TRUE,
-                    context = "MultiPIP",
-                    text = lastz_progress_text(sprintf("Scoring candidate references\u2026 (0 / %d).", total_jobs)),
-                    headline = "Please be patient",
-                    auto_open = TRUE
-                )
-                on.exit(set_popup_loading(FALSE, context = "MultiPIP"), add = TRUE)
-                scoring_rows <- {
-                    candidate_rows <- lapply(ids, function(ref_id) {
-                        ref_ctx <- ctx_all[[ref_id]] %||% NULL
-                        if (is.null(ref_ctx)) {
-                            return(NULL)
-                        }
-                        query_ids <- ids[ids != ref_id]
-                        ref_underlay <- build_multipip_underlay_features(
-                            ref_ctx = ref_ctx,
-                            ref_row_y = 0,
-                            feature_palette = list(),
-                            feature_border = "#8C867B"
-                        )
-                        ref_feature_df <- ref_underlay$all_df %||% NULL
-                        per_query <- lapply(query_ids, function(qid) {
-                            progress_done_mp <<- progress_done_mp + 1L
-                            set_popup_loading(
-                                TRUE,
-                                context = "MultiPIP",
-                                text = lastz_progress_text(sprintf(
-                                    "Scoring candidate references\u2026 (%d / %d).",
-                                    progress_done_mp,
-                                    total_jobs
-                                )),
-                                headline = "Please be patient",
-                                auto_open = TRUE
-                            )
-                            qry_ctx <- ctx_all[[qid]] %||% NULL
-                            if (is.null(qry_ctx)) {
-                                return(NULL)
-                            }
-                            run_obj <- tryCatch(
-                                run_multipip(
-                                    reference_ctx = ref_ctx,
-                                    query_ctx = qry_ctx,
-                                    engine = "lastz"
-                                ),
-                                error = function(e) list(status = "engine_error", stderr = conditionMessage(e), segments = NULL)
-                            )
-                            support <- summarize_multipip_reference_support(
-                                run_obj$segments,
-                                min_identity = min_identity,
-                                min_segment_bp = min_segment_bp,
-                                ref_feature_df = ref_feature_df
-                            )
-                            list(
-                                query_id = qid,
-                                status = as.character(run_obj$status %||% "unknown"),
-                                support = support
-                            )
-                        })
-                        kept <- Filter(Negate(is.null), per_query)
-                        if (length(kept) == 0L) {
-                            return(data.frame(
-                                ref_id = ref_id,
-                                supported_species = 0L,
-                                total_species = length(query_ids),
-                                covered_bp = 0,
-                                mean_coverage_fraction = 0,
-                                weighted_identity = NA_real_,
-                                fragment_count = 0L,
-                                aligned_bp = 0,
-                                stringsAsFactors = FALSE
-                            ))
-                        }
-                        supported_mask <- vapply(kept, function(x) isTRUE(x$support$visible), logical(1))
-                        covered_bp <- sum(vapply(kept, function(x) as.numeric(x$support$covered_bp %||% 0), numeric(1)), na.rm = TRUE)
-                        aligned_bp <- sum(vapply(kept, function(x) as.numeric(x$support$aligned_bp %||% 0), numeric(1)), na.rm = TRUE)
-                        coverage_fraction <- mean(vapply(kept, function(x) as.numeric(x$support$coverage_fraction %||% 0), numeric(1)), na.rm = TRUE)
-                        fragment_count <- sum(vapply(kept, function(x) as.integer(x$support$segment_count %||% 0L), integer(1)), na.rm = TRUE)
-                        weighted_identity <- {
-                            id_vec <- vapply(kept, function(x) as.numeric(x$support$weighted_identity %||% NA_real_), numeric(1))
-                            len_vec <- vapply(kept, function(x) as.numeric(x$support$aligned_bp %||% 0), numeric(1))
-                            keep_idx <- is.finite(id_vec) & is.finite(len_vec) & len_vec > 0
-                            if (any(keep_idx)) {
-                                sum(id_vec[keep_idx] * len_vec[keep_idx], na.rm = TRUE) / sum(len_vec[keep_idx], na.rm = TRUE)
-                            } else {
-                                NA_real_
-                            }
-                        }
-                        data.frame(
-                            ref_id = ref_id,
-                            supported_species = as.integer(sum(supported_mask, na.rm = TRUE)),
-                            total_species = length(query_ids),
-                            covered_bp = as.numeric(covered_bp %||% 0),
-                            mean_coverage_fraction = as.numeric(coverage_fraction %||% 0),
-                            weighted_identity = suppressWarnings(as.numeric(weighted_identity)),
-                            fragment_count = as.integer(fragment_count %||% 0L),
-                            aligned_bp = as.numeric(aligned_bp %||% 0),
-                            stringsAsFactors = FALSE
-                        )
-                    })
-                    do.call(rbind,  Filter(Negate(is.null), candidate_rows))
-                }
-                if (!is.data.frame(scoring_rows) || nrow(scoring_rows) == 0L) {
-                    emit_popup_status("MultiPIP", "No candidate references could be scored with the current locus windows.", tone = "warning", clear = TRUE)
-                    return(invisible(NULL))
-                }
-                scoring_rows <- scoring_rows[order(
-                    -scoring_rows$supported_species,
-                    -scoring_rows$mean_coverage_fraction,
-                    -ifelse(is.finite(scoring_rows$weighted_identity), scoring_rows$weighted_identity, -Inf),
-                    scoring_rows$fragment_count,
-                    -scoring_rows$covered_bp,
-                    scoring_rows$ref_id
-                ), , drop = FALSE]
-                cache_map[[suggestion_key]] <- list(
-                    ranking = scoring_rows,
-                    generated_at = format(Sys.time(), "%Y-%m-%d %H:%M:%S")
-                )
-                multipipReferenceSuggestionCacheOrthologous(cache_map)
-            }
-            best_id <- trimws(as.character(scoring_rows$ref_id[1] %||% ""))
-            if (!nzchar(best_id)) {
-                emit_popup_status("MultiPIP", "No evidence-based reference suggestion is available for this locus set.", tone = "warning", clear = TRUE)
-                return(invisible(NULL))
-            }
-            best_row <- scoring_rows[1, , drop = FALSE]
-            updateSelectInput(session, "ortho_multipip_reference_track", selected = best_id)
-            multipipReferenceAssessmentOrthologous(list(
-                status = "suggested",
-                basis = "evidence",
-                reference_id = best_id,
-                summary = sprintf(
-                    "Suggested from evidence: %s supported %d of %d cross-species comparisons.",
-                    best_id,
-                    as.integer(best_row$supported_species %||% 0L),
-                    as.integer(best_row$total_species %||% 0L)
-                ),
-                detail = sprintf(
-                    "Mean covered fraction %.1f%% | support-weighted identity %s | visible pruned segments %d. Suggestion is based on LASTZ gap-free local support under the current MultiPIP filters.",
-                    100 * as.numeric(best_row$mean_coverage_fraction %||% 0),
-                    if (is.finite(suppressWarnings(as.numeric(best_row$weighted_identity)))) sprintf("%.1f%%", as.numeric(best_row$weighted_identity)) else "N/A",
-                    as.integer(best_row$fragment_count %||% 0L)
-                ),
-                metrics = best_row,
-                stamp = format(Sys.time(), "%Y-%m-%d %H:%M:%S")
-            ))
-            emit_popup_status(
-                "MultiPIP",
-                sprintf(
-                    "Best reference selected: %s (supported %d/%d species, mean coverage %.1f%%).",
-                    best_id,
-                    as.integer(best_row$supported_species %||% 0L),
-                    as.integer(best_row$total_species %||% 0L),
-                    100 * as.numeric(best_row$mean_coverage_fraction %||% 0)
-                ),
-                tone = "success",
-                clear = TRUE
-            )
-        }, ignoreInit = TRUE)
 
         observeEvent(input$ortho_multipip_run_alignments, {
             lastz_dbg("=== MULTIPIP START ===", detail = format(Sys.time()))
@@ -11318,6 +11149,13 @@ function(input, output, session) {
                     running = FALSE,
                     token = run_token_local
                 )
+                multipipReferenceAssessmentOrthologous(assess_current_lastz_reference(
+                    runs = runs,
+                    reference_ctx = ref_ctx_local,
+                    kind = "multipip",
+                    min_identity = max(50, min(100, suppressWarnings(as.numeric(input$ortho_multipip_min_identity %||% 70)))),
+                    min_length = suppressWarnings(as.integer(input$ortho_multipip_min_segment_bp %||% 25L))
+                ))
                 shinyjs::enable("ortho_multipip_run_alignments")
                 set_popup_loading(FALSE, context = "MultiPIP")
 
@@ -11362,14 +11200,14 @@ function(input, output, session) {
                     return(promises::promise_resolve(NULL))
                 }
                 cache_key <- lastz_alignment_cache_key(
-                    mode = "multipip",
+                    mode = "canonical_lastz",
                     reference_ctx = ref_ctx_local,
                     query_ctx = qry_ctx,
-                    format_name = "lav",
+                    format_name = "general-cigarx",
                     bin_info = bin_info,
                     extra_args = character(0)
                 )
-                cached_result <- get_lastz_alignment_cached_result(cache_key)
+                cached_result <- get_lastz_alignment_cached_result(cache_key, ref_ctx_local, qry_ctx)
                 if (!is.null(cached_result)) {
                     app_perf_mark(NULL, sprintf("multipip_cache_hit pid=%s", as.character(pid)), "ORTHO_LASTZ")
                     lastz_dbg(sprintf("MP Step 6[%d]: cache hit", i), detail = as.character(cache_key))
@@ -11388,7 +11226,7 @@ function(input, output, session) {
                 }
                 app_perf_mark(NULL, sprintf("multipip_cache_miss pid=%s", as.character(pid)), "ORTHO_LASTZ")
                 tryCatch(
-                    promises::future_promise({
+                    lastz_future_promise({
                         qry_seq_result <- tryCatch({
                             seq_txt <- extract_locus_window_sequence(qry_ctx)
                             list(ok = TRUE, len = nchar(seq_txt), preview = substr(seq_txt, 1, 50))
@@ -11396,7 +11234,8 @@ function(input, output, session) {
                             list(ok = FALSE, error = e$message)
                         })
                         result <- tryCatch(
-                            run_multipip_local(
+                            run_cached_canonical_lastz(
+                                cache_key = cache_key,
                                 reference_ctx = ref_ctx_local,
                                 query_ctx = qry_ctx,
                                 engine = "lastz"
@@ -20278,53 +20117,79 @@ function(input, output, session) {
         )
     }
 
-    run_homo_local_lastz <- function(kind = c("blocks", "multipip"), span_mode = "gene") {
+    run_homo_local_lastz_async <- function(kind = c("blocks", "multipip"), span_mode = "gene") {
         kind <- match.arg(kind)
         contexts <- homoLastzLocusContexts(span_mode)
         ref_id <- as.character(homoCanonicalReferencePlotId() %||% "")
+        invalid_state <- list(
+            status = "invalid_input",
+            runs = list(),
+            contexts = contexts,
+            reference_id = ref_id,
+            query_ids = character(0),
+            stamp = as.character(Sys.time())
+        )
         if (!nzchar(ref_id) || !ref_id %in% names(contexts) || length(contexts) < 2L) {
-            return(list(status = "invalid_input", runs = list(), contexts = contexts, reference_id = ref_id, query_ids = character(0), stamp = as.character(Sys.time())))
+            return(promises::promise_resolve(invalid_state))
         }
         query_ids <- setdiff(names(contexts), ref_id)
         ref_ctx <- contexts[[ref_id]]
         bin_info <- tryCatch(resolve_lastz_binary(), error = function(e) list(available = FALSE, path = ""))
-        runs <- list()
-        label <- if (identical(kind, "multipip")) "Multi-Gene MultiPIP" else "Multi-Gene LASTZ"
-        withProgress(message = label, value = 0, {
-            total <- max(1L, length(query_ids))
-            for (i in seq_along(query_ids)) {
-                qid <- as.character(query_ids[[i]])
-                incProgress(1 / total, detail = paste("Aligning", homoLastzTranscriptLabel(qid)))
-                qry_ctx <- contexts[[qid]]
-                cache_key <- lastz_alignment_cache_key(
-                    mode = if (identical(kind, "multipip")) "homo_multipip" else "homo_lastz_blocks",
-                    reference_ctx = ref_ctx,
-                    query_ctx = qry_ctx,
-                    format_name = if (identical(kind, "multipip")) "lav" else "general",
-                    bin_info = bin_info
-                )
-                cached <- get_lastz_alignment_cached_result(cache_key)
-                if (is.list(cached)) {
-                    runs[[qid]] <- cached
-                } else {
-                    res <- if (identical(kind, "multipip")) {
-                        run_local_locus_alignment_multipip(ref_ctx, qry_ctx, engine = "lastz")
-                    } else {
-                        run_local_locus_alignment(ref_ctx, qry_ctx, engine = "lastz", format_name = "general")
-                    }
-                    set_lastz_alignment_cached_result(cache_key, res)
-                    runs[[qid]] <- res
-                }
+        jobs <- lapply(query_ids, function(qid) {
+            qry_ctx <- contexts[[qid]]
+            cache_key <- lastz_alignment_cache_key(
+                mode = "canonical_lastz",
+                reference_ctx = ref_ctx,
+                query_ctx = qry_ctx,
+                format_name = "general-cigarx",
+                bin_info = bin_info
+            )
+            cached <- get_lastz_alignment_cached_result(cache_key, ref_ctx, qry_ctx)
+            if (is.list(cached)) {
+                return(promises::promise_resolve(list(qid = qid, cache_key = cache_key, cache_hit = TRUE, run = cached)))
             }
+            lastz_future_promise({
+                result <- tryCatch(
+                    run_cached_canonical_lastz(
+                        cache_key = cache_key,
+                        reference_ctx = ref_ctx,
+                        query_ctx = qry_ctx,
+                        engine = "lastz"
+                    ),
+                    error = function(e) list(
+                        status = "engine_error",
+                        stderr = conditionMessage(e),
+                        blocks = data.frame(stringsAsFactors = FALSE),
+                        segments = data.frame(stringsAsFactors = FALSE)
+                    )
+                )
+                list(qid = qid, cache_key = cache_key, cache_hit = FALSE, run = result)
+            }, seed = FALSE)
         })
-        list(status = "done", runs = runs, contexts = contexts, reference_id = ref_id, query_ids = query_ids, stamp = as.character(Sys.time()))
+        names(jobs) <- query_ids
+        promises::promise_all(.list = jobs) %...>% (function(payloads) {
+            payloads <- unname(as.list(payloads %||% list()))
+            runs <- lapply(payloads, function(item) {
+                result <- item$run %||% list(status = "engine_error", stderr = "empty result")
+                if (!isTRUE(item$cache_hit)) set_lastz_alignment_cached_result(item$cache_key, result)
+                result
+            })
+            names(runs) <- vapply(payloads, function(item) as.character(item$qid %||% ""), character(1))
+            list(
+                status = "done",
+                runs = runs,
+                contexts = contexts,
+                reference_id = ref_id,
+                query_ids = query_ids,
+                stamp = as.character(Sys.time())
+            )
+        })
     }
 
     observeEvent(input$homo_pip_run_alignments, {
         req(isTRUE(homoLastzModesEnabled()))
         req(identical(tolower(trimws(as.character(input$homo_visual_mode %||% ""))), "pip_blocks"))
         shinyjs::disable("homo_pip_run_alignments")
-        on.exit(shinyjs::enable("homo_pip_run_alignments"), add = TRUE)
         set_popup_loading(
             TRUE,
             context = "Multi-Gene LASTZ",
@@ -20332,33 +20197,30 @@ function(input, output, session) {
             headline = "Please be patient",
             auto_open = TRUE
         )
-        on.exit(set_popup_loading(FALSE, context = "Multi-Gene LASTZ"), add = TRUE)
-        homoPipLocalAlignmentState(list(status = "running", runs = list(), contexts = homoLastzLocusContexts(input$homo_pip_span %||% "gene"), reference_id = homoCanonicalReferencePlotId(), query_ids = character(0), stamp = as.character(Sys.time())))
-        state <- tryCatch(
-            run_homo_local_lastz("blocks", span_mode = input$homo_pip_span %||% "gene"),
-            error = function(e) list(status = "error", error = as.character(e$message %||% "unknown error"), runs = list(), contexts = list(), reference_id = homoCanonicalReferencePlotId(), query_ids = character(0), stamp = as.character(Sys.time()))
-        )
-        homoPipLocalAlignmentState(state)
-        if (identical(state$status, "done")) {
+        run_token <- paste0("homo_pip_", format(Sys.time(), "%Y%m%d%H%M%OS6"), "_", sample.int(1000000L, 1L))
+        homoPipLocalAlignmentState(list(status = "running", token = run_token, runs = list(), contexts = homoLastzLocusContexts(input$homo_pip_span %||% "gene"), reference_id = homoCanonicalReferencePlotId(), query_ids = character(0), stamp = as.character(Sys.time())))
+        run_homo_local_lastz_async("blocks", span_mode = input$homo_pip_span %||% "gene") %...>% (function(state) {
+            if (!identical(as.character((homoPipLocalAlignmentState() %||% list())$token %||% ""), run_token)) return(NULL)
+            state$token <- run_token
+            homoPipLocalAlignmentState(state)
+            shinyjs::enable("homo_pip_run_alignments")
+            set_popup_loading(FALSE, context = "Multi-Gene LASTZ")
             emit_popup_status("Multi-Gene LASTZ", "Local LASTZ alignments finished.", tone = "success", clear = TRUE)
-        } else {
-            emit_popup_status(
-                "Multi-Gene LASTZ",
-                paste0(
-                    "Local LASTZ alignments did not finish",
-                    if (nzchar(trimws(as.character(state$error %||% "")))) paste0(": ", state$error) else "."
-                ),
-                tone = if (identical(state$status, "error")) "error" else "warning",
-                clear = TRUE
-            )
-        }
+            NULL
+        }) %...!% (function(err) {
+            if (!identical(as.character((homoPipLocalAlignmentState() %||% list())$token %||% ""), run_token)) return(NULL)
+            homoPipLocalAlignmentState(list(status = "error", token = run_token, error = conditionMessage(err), runs = list(), contexts = list(), reference_id = homoCanonicalReferencePlotId(), query_ids = character(0), stamp = as.character(Sys.time())))
+            shinyjs::enable("homo_pip_run_alignments")
+            set_popup_loading(FALSE, context = "Multi-Gene LASTZ")
+            emit_popup_status("Multi-Gene LASTZ", paste0("Local LASTZ alignments did not finish: ", conditionMessage(err)), tone = "error", clear = TRUE)
+            NULL
+        })
     }, ignoreInit = TRUE)
 
     observeEvent(input$homo_multipip_run_alignments, {
         req(isTRUE(homoLastzModesEnabled()))
         req(identical(tolower(trimws(as.character(input$homo_visual_mode %||% ""))), "pip_multipip"))
         shinyjs::disable("homo_multipip_run_alignments")
-        on.exit(shinyjs::enable("homo_multipip_run_alignments"), add = TRUE)
         set_popup_loading(
             TRUE,
             context = "Multi-Gene MultiPIP",
@@ -20366,26 +20228,24 @@ function(input, output, session) {
             headline = "Please be patient",
             auto_open = TRUE
         )
-        on.exit(set_popup_loading(FALSE, context = "Multi-Gene MultiPIP"), add = TRUE)
-        homoMultipipLocalAlignmentState(list(status = "running", runs = list(), contexts = homoLastzLocusContexts(input$homo_multipip_span %||% "gene"), reference_id = homoCanonicalReferencePlotId(), query_ids = character(0), stamp = as.character(Sys.time())))
-        state <- tryCatch(
-            run_homo_local_lastz("multipip", span_mode = input$homo_multipip_span %||% "gene"),
-            error = function(e) list(status = "error", error = as.character(e$message %||% "unknown error"), runs = list(), contexts = list(), reference_id = homoCanonicalReferencePlotId(), query_ids = character(0), stamp = as.character(Sys.time()))
-        )
-        homoMultipipLocalAlignmentState(state)
-        if (identical(state$status, "done")) {
+        run_token <- paste0("homo_multipip_", format(Sys.time(), "%Y%m%d%H%M%OS6"), "_", sample.int(1000000L, 1L))
+        homoMultipipLocalAlignmentState(list(status = "running", token = run_token, runs = list(), contexts = homoLastzLocusContexts(input$homo_multipip_span %||% "gene"), reference_id = homoCanonicalReferencePlotId(), query_ids = character(0), stamp = as.character(Sys.time())))
+        run_homo_local_lastz_async("multipip", span_mode = input$homo_multipip_span %||% "gene") %...>% (function(state) {
+            if (!identical(as.character((homoMultipipLocalAlignmentState() %||% list())$token %||% ""), run_token)) return(NULL)
+            state$token <- run_token
+            homoMultipipLocalAlignmentState(state)
+            shinyjs::enable("homo_multipip_run_alignments")
+            set_popup_loading(FALSE, context = "Multi-Gene MultiPIP")
             emit_popup_status("Multi-Gene MultiPIP", "Local MultiPIP alignments finished.", tone = "success", clear = TRUE)
-        } else {
-            emit_popup_status(
-                "Multi-Gene MultiPIP",
-                paste0(
-                    "Local MultiPIP alignments did not finish",
-                    if (nzchar(trimws(as.character(state$error %||% "")))) paste0(": ", state$error) else "."
-                ),
-                tone = if (identical(state$status, "error")) "error" else "warning",
-                clear = TRUE
-            )
-        }
+            NULL
+        }) %...!% (function(err) {
+            if (!identical(as.character((homoMultipipLocalAlignmentState() %||% list())$token %||% ""), run_token)) return(NULL)
+            homoMultipipLocalAlignmentState(list(status = "error", token = run_token, error = conditionMessage(err), runs = list(), contexts = list(), reference_id = homoCanonicalReferencePlotId(), query_ids = character(0), stamp = as.character(Sys.time())))
+            shinyjs::enable("homo_multipip_run_alignments")
+            set_popup_loading(FALSE, context = "Multi-Gene MultiPIP")
+            emit_popup_status("Multi-Gene MultiPIP", paste0("Local MultiPIP alignments did not finish: ", conditionMessage(err)), tone = "error", clear = TRUE)
+            NULL
+        })
     }, ignoreInit = TRUE)
 
     homo_reference_window_features <- function(ref_ctx) {
@@ -22536,13 +22396,6 @@ function(input, output, session) {
                                     icon = icon("play"),
                                     class = "btn btn-sm btn-success",
                                     style = "width:100%; height:38px; border-radius:10px; font-weight:700;"
-                                ),
-                                actionButton(
-                                    inputId = "ortho_pip_suggest_reference",
-                                    label = "Suggest best reference",
-                                    icon = icon("compass"),
-                                    class = "btn btn-sm btn-outline-primary",
-                                    style = "width:100%; height:38px; border-radius:10px; font-weight:700;"
                                 )
                             )
                         )
@@ -22695,13 +22548,6 @@ function(input, output, session) {
                                     label = "Run local alignments",
                                     icon = icon("play"),
                                     class = "btn btn-sm btn-success",
-                                    style = "width:100%; height:38px; border-radius:10px; font-weight:700;"
-                                ),
-                                actionButton(
-                                    inputId = "ortho_multipip_suggest_reference",
-                                    label = "Suggest best reference",
-                                    icon = icon("compass"),
-                                    class = "btn btn-sm btn-outline-primary",
                                     style = "width:100%; height:38px; border-radius:10px; font-weight:700;"
                                 )
                             )
@@ -25997,20 +25843,21 @@ function(input, output, session) {
         pip_ref_theme <- tolower(as.character(input$app_theme %||% "light"))
         if (!pip_ref_theme %in% c("light", "dark")) pip_ref_theme <- "light"
         is_dark_pip_ref <- identical(pip_ref_theme, "dark")
-        status_txt <- trimws(as.character(assess$status %||% "provisional"))
-        is_suggested <- identical(status_txt, "suggested") && identical(trimws(as.character(assess$reference_id %||% "")), selected_id)
-        chip_bg <- if (is_suggested) "rgba(75, 160, 115, 0.10)" else "rgba(224, 123, 57, 0.10)"
-        chip_border <- if (is_suggested) "#75B990" else "#D49B72"
-        chip_txt <- if (is_suggested) "#2F6F4C" else "#8C4D1E"
-        chip_label <- if (is_suggested) "Suggested from evidence" else "Provisional"
+        status_txt <- trimws(as.character(assess$status %||% "pending"))
+        is_evaluated <- identical(status_txt, "evaluated") && identical(trimws(as.character(assess$reference_id %||% "")), selected_id)
+        is_unavailable <- identical(status_txt, "unavailable") && identical(trimws(as.character(assess$reference_id %||% "")), selected_id)
+        chip_bg <- if (is_evaluated) "rgba(75, 160, 115, 0.10)" else if (is_unavailable) "rgba(196, 84, 80, 0.10)" else "rgba(224, 123, 57, 0.10)"
+        chip_border <- if (is_evaluated) "#75B990" else if (is_unavailable) "#D29792" else "#D49B72"
+        chip_txt <- if (is_evaluated) "#2F6F4C" else if (is_unavailable) "#8D3E3A" else "#8C4D1E"
+        chip_label <- if (is_evaluated) "Evaluated" else if (is_unavailable) "Unavailable" else "Pending run"
         detail_txt <- trimws(as.character(
-            if (is_suggested) {
+            if (is_evaluated || is_unavailable) {
                 assess$detail %||% assess$summary %||% ""
             } else {
                 if (length(ids) > 0L) {
-                    "Reference-centered view: this choice is provisional until candidates are compared across all loaded organisms."
+                    "Reference-centered view: run the selected reference once to measure support across the visible organisms."
                 } else {
-                    "Load cross-species comparison tracks first. Then choose a reference or ask the app to suggest one from cross-species support."
+                    "Load cross-species comparison tracks first, then choose a reference and run local alignments."
                 }
             }
         ))
@@ -26054,17 +25901,18 @@ function(input, output, session) {
     output$ortho_pip_reference_note_ui <- renderUI({
         ids <- as.character(pipRepresentativePlotIdsOrthologous() %||% character(0))
         assess <- pipReferenceAssessmentOrthologous() %||% list()
-        status_txt <- trimws(as.character(assess$status %||% "provisional"))
-        is_suggested <- identical(status_txt, "suggested")
-        title_txt <- if (is_suggested) "Reference rationale" else "Reference status"
+        status_txt <- trimws(as.character(assess$status %||% "pending"))
+        is_evaluated <- identical(status_txt, "evaluated")
+        is_unavailable <- identical(status_txt, "unavailable")
+        title_txt <- if (is_evaluated || is_unavailable) "Reference evaluation" else "Reference status"
         detail_txt <- trimws(as.character(
-            if (is_suggested) {
+            if (is_evaluated || is_unavailable) {
                 assess$summary %||% assess$detail %||% ""
             } else {
                 if (length(ids) > 0L) {
-                    "Current reference is provisional until candidate loci are compared across the loaded organisms."
+                    "Run local alignments to evaluate the selected reference against the visible organisms."
                 } else {
-                    "Load cross-species comparison tracks first, then choose a reference or ask the app to score one from cross-species support."
+                    "Load cross-species comparison tracks first, then choose a reference and run local alignments."
                 }
             }
         ))
@@ -26263,7 +26111,7 @@ function(input, output, session) {
                 style = "display:flex; flex-wrap:wrap; gap:8px 12px; align-items:center;",
                 tags$strong("Backend status"),
 	                tags$span(style = "opacity:0.82;", paste0("Reference track: ", ref_label)),
-                tags$span(style = "opacity:0.82;", paste0("Reference state: ", if (identical(trimws(as.character(assess$status %||% "")), "suggested")) "Suggested from evidence" else "Provisional")),
+                tags$span(style = "opacity:0.82;", paste0("Reference state: ", if (identical(trimws(as.character(assess$status %||% "")), "evaluated")) "Evaluated from current run" else if (identical(trimws(as.character(assess$status %||% "")), "unavailable")) "Evaluation unavailable" else "Pending run")),
                 tags$span(style = "opacity:0.82;", paste0("Organisms shown: ", max(length(ids) - 1L, 0L), " query + 1 reference")),
                 tags$span(style = "opacity:0.82;", paste0("Identity filter: ", as.integer(round(min_identity)), "%")),
                 tags$span(style = "opacity:0.82;", paste0("Length filter: ", min_length, " bp")),
@@ -27022,7 +26870,7 @@ function(input, output, session) {
             style = "display:flex; flex-wrap:wrap; gap:8px 10px; align-items:center;",
             tags$span(style = "font-weight:700;", "LASTZ Block View ready"),
             tags$span(style = "opacity:0.82;", paste0("Reference: ", ref_label)),
-            tags$span(style = "opacity:0.82;", paste0("Reference state: ", if (identical(trimws(as.character(assess$status %||% "")), "suggested")) "Suggested from evidence" else "Provisional")),
+            tags$span(style = "opacity:0.82;", paste0("Reference state: ", if (identical(trimws(as.character(assess$status %||% "")), "evaluated")) "Evaluated from current run" else if (identical(trimws(as.character(assess$status %||% "")), "unavailable")) "Evaluation unavailable" else "Pending run")),
             tags$span(style = "opacity:0.82;", paste0("Reference window: ", ref_window_txt)),
             tags$span(style = "opacity:0.82;", paste0("Window: ", span_label)),
             if (is.finite(ref_window_bp)) tags$span(style = "opacity:0.82;", paste0("Aligned reference bp: ", format(as.integer(ref_window_bp), big.mark = ","))) else NULL,
@@ -27075,12 +26923,13 @@ function(input, output, session) {
         multipip_ref_theme <- tolower(as.character(input$app_theme %||% "light"))
         if (!multipip_ref_theme %in% c("light", "dark")) multipip_ref_theme <- "light"
         is_dark_multipip_ref <- identical(multipip_ref_theme, "dark")
-        status_txt <- trimws(as.character(assess$status %||% "provisional"))
-        is_suggested <- identical(status_txt, "suggested") && identical(trimws(as.character(assess$reference_id %||% "")), selected_id)
-        chip_bg <- if (is_suggested) "rgba(76, 150, 96, 0.12)" else "rgba(196, 133, 68, 0.12)"
-        chip_border <- if (is_suggested) "#6EA776" else "#C18A54"
-        chip_txt <- if (is_suggested) "#3C6A43" else "#8B5B2C"
-        chip_label <- if (is_suggested) "Suggested from evidence" else "Provisional"
+        status_txt <- trimws(as.character(assess$status %||% "pending"))
+        is_evaluated <- identical(status_txt, "evaluated") && identical(trimws(as.character(assess$reference_id %||% "")), selected_id)
+        is_unavailable <- identical(status_txt, "unavailable") && identical(trimws(as.character(assess$reference_id %||% "")), selected_id)
+        chip_bg <- if (is_evaluated) "rgba(76, 150, 96, 0.12)" else if (is_unavailable) "rgba(196, 84, 80, 0.10)" else "rgba(196, 133, 68, 0.12)"
+        chip_border <- if (is_evaluated) "#6EA776" else if (is_unavailable) "#D29792" else "#C18A54"
+        chip_txt <- if (is_evaluated) "#3C6A43" else if (is_unavailable) "#8D3E3A" else "#8B5B2C"
+        chip_label <- if (is_evaluated) "Evaluated" else if (is_unavailable) "Unavailable" else "Pending run"
         div(
             class = "ortho-aligned-control ortho-aligned-control--select",
             div(
@@ -27121,16 +26970,17 @@ function(input, output, session) {
     output$ortho_multipip_reference_note_ui <- renderUI({
         ids <- as.character(pipRepresentativePlotIdsOrthologous() %||% character(0))
         assess <- multipipReferenceAssessmentOrthologous() %||% list()
-        status_txt <- trimws(as.character(assess$status %||% "provisional"))
-        is_suggested <- identical(status_txt, "suggested")
-        title_txt <- if (is_suggested) "Reference rationale" else "Reference status"
+        status_txt <- trimws(as.character(assess$status %||% "pending"))
+        is_evaluated <- identical(status_txt, "evaluated")
+        is_unavailable <- identical(status_txt, "unavailable")
+        title_txt <- if (is_evaluated || is_unavailable) "Reference evaluation" else "Reference status"
         detail_txt <- trimws(as.character(
-            if (is_suggested) {
+            if (is_evaluated || is_unavailable) {
                 assess$summary %||% assess$detail %||% ""
             } else if (length(ids) > 0L) {
-                "Current reference is provisional until candidate loci are compared across the loaded organisms using pruned gap-free segments."
+                "Run local alignments to evaluate the selected reference using the same gap-free segments shown by MultiPIP."
             } else {
-                "Load cross-species comparison tracks first, then choose a reference or ask the app to score one from cross-species local support."
+                "Load cross-species comparison tracks first, then choose a reference and run local alignments."
             }
         ))
         if (!nzchar(detail_txt)) {
@@ -28039,7 +27889,7 @@ function(input, output, session) {
             style = "display:flex; flex-wrap:wrap; gap:8px 10px; align-items:center;",
             tags$span(style = "font-weight:700;", "MultiPIP-style local conservation ready"),
             tags$span(style = "opacity:0.82;", paste0("Reference: ", ref_label)),
-            tags$span(style = "opacity:0.82;", paste0("Reference state: ", if (identical(trimws(as.character(assess$status %||% "")), "suggested")) "Suggested from evidence" else "Provisional")),
+            tags$span(style = "opacity:0.82;", paste0("Reference state: ", if (identical(trimws(as.character(assess$status %||% "")), "evaluated")) "Evaluated from current run" else if (identical(trimws(as.character(assess$status %||% "")), "unavailable")) "Evaluation unavailable" else "Pending run")),
             if (is.finite(ref_window_bp)) tags$span(style = "opacity:0.82;", paste0("Aligned reference bp: ", format(as.integer(ref_window_bp), big.mark = ","))) else NULL,
             tags$span(style = "opacity:0.82;", if (flank_bp <= 0L) "Scope: Gene body only (0 bp flanks)" else paste0("Scope: Gene + ", format(as.integer(flank_bp), big.mark = ","), " bp flanks")),
             tags$span(style = "opacity:0.82;", paste0("Organisms shown: ", max(length(ids) - 1L, 0L), " query + 1 reference")),
@@ -34884,96 +34734,126 @@ function(input, output, session) {
             },
             run_lastz_fn = function(contexts) {
                 contexts <- unique(as.character(contexts %||% character(0)))
-                missing <- character(0)
-                completed_for_report <- list()
+                jobs <- list()
 
                 if ("homo" %in% contexts) {
-                    homo_state <- tryCatch(
-                        run_homo_local_lastz(
-                            "blocks",
-                            span_mode = as.character(input$homo_pip_span %||% "gene")
-                        ),
-                        error = function(e) list(
-                            status = "error",
-                            error = conditionMessage(e),
-                            runs = list()
-                        )
-                    )
-                    homoPipLocalAlignmentState(homo_state)
-                    completed_homo <- cgv_completed_alignment_runs(homo_state$runs %||% list())
-                    if (length(completed_homo)) {
-                        homo_ids <- names(completed_homo)
-                        if (is.null(homo_ids)) homo_ids <- as.character(seq_along(completed_homo))
-                        names(completed_homo) <- paste0("multi_gene_", homo_ids)
-                        completed_for_report <- c(completed_for_report, completed_homo)
-                    }
-                    if (!length(completed_homo)) {
-                        detail <- cgv_safe_scalar(
-                            homo_state$error,
-                            "no compatible LASTZ result was completed"
-                        )
-                        missing <- c(missing, paste0("Multi-Gene LASTZ: ", detail))
+                    homo_blocks_span <- as.character(input$homo_pip_span %||% "gene")
+                    homo_multipip_span <- as.character(input$homo_multipip_span %||% "gene")
+                    jobs$homo_blocks <- run_homo_local_lastz_async("blocks", span_mode = homo_blocks_span)
+                    jobs$homo_multipip <- if (identical(homo_blocks_span, homo_multipip_span)) {
+                        jobs$homo_blocks
+                    } else {
+                        run_homo_local_lastz_async("multipip", span_mode = homo_multipip_span)
                     }
                 }
 
                 if ("ortho" %in% contexts) {
-                    ortho_contexts <- tryCatch(pipWindowTracksOrthologous() %||% list(), error = function(e) list())
-                    ortho_reference <- tryCatch(pipReferenceWindowOrthologous(), error = function(e) NULL)
-                    ortho_ids <- as.character(tryCatch(pipVisiblePlotIdsOrthologous(), error = function(e) character(0)))
-                    reference_id <- cgv_safe_scalar((ortho_reference %||% list())$plot_id)
-                    query_ids <- setdiff(ortho_ids[nzchar(ortho_ids)], reference_id)
-                    ortho_runs <- if (!is.null(ortho_reference) && length(query_ids)) {
-                        stats::setNames(lapply(query_ids, function(plot_id) {
-                            query_context <- ortho_contexts[[plot_id]] %||% NULL
-                            if (is.null(query_context)) {
-                                return(list(
-                                    status = "invalid_input",
-                                    stderr = "Missing query locus context.",
-                                    blocks = data.frame(stringsAsFactors = FALSE)
-                                ))
-                            }
-                            tryCatch(
-                                run_local_locus_alignment(
-                                    reference_ctx = ortho_reference,
-                                    query_ctx = query_context,
-                                    engine = "lastz",
-                                    format_name = "general"
-                                ),
-                                error = function(e) list(
-                                    status = "engine_error",
-                                    stderr = conditionMessage(e),
-                                    blocks = data.frame(stringsAsFactors = FALSE)
-                                )
-                            )
-                        }), query_ids)
-                    } else {
-                        list()
-                    }
-                    setPipLocalAlignmentStateOrthologous(
-                        runs = ortho_runs,
-                        stamp = format(Sys.time(), "%Y-%m-%d %H:%M:%S"),
-                        running = FALSE,
-                        token = paste0("report_", cgv_random_secret(8L))
+                    ortho_blocks_contexts <- tryCatch(pipWindowTracksOrthologous() %||% list(), error = function(e) list())
+                    ortho_blocks_reference <- tryCatch(pipReferenceWindowOrthologous(), error = function(e) NULL)
+                    ortho_blocks_ids <- as.character(tryCatch(pipVisiblePlotIdsOrthologous(), error = function(e) character(0)))
+                    ortho_multipip_contexts <- tryCatch(multipipWindowTracksOrthologous() %||% list(), error = function(e) list())
+                    ortho_multipip_reference <- tryCatch(multipipReferenceWindowOrthologous(), error = function(e) NULL)
+                    ortho_multipip_ids <- as.character(tryCatch(multipipOrderedPlotIdsOrthologous(), error = function(e) character(0)))
+                    jobs$ortho_blocks <- run_canonical_lastz_contexts_async(
+                        ortho_blocks_contexts,
+                        ortho_blocks_reference,
+                        ortho_blocks_ids
                     )
-                    completed_ortho <- cgv_completed_alignment_runs(ortho_runs)
-                    if (length(completed_ortho)) {
-                        ortho_run_ids <- names(completed_ortho)
-                        if (is.null(ortho_run_ids)) ortho_run_ids <- as.character(seq_along(completed_ortho))
-                        names(completed_ortho) <- paste0("cross_species_", ortho_run_ids)
-                        completed_for_report <- c(completed_for_report, completed_ortho)
-                    }
-                    if (!length(completed_ortho)) {
-                        missing <- c(
-                            missing,
-                            "Cross-Species LASTZ: no compatible alignment result was completed."
+                    same_ortho_alignment <- identical(
+                        as.character(input$ortho_pip_span %||% "gene"),
+                        as.character(input$ortho_multipip_span %||% "gene")
+                    ) && identical(
+                        trimws(as.character((ortho_blocks_reference %||% list())$plot_id %||% "")),
+                        trimws(as.character((ortho_multipip_reference %||% list())$plot_id %||% ""))
+                    ) && setequal(ortho_blocks_ids, ortho_multipip_ids)
+                    jobs$ortho_multipip <- if (isTRUE(same_ortho_alignment)) {
+                        jobs$ortho_blocks
+                    } else {
+                        run_canonical_lastz_contexts_async(
+                            ortho_multipip_contexts,
+                            ortho_multipip_reference,
+                            ortho_multipip_ids
                         )
                     }
                 }
 
-                list(
-                    missing = unique(missing),
-                    pip_runs = completed_for_report
-                )
+                if (length(jobs) == 0L) {
+                    return(promises::promise_resolve(list(missing = character(0), pip_runs = list(), multipip_prepared = TRUE)))
+                }
+
+                return(promises::promise_all(.list = jobs) %...>% (function(states) {
+                    states <- as.list(states %||% list())
+                    missing_async <- character(0)
+                    completed_for_report_async <- list()
+
+                    if ("homo" %in% contexts) {
+                        homo_blocks_state <- states$homo_blocks %||% list(status = "error", runs = list())
+                        homo_multipip_state <- states$homo_multipip %||% list(status = "error", runs = list())
+                        homoPipLocalAlignmentState(homo_blocks_state)
+                        homoMultipipLocalAlignmentState(homo_multipip_state)
+                        completed_homo <- cgv_completed_alignment_runs(homo_blocks_state$runs %||% list())
+                        if (length(completed_homo)) {
+                            homo_ids <- names(completed_homo)
+                            if (is.null(homo_ids)) homo_ids <- as.character(seq_along(completed_homo))
+                            names(completed_homo) <- paste0("multi_gene_", homo_ids)
+                            completed_for_report_async <- c(completed_for_report_async, completed_homo)
+                        } else {
+                            missing_async <- c(missing_async, "Multi-Gene LASTZ: no compatible alignment result was completed.")
+                        }
+                        if (!length(cgv_completed_alignment_runs(homo_multipip_state$runs %||% list()))) {
+                            missing_async <- c(missing_async, "Multi-Gene MultiPIP: no compatible alignment result was completed.")
+                        }
+                    }
+
+                    if ("ortho" %in% contexts) {
+                        ortho_blocks_state <- states$ortho_blocks %||% list(status = "error", runs = list())
+                        ortho_multipip_state <- states$ortho_multipip %||% list(status = "error", runs = list())
+                        setPipLocalAlignmentStateOrthologous(
+                            runs = ortho_blocks_state$runs %||% list(),
+                            stamp = as.character(ortho_blocks_state$stamp %||% Sys.time()),
+                            running = FALSE,
+                            token = paste0("report_", cgv_random_secret(8L))
+                        )
+                        setMultipipLocalAlignmentStateOrthologous(
+                            runs = ortho_multipip_state$runs %||% list(),
+                            stamp = as.character(ortho_multipip_state$stamp %||% Sys.time()),
+                            running = FALSE,
+                            token = paste0("report_", cgv_random_secret(8L))
+                        )
+                        pipReferenceAssessmentOrthologous(assess_current_lastz_reference(
+                            ortho_blocks_state$runs %||% list(),
+                            ortho_blocks_reference,
+                            kind = "blocks",
+                            min_identity = as.numeric(input$ortho_pip_min_identity %||% 70),
+                            min_length = as.integer(input$ortho_pip_min_length %||% 100L)
+                        ))
+                        multipipReferenceAssessmentOrthologous(assess_current_lastz_reference(
+                            ortho_multipip_state$runs %||% list(),
+                            ortho_multipip_reference,
+                            kind = "multipip",
+                            min_identity = as.numeric(input$ortho_multipip_min_identity %||% 70),
+                            min_length = as.integer(input$ortho_multipip_min_segment_bp %||% 25L)
+                        ))
+                        completed_ortho <- cgv_completed_alignment_runs(ortho_blocks_state$runs %||% list())
+                        if (length(completed_ortho)) {
+                            ortho_ids <- names(completed_ortho)
+                            if (is.null(ortho_ids)) ortho_ids <- as.character(seq_along(completed_ortho))
+                            names(completed_ortho) <- paste0("cross_species_", ortho_ids)
+                            completed_for_report_async <- c(completed_for_report_async, completed_ortho)
+                        } else {
+                            missing_async <- c(missing_async, "Cross-Species LASTZ: no compatible alignment result was completed.")
+                        }
+                        if (!length(cgv_completed_alignment_runs(ortho_multipip_state$runs %||% list()))) {
+                            missing_async <- c(missing_async, "Cross-Species MultiPIP: no compatible alignment result was completed.")
+                        }
+                    }
+
+                    list(
+                        missing = unique(missing_async),
+                        pip_runs = completed_for_report_async,
+                        multipip_prepared = TRUE
+                    )
+                }))
             },
             active_homo_ids_rv = activePlotIdsHomologous,
             active_ortho_ids_rv = activePlotIdsOrthologous,

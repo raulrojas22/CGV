@@ -6499,13 +6499,6 @@ fluidPage(
                                 icon = icon("play"),
                                 class = "btn btn-sm btn-success",
                                 style = "width:100%; height:38px; border-radius:10px; font-weight:700;"
-                              ),
-                              actionButton(
-                                inputId = "ortho_multipip_suggest_reference",
-                                label = "Suggest best reference",
-                                icon = icon("compass"),
-                                class = "btn btn-sm btn-outline-primary",
-                                style = "width:100%; height:38px; border-radius:10px; font-weight:700;"
                               )
                             )
                           )

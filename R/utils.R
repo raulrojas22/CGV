@@ -606,6 +606,7 @@ resolve_genome_fasta <- function(det_info = NULL, uploaded_fasta_path = NULL, ge
 .neighbor_context_cache <- new.env(parent = emptyenv())
 .orthologous_local_lookup_cache <- new.env(parent = emptyenv())
 .annotation_disk_cache_maintenance <- new.env(parent = emptyenv())
+.lastz_disk_cache_maintenance <- new.env(parent = emptyenv())
 .gff_autocomplete_cache_validation <- new.env(parent = emptyenv())
 .gff_index_cache_version <- "desc-clean-v2"
 .gff_autocomplete_cache_version <- 1L
@@ -4522,7 +4523,12 @@ get_chromosome_length_for_chr <- function(annotation_file_path, chr_id) {
 }
 
 parse_locus_window_flank_bp <- function(span_mode = "10kb", default_bp = 10000L) {
-    mode_txt <- tolower(trimws(as.character(span_mode %||% "10kb")))
+    raw_mode <- span_mode %||% "10kb"
+    numeric_mode <- suppressWarnings(as.numeric(raw_mode[1L]))
+    if (length(numeric_mode) > 0L && is.finite(numeric_mode) && numeric_mode >= 0) {
+        return(as.integer(round(numeric_mode)))
+    }
+    mode_txt <- tolower(trimws(as.character(raw_mode[1L])))
     out <- switch(
         mode_txt,
         "gene" = 0L,
@@ -4789,6 +4795,160 @@ lastz_max_sequence_bp <- function(default_bp = 2000000L) {
     max_bp
 }
 
+lastz_disk_cache_enabled <- function() {
+    isTRUE(app_env_flag("APP_LASTZ_DISK_CACHE", TRUE))
+}
+
+lastz_disk_cache_dir <- function(base_dir = ".", create = FALSE) {
+    override <- app_env_path("APP_LASTZ_DISK_CACHE_DIR", "")
+    root <- if (nzchar(override)) {
+        override
+    } else {
+        file.path(get_cgv_cache_root(base_dir), "lastz_alignments")
+    }
+    root <- normalizePath(root, winslash = "/", mustWork = FALSE)
+    if (isTRUE(create) && nzchar(root) && !dir.exists(root)) {
+        dir.create(root, recursive = TRUE, showWarnings = FALSE)
+    }
+    root
+}
+
+lastz_public_genome_roots <- function(base_dir = ".") {
+    roots <- c(
+        app_env_path("CGV_GENOMES_DIR", ""),
+        file.path(get_cgv_data_root(base_dir), "genomes"),
+        file.path(normalizePath(base_dir, winslash = "/", mustWork = FALSE), "genomes"),
+        "/app/genomes"
+    )
+    roots <- unique(vapply(roots[nzchar(roots)], function(path) {
+        normalizePath(path, winslash = "/", mustWork = FALSE)
+    }, character(1)))
+    roots[nzchar(roots)]
+}
+
+lastz_context_is_public_genome <- function(ctx, base_dir = ".") {
+    path <- trimws(as.character((ctx %||% list())$genome_path %||% ""))
+    if (!nzchar(path) || !file.exists(path)) return(FALSE)
+    path <- normalizePath(path, winslash = "/", mustWork = FALSE)
+    roots <- lastz_public_genome_roots(base_dir)
+    any(vapply(roots, function(root) {
+        identical(path, root) || startsWith(path, paste0(root, "/"))
+    }, logical(1)))
+}
+
+lastz_disk_cache_eligible <- function(reference_ctx, query_ctx, base_dir = ".") {
+    isTRUE(lastz_disk_cache_enabled()) &&
+        isTRUE(lastz_context_is_public_genome(reference_ctx, base_dir = base_dir)) &&
+        isTRUE(lastz_context_is_public_genome(query_ctx, base_dir = base_dir))
+}
+
+lastz_disk_cache_path <- function(cache_key, base_dir = ".", create = FALSE) {
+    key <- gsub("[^A-Za-z0-9._-]+", "_", trimws(as.character(cache_key %||% "")))
+    if (!nzchar(key)) return("")
+    file.path(lastz_disk_cache_dir(base_dir = base_dir, create = create), paste0(key, ".rds"))
+}
+
+lastz_disk_cache_limits <- function() {
+    list(
+        max_bytes = parse_positive_bytes_env_mb("APP_LASTZ_DISK_CACHE_MAX_MB", 512),
+        ttl_seconds = as.numeric(app_env_int("APP_LASTZ_DISK_CACHE_TTL_DAYS", 30L, min_value = 1L, max_value = 3650L)) * 86400
+    )
+}
+
+maintain_lastz_disk_cache <- function(base_dir = ".", force = FALSE) {
+    cache_dir <- lastz_disk_cache_dir(base_dir = base_dir, create = FALSE)
+    if (!dir.exists(cache_dir)) return(invisible(NULL))
+    key <- normalizePath(cache_dir, winslash = "/", mustWork = FALSE)
+    last_run <- suppressWarnings(as.numeric(get0(key, envir = .lastz_disk_cache_maintenance, inherits = FALSE, ifnotfound = NA_real_)))
+    now <- as.numeric(Sys.time())
+    if (!isTRUE(force) && is.finite(last_run) && now - last_run < 60) return(invisible(NULL))
+    assign(key, now, envir = .lastz_disk_cache_maintenance)
+
+    files <- list.files(cache_dir, pattern = "\\.rds$", full.names = TRUE)
+    if (length(files) == 0L) return(invisible(NULL))
+    info <- file.info(files)
+    limits <- lastz_disk_cache_limits()
+    ages <- now - as.numeric(info$mtime)
+    expired <- !is.finite(ages) | ages > limits$ttl_seconds
+    if (any(expired)) {
+        unlink(files[expired], force = TRUE)
+        files <- files[!expired]
+        info <- info[!expired, , drop = FALSE]
+    }
+    if (length(files) == 0L) return(invisible(NULL))
+    sizes <- suppressWarnings(as.numeric(info$size))
+    sizes[!is.finite(sizes)] <- 0
+    total_bytes <- sum(sizes)
+    if (total_bytes > limits$max_bytes) {
+        oldest_first <- order(as.numeric(info$mtime), na.last = FALSE)
+        remove_idx <- integer(0)
+        for (idx in oldest_first) {
+            if (total_bytes <= limits$max_bytes) break
+            remove_idx <- c(remove_idx, idx)
+            total_bytes <- total_bytes - sizes[[idx]]
+        }
+        if (length(remove_idx) > 0L) unlink(files[remove_idx], force = TRUE)
+    }
+    invisible(NULL)
+}
+
+lastz_disk_cache_get <- function(cache_key,
+                                 reference_ctx,
+                                 query_ctx,
+                                 base_dir = ".",
+                                 touch = TRUE) {
+    if (!isTRUE(lastz_disk_cache_eligible(reference_ctx, query_ctx, base_dir = base_dir))) return(NULL)
+    path <- lastz_disk_cache_path(cache_key, base_dir = base_dir, create = FALSE)
+    if (!nzchar(path) || !file.exists(path)) return(NULL)
+    info <- tryCatch(file.info(path), error = function(e) NULL)
+    limits <- lastz_disk_cache_limits()
+    if (is.null(info) || nrow(info) == 0L || as.numeric(Sys.time()) - as.numeric(info$mtime[[1L]]) > limits$ttl_seconds) {
+        unlink(path, force = TRUE)
+        return(NULL)
+    }
+    payload <- tryCatch(readRDS(path), error = function(e) NULL)
+    valid <- is.list(payload) &&
+        identical(as.character(payload$version %||% ""), "lastz-disk-v1") &&
+        identical(as.character(payload$cache_key %||% ""), as.character(cache_key %||% "")) &&
+        is.list(payload$result) &&
+        identical(trimws(as.character(payload$result$status %||% "")), "ok")
+    if (!isTRUE(valid)) {
+        unlink(path, force = TRUE)
+        return(NULL)
+    }
+    if (isTRUE(touch)) try(suppressWarnings(Sys.setFileTime(path, Sys.time())), silent = TRUE)
+    payload$result
+}
+
+lastz_disk_cache_set <- function(cache_key,
+                                 result,
+                                 reference_ctx,
+                                 query_ctx,
+                                 base_dir = ".") {
+    if (!is.list(result) || !identical(trimws(as.character(result$status %||% "")), "ok")) return(invisible(result))
+    if (!isTRUE(lastz_disk_cache_eligible(reference_ctx, query_ctx, base_dir = base_dir))) return(invisible(result))
+    path <- lastz_disk_cache_path(cache_key, base_dir = base_dir, create = TRUE)
+    cache_dir <- dirname(path)
+    if (!nzchar(path) || !dir.exists(cache_dir) || file.access(cache_dir, mode = 2L) != 0L) return(invisible(result))
+    tmp <- tempfile(pattern = ".lastz-cache-", tmpdir = cache_dir, fileext = ".rds")
+    on.exit(if (file.exists(tmp)) unlink(tmp, force = TRUE), add = TRUE)
+    payload <- list(
+        version = "lastz-disk-v1",
+        cache_key = as.character(cache_key %||% ""),
+        created_at = format(Sys.time(), tz = "UTC", usetz = TRUE),
+        result = result
+    )
+    saved <- tryCatch({
+        saveRDS(payload, tmp, compress = "gzip")
+        TRUE
+    }, error = function(e) FALSE)
+    if (isTRUE(saved)) {
+        if (file.exists(path) || !file.rename(tmp, path)) unlink(tmp, force = TRUE)
+    }
+    maintain_lastz_disk_cache(base_dir = base_dir)
+    invisible(result)
+}
+
 run_lastz_process <- function(binary, args) {
     if (requireNamespace("processx", quietly = TRUE)) {
         return(processx::run(
@@ -4859,7 +5019,7 @@ parse_lastz_general_output <- function(raw_lines,
         "name2", "strand2", "start2_pos", "end2_pos",
         "identity_pct", "coverage_pct",
         "length1", "length2",
-        "nmatch", "nmismatch", "ncolumn", "score"
+        "nmatch", "nmismatch", "ncolumn", "score", "cigarx"
     )
     df <- tryCatch(
         utils::read.table(
@@ -4889,6 +5049,7 @@ parse_lastz_general_output <- function(raw_lines,
         df[[nm]] <- suppressWarnings(as.numeric(raw_num))
     }
     df$strand2 <- trimws(as.character(df$strand2 %||% ""))
+    df$cigarx <- trimws(as.character(df$cigarx %||% ""))
     df$ref_start <- suppressWarnings(as.integer(round(df$start1)))
     df$ref_end <- suppressWarnings(as.integer(round(df$end1)))
     df$qry_start <- suppressWarnings(as.integer(round(pmin(df$start2_pos, df$end2_pos, na.rm = TRUE))))
@@ -4917,6 +5078,146 @@ parse_lastz_general_output <- function(raw_lines,
         df$query_genomic_end <- df$qry_end
     }
     df
+}
+
+parse_lastz_cigarx_segments <- function(df_blocks,
+                                        reference_ctx = NULL,
+                                        query_ctx = NULL) {
+    if (!is.data.frame(df_blocks) || nrow(df_blocks) == 0L || !"cigarx" %in% names(df_blocks)) {
+        return(data.frame(stringsAsFactors = FALSE))
+    }
+
+    ctx_width <- function(ctx) {
+        start_bp <- suppressWarnings(as.integer((ctx %||% list())$window_start %||% NA_integer_))
+        end_bp <- suppressWarnings(as.integer((ctx %||% list())$window_end %||% NA_integer_))
+        width <- end_bp - start_bp + 1L
+        if (!is.finite(width) || width < 1L) NA_integer_ else as.integer(width)
+    }
+    parse_ops <- function(cigar_txt) {
+        cigar_txt <- toupper(gsub("\\s+", "", trimws(as.character(cigar_txt %||% ""))))
+        if (!nzchar(cigar_txt)) return(NULL)
+        match_obj <- gregexpr("[0-9]*[=XID]", cigar_txt, perl = TRUE)[[1L]]
+        if (length(match_obj) == 0L || identical(match_obj[[1L]], -1L)) return(NULL)
+        tokens <- regmatches(cigar_txt, list(match_obj))[[1L]]
+        if (!identical(paste(tokens, collapse = ""), cigar_txt)) return(NULL)
+        ops <- substring(tokens, nchar(tokens), nchar(tokens))
+        len_txt <- substring(tokens, 1L, pmax(0L, nchar(tokens) - 1L))
+        lens <- suppressWarnings(as.integer(ifelse(nzchar(len_txt), len_txt, "1")))
+        if (any(!is.finite(lens)) || any(lens < 1L)) return(NULL)
+        data.frame(op = ops, len = lens, stringsAsFactors = FALSE)
+    }
+
+    ref_window_start <- suppressWarnings(as.integer((reference_ctx %||% list())$window_start %||% 1L))
+    query_window_start <- suppressWarnings(as.integer((query_ctx %||% list())$window_start %||% 1L))
+    if (!is.finite(ref_window_start)) ref_window_start <- 1L
+    if (!is.finite(query_window_start)) query_window_start <- 1L
+    ref_width <- ctx_width(reference_ctx)
+    qry_width <- ctx_width(query_ctx)
+    out_rows <- list()
+
+    for (alignment_idx in seq_len(nrow(df_blocks))) {
+        block <- df_blocks[alignment_idx, , drop = FALSE]
+        ops <- parse_ops(block$cigarx[[1L]])
+        if (!is.data.frame(ops) || nrow(ops) == 0L) next
+
+        ref_cursor <- suppressWarnings(as.integer(block$start1[[1L]]))
+        qry_low <- suppressWarnings(as.integer(min(block$start2_pos[[1L]], block$end2_pos[[1L]], na.rm = TRUE)))
+        qry_high <- suppressWarnings(as.integer(max(block$start2_pos[[1L]], block$end2_pos[[1L]], na.rm = TRUE)))
+        strand_txt <- if (identical(trimws(as.character(block$strand2[[1L]] %||% "+")), "-")) "-" else "+"
+        qry_direction <- if (identical(strand_txt, "-")) -1L else 1L
+        qry_cursor <- if (identical(strand_txt, "-")) qry_high else qry_low
+        if (!all(is.finite(c(ref_cursor, qry_cursor)))) next
+
+        segment_rank <- 0L
+        segment_ref_start <- NA_integer_
+        segment_qry_path_start <- NA_integer_
+        segment_matches <- 0L
+        segment_mismatches <- 0L
+
+        flush_segment <- function() {
+            segment_bp <- as.integer(segment_matches + segment_mismatches)
+            if (!is.finite(segment_ref_start) || !is.finite(segment_qry_path_start) || segment_bp < 1L) {
+                return(invisible(NULL))
+            }
+            segment_rank <<- segment_rank + 1L
+            ref_local_end <- as.integer(segment_ref_start + segment_bp - 1L)
+            qry_path_end <- as.integer(segment_qry_path_start + qry_direction * (segment_bp - 1L))
+            qry_plus_start <- min(segment_qry_path_start, qry_path_end)
+            qry_plus_end <- max(segment_qry_path_start, qry_path_end)
+            if (identical(strand_txt, "-") && is.finite(qry_width)) {
+                qry_axis_start <- as.integer(qry_width - qry_plus_end + 1L)
+                qry_axis_end <- as.integer(qry_width - qry_plus_start + 1L)
+            } else {
+                qry_axis_start <- as.integer(qry_plus_start)
+                qry_axis_end <- as.integer(qry_plus_end)
+            }
+            identity_pct <- 100 * as.numeric(segment_matches) / as.numeric(segment_bp)
+            out_rows[[length(out_rows) + 1L]] <<- data.frame(
+                ref_plot_id = as.character((reference_ctx %||% list())$plot_id %||% ""),
+                query_plot_id = as.character((query_ctx %||% list())$plot_id %||% ""),
+                ref_seqid = as.character((reference_ctx %||% list())$seqid %||% ""),
+                query_seqid = as.character((query_ctx %||% list())$seqid %||% ""),
+                ref_start = as.numeric(ref_window_start + segment_ref_start - 1L),
+                ref_end = as.numeric(ref_window_start + ref_local_end - 1L),
+                qry_start = as.numeric(query_window_start + qry_plus_start - 1L),
+                qry_end = as.numeric(query_window_start + qry_plus_end - 1L),
+                ref_local_start = as.integer(segment_ref_start),
+                ref_local_end = as.integer(ref_local_end),
+                qry_lav_start = as.integer(qry_axis_start),
+                qry_lav_end = as.integer(qry_axis_end),
+                strand = strand_txt,
+                identity_pct = as.numeric(identity_pct),
+                segment_bp = segment_bp,
+                alignment_id = as.integer(alignment_idx),
+                segment_rank = as.integer(segment_rank),
+                score = suppressWarnings(as.numeric(block$score[[1L]] %||% NA_real_)),
+                ref_width = ref_width,
+                qry_width = qry_width,
+                ref_window_start = as.integer(ref_window_start),
+                query_window_start = as.integer(query_window_start),
+                source_engine = "lastz",
+                source_format = "general-cigarx",
+                stringsAsFactors = FALSE
+            )
+            invisible(NULL)
+        }
+
+        for (op_idx in seq_len(nrow(ops))) {
+            op <- ops$op[[op_idx]]
+            run_len <- ops$len[[op_idx]]
+            if (op %in% c("=", "X")) {
+                if (!is.finite(segment_ref_start)) {
+                    segment_ref_start <- ref_cursor
+                    segment_qry_path_start <- qry_cursor
+                }
+                if (identical(op, "=")) {
+                    segment_matches <- segment_matches + run_len
+                } else {
+                    segment_mismatches <- segment_mismatches + run_len
+                }
+                ref_cursor <- ref_cursor + run_len
+                qry_cursor <- qry_cursor + qry_direction * run_len
+            } else {
+                flush_segment()
+                segment_ref_start <- NA_integer_
+                segment_qry_path_start <- NA_integer_
+                segment_matches <- 0L
+                segment_mismatches <- 0L
+                if (identical(op, "I")) {
+                    qry_cursor <- qry_cursor + qry_direction * run_len
+                } else if (identical(op, "D")) {
+                    ref_cursor <- ref_cursor + run_len
+                }
+            }
+        }
+        flush_segment()
+    }
+
+    out_df <- do.call(rbind, out_rows)
+    if (!is.data.frame(out_df) || nrow(out_df) == 0L) {
+        return(data.frame(stringsAsFactors = FALSE))
+    }
+    compute_gap_free_segment_identity(extract_gap_free_segments_from_alignment(out_df))
 }
 
 run_local_locus_alignment <- function(reference_ctx,
@@ -5012,7 +5313,7 @@ run_local_locus_alignment <- function(reference_ctx,
             "name2", "strand2", "start2+", "end2+",
             "id%", "cov%",
             "length1", "length2",
-            "nmatch", "nmismatch", "ncolumn", "score"
+            "nmatch", "nmismatch", "ncolumn", "score", "cigarx"
         ),
         collapse = ","
     )
@@ -5052,6 +5353,7 @@ run_local_locus_alignment <- function(reference_ctx,
         raw_lines <- tryCatch(readLines(out_file, warn = FALSE), error = function(e) character(0))
     }
     parsed_blocks <- parse_lastz_general_output(raw_lines, reference_ctx = reference_ctx, query_ctx = query_ctx)
+    parsed_segments <- parse_lastz_cigarx_segments(parsed_blocks, reference_ctx = reference_ctx, query_ctx = query_ctx)
     unlink(run_dir, recursive = TRUE, force = TRUE)
     if (length(exit_status) == 0L || !is.finite(exit_status)) {
         exit_status <- 1L
@@ -5082,7 +5384,9 @@ run_local_locus_alignment <- function(reference_ctx,
         timed_out = timed_out,
         stderr = as.character(run_res$stderr %||% character(0)),
         stdout = as.character(run_res$stdout %||% character(0)),
-        blocks = parsed_blocks
+        blocks = parsed_blocks,
+        segments = parsed_segments,
+        canonical_format = "general-cigarx"
     )
 }
 
@@ -5166,7 +5470,7 @@ parse_lastz_lav_output <- function(raw_lines,
             }
             if (startsWith(line_txt, "\"")) {
                 s_line_idx <- s_line_idx + 1L
-                path_txt <- gsub("^\"|\"$", "", line_txt)
+                path_txt <- sub("^\"([^\"]*)\".*$", "\\1", line_txt)
                 if (s_line_idx >= 2L) {
                     current_strand <- if (endsWith(path_txt, "-")) "-" else "+"
                 }
@@ -5490,12 +5794,12 @@ classify_reference_underlay_context <- function(df_segments, ref_feature_df = NU
     out
 }
 
-run_local_locus_alignment_multipip <- function(reference_ctx,
-                                               query_ctx,
-                                               engine = "lastz",
-                                               out_path = "",
-                                               format_name = "lav",
-                                               extra_args = character(0)) {
+run_local_locus_alignment_multipip_lav <- function(reference_ctx,
+                                                   query_ctx,
+                                                   engine = "lastz",
+                                                   out_path = "",
+                                                   format_name = "lav",
+                                                   extra_args = character(0)) {
     lastz_perf <- app_perf_new_run("LASTZ_MULTIPIP")
     app_perf_mark(lastz_perf, "start", "LASTZ")
     engine_txt <- tolower(trimws(as.character(engine %||% "lastz")))
@@ -5647,6 +5951,116 @@ run_local_locus_alignment_multipip <- function(reference_ctx,
         stdout = as.character(run_res$stdout %||% character(0)),
         segments = parsed_segments
     )
+}
+
+run_local_locus_alignment_multipip <- function(reference_ctx,
+                                               query_ctx,
+                                               engine = "lastz",
+                                               out_path = "",
+                                               format_name = "general-cigarx",
+                                               extra_args = character(0)) {
+    result <- run_local_locus_alignment(
+        reference_ctx = reference_ctx,
+        query_ctx = query_ctx,
+        engine = engine,
+        out_path = out_path,
+        format_name = "general-cigarx",
+        extra_args = extra_args
+    )
+    if (!is.list(result)) {
+        return(list(
+            status = "engine_error",
+            engine = tolower(trimws(as.character(engine %||% "lastz"))),
+            blocks = data.frame(stringsAsFactors = FALSE),
+            segments = data.frame(stringsAsFactors = FALSE),
+            canonical_format = "general-cigarx"
+        ))
+    }
+    if (!is.data.frame(result$blocks)) result$blocks <- data.frame(stringsAsFactors = FALSE)
+    if (!is.data.frame(result$segments)) result$segments <- data.frame(stringsAsFactors = FALSE)
+    result$canonical_format <- "general-cigarx"
+    result
+}
+
+run_cached_canonical_lastz <- function(cache_key,
+                                       reference_ctx,
+                                       query_ctx,
+                                       engine = "lastz",
+                                       extra_args = character(0),
+                                       base_dir = ".") {
+    compute_alignment <- function() {
+        run_local_locus_alignment(
+            reference_ctx = reference_ctx,
+            query_ctx = query_ctx,
+            engine = engine,
+            format_name = "general-cigarx",
+            extra_args = extra_args
+        )
+    }
+    if (!isTRUE(lastz_disk_cache_eligible(reference_ctx, query_ctx, base_dir = base_dir))) {
+        return(compute_alignment())
+    }
+
+    cached <- lastz_disk_cache_get(
+        cache_key,
+        reference_ctx = reference_ctx,
+        query_ctx = query_ctx,
+        base_dir = base_dir
+    )
+    if (!is.null(cached)) return(cached)
+
+    cache_path <- lastz_disk_cache_path(cache_key, base_dir = base_dir, create = TRUE)
+    if (!nzchar(cache_path)) return(compute_alignment())
+    lock_dir <- paste0(cache_path, ".lock")
+    wait_default <- as.integer(ceiling(lastz_process_timeout_ms() / 1000)) + 15L
+    wait_seconds <- app_env_int("APP_LASTZ_DISK_CACHE_LOCK_WAIT_SECONDS", wait_default, min_value = 5L, max_value = 3660L)
+    stale_seconds <- max(300, wait_seconds + 60L)
+    deadline <- as.numeric(Sys.time()) + wait_seconds
+    owns_lock <- FALSE
+
+    repeat {
+        owns_lock <- isTRUE(dir.create(lock_dir, recursive = FALSE, showWarnings = FALSE))
+        if (owns_lock) break
+        cached <- lastz_disk_cache_get(
+            cache_key,
+            reference_ctx = reference_ctx,
+            query_ctx = query_ctx,
+            base_dir = base_dir
+        )
+        if (!is.null(cached)) return(cached)
+        lock_info <- tryCatch(file.info(lock_dir), error = function(e) NULL)
+        lock_age <- if (!is.null(lock_info) && nrow(lock_info) > 0L) {
+            as.numeric(Sys.time()) - as.numeric(lock_info$mtime[[1L]])
+        } else {
+            NA_real_
+        }
+        if (is.finite(lock_age) && lock_age > stale_seconds) {
+            unlink(lock_dir, recursive = TRUE, force = TRUE)
+            next
+        }
+        if (as.numeric(Sys.time()) >= deadline) {
+            return(compute_alignment())
+        }
+        Sys.sleep(0.1)
+    }
+    on.exit(if (isTRUE(owns_lock) && dir.exists(lock_dir)) unlink(lock_dir, recursive = TRUE, force = TRUE), add = TRUE)
+
+    cached <- lastz_disk_cache_get(
+        cache_key,
+        reference_ctx = reference_ctx,
+        query_ctx = query_ctx,
+        base_dir = base_dir
+    )
+    if (!is.null(cached)) return(cached)
+    result <- compute_alignment()
+    lastz_disk_cache_set(
+        cache_key,
+        result,
+        reference_ctx = reference_ctx,
+        query_ctx = query_ctx,
+        base_dir = base_dir
+    )
+    result
 }
 
 # --- 4. FASTA Y SECUENCIAS ---

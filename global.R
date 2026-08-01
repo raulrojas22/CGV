@@ -241,8 +241,9 @@ configure_app_future_plan <- function() {
                 available
             ))
         }
+        workers_arg <- if (identical(as.integer(workers), 1L)) I(as.integer(workers)) else as.integer(workers)
         tryCatch(
-            future::plan(future::multisession, workers = workers),
+            future::plan(future::multisession, workers = workers_arg),
             error = function(e) {
                 fallback_workers <- max(1L, min(default_workers, available))
                 message(sprintf(
@@ -251,7 +252,8 @@ configure_app_future_plan <- function() {
                     as.character(e$message %||% "unknown error"),
                     fallback_workers
                 ))
-                future::plan(future::multisession, workers = fallback_workers)
+                fallback_arg <- if (identical(as.integer(fallback_workers), 1L)) I(as.integer(fallback_workers)) else as.integer(fallback_workers)
+                future::plan(future::multisession, workers = fallback_arg)
             }
         )
     } else {

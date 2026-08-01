@@ -63,6 +63,27 @@ fixture_dir <- "/Users/rarojas/Documents/A_FULLAPP/scripts/fixtures"
 general_lines <- readLines(file.path(fixture_dir, "lastz_general_sample.tsv"), warn = FALSE)
 lav_lines <- readLines(file.path(fixture_dir, "lastz_sample.lav"), warn = FALSE)
 
+old_lastz_disk_cache <- Sys.getenv("APP_LASTZ_DISK_CACHE", unset = "")
+old_lastz_disk_cache_dir <- Sys.getenv("APP_LASTZ_DISK_CACHE_DIR", unset = "")
+disk_cache_tmp <- tempfile("cgv-lastz-cache-")
+on.exit({
+  Sys.setenv(
+    APP_LASTZ_DISK_CACHE = old_lastz_disk_cache,
+    APP_LASTZ_DISK_CACHE_DIR = old_lastz_disk_cache_dir
+  )
+  unlink(disk_cache_tmp, recursive = TRUE, force = TRUE)
+}, add = TRUE)
+Sys.setenv(APP_LASTZ_DISK_CACHE = "1", APP_LASTZ_DISK_CACHE_DIR = disk_cache_tmp)
+public_cache_ctx <- list(genome_path = file.path("genomes", "registry.tsv"))
+private_cache_ctx <- list(genome_path = file.path(fixture_dir, "lastz_general_sample.tsv"))
+assert_true(lastz_disk_cache_eligible(public_cache_ctx, public_cache_ctx), "Preloaded genomes should be eligible for the persistent LASTZ cache.")
+assert_true(!lastz_disk_cache_eligible(private_cache_ctx, private_cache_ctx), "Files outside the shared genome registry must not enter the persistent LASTZ cache.")
+disk_fixture_result <- list(status = "ok", blocks = data.frame(x = 1L), segments = data.frame(y = 2L))
+lastz_disk_cache_set("fixture-ok", disk_fixture_result, public_cache_ctx, public_cache_ctx)
+assert_true(identical(lastz_disk_cache_get("fixture-ok", public_cache_ctx, public_cache_ctx), disk_fixture_result), "Persistent LASTZ cache round-trip failed.")
+lastz_disk_cache_set("fixture-error", list(status = "engine_error"), public_cache_ctx, public_cache_ctx)
+assert_true(is.null(lastz_disk_cache_get("fixture-error", public_cache_ctx, public_cache_ctx)), "Failed LASTZ executions must not be cached.")
+
 ref_ctx <- list(plot_id = "ref", seqid = "chrRef", window_start = 1000L, window_end = 1500L)
 qry_ctx <- list(plot_id = "qry", seqid = "chrQry", window_start = 2000L, window_end = 2500L)
 
@@ -78,20 +99,54 @@ Sys.setenv(APP_LASTZ_TIMEOUT_SECONDS = "17", APP_LASTZ_MAX_SEQUENCE_BP = "12345"
 assert_true(identical(lastz_process_timeout_ms(), 17000L), "LASTZ timeout environment setting was not converted to milliseconds.")
 assert_true(identical(lastz_max_sequence_bp(), 12345L), "LASTZ maximum sequence guard was not applied.")
 Sys.setenv(APP_LASTZ_TIMEOUT_SECONDS = old_lastz_timeout, APP_LASTZ_MAX_SEQUENCE_BP = old_lastz_max_bp)
+assert_true(identical(parse_locus_window_flank_bp("gene"), 0L), "Gene-only locus span was not parsed correctly.")
+assert_true(identical(parse_locus_window_flank_bp("25kb"), 25000L), "Named locus span was not parsed correctly.")
+assert_true(identical(parse_locus_window_flank_bp(5000L), 5000L), "A previously parsed numeric locus span must not fall back to 10 kb.")
+assert_true(identical(parse_locus_window_flank_bp("50000"), 50000L), "A numeric-text locus span must retain its value.")
 server_source <- paste(readLines("server.R", warn = FALSE), collapse = "\n")
 assert_true(
-  grepl("I(as.integer(target_workers))", server_source, fixed = TRUE),
-  "LASTZ with one worker must remain on a real background multisession process."
+  grepl("queue = lastzFutureQueue", server_source, fixed = TRUE) &&
+    grepl("global future plan unchanged", server_source, fixed = TRUE),
+  "LASTZ must use its dedicated background queue without mutating the global future plan."
 )
+assert_true(grepl("run_homo_local_lastz_async", server_source, fixed = TRUE), "Multi-Gene LASTZ must use the non-blocking runner.")
+assert_true(grepl("multipip_prepared = TRUE", server_source, fixed = TRUE), "Reports must prepare both LASTZ views on the server from canonical results.")
+toolbar_button_pattern <- 'actionButton\\(\\s*inputId\\s*=\\s*"ortho_(pip|multipip)_suggest_reference"'
+assert_true(!grepl(toolbar_button_pattern, server_source, perl = TRUE), "The quadratic reference-suggestion buttons must not be rendered.")
+ui_source <- paste(readLines("ui.R", warn = FALSE), collapse = "\n")
+assert_true(!grepl(toolbar_button_pattern, ui_source, perl = TRUE), "The static UI must not expose the quadratic reference-suggestion button.")
 
 parsed_blocks <- parse_lastz_general_output(general_lines, reference_ctx = ref_ctx, query_ctx = qry_ctx)
 assert_true(is.data.frame(parsed_blocks) && nrow(parsed_blocks) == 2L, "General LASTZ fixture did not parse into two blocks.")
 assert_true(all(parsed_blocks$identity_pct > 80), "General LASTZ fixture identity values are incorrect.")
+canonical_segments <- parse_lastz_cigarx_segments(parsed_blocks, reference_ctx = ref_ctx, query_ctx = qry_ctx)
+assert_true(is.data.frame(canonical_segments) && nrow(canonical_segments) == 2L, "Canonical CIGARX output did not produce gap-free MultiPIP segments.")
+assert_true(all(abs(canonical_segments$identity_pct - c(95, 100 * 53 / 60)) < 0.001), "CIGARX segment identities were not computed exactly.")
+
+reverse_cigar_block <- parsed_blocks[1L, , drop = FALSE]
+reverse_cigar_block$strand2 <- "-"
+reverse_cigar_block$start2_pos <- 15L
+reverse_cigar_block$end2_pos <- 74L
+reverse_cigar_block$cigarx <- "20=2X3I10=2D28="
+reverse_cigar_segments <- parse_lastz_cigarx_segments(reverse_cigar_block, reference_ctx = ref_ctx, query_ctx = qry_ctx)
+assert_true(nrow(reverse_cigar_segments) == 3L && all(reverse_cigar_segments$strand == "-"), "CIGARX reverse-strand segments were not preserved.")
+assert_true(
+  identical(as.integer(reverse_cigar_segments$qry_start[[1L]]), 2052L) && identical(as.integer(reverse_cigar_segments$qry_end[[1L]]), 2073L),
+  "CIGARX reverse-strand coordinates were not mapped to the forward genomic axis correctly."
+)
 
 parsed_lav <- parse_lastz_lav_output(lav_lines, reference_ctx = ref_ctx, query_ctx = qry_ctx)
 gap_free_segments <- compute_gap_free_segment_identity(extract_gap_free_segments_from_alignment(parsed_lav))
 assert_true(is.data.frame(gap_free_segments) && nrow(gap_free_segments) == 2L, "LAV fixture did not produce two gap-free segments.")
 assert_true(all(gap_free_segments$segment_bp >= 60), "Gap-free segment lengths are incorrect.")
+
+reverse_lav_lines <- sub('"qry_seq\\+"', '"qry_seq-" 1 501 1 1', lav_lines, fixed = FALSE)
+reverse_lav <- parse_lastz_lav_output(reverse_lav_lines, reference_ctx = ref_ctx, query_ctx = qry_ctx)
+assert_true(nrow(reverse_lav) == 2L && all(reverse_lav$strand == "-"), "Real LASTZ LAV sequence metadata did not preserve the reverse strand.")
+assert_true(
+  identical(as.integer(reverse_lav$qry_start[[1L]]), 2427L) && identical(as.integer(reverse_lav$qry_end[[1L]]), 2486L),
+  "Reverse-strand LAV coordinates were not converted to the forward genomic axis correctly."
+)
 
 pip_view <- server_env$build_pip_display_blocks(parsed_blocks, min_identity = 70, min_block_length = 20)
 assert_true(is.data.frame(pip_view$deduplicated_blocks) && nrow(pip_view$deduplicated_blocks) == 2L, "PIP build unexpectedly removed fixture blocks.")
