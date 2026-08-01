@@ -93,6 +93,10 @@
     return kind === 'overlaps' ? 'overlapping genes' : 'neighboring genes';
   }
 
+  function contextShortCopy(kind) {
+    return kind === 'overlaps' ? 'overlaps' : 'neighbors';
+  }
+
   function syncContextButtons() {
     var buttons = document.querySelectorAll('[data-genomic-context-toggle]');
     for (var i = 0; i < buttons.length; i += 1) {
@@ -104,6 +108,10 @@
       buttons[i].setAttribute('aria-pressed', active ? 'true' : 'false');
       buttons[i].setAttribute('aria-label', (active ? 'Hide ' : 'Show ') + copy);
       buttons[i].title = (active ? 'Hide ' : 'Show ') + copy + ' on gene cards';
+      var label = buttons[i].querySelector('.summary-genomic-context-toggle-label');
+      if (label) {
+        label.textContent = (active ? 'Hide ' : 'Show ') + contextShortCopy(kind);
+      }
     }
   }
 

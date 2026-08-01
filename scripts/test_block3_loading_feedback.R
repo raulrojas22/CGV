@@ -1,0 +1,55 @@
+#!/usr/bin/env Rscript
+
+read_all <- function(path) paste(readLines(path, warn = FALSE), collapse = "\n")
+
+ui_txt <- read_all("ui.R")
+modules_txt <- read_all(file.path("R", "modules.R"))
+activity_txt <- read_all(file.path("www", "js", "activity_feedback.js"))
+loader_txt <- read_all(file.path("www", "js", "dna_loader_unifier.js"))
+popup_txt <- read_all(file.path("www", "js", "status_popup.js"))
+search_txt <- read_all(file.path("www", "js", "search_submit_feedback.js"))
+studio_txt <- read_all(file.path("www", "js", "figure_studio.js"))
+app_css <- read_all(file.path("www", "css", "cgv_compiled.css"))
+studio_css <- read_all(file.path("www", "css", "figure_studio.css"))
+
+stopifnot(grepl('js/activity_feedback.js', ui_txt, fixed = TRUE))
+stopifnot(grepl('id = "app-work-indicator"', ui_txt, fixed = TRUE))
+stopifnot(grepl('`aria-live` = "polite"', ui_txt, fixed = TRUE))
+stopifnot(grepl('`aria-atomic` = "true"', ui_txt, fixed = TRUE))
+stopifnot(grepl('app-dna-loader app-dna-loader--spinner-sm', ui_txt, fixed = TRUE))
+
+stopifnot(grepl('window.cgvActivity =', activity_txt, fixed = TRUE))
+stopifnot(grepl("shiny:busy", activity_txt, fixed = TRUE))
+stopifnot(grepl("shiny:idle", activity_txt, fixed = TRUE))
+stopifnot(grepl("shiny:disconnected", activity_txt, fixed = TRUE))
+stopifnot(grepl("MAX_SOURCE_AGE_MS", activity_txt, fixed = TRUE))
+stopifnot(grepl("MIN_VISIBLE_MS", activity_txt, fixed = TRUE))
+
+stopifnot(grepl("Rendering gene visualization…", modules_txt, fixed = TRUE))
+stopifnot(grepl('role = "status"', modules_txt, fixed = TRUE))
+stopifnot(grepl("Generating statistical analysis…", loader_txt, fixed = TRUE))
+stopifnot(grepl("Building interaction network…", loader_txt, fixed = TRUE))
+stopifnot(grepl("aria-live", loader_txt, fixed = TRUE))
+stopifnot(grepl("syncPlotPlaceholder", loader_txt, fixed = TRUE))
+stopifnot(grepl("placeholder.hidden = ready", loader_txt, fixed = TRUE))
+
+stopifnot(grepl("beginGlobalActivity", popup_txt, fixed = TRUE))
+stopifnot(grepl("endGlobalActivity", popup_txt, fixed = TRUE))
+stopifnot(grepl("priority: 60", popup_txt, fixed = TRUE))
+stopifnot(grepl("beginActivity(normalizedMode, query)", search_txt, fixed = TRUE))
+stopifnot(grepl("window.cgvActivity.end('search-submit')", search_txt, fixed = TRUE))
+
+stopifnot(grepl("withFigureActivity", studio_txt, fixed = TRUE))
+stopifnot(grepl('button.setAttribute("aria-busy", "true")', studio_txt, fixed = TRUE))
+stopifnot(grepl("Restoring saved figure panels…", studio_txt, fixed = TRUE))
+stopifnot(grepl("Rendering publication PNG…", studio_txt, fixed = TRUE))
+stopifnot(grepl("finishExportActivity", studio_txt, fixed = TRUE))
+stopifnot(grepl("figure-panel-loading", studio_txt, fixed = TRUE))
+
+stopifnot(grepl(".app-work-indicator[hidden]", app_css, fixed = TRUE))
+stopifnot(grepl(".analytics-chart-wrap .shiny-bound-output.recalculating", app_css, fixed = TRUE))
+stopifnot(grepl(".plot-loading-placeholder[hidden]", app_css, fixed = TRUE))
+stopifnot(grepl('html[data-app-theme="dark"] .app-work-indicator', app_css, fixed = TRUE))
+stopifnot(grepl('.figure-catalog-item[aria-busy="true"]', studio_css, fixed = TRUE))
+
+cat("block3-loading-feedback-static-ok\n")

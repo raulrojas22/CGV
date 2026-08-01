@@ -83,11 +83,24 @@ init_analytics_domain <- function(
                     return(intToUtf8(0x1D434 + (code - utf8ToInt("A"))))
                 }
                 if (code >= utf8ToInt("a") && code <= utf8ToInt("z")) {
+                    if (identical(ch, "h")) {
+                        return("\u210E")
+                    }
                     return(intToUtf8(0x1D44E + (code - utf8ToInt("a"))))
                 }
                 ch
             }, character(1))
             paste0(out, collapse = "")
+        }, character(1))
+    }
+
+    plotmath_quote_text <- function(x) {
+        txt_vec <- as.character(x %||% "")
+        txt_vec[is.na(txt_vec)] <- ""
+        vapply(txt_vec, function(txt) {
+            txt <- gsub("\\", "\\\\", txt, fixed = TRUE)
+            txt <- gsub("\"", "\\\"", txt, fixed = TRUE)
+            paste0("\"", txt, "\"")
         }, character(1))
     }
 
@@ -466,7 +479,7 @@ init_analytics_domain <- function(
     get_cached_scatter_prepared_df <- function(df_prepared, order_mode = "load") {
         prep_key <- as.character(attr(df_prepared, "analytics_cache_key") %||% analytics_df_fingerprint(df_prepared))
         order_txt <- tolower(trimws(as.character(order_mode %||% "load")))
-        cache_key <- paste("analytics-scatter-v5", prep_key, order_txt, sep = "||")
+        cache_key <- paste("analytics-scatter-v6", prep_key, order_txt, sep = "||")
         if (exists(cache_key, envir = analyticsScatterPrepCache_env, inherits = FALSE)) {
             cached <- get(cache_key, envir = analyticsScatterPrepCache_env, inherits = FALSE)
             if (is.data.frame(cached)) {
@@ -510,16 +523,24 @@ init_analytics_domain <- function(
         df_prep <- df_prep %>%
             dplyr::mutate(
                 scatter_label = stringr::str_trunc(x_label_scatter, width = label_char_limit * 3L, ellipsis = "\u2026"),
+                scatter_gene_label = stringr::str_trunc(gene_full, width = label_char_limit, ellipsis = "\u2026"),
+                scatter_organism_label = stringr::str_trunc(organism_full, width = label_char_limit, ellipsis = "\u2026"),
                 scatter_label_compact = dplyr::if_else(
                     nzchar(trimws(as.character(x_label_organism %||% ""))),
                     paste0(
-                        stringr::str_trunc(gene_full, width = label_char_limit, ellipsis = "\u2026"),
+                        scatter_gene_label,
                         "\n",
-                        scientific_italic_unicode(
-                            stringr::str_trunc(organism_full, width = label_char_limit, ellipsis = "\u2026")
-                        )
+                        scatter_organism_label
                     ),
-                    stringr::str_trunc(gene_full, width = label_char_limit, ellipsis = "\u2026")
+                    scatter_gene_label
+                ),
+                scatter_label_plotmath = dplyr::if_else(
+                    nzchar(trimws(as.character(x_label_organism %||% ""))),
+                    paste0(
+                        "atop(bold(", plotmath_quote_text(scatter_gene_label), "),",
+                        "italic(", plotmath_quote_text(scatter_organism_label), "))"
+                    ),
+                    paste0("bold(", plotmath_quote_text(scatter_gene_label), ")")
                 ),
                 data_id_lbl = paste0(x_label_plain, "_", dplyr::row_number()),
                 tooltip_txt = paste0(

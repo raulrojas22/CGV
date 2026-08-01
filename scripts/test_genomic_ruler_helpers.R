@@ -51,6 +51,34 @@ single_tick <- prune_genomic_ruler_spec_for_width(
 stopifnot(nrow(single_tick) == 1L, identical(single_tick$hjust, 0.5))
 stopifnot(grepl(" Mb$", single_tick$label))
 
+modules_txt <- paste(readLines(file.path("R", "modules.R"), warn = FALSE), collapse = "\n")
+stopifnot(grepl(
+    "!is.null(ruler_spec) && nrow(ruler_spec) >= 1L",
+    modules_txt,
+    fixed = TRUE
+))
+
+stopifnot(identical(normalize_gene_plot_orientation_mode(NULL), "genomic"))
+stopifnot(identical(normalize_gene_plot_orientation_mode("TRANSCRIPTION"), "transcription"))
+stopifnot(identical(normalize_gene_plot_orientation_mode("unexpected"), "genomic"))
+stopifnot(!gene_plot_axis_should_reverse("genomic", "-"))
+stopifnot(!gene_plot_axis_should_reverse("transcription", "+"))
+stopifnot(gene_plot_axis_should_reverse("transcription", "-"))
+
+genomic_cache_key <- make_girafe_plot_cache_key(
+    "homologous",
+    plot_signature = "gene:test",
+    orientation_mode = "genomic"
+)
+transcription_cache_key <- make_girafe_plot_cache_key(
+    "homologous",
+    plot_signature = "gene:test",
+    orientation_mode = "transcription"
+)
+stopifnot(!identical(genomic_cache_key, transcription_cache_key))
+stopifnot(endsWith(genomic_cache_key, "|genomic"))
+stopifnot(endsWith(transcription_cache_key, "|transcription"))
+
 lanes <- assign_genomic_overlap_lanes(
     starts = c(100, 120, 210, 215, 400),
     ends = c(200, 160, 240, 260, 450),

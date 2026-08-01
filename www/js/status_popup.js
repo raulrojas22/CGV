@@ -356,6 +356,24 @@
     }, AUTO_CLOSE_MS);
   }
 
+  function activitySource(context) {
+    return 'server:' + txt(context || 'Status').toLowerCase().replace(/[^a-z0-9]+/g, '-');
+  }
+
+  function beginGlobalActivity(context, headline, detail) {
+    if (!window.cgvActivity) return;
+    window.cgvActivity.begin(activitySource(context), {
+      headline: txt(headline || context || 'CGV is working'),
+      detail: txt(detail || 'Processing data…'),
+      priority: 60,
+      delay: 140
+    });
+  }
+
+  function endGlobalActivity(context) {
+    if (window.cgvActivity) window.cgvActivity.end(activitySource(context));
+  }
+
   Shiny.addCustomMessageHandler('app_status_popup', function (message) {
     var popup = document.getElementById('app-status-popup');
     var logEl = document.getElementById('app-status-popup-log');
@@ -371,6 +389,7 @@
     if (!lines.length) return;
     var line = txt(lines[lines.length - 1]);
     var contextTxt = txt(context);
+    endGlobalActivity(contextTxt);
 
     var now = new Date();
     var durationText = '';
@@ -424,6 +443,9 @@
     }
     if (active) {
       loadingContext = (message && message.context) ? String(message.context) : 'Status';
+      beginGlobalActivity(loadingContext, headlineTranslated || loadingContext, textTranslated);
+    } else {
+      endGlobalActivity((message && message.context) ? String(message.context) : loadingContext);
     }
 
     if (loaderTextEl && (headlineTranslated.length || textTranslated.length)) {
@@ -485,6 +507,7 @@
     var logEl = document.getElementById('app-status-popup-log');
     var loaderTextEl = document.getElementById('app-status-popup-loader-text');
     if (!popup) return;
+    var closingLoadingContext = loadingContext;
 
     closePopup(popup);
     popup.classList.remove('loading', 'tone-info', 'tone-success', 'tone-warning', 'tone-error');
@@ -502,6 +525,8 @@
         loaderTextEl.textContent = txt('Working...');
       }
     }
+    endGlobalActivity(closingLoadingContext);
+    if (window.cgvEndSearchFeedback) window.cgvEndSearchFeedback();
   });
 
   $(document).on('click', '#app-status-popup-close', function () {

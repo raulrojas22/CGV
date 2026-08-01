@@ -127,6 +127,8 @@ init_session_snapshot_domain <- function(
                 ortho_preloaded_species = as.character(input$ortho_preloaded_species %||% character(0)),
                 homo_visual_mode = as.character(input$homo_visual_mode %||% "compact"),
                 ortho_visual_mode = as.character(input$ortho_visual_mode %||% "compact"),
+                homo_orientation_mode = as.character(input$homo_orientation_pick %||% "genomic"),
+                ortho_orientation_mode = as.character(input$ortho_orientation_pick %||% "genomic"),
                 homo_sort_mode = as.character(input$homo_sort_mode %||% "load"),
                 ortho_sort_mode = as.character(input$ortho_sort_mode %||% "load"),
                 ext_alias_source_mygene = isTRUE(input$ext_alias_source_mygene %||% TRUE),
@@ -478,6 +480,20 @@ init_session_snapshot_domain <- function(
         if (!ortho_visual %in% c("compact", "detailed", "aligned", "pip_blocks", "pip_multipip")) ortho_visual <- "compact"
         updateRadioButtons(session, "homo_visual_mode", selected = homo_visual)
         updateRadioButtons(session, "ortho_visual_mode", selected = ortho_visual)
+        homo_orientation <- tolower(trimws(as.character(state$homo_orientation_mode %||% "genomic")))
+        ortho_orientation <- tolower(trimws(as.character(state$ortho_orientation_mode %||% "genomic")))
+        if (!homo_orientation %in% c("genomic", "transcription")) homo_orientation <- "genomic"
+        if (!ortho_orientation %in% c("genomic", "transcription")) ortho_orientation <- "genomic"
+        shinyjs::runjs(sprintf(
+            paste0(
+                "if(window.Shiny){",
+                "Shiny.setInputValue('homo_orientation_pick','%s',{priority:'event'});",
+                "Shiny.setInputValue('ortho_orientation_pick','%s',{priority:'event'});",
+                "}"
+            ),
+            homo_orientation,
+            ortho_orientation
+        ))
 
         allowed_homo_sort <- c("load", "exondiff_desc", "exondiff_asc", "tx_len_desc", "tx_len_asc", "exon_desc", "exon_asc", "tx_asc", "tx_desc", "chr_asc", "chr_desc")
         allowed_ortho_sort <- c("load", "exondiff_desc", "exondiff_asc", "tx_len_desc", "tx_len_asc", "exon_desc", "exon_asc", "organism_asc", "organism_desc", "tx_asc", "tx_desc")
@@ -629,6 +645,20 @@ init_session_snapshot_domain <- function(
             if (!ortho_visual %in% c("compact", "detailed", "aligned", "pip_blocks", "pip_multipip")) ortho_visual <- "compact"
             updateRadioButtons(session, "homo_visual_mode", selected = homo_visual)
             updateRadioButtons(session, "ortho_visual_mode", selected = ortho_visual)
+            homo_orientation <- tolower(trimws(as.character(visual_state$homo_orientation_mode %||% "genomic")))
+            ortho_orientation <- tolower(trimws(as.character(visual_state$ortho_orientation_mode %||% "genomic")))
+            if (!homo_orientation %in% c("genomic", "transcription")) homo_orientation <- "genomic"
+            if (!ortho_orientation %in% c("genomic", "transcription")) ortho_orientation <- "genomic"
+            shinyjs::runjs(sprintf(
+                paste0(
+                    "setTimeout(function(){if(window.Shiny){",
+                    "Shiny.setInputValue('homo_orientation_pick','%s',{priority:'event'});",
+                    "Shiny.setInputValue('ortho_orientation_pick','%s',{priority:'event'});",
+                    "}},0);"
+                ),
+                homo_orientation,
+                ortho_orientation
+            ))
             shinyjs::runjs(
                 "setTimeout(function(){if(window.syncVizModeToggles){window.syncVizModeToggles();}if(window.updateCompactModeLayoutState){window.updateCompactModeLayoutState();}},0);"
             )

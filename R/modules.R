@@ -9,11 +9,19 @@ plotUIModule <- function(id) {
             style = "width: 100%; height: 110px; margin: 0; position: relative;",
             div(
                 class = "plot-loading-placeholder",
+                role = "status",
+                `aria-live` = "polite",
+                `aria-label` = "Rendering gene visualization",
                 style = "position:absolute; inset:0; display:flex; align-items:center; justify-content:center; z-index:0; pointer-events:none; background:#FFFFFF;",
                 div(
-                    class = "app-dna-loader app-dna-loader--spinner-sm",
-                    div(class = "app-dna-wave app-dna-wave-top", lapply(seq_len(16), function(i) span(class = "app-dna-node", style = sprintf("--i:%d;", i - 1)))),
-                    div(class = "app-dna-wave app-dna-wave-bottom", lapply(seq_len(16), function(i) span(class = "app-dna-node", style = sprintf("--i:%d;", i - 1))))
+                    class = "plot-loading-placeholder-content",
+                    div(
+                        class = "app-dna-loader app-dna-loader--spinner-sm",
+                        `aria-hidden` = "true",
+                        div(class = "app-dna-wave app-dna-wave-top", lapply(seq_len(16), function(i) span(class = "app-dna-node", style = sprintf("--i:%d;", i - 1)))),
+                        div(class = "app-dna-wave app-dna-wave-bottom", lapply(seq_len(16), function(i) span(class = "app-dna-node", style = sprintf("--i:%d;", i - 1))))
+                    ),
+                    span(class = "plot-loading-placeholder-text", "Rendering gene visualization…")
                 )
             ),
             girafeOutput(ns("plot"), height = "110px", width = "100%")
@@ -102,7 +110,8 @@ make_girafe_plot_cache_key <- function(plot_context, plot_signature = NULL, fall
                                        max_gene_length_key = 0, visual_mode = "compact",
                                        theme_mode = "light", is_colorblind_mode = FALSE,
                                        seq_len_key = 0L, has_neighbor_context = FALSE,
-                                       compact_feature_interactivity = NA) {
+                                       compact_feature_interactivity = NA,
+                                       orientation_mode = "genomic") {
     max_len_txt <- format(max_gene_length_key %||% 0, scientific = FALSE, trim = TRUE)
     paste(
         as.character(plot_context %||% "plot"),
@@ -114,8 +123,22 @@ make_girafe_plot_cache_key <- function(plot_context, plot_signature = NULL, fall
         as.character(seq_len_key %||% 0L),
         as.character(isTRUE(has_neighbor_context)),
         as.character(compact_feature_interactivity),
+        normalize_gene_plot_orientation_mode(orientation_mode),
         sep = "|"
     )
+}
+
+normalize_gene_plot_orientation_mode <- function(value = "genomic") {
+    mode <- tolower(trimws(as.character(value %||% "genomic")[1]))
+    if (!mode %in% c("genomic", "transcription")) {
+        mode <- "genomic"
+    }
+    mode
+}
+
+gene_plot_axis_should_reverse <- function(orientation_mode = "genomic", strand = "+") {
+    identical(normalize_gene_plot_orientation_mode(orientation_mode), "transcription") &&
+        identical(trimws(as.character(strand %||% "+")[1]), "-")
 }
 
 get_shared_girafe_plot_cache <- function(cache_key) {
@@ -755,8 +778,9 @@ prepare_gene_plot_model <- function(df, df_gene, df_transcript = NULL, visual_mo
 }
 
 # Función auxiliar para crear el gráfico (compartida)
-create_gene_plot <- function(df, df_gene, df_transcript = NULL, current_transcript_length, length_difference, composicion_secuencia, gene_length_label, transcript_length_label, neighbor_context = NULL, visual_mode = "compact", width_svg = 22, height_svg = 1.75, organism_label = NULL, annotation_file_path = NULL, use_report_map = FALSE, report_path = "", plot_id = NULL, plot_context = NULL, genome_fasta_path = NULL, is_dark_theme = FALSE, is_colorblind_mode = FALSE, gene_display_name = NULL, precomputed_genomic_span = NULL, model_cache_key = NULL) {
+create_gene_plot <- function(df, df_gene, df_transcript = NULL, current_transcript_length, length_difference, composicion_secuencia, gene_length_label, transcript_length_label, neighbor_context = NULL, visual_mode = "compact", width_svg = 22, height_svg = 1.75, organism_label = NULL, annotation_file_path = NULL, use_report_map = FALSE, report_path = "", plot_id = NULL, plot_context = NULL, genome_fasta_path = NULL, is_dark_theme = FALSE, is_colorblind_mode = FALSE, gene_display_name = NULL, precomputed_genomic_span = NULL, model_cache_key = NULL, orientation_mode = "genomic") {
     visual_mode <- match.arg(visual_mode, c("compact", "detailed"))
+    orientation_mode <- normalize_gene_plot_orientation_mode(orientation_mode)
     plot_perf <- app_perf_new_run(sprintf("PLOT_BUILD-%s", as.character(plot_id %||% "NA")))
     plot_perf_context <- switch(
         tolower(trimws(as.character(plot_context %||% ""))),
@@ -1414,6 +1438,7 @@ create_gene_plot <- function(df, df_gene, df_transcript = NULL, current_transcri
     )
     gene_strand <- trimws(as.character(gene_strand %||% "+"))
     if (!gene_strand %in% c("+", "-")) gene_strand <- "+"
+    reverse_gene_axis <- gene_plot_axis_should_reverse(orientation_mode, gene_strand)
 
     # Use symmetric virtual extension so scaling does not leave a visible right-side tail.
     total_plot_length <- current_transcript_length + length_difference
@@ -1571,13 +1596,22 @@ create_gene_plot <- function(df, df_gene, df_transcript = NULL, current_transcri
     ruler_line_df <- data.frame()
     ruler_tick_df <- data.frame()
     ruler_label_df <- data.frame()
-    if (!is.null(ruler_spec) && nrow(ruler_spec) >= 2L) {
+    if (!is.null(ruler_spec) && nrow(ruler_spec) >= 1L) {
         ruler_range_tooltip <- paste0(
             "<b style='color:var(--app-message-accent);font-weight:700;'>Genomic Context Scale</b><br/>",
             "<b>Chromosome / Sequence:</b> ", esc_html(tx_chr_short), "<br/>",
             "<b>Displayed Start:</b> ", format_bp(target_start), " bp<br/>",
             "<b>Displayed End:</b> ", format_bp(target_end), " bp<br/>",
             "<b>Displayed Span:</b> ", format_bp(target_end - target_start + 1), " bp<br/>",
+            if (identical(orientation_mode, "transcription")) {
+                paste0(
+                    "<b>Display Orientation:</b> 5&#8242;&rarr;3&#8242;",
+                    if (isTRUE(reverse_gene_axis)) " (minus-strand axis mirrored)" else "",
+                    "<br/>"
+                )
+            } else {
+                "<b>Display Orientation:</b> genomic coordinates<br/>"
+            },
             "<span style='opacity:.82;'>Solid center: linear coordinates. Dashed sides: compressed neighbor distance.</span>"
         )
         ruler_line_df <- data.frame(
@@ -1602,11 +1636,15 @@ create_gene_plot <- function(df, df_gene, df_transcript = NULL, current_transcri
             data_id = paste0("genomic_ruler_tick_", seq_len(nrow(ruler_spec))),
             stringsAsFactors = FALSE
         )
+        ruler_label_hjust <- suppressWarnings(as.numeric(ruler_spec$hjust))
+        if (isTRUE(reverse_gene_axis)) {
+            ruler_label_hjust <- 1 - ruler_label_hjust
+        }
         ruler_label_df <- data.frame(
             x = ruler_spec$value,
             y = ruler_label_y,
             label = ruler_spec$label,
-            hjust = ruler_spec$hjust,
+            hjust = ruler_label_hjust,
             tooltip = ruler_tick_df$tooltip,
             data_id = paste0("genomic_ruler_label_", seq_len(nrow(ruler_spec))),
             stringsAsFactors = FALSE
@@ -1712,6 +1750,12 @@ create_gene_plot <- function(df, df_gene, df_transcript = NULL, current_transcri
         if (!is.finite(detailed_feature_ymin)) detailed_feature_ymin <- 0.825
         plot_ymin <- max(0.72, detailed_feature_ymin - 0.07)
         plot_ymax <- max(1.145, ruler_label_y + 0.020)
+    }
+
+    gene_x_scale <- if (isTRUE(reverse_gene_axis)) {
+        scale_x_reverse(expand = expansion(mult = 0, add = 0))
+    } else {
+        scale_x_continuous(expand = expansion(mult = 0, add = 0))
     }
 
     gg_lines <- ggplot() +
@@ -1879,7 +1923,7 @@ create_gene_plot <- function(df, df_gene, df_transcript = NULL, current_transcri
             hjust = 0.5,
             vjust = 0.5
         ) +
-        scale_x_continuous(expand = expansion(mult = 0, add = 0)) +
+        gene_x_scale +
         scale_y_continuous(expand = expansion(mult = 0, add = 0)) +
         coord_cartesian(
           xlim = c(plot_left, plot_right),
@@ -1963,6 +2007,10 @@ create_gene_plot <- function(df, df_gene, df_transcript = NULL, current_transcri
             data_id = paste0("genomic_ruler_context_right_tick_", seq_along(side_tick_s)),
             stringsAsFactors = FALSE
         )
+        if (isTRUE(reverse_gene_axis)) {
+            left_ticks$hjust <- 1 - left_ticks$hjust
+            right_ticks$hjust <- 1 - right_ticks$hjust
+        }
         context_side_segments <- data.frame(
             x = c(left_panel_start, target_end),
             xend = c(target_start, right_panel_end),
@@ -2679,7 +2727,7 @@ create_gene_plot <- function(df, df_gene, df_transcript = NULL, current_transcri
 }
 
 # Función server del módulo de Plot para homólogos
-plotServerHomologous <- function(id, data, max_gene_length, min_gene_coord, max_gene_coord, genSequences, plotIndex, gene_name, genome_fasta_path = NULL, annotation_file_path = NULL, visual_mode = NULL, organism_name = NULL, use_report_map = FALSE, report_path = "", app_theme = NULL, app_colorblind = NULL, precomputed_neighbor_context = NULL, prefetch_sequence = TRUE, prefetch_neighbor_context = FALSE, perf_run_id = NULL, on_plot_ready = NULL, plot_signature = NULL) {
+plotServerHomologous <- function(id, data, max_gene_length, min_gene_coord, max_gene_coord, genSequences, plotIndex, gene_name, genome_fasta_path = NULL, annotation_file_path = NULL, visual_mode = NULL, orientation_mode = NULL, organism_name = NULL, use_report_map = FALSE, report_path = "", app_theme = NULL, app_colorblind = NULL, precomputed_neighbor_context = NULL, prefetch_sequence = TRUE, prefetch_neighbor_context = FALSE, perf_run_id = NULL, on_plot_ready = NULL, plot_signature = NULL) {
     moduleServer(
         id,
         function(input, output, session) {
@@ -3155,6 +3203,11 @@ plotServerHomologous <- function(id, data, max_gene_length, min_gene_coord, max_
                 }
                 visual_mode_evt <- tolower(visual_mode_evt %||% "compact")
                 if (!visual_mode_evt %in% c("compact", "detailed")) visual_mode_evt <- "compact"
+                orientation_mode_evt <- "genomic"
+                if (!is.null(orientation_mode)) {
+                    orientation_mode_evt <- tryCatch(as.character(orientation_mode())[1], error = function(e) "genomic")
+                }
+                orientation_mode_evt <- normalize_gene_plot_orientation_mode(orientation_mode_evt)
                 theme_mode_evt <- "light"
                 if (!is.null(app_theme)) {
                     theme_mode_evt <- tryCatch(as.character(app_theme())[1], error = function(e) "light")
@@ -3187,6 +3240,7 @@ plotServerHomologous <- function(id, data, max_gene_length, min_gene_coord, max_
                 if (!is.finite(gc_span_len_evt)) gc_span_len_evt <- 0L
                 list(
                     visual_mode_evt,
+                    orientation_mode_evt,
                     theme_mode_evt,
                     colorblind_evt,
                     as.logical(neighbor_evt),
@@ -3228,6 +3282,11 @@ plotServerHomologous <- function(id, data, max_gene_length, min_gene_coord, max_
                         this_visual_mode <- tolower(candidate_mode)
                     }
                 }
+                this_orientation_mode <- "genomic"
+                if (!is.null(orientation_mode)) {
+                    this_orientation_mode <- tryCatch(as.character(orientation_mode())[1], error = function(e) "genomic")
+                }
+                this_orientation_mode <- normalize_gene_plot_orientation_mode(this_orientation_mode)
 
                 # Si es compacta, el lienzo es delgado. Si es detallada, crece.
                 height_svg <- if (this_visual_mode == "compact") 1.15 else 1.85
@@ -3298,7 +3357,8 @@ plotServerHomologous <- function(id, data, max_gene_length, min_gene_coord, max_
                     is_colorblind_mode = is_colorblind_mode,
                     seq_len_key = seq_len_key,
                     has_neighbor_context = has_neighbor_context,
-                    compact_feature_interactivity = compact_feature_key
+                    compact_feature_interactivity = compact_feature_key,
+                    orientation_mode = this_orientation_mode
                 )
 
                 if (cache_enabled) {
@@ -3351,7 +3411,8 @@ plotServerHomologous <- function(id, data, max_gene_length, min_gene_coord, max_
                     is_colorblind_mode = is_colorblind_mode,
                     gene_display_name = gene_name,
                     precomputed_genomic_span = span_for_plot,
-                    model_cache_key = cache_key
+                    model_cache_key = cache_key,
+                    orientation_mode = this_orientation_mode
                 )
                 if (isTRUE(defer_feature_gc) && !nzchar(trimws(as.character(span_for_plot %||% "")))) {
                     schedule_gc_span_prefetch(df)
@@ -3406,7 +3467,7 @@ plotServerHomologous <- function(id, data, max_gene_length, min_gene_coord, max_
 }
 
 # Función server del módulo de Plot para ortólogos
-plotServerOrtologous <- function(id, data, max_gene_length, min_gene_coord, max_gene_coord, genSequences, plotIndex, gene_name, genome_fasta_path = NULL, annotation_file_path = NULL, visual_mode = NULL, organism_name = NULL, use_report_map = FALSE, report_path = "", app_theme = NULL, app_colorblind = NULL, precomputed_neighbor_context = NULL, prefetch_sequence = TRUE, prefetch_neighbor_context = FALSE, perf_run_id = NULL, on_plot_ready = NULL, plot_signature = NULL) {
+plotServerOrtologous <- function(id, data, max_gene_length, min_gene_coord, max_gene_coord, genSequences, plotIndex, gene_name, genome_fasta_path = NULL, annotation_file_path = NULL, visual_mode = NULL, orientation_mode = NULL, organism_name = NULL, use_report_map = FALSE, report_path = "", app_theme = NULL, app_colorblind = NULL, precomputed_neighbor_context = NULL, prefetch_sequence = TRUE, prefetch_neighbor_context = FALSE, perf_run_id = NULL, on_plot_ready = NULL, plot_signature = NULL) {
     moduleServer(
         id,
         function(input, output, session) {
@@ -3917,6 +3978,11 @@ plotServerOrtologous <- function(id, data, max_gene_length, min_gene_coord, max_
                 }
                 visual_mode_evt <- tolower(visual_mode_evt %||% "compact")
                 if (!visual_mode_evt %in% c("compact", "detailed")) visual_mode_evt <- "compact"
+                orientation_mode_evt <- "genomic"
+                if (!is.null(orientation_mode)) {
+                    orientation_mode_evt <- tryCatch(as.character(orientation_mode())[1], error = function(e) "genomic")
+                }
+                orientation_mode_evt <- normalize_gene_plot_orientation_mode(orientation_mode_evt)
                 theme_mode_evt <- "light"
                 if (!is.null(app_theme)) {
                     theme_mode_evt <- tryCatch(as.character(app_theme())[1], error = function(e) "light")
@@ -3949,6 +4015,7 @@ plotServerOrtologous <- function(id, data, max_gene_length, min_gene_coord, max_
                 if (!is.finite(gc_span_len_evt)) gc_span_len_evt <- 0L
                 list(
                     visual_mode_evt,
+                    orientation_mode_evt,
                     theme_mode_evt,
                     colorblind_evt,
                     as.logical(neighbor_evt),
@@ -4001,6 +4068,11 @@ plotServerOrtologous <- function(id, data, max_gene_length, min_gene_coord, max_
                         this_visual_mode <- tolower(candidate_mode)
                     }
                 }
+                this_orientation_mode <- "genomic"
+                if (!is.null(orientation_mode)) {
+                    this_orientation_mode <- tryCatch(as.character(orientation_mode())[1], error = function(e) "genomic")
+                }
+                this_orientation_mode <- normalize_gene_plot_orientation_mode(this_orientation_mode)
 
                 # Si es compacta, el lienzo es delgado. Si es detallada, crece.
                 height_svg <- if (this_visual_mode == "compact") 1.15 else 1.85
@@ -4078,7 +4150,8 @@ plotServerOrtologous <- function(id, data, max_gene_length, min_gene_coord, max_
                     is_colorblind_mode = is_colorblind_mode,
                     seq_len_key = seq_len_key,
                     has_neighbor_context = has_neighbor_context,
-                    compact_feature_interactivity = compact_feature_key
+                    compact_feature_interactivity = compact_feature_key,
+                    orientation_mode = this_orientation_mode
                 )
 
                 if (cache_enabled) {
@@ -4131,7 +4204,8 @@ plotServerOrtologous <- function(id, data, max_gene_length, min_gene_coord, max_
                     is_colorblind_mode = is_colorblind_mode,
                     gene_display_name = gene_name,
                     precomputed_genomic_span = span_for_plot,
-                    model_cache_key = cache_key
+                    model_cache_key = cache_key,
+                    orientation_mode = this_orientation_mode
                 )
                 if (isTRUE(defer_feature_gc) && !nzchar(trimws(as.character(span_for_plot %||% "")))) {
                     schedule_gc_span_prefetch(df)

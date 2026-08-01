@@ -34,6 +34,15 @@
     return 'app-dna-loader--spinner-md';
   }
 
+  function resolveSpinnerMessage(host) {
+    if (!host || !host.closest) return 'Processing data…';
+    if (host.closest('.analytics-chart-wrap')) return 'Generating statistical analysis…';
+    if (host.closest('.string-network-body-wrap')) return 'Building interaction network…';
+    if (host.closest('.plot-card-main, .promoter-plot-container')) return 'Rendering gene visualization…';
+    if (host.closest('.chart-modal-chart-wrap')) return 'Preparing chart…';
+    return 'Processing data…';
+  }
+
   function hydrateSpinnerHost(loadContainer) {
     if (!loadContainer || loadContainer.getAttribute('data-dna-loader-ready') === 'true') return;
     loadContainer.setAttribute('data-dna-loader-ready', 'true');
@@ -41,8 +50,12 @@
 
     var wrap = document.createElement('div');
     wrap.className = 'app-dna-spinner-wrap';
-    wrap.innerHTML = buildDnaLoader(resolveSpinnerSizeClass(loadContainer));
+    wrap.innerHTML = buildDnaLoader(resolveSpinnerSizeClass(loadContainer)) +
+      '<span class="app-dna-spinner-message">' + resolveSpinnerMessage(loadContainer) + '</span>';
     loadContainer.appendChild(wrap);
+    loadContainer.setAttribute('role', 'status');
+    loadContainer.setAttribute('aria-live', 'polite');
+    loadContainer.setAttribute('aria-label', resolveSpinnerMessage(loadContainer));
   }
 
   function syncActiveState(loadContainer) {
@@ -94,8 +107,25 @@
     }
   }
 
+  function syncPlotPlaceholder(container) {
+    if (!container || !container.querySelector) return;
+    var placeholder = container.querySelector('.plot-loading-placeholder');
+    if (!placeholder) return;
+    var ready = !!container.querySelector('.shiny-bound-output svg, .ggiraph.html-widget svg');
+    placeholder.hidden = ready;
+    placeholder.setAttribute('aria-hidden', ready ? 'true' : 'false');
+  }
+
+  function scanPlotPlaceholders(root) {
+    var scope = root && root.querySelectorAll ? root : document;
+    if (scope.matches && scope.matches('.promoter-plot-container')) syncPlotPlaceholder(scope);
+    var containers = scope.querySelectorAll('.promoter-plot-container');
+    for (var i = 0; i < containers.length; i += 1) syncPlotPlaceholder(containers[i]);
+  }
+
   function boot() {
     scanSpinnerHosts(document);
+    scanPlotPlaceholders(document);
     if (typeof MutationObserver !== 'function' || !document.body) return;
 
     var observer = new MutationObserver(function (mutations) {
@@ -107,7 +137,12 @@
           var node = m.addedNodes[j];
           if (!node || node.nodeType !== 1) continue;
           scanSpinnerHosts(node);
+          scanPlotPlaceholders(node);
         }
+        var plotContainer = m.target && m.target.closest
+          ? m.target.closest('.promoter-plot-container')
+          : null;
+        if (plotContainer) syncPlotPlaceholder(plotContainer);
       }
     });
 
@@ -119,6 +154,9 @@
   }
 
   window.appBuildDnaLoader = buildDnaLoader;
+  window.appSyncPlotLoadingPlaceholders = function () {
+    scanPlotPlaceholders(document);
+  };
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', boot, { once: true });
