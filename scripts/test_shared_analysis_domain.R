@@ -3,6 +3,10 @@
 source("R/utils.R", local = TRUE)
 source("R/server_shared_analysis_domain.R", local = TRUE)
 
+shared_domain_source <- paste(readLines("R/server_shared_analysis_domain.R", warn = FALSE), collapse = "\n")
+stopifnot(grepl("promises::is.promise(lastz_result)", shared_domain_source, fixed = TRUE))
+stopifnot(grepl("run_multipip = !isTRUE(lastz_result$multipip_prepared)", shared_domain_source, fixed = TRUE))
+
 test_root <- tempfile("cgv-shared-analysis-test-")
 dir.create(test_root, recursive = TRUE)
 on.exit(unlink(test_root, recursive = TRUE, force = TRUE), add = TRUE)

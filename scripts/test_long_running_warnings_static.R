@@ -5,9 +5,7 @@ report_source <- paste(
 )
 
 required_lastz_routes <- c(
-    "input$ortho_pip_suggest_reference",
     "input$ortho_pip_run_alignments",
-    "input$ortho_multipip_suggest_reference",
     "input$ortho_multipip_run_alignments",
     "input$homo_pip_run_alignments",
     "input$homo_multipip_run_alignments"
@@ -18,6 +16,8 @@ stopifnot(all(vapply(
     function(route) grepl(route, server_source, fixed = TRUE),
     logical(1)
 )))
+stopifnot(!grepl("input$ortho_pip_suggest_reference", server_source, fixed = TRUE))
+stopifnot(!grepl("input$ortho_multipip_suggest_reference", server_source, fixed = TRUE))
 stopifnot(grepl("lastz_patience_notice", server_source, fixed = TRUE))
 stopifnot(grepl("LASTZ is computationally intensive and may take several minutes.", server_source, fixed = TRUE))
 stopifnot(grepl('headline = "Please be patient"', server_source, fixed = TRUE))
