@@ -67,7 +67,7 @@ assert(identical(ready$result$url, report_result$url), "published URL is persist
 
 config <- list(
     api_key = "test-key",
-    from_email = "CGV Feedback <feedback@cgvapp.com>",
+    from_email = "CGV Reports <reports@cgvapp.com>",
     reply_to = "cgvviewer@gmail.com",
     logo_path = "",
     public_url = "https://cgv.example"
@@ -83,6 +83,25 @@ assert(identical(delivery$provider_id, "report_email_123"), "provider id is reta
 html <- cgv_report_email_html(ready, success = TRUE, config = config)
 assert(grepl(report_result$url, html, fixed = TRUE), "result email contains the secret report URL")
 assert(grepl("interactive CGV report", html, fixed = TRUE), "result email uses branded interactive-report copy")
+
+alignment_ready <- ready
+alignment_ready$options <- list(
+    request_kind = "alignment",
+    alignment_mode = "blocks",
+    include_multi_gene = FALSE,
+    include_cross_species = TRUE,
+    run_lastz = TRUE
+)
+alignment_html <- cgv_report_email_html(alignment_ready, success = TRUE, config = config)
+assert(grepl("complete CGV alignment report", alignment_html, fixed = TRUE), "alignment delivery has purpose-specific branded copy")
+assert(grepl("Cross-Species", alignment_html, fixed = TRUE), "alignment delivery identifies its workflow")
+assert(grepl("LASTZ blocks and MultiPIP", alignment_html, fixed = TRUE), "alignment delivery identifies both completed alignment views")
+assert(identical(cgv_report_email_subject(alignment_ready), "Your CGV alignment report is ready"), "alignment delivery uses a clear subject")
+
+empty_env <- function(name, unset = "") unset
+default_report_config <- cgv_report_delivery_config(getenv = empty_env)
+assert(identical(default_report_config$from_email, "CGV Reports <reports@cgvapp.com>"), "reports use the verified cgvapp.com sender by default")
+assert(identical(default_report_config$reply_to, "cgvviewer@gmail.com"), "report replies return to the CGV Gmail inbox")
 
 completed <- cgv_update_background_report(queued$id, state = "completed", delivery = delivery, base_dir = test_root)
 assert(identical(completed$state, "completed"), "delivered report enters completed state")
@@ -102,14 +121,33 @@ worker_text <- paste(readLines(file.path("scripts", "background_report_worker.R"
 compose_text <- paste(readLines("docker-compose.shinyproxy.yml", warn = FALSE), collapse = "\n")
 colors_deploy_text <- paste(readLines("deploy-colors-shinyproxy.sh", warn = FALSE), collapse = "\n")
 browser_text <- paste(readLines(file.path("www", "js", "reproducible_report.js"), warn = FALSE), collapse = "\n")
+server_text <- paste(readLines("server.R", warn = FALSE), collapse = "\n")
+dependencies_text <- paste(readLines("Dockerfile.dependencies", warn = FALSE), collapse = "\n")
 assert(grepl('choiceValues = c("session", "email")', domain_text, fixed = TRUE), "Share exposes foreground and email delivery choices")
+for (button_id in c(
+    "email_homo_pip_report",
+    "email_homo_multipip_report",
+    "email_ortho_pip_report",
+    "email_ortho_multipip_report"
+)) {
+    assert(grepl(button_id, domain_text, fixed = TRUE), paste("domain observes", button_id))
+    assert(grepl(button_id, server_text, fixed = TRUE), paste("alignment UI exposes", button_id))
+}
+assert(grepl('request_kind = "alignment"', domain_text, fixed = TRUE), "alignment email requests are labelled for branded delivery")
+assert(grepl('run_lastz = TRUE', domain_text, fixed = TRUE), "alignment email requests always run LASTZ in the worker")
+assert(grepl('lastz_contexts <- c(lastz_contexts, "homo")', domain_text, fixed = TRUE), "complete Multi-Gene reports schedule LASTZ")
 assert(grepl("CGV_BACKGROUND_REPORT_JOB_PATH", worker_text, fixed = TRUE), "worker launches an isolated snapshot renderer")
+assert(grepl("resolve_worker_chrome", worker_text, fixed = TRUE), "worker validates its headless browser before accepting jobs")
+assert(grepl("google-chrome-stable_current_amd64.deb", dependencies_text, fixed = TRUE), "dependency image installs a container-native headless browser")
 assert(grepl("background-report-worker:", compose_text, fixed = TRUE), "ShinyProxy compose runs the detached report worker")
+assert(grepl('CHROMOTE_CHROME: "/usr/bin/google-chrome"', compose_text, fixed = TRUE), "worker uses the packaged Google Chrome binary")
 assert(grepl('CGV_PUBLIC_BASE_URL: "${CGV_PUBLIC_BASE_URL:-https://cgvapp.com}"', compose_text, fixed = TRUE), "worker always publishes an externally reachable report URL")
 assert(grepl("cgv-background-report-worker", colors_deploy_text, fixed = TRUE), "Colors deploy starts the detached report worker")
 assert(grepl("CGV_PUBLIC_BASE_URL='https://${PUBLIC_HOSTNAME}'", colors_deploy_text, fixed = TRUE), "Colors worker publishes its real public hostname")
 assert(grepl("APP_BACKGROUND_REPORTS_ENABLED", colors_deploy_text, fixed = TRUE), "Colors sessions receive the background-report feature flag")
+assert(grepl("REPORT_FROM_EMAIL", colors_deploy_text, fixed = TRUE), "Colors worker receives the branded report sender")
 assert(grepl("requireNamespace('chromote'", colors_deploy_text, fixed = TRUE), "Colors deploy rebuilds dependencies when the headless runtime is absent")
+assert(grepl("/usr/bin/google-chrome", colors_deploy_text, fixed = TRUE), "Colors validates the exact headless browser used by the worker")
 assert(!grepl("--chmod=F600", colors_deploy_text, fixed = TRUE), "Colors secret sync stays compatible with macOS openrsync")
 assert(grepl("--chmod=Fu=rw,Fgo=", colors_deploy_text, fixed = TRUE), "Colors secret sync preserves mode 0600 portably")
 assert(grepl("cgv:background-report-bootstrap", browser_text, fixed = TRUE), "headless browser can trigger the existing report capture")

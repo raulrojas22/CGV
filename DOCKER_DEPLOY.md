@@ -207,7 +207,8 @@ del propio proceso. Conserva el caché persistente y no expongas
 
 El servicio `background-report-worker` consume en serie los trabajos solicitados
 con **Email me**, restaura el snapshot inmutable en una sesión interna, captura
-el mismo reporte interactivo con Chromium headless y envía la URL secreta usando
-la configuración Resend de feedback. `FEEDBACK_FROM_EMAIL` sigue siendo el
-remitente verificado y `FEEDBACK_TO_EMAIL` (el Gmail de CGV) queda como
-`Reply-To`. Los archivos privados/subidos no se aceptan todavía en esta cola.
+el mismo reporte interactivo con Google Chrome headless y envía la URL secreta
+usando Resend. `REPORT_FROM_EMAIL` identifica al remitente verificado y
+`REPORT_REPLY_TO_EMAIL` (el Gmail de CGV) queda como `Reply-To`. La misma cola
+atiende **Email full report** desde LASTZ y MultiPIP. Los archivos
+privados/subidos no se aceptan todavía en esta cola.

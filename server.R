@@ -20030,6 +20030,20 @@ function(input, output, session) {
     homoPipLocalAlignmentState <- reactiveVal(list(status = "idle", runs = list(), contexts = list(), reference_id = "", query_ids = character(0), stamp = ""))
     homoMultipipLocalAlignmentState <- reactiveVal(list(status = "idle", runs = list(), contexts = list(), reference_id = "", query_ids = character(0), stamp = ""))
 
+    background_alignment_email_button <- function(input_id, compact = FALSE) {
+        if (cgv_runtime_is_desktop() ||
+            !isTRUE(app_env_flag("APP_SHARED_REPORTS_ENABLED", default = TRUE)) ||
+            !cgv_background_reports_enabled()) return(NULL)
+        shiny::actionButton(
+            inputId = input_id,
+            label = if (isTRUE(compact)) "Email report" else "Email full report",
+            icon = icon("envelope"),
+            class = "btn btn-sm btn-outline-primary cgv-alignment-email-btn",
+            title = "Run the alignments in the background and email the complete interactive report",
+            style = "height:38px; border-radius:10px; font-weight:700;"
+        )
+    }
+
     build_homologous_lastz_card_ui <- function(kind = c("blocks", "multipip"), is_dark_theme = FALSE) {
         kind <- match.arg(kind)
         groups <- homoMultiTranscriptGeneGroups()
@@ -20043,6 +20057,7 @@ function(input, output, session) {
         ident_id <- if (is_multipip) "homo_multipip_min_identity" else "homo_pip_min_identity"
         length_id <- if (is_multipip) "homo_multipip_min_length" else "homo_pip_min_length"
         run_id <- if (is_multipip) "homo_multipip_run_alignments" else "homo_pip_run_alignments"
+        email_id <- if (is_multipip) "email_homo_multipip_report" else "email_homo_pip_report"
         out_id <- if (is_multipip) "homo_multipip_plot_out" else "homo_pip_plot_out"
         footer_id <- if (is_multipip) "homo_multipip_footer" else "homo_pip_footer"
         title_txt <- if (is_multipip) "Multi-Gene MultiPIP View" else "Multi-Gene LASTZ Block View"
@@ -20109,8 +20124,12 @@ function(input, output, session) {
                     ),
                     div(
                         class = "ortho-aligned-control",
-                        tags$label("&nbsp;", class = "ortho-aligned-control-label"),
-                        shiny::actionButton(run_id, "Run local alignments", class = "btn btn-primary btn-sm", icon = icon("play"))
+                        tags$label("Run or receive:", class = "ortho-aligned-control-label"),
+                        div(
+                            class = "cgv-homo-alignment-actions",
+                            shiny::actionButton(run_id, "Run local alignments", class = "btn btn-primary btn-sm", icon = icon("play")),
+                            background_alignment_email_button(email_id, compact = TRUE)
+                        )
                     )
                 ),
                 tags$small(
@@ -22402,7 +22421,8 @@ function(input, output, session) {
                                     icon = icon("play"),
                                     class = "btn btn-sm btn-success",
                                     style = "width:100%; height:38px; border-radius:10px; font-weight:700;"
-                                )
+                                ),
+                                background_alignment_email_button("email_ortho_pip_report")
                             )
                         )
                     )
@@ -22555,7 +22575,8 @@ function(input, output, session) {
                                     icon = icon("play"),
                                     class = "btn btn-sm btn-success",
                                     style = "width:100%; height:38px; border-radius:10px; font-weight:700;"
-                                )
+                                ),
+                                background_alignment_email_button("email_ortho_multipip_report")
                             )
                         )
                     )

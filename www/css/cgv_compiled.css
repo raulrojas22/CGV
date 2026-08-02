@@ -40,6 +40,56 @@
   transform: translateY(-1px);
 }
 
+.cgv-alignment-email-btn.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+  border: 1px solid rgba(24, 169, 142, 0.55);
+  background: rgba(24, 169, 142, 0.08);
+  color: #087a65;
+  white-space: normal;
+  line-height: 1.15;
+  box-shadow: none;
+}
+
+.cgv-alignment-email-btn.btn:hover,
+.cgv-alignment-email-btn.btn:focus {
+  border-color: #18a98e;
+  background: rgba(24, 169, 142, 0.16);
+  color: #075f51;
+  box-shadow: 0 0 0 3px rgba(24, 169, 142, 0.11);
+}
+
+.cgv-homo-alignment-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+  gap: 8px;
+  min-width: 280px;
+}
+
+.cgv-homo-alignment-actions > .btn {
+  width: 100%;
+  min-height: 38px;
+  border-radius: 10px;
+  font-weight: 700;
+}
+
+html[data-app-theme="dark"] .cgv-alignment-email-btn.btn {
+  border-color: rgba(74, 210, 183, 0.55);
+  background: rgba(24, 169, 142, 0.14);
+  color: #8be1cf;
+}
+
+@media (max-width: 760px) {
+  .cgv-homo-alignment-actions {
+    grid-template-columns: 1fr;
+    min-width: 0;
+  }
+}
+
 .modal-dialog:has(#cgv-share-modal-shell) {
   width: calc(100vw - 32px);
   max-width: 760px;
@@ -167,6 +217,15 @@
   max-width: 470px;
   margin: 1px 0 0;
   color: #4f6677;
+}
+
+.cgv-alignment-email-modal .cgv-share-intro {
+  display: block;
+}
+
+.cgv-alignment-email-modal .cgv-share-intro > p {
+  max-width: none;
+  margin: 0 0 8px;
 }
 
 .cgv-share-counts {

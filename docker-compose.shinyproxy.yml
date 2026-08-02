@@ -83,7 +83,7 @@ services:
       APP_BACKGROUND_REPORT_LASTZ_WORKERS: "${APP_BACKGROUND_REPORT_LASTZ_WORKERS:-1}"
       APP_LASTZ_GLOBAL_WORKERS: "${APP_LASTZ_GLOBAL_WORKERS:-1}"
       APP_LASTZ_GLOBAL_QUEUE_WAIT_SECONDS: "${APP_LASTZ_GLOBAL_QUEUE_WAIT_SECONDS:-1800}"
-      CHROMOTE_CHROME: "/usr/bin/chromium"
+      CHROMOTE_CHROME: "/usr/bin/google-chrome"
     volumes:
       - ${SP_ANNOTATIONS_DIR:?set-SP_ANNOTATIONS_DIR-to-an-absolute-host-path}:/app/annotations:ro
       - ${SP_GENOMES_DIR:?set-SP_GENOMES_DIR-to-an-absolute-host-path}:/app/genomes:ro

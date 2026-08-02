@@ -283,18 +283,55 @@ cgv_report_delivery_config <- function(getenv = Sys.getenv) {
     }
     list(
         api_key = env_value("REPORT_RESEND_API_KEY", feedback_config$api_key),
-        from_email = env_value("REPORT_FROM_EMAIL", feedback_config$from_email),
-        reply_to = env_value("REPORT_REPLY_TO_EMAIL", feedback_config$to_email),
+        from_email = env_value("REPORT_FROM_EMAIL", "CGV Reports <reports@cgvapp.com>"),
+        reply_to = env_value("REPORT_REPLY_TO_EMAIL", feedback_config$to_email %||% "cgvviewer@gmail.com"),
         logo_path = env_value("REPORT_LOGO_PATH", feedback_config$logo_path),
         public_url = sub("/+$", "", env_value("CGV_PUBLIC_BASE_URL", feedback_config$public_url))
     )
 }
 
+cgv_report_request_meta <- function(job) {
+    options <- job$options %||% list()
+    alignment <- identical(tolower(trimws(as.character(options$request_kind %||% "report"))), "alignment")
+    workflow <- if (isTRUE(options$include_multi_gene) && isTRUE(options$include_cross_species)) {
+        "Multi-Gene and Cross-Species"
+    } else if (isTRUE(options$include_multi_gene)) {
+        "Multi-Gene"
+    } else if (isTRUE(options$include_cross_species)) {
+        "Cross-Species"
+    } else {
+        "CGV"
+    }
+    mode <- switch(
+        tolower(trimws(as.character(options$alignment_mode %||% "complete"))),
+        blocks = "LASTZ blocks and MultiPIP",
+        multipip = "MultiPIP and LASTZ blocks",
+        "LASTZ and MultiPIP"
+    )
+    list(alignment = alignment, workflow = workflow, mode = mode)
+}
+
+cgv_report_email_subject <- function(job, success = TRUE) {
+    meta <- cgv_report_request_meta(job)
+    if (isTRUE(success)) {
+        if (isTRUE(meta$alignment)) "Your CGV alignment report is ready" else "Your interactive CGV report is ready"
+    } else {
+        if (isTRUE(meta$alignment)) "CGV could not complete your alignment report" else "CGV could not complete your report"
+    }
+}
+
 cgv_report_email_text <- function(job, success = TRUE) {
+    meta <- cgv_report_request_meta(job)
     if (isTRUE(success)) {
         paste(
-            "Your Comparative Gene Viewer interactive report is ready.",
+            if (isTRUE(meta$alignment)) {
+                "Your Comparative Gene Viewer alignment report is ready."
+            } else {
+                "Your Comparative Gene Viewer interactive report is ready."
+            },
             "",
+            if (isTRUE(meta$alignment)) paste0("Workflow: ", meta$workflow) else "",
+            if (isTRUE(meta$alignment)) paste0("Alignment views: ", meta$mode) else "",
             paste0("Open report: ", job$result$url %||% ""),
             paste0("Expires: ", job$result$expires_at %||% "automatically"),
             paste0("Reference: ", job$id %||% ""),
@@ -319,32 +356,66 @@ cgv_report_email_text <- function(job, success = TRUE) {
 cgv_report_email_html <- function(job, success = TRUE, config = cgv_report_delivery_config()) {
     esc <- if (exists("feedback_html_escape", mode = "function")) feedback_html_escape else function(x) as.character(x %||% "")
     summary <- job$summary %||% list()
+    meta <- cgv_report_request_meta(job)
     genes <- paste(as.character(summary$genes %||% character(0)), collapse = ", ")
     if (!nzchar(genes)) genes <- "CGV analysis"
     if (isTRUE(success)) {
+        badge <- if (isTRUE(meta$alignment)) "Alignment report ready" else "Report ready"
+        heading <- if (isTRUE(meta$alignment)) {
+            "Your complete CGV alignment report is ready"
+        } else {
+            "Your interactive CGV report is ready"
+        }
+        description <- if (isTRUE(meta$alignment)) {
+            paste0(
+                "CGV finished the requested ", esc(meta$workflow),
+                " analysis in the background. The interactive report includes the structural results, analytics and completed ",
+                esc(meta$mode), "."
+            )
+        } else {
+            "CGV finished the analysis snapshot you sent to the background queue. You can open the complete read-only report without returning to the original session."
+        }
+        alignment_details <- if (isTRUE(meta$alignment)) paste0(
+            '<div style="margin-top:7px;font-size:12px;line-height:18px;color:#60758a;">Workflow: ', esc(meta$workflow),
+            '<br>Alignment views: ', esc(meta$mode), '</div>'
+        ) else ""
         content <- paste0(
-            '<span style="display:inline-block;padding:6px 10px;border-radius:999px;font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;background:#eafaf6;color:#087a65;border:1px solid #bdece1;">Report ready</span>',
-            '<h1 style="margin:16px 0 8px;font-size:25px;line-height:32px;color:#263d55;">Your interactive CGV report is ready</h1>',
-            '<div style="font-size:14px;line-height:22px;color:#536b81;">CGV finished the analysis snapshot you sent to the background queue. You can open the complete read-only report without returning to the original session.</div>',
+            '<span style="display:inline-block;padding:6px 10px;border-radius:999px;font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;background:#eafaf6;color:#087a65;border:1px solid #bdece1;">', esc(badge), '</span>',
+            '<h1 style="margin:16px 0 8px;font-size:25px;line-height:32px;color:#263d55;">', esc(heading), '</h1>',
+            '<div style="font-size:14px;line-height:22px;color:#536b81;">', description, '</div>',
             '<div style="margin-top:22px;padding:18px;background:#edf8f6;border:1px solid #ccebe5;border-radius:10px;">',
             '<div style="font-size:11px;line-height:16px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:#087a65;">Analysis snapshot</div>',
             '<div style="margin-top:5px;font-size:17px;line-height:24px;font-weight:700;color:#263d55;">', esc(genes), '</div>',
+            alignment_details,
             '<div style="margin-top:7px;font-size:12px;line-height:18px;color:#60758a;">Reference: ', esc(job$id), '<br>Expires: ', esc(job$result$expires_at %||% "automatically"), '</div></div>',
             '<div style="margin-top:24px;"><a href="', esc(job$result$url %||% ""), '" style="display:inline-block;padding:12px 18px;border-radius:8px;background:#18a98e;color:#ffffff;font-size:14px;line-height:19px;font-weight:700;text-decoration:none;">Open interactive report</a></div>',
             '<div style="margin-top:18px;font-size:12px;line-height:19px;color:#7b8c9d;">This secret URL acts as the access key. Anyone who receives it can view and copy the report until it expires. The report reflects the session exactly when the job was submitted.</div>'
         )
-        preheader <- "Your complete interactive CGV report is ready."
+        preheader <- if (isTRUE(meta$alignment)) {
+            "Your complete CGV alignment report is ready."
+        } else {
+            "Your complete interactive CGV report is ready."
+        }
     } else {
+        failed_heading <- if (isTRUE(meta$alignment)) {
+            "CGV could not finish the alignment report"
+        } else {
+            "CGV could not finish the report"
+        }
         content <- paste0(
             '<span style="display:inline-block;padding:6px 10px;border-radius:999px;font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;background:#fff1f0;color:#b42318;border:1px solid #ffd6d2;">Report not completed</span>',
-            '<h1 style="margin:16px 0 8px;font-size:25px;line-height:32px;color:#263d55;">CGV could not finish the report</h1>',
+            '<h1 style="margin:16px 0 8px;font-size:25px;line-height:32px;color:#263d55;">', esc(failed_heading), '</h1>',
             '<div style="font-size:14px;line-height:22px;color:#536b81;">The background worker stopped before publishing the requested analysis snapshot.</div>',
             '<div style="margin-top:22px;padding:18px;background:#fff7f6;border:1px solid #f3d4d0;border-radius:10px;">',
             '<div style="font-size:11px;line-height:16px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:#b42318;">Reference ', esc(job$id), '</div>',
             '<div style="margin-top:7px;font-size:13px;line-height:21px;color:#536b81;">', esc(job$error %||% "The report worker stopped before publication."), '</div></div>',
             '<div style="margin-top:24px;"><a href="', esc(config$public_url %||% ""), '" style="display:inline-block;padding:11px 17px;border-radius:8px;background:#314c70;color:#ffffff;font-size:13px;line-height:18px;font-weight:700;text-decoration:none;">Return to CGV</a></div>'
         )
-        preheader <- "CGV could not complete your background report."
+        preheader <- if (isTRUE(meta$alignment)) {
+            "CGV could not complete your alignment report."
+        } else {
+            "CGV could not complete your background report."
+        }
     }
     if (exists("feedback_email_shell", mode = "function")) {
         feedback_email_shell(content, preheader = preheader)
@@ -371,7 +442,7 @@ cgv_report_send_email <- function(job,
         from = config$from_email,
         to = list(email),
         reply_to = list(config$reply_to),
-        subject = if (isTRUE(success)) "Your interactive CGV report is ready" else "CGV could not complete your report",
+        subject = cgv_report_email_subject(job, success = success),
         text = cgv_report_email_text(job, success = success),
         html = cgv_report_email_html(job, success = success, config = config)
     )
