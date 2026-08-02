@@ -110,6 +110,8 @@ assert(grepl("cgv-background-report-worker", colors_deploy_text, fixed = TRUE), 
 assert(grepl("CGV_PUBLIC_BASE_URL='https://${PUBLIC_HOSTNAME}'", colors_deploy_text, fixed = TRUE), "Colors worker publishes its real public hostname")
 assert(grepl("APP_BACKGROUND_REPORTS_ENABLED", colors_deploy_text, fixed = TRUE), "Colors sessions receive the background-report feature flag")
 assert(grepl("requireNamespace('chromote'", colors_deploy_text, fixed = TRUE), "Colors deploy rebuilds dependencies when the headless runtime is absent")
+assert(!grepl("--chmod=F600", colors_deploy_text, fixed = TRUE), "Colors secret sync stays compatible with macOS openrsync")
+assert(grepl("--chmod=Fu=rw,Fgo=", colors_deploy_text, fixed = TRUE), "Colors secret sync preserves mode 0600 portably")
 assert(grepl("cgv:background-report-bootstrap", browser_text, fixed = TRUE), "headless browser can trigger the existing report capture")
 
 message("All background report job tests passed.")
