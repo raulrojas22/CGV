@@ -260,7 +260,7 @@ EMAIL_ENV_STAGING="$(mktemp "${TMPDIR:-/tmp}/cgv-colors-report-email.XXXXXX")"
 awk '/^(FEEDBACK_RESEND_API_KEY|FEEDBACK_TO_EMAIL|FEEDBACK_FROM_EMAIL)=/' \
   "$LOCAL_EMAIL_ENV" > "$EMAIL_ENV_STAGING"
 chmod 600 "$EMAIL_ENV_STAGING"
-rsync -az --chmod=F600 \
+rsync -az --chmod=Fu=rw,Fgo= \
   -e "ssh -S $SSH_SOCK" \
   "$EMAIL_ENV_STAGING" "${REMOTE_TARGET}:${REMOTE_EMAIL_ENV}"
 rssh "chmod 600 '${REMOTE_EMAIL_ENV}' && test \"\$(stat -c '%a' '${REMOTE_EMAIL_ENV}')\" = 600"

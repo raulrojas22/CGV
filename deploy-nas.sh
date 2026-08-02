@@ -137,7 +137,7 @@ rsync -avz --progress --delete \
   --exclude='*.docx' --exclude='.env.local' \
   "$LOCAL_APP" \
   "${NAS_USER}@${NAS_HOST}:${NAS_PATH}/app/"
-rsync -az --chmod=F600 \
+rsync -az --chmod=Fu=rw,Fgo= \
   -e "ssh -S $SSH_SOCK" \
   "${LOCAL_ENV_FILE}" \
   "${NAS_USER}@${NAS_HOST}:${NAS_PATH}/app/.env.local"
