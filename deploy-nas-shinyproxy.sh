@@ -11,6 +11,7 @@ NAS_USER="${NAS_USER:-truenas_admin}"
 NAS_HOST="${NAS_HOST:-192.168.1.200}"
 NAS_PATH="${NAS_PATH:-/mnt/Datos4raro/cgv}"
 LOCAL_APP="/Users/rarojas/Documents/A_FULLAPP/"
+LOCAL_ENV_FILE="${LOCAL_APP}.env.local"
 TUNNEL_NAME="cgv"
 REMOTE_DOCKER="${REMOTE_DOCKER:-docker}"
 NAS_APP_DIR="${NAS_PATH}/app"
@@ -91,6 +92,10 @@ echo ""
 
 # --- Paso 1: Sincronizar codigo ---
 echo "[1/7] Sincronizando codigo al NAS..."
+if [[ ! -f "${LOCAL_ENV_FILE}" ]] || ! grep -Eq '^FEEDBACK_RESEND_API_KEY=.+$' "${LOCAL_ENV_FILE}"; then
+  echo "ERROR: falta FEEDBACK_RESEND_API_KEY en ${LOCAL_ENV_FILE}; el worker no podria enviar los reportes." >&2
+  exit 1
+fi
 rsync -avz --progress --delete \
   -e "ssh -S $SSH_SOCK" \
   --exclude=annotations --exclude=genomes \
@@ -103,6 +108,11 @@ rsync -avz --progress --delete \
   --exclude='*.docx' --exclude='.env.local' \
   "$LOCAL_APP" \
   "${NAS_USER}@${NAS_HOST}:${NAS_APP_DIR}/"
+rsync -az --chmod=F600 \
+  -e "ssh -S $SSH_SOCK" \
+  "${LOCAL_ENV_FILE}" \
+  "${NAS_USER}@${NAS_HOST}:${NAS_APP_DIR}/.env.local"
+nssh "chmod 600 '${NAS_APP_DIR}/.env.local'"
 echo ""
 
 # --- Paso 1b: Verificar datos grandes en el NAS ---
@@ -190,7 +200,8 @@ nssh "
   ${REMOTE_DOCKER} stop cgv 2>/dev/null || echo '  (no habia cgv)'
   ${REMOTE_DOCKER} stop cgv-shinyproxy 2>/dev/null || echo '  (no habia shinyproxy)'
   ${REMOTE_DOCKER} stop cgv-nginx 2>/dev/null || echo '  (no habia nginx)'
-  ${REMOTE_DOCKER} rm cgv cgv-shinyproxy cgv-nginx 2>/dev/null || true
+  ${REMOTE_DOCKER} stop cgv-background-report-worker 2>/dev/null || echo '  (no habia worker de reportes)'
+  ${REMOTE_DOCKER} rm cgv cgv-shinyproxy cgv-nginx cgv-background-report-worker 2>/dev/null || true
   stale=\$(${REMOTE_DOCKER} ps -aq --filter ancestor=${CGV_IMAGE} 2>/dev/null || true)
   if [ -n \"\$stale\" ]; then
     echo '  Deteniendo contenedores CGV dinamicos de ShinyProxy...'
@@ -222,8 +233,11 @@ echo ""
 echo "[3/7] Preparando dependencias de R y construyendo '${CGV_IMAGE}' en el NAS..."
 nssh "
   cd ${NAS_APP_DIR}
-  if [ '${REBUILD_R_DEPS}' = '1' ] || ! ${REMOTE_DOCKER} image inspect '${CGV_DEPS_IMAGE}' >/dev/null 2>&1; then
-    echo '  Construyendo ${CGV_DEPS_IMAGE} (primera vez o actualización explícita de dependencias)...'
+  if [ '${REBUILD_R_DEPS}' = '1' ] ||
+     ! ${REMOTE_DOCKER} image inspect '${CGV_DEPS_IMAGE}' >/dev/null 2>&1 ||
+     ! ${REMOTE_DOCKER} run --rm '${CGV_DEPS_IMAGE}' chromium --version >/dev/null 2>&1 ||
+     ! ${REMOTE_DOCKER} run --rm '${CGV_DEPS_IMAGE}' Rscript -e 'library(chromote)' >/dev/null 2>&1; then
+    echo '  Construyendo ${CGV_DEPS_IMAGE} (incluye Chromium/chromote para reportes en segundo plano)...'
     ${REMOTE_DOCKER} build --pull=false -t '${CGV_DEPS_IMAGE}' -f Dockerfile.dependencies .
   else
     echo '  Reutilizando ${CGV_DEPS_IMAGE}; no se instalarán paquetes R.'
@@ -292,10 +306,11 @@ nssh "
     shiny_code=\$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 http://127.0.0.1:8080 2>/dev/null || true)
     nginx_code=\$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 http://127.0.0.1:${CGV_NGINX_PORT} 2>/dev/null || true)
     delegate=\$(${REMOTE_DOCKER} ps --filter 'name=sp-container-' --filter status=running --format '{{.Names}}' 2>/dev/null | head -1 || true)
+    report_worker=\$(${REMOTE_DOCKER} ps --filter 'name=cgv-background-report-worker' --filter status=running --format '{{.Names}}' 2>/dev/null | head -1 || true)
     if echo \"\$shiny_code\" | grep -Eq '^(200|302)$' &&
        echo \"\$nginx_code\" | grep -Eq '^(200|302)$' &&
-       [ -n \"\$delegate\" ]; then
-      echo \"  Cadena local lista después de \${ELAPSED}s (ShinyProxy=\$shiny_code, nginx=\$nginx_code, app=\$delegate)\"
+       [ -n \"\$delegate\" ] && [ -n \"\$report_worker\" ]; then
+      echo \"  Cadena local lista después de \${ELAPSED}s (ShinyProxy=\$shiny_code, nginx=\$nginx_code, app=\$delegate, worker=\$report_worker)\"
       READY=1
       break
     fi
@@ -313,7 +328,7 @@ nssh "
     exit 1
   fi
 
-  ${REMOTE_DOCKER} ps --filter name=cgv-nginx --filter name=cgv-shinyproxy --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'
+  ${REMOTE_DOCKER} ps --filter name=cgv-nginx --filter name=cgv-shinyproxy --filter name=cgv-background-report-worker --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'
 "
 
 # --- Paso 7: Lanzar Cloudflare tunnel ---

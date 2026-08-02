@@ -188,7 +188,9 @@ autor en `${CGV_CACHE_DIR}/reproducibility_packages`. Configuración inicial:
 APP_SHARED_REPORTS_ENABLED=1
 APP_SHARED_REPORT_MAX_MB=100
 APP_SHARED_REPORT_STORAGE_GB=5
-CGV_PUBLIC_BASE_URL=https://cgv.mobilomics.org
+APP_BACKGROUND_REPORTS_ENABLED=1
+APP_LASTZ_GLOBAL_WORKERS=1
+CGV_PUBLIC_BASE_URL=https://cgvapp.com
 ```
 
 En ShinyProxy, Nginx monta el mismo caché como sólo lectura y sirve
@@ -202,3 +204,10 @@ nuevas publicaciones; nunca se elimina un enlace vigente para liberar espacio.
 Si usas el despliegue Shiny nativo, CGV registra `/share` como recurso estático
 del propio proceso. Conserva el caché persistente y no expongas
 `shared_report_metadata`, que contiene los hashes privados de revocación.
+
+El servicio `background-report-worker` consume en serie los trabajos solicitados
+con **Email me**, restaura el snapshot inmutable en una sesión interna, captura
+el mismo reporte interactivo con Chromium headless y envía la URL secreta usando
+la configuración Resend de feedback. `FEEDBACK_FROM_EMAIL` sigue siendo el
+remitente verificado y `FEEDBACK_TO_EMAIL` (el Gmail de CGV) queda como
+`Reply-To`. Los archivos privados/subidos no se aceptan todavía en esta cola.

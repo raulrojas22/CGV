@@ -17,8 +17,13 @@ expect_pattern <- function(txt, pattern, label) {
 
 expect_pattern(
     server_txt,
-    'orientation_input_id <- paste0\\(scope, "_orientation_pick"\\)[\\s\\S]*"Genomic"[\\s\\S]*"transcription"[\\s\\S]*minus-strand loci are mirrored',
+    'orientation_input_id <- paste0\\(scope, "_orientation_pick"\\)[\\s\\S]*header_submode_button\\([\\s\\S]*orientation_input_id,[\\s\\S]*"genomic",[\\s\\S]*"Genomic"[\\s\\S]*header_submode_button\\([\\s\\S]*orientation_input_id,[\\s\\S]*"transcription",[\\s\\S]*"5\\\\u2032\\\\u21923\\\\u2032"',
     "explicit genomic versus 5-prime-to-3-prime selector"
+)
+expect_pattern(
+    server_txt,
+    'orientation_note <- if \\(identical\\(current_orientation, "transcription"\\)\\)[\\s\\S]*minus-strand loci are mirrored',
+    "normalized orientation explains mirrored minus-strand loci"
 )
 expect_pattern(
     ui_txt,
@@ -27,8 +32,8 @@ expect_pattern(
 )
 expect_pattern(
     app_css,
-    '\\.summary-display-orientation-subbar \\{[\\s\\S]*grid-column: 1 / -1;',
-    "orientation selector has its own non-overlapping row"
+    '\\.summary-display-side--right \\{[\\s\\S]*grid-column: 3;[\\s\\S]*\\.summary-display-orientation-subbar \\{[\\s\\S]*flex: 0 1 auto;',
+    "orientation selector shares the balanced right side of the control row"
 )
 expect_pattern(
     lifecycle_txt,

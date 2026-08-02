@@ -6490,6 +6490,7 @@ html[data-app-theme="dark"] .plot-card-footer .footer-base-pill {
   grid-column: 1 / -1;
   width: 100%;
   min-width: 0;
+  container-type: inline-size;
 }
 
 .summary-context-mode-slot > .shiny-html-output {
@@ -6502,12 +6503,33 @@ html[data-app-theme="dark"] .plot-card-footer .footer-base-pill {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
-  gap: 8px 12px;
+  gap: 12px;
   padding-top: 8px;
   border-top: 1px solid rgba(116, 142, 164, 0.18);
   position: relative;
   z-index: 1;
   order: 20;
+}
+
+.summary-display-side {
+  width: 100%;
+  max-width: 390px;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.summary-display-side--left {
+  grid-column: 1;
+  justify-self: start;
+  justify-content: flex-start;
+}
+
+.summary-display-side--right {
+  grid-column: 3;
+  justify-self: start;
+  justify-content: flex-start;
 }
 
 .summary-display-mode-main {
@@ -6525,7 +6547,7 @@ html[data-app-theme="dark"] .plot-card-footer .footer-base-pill {
   border: 1px solid rgba(119, 143, 162, 0.32);
   border-radius: 12px;
   min-height: 38px;
-  min-width: 202px;
+  min-width: 190px;
   padding: 5px 14px;
   display: inline-flex;
   align-items: center;
@@ -6613,11 +6635,10 @@ html[data-app-theme="dark"] .plot-card-footer .footer-base-pill {
 }
 
 .summary-display-mode-subbar {
-  grid-column: 3;
-  justify-self: end;
   display: inline-flex;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: center;
+  flex: 0 1 auto;
   gap: 4px;
   min-width: 0;
   padding: 4px;
@@ -6625,14 +6646,30 @@ html[data-app-theme="dark"] .plot-card-footer .footer-base-pill {
   border-radius: 999px;
   background: rgba(248, 251, 254, 0.78);
   max-width: 100%;
-  overflow-x: auto;
+  overflow: visible;
   scrollbar-width: none;
 }
 
 .summary-display-context-subbar {
-  grid-column: 1;
-  justify-self: start;
   justify-content: flex-start;
+  flex: 0 1 auto;
+}
+
+.summary-display-orientation-subbar {
+  justify-content: center;
+  flex: 0 1 auto;
+}
+
+.summary-display-orientation-note {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  padding: 0 !important;
+  margin: -1px !important;
+  overflow: hidden !important;
+  clip: rect(0, 0, 0, 0) !important;
+  white-space: nowrap !important;
+  border: 0 !important;
 }
 
 .summary-display-mode-subbar::-webkit-scrollbar {
@@ -6647,6 +6684,21 @@ html[data-app-theme="dark"] .plot-card-footer .footer-base-pill {
   text-transform: uppercase;
   color: #6a7f91;
   white-space: nowrap;
+}
+
+.summary-display-detail-label {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding-inline: 3px;
+  font-size: 8.3px;
+  line-height: 1.05;
+  letter-spacing: 0.05em;
+}
+
+.summary-display-detail-label > span {
+  display: block;
 }
 
 .summary-display-submode-button {
@@ -6687,7 +6739,16 @@ html[data-app-theme="dark"] .plot-card-footer .footer-base-pill {
   padding-left: 3px;
 }
 
-.summary-genomic-context-toggle {
+.summary-display-side--right .summary-display-submode-label {
+  padding-inline: 4px;
+}
+
+.summary-display-side--right .summary-display-submode-button {
+  padding-inline: 6px;
+}
+
+.summary-genomic-context-toggle,
+.summary-genomic-ruler-toggle {
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -6695,7 +6756,9 @@ html[data-app-theme="dark"] .plot-card-footer .footer-base-pill {
 }
 
 .summary-genomic-context-toggle .fa,
-.summary-genomic-context-toggle .fas {
+.summary-genomic-context-toggle .fas,
+.summary-genomic-ruler-toggle .fa,
+.summary-genomic-ruler-toggle .fas {
   font-size: 8.5px;
 }
 
@@ -6709,6 +6772,59 @@ html[data-app-theme="dark"] .plot-card-footer .footer-base-pill {
   background: #7a5aa6;
   color: #ffffff;
   box-shadow: 0 2px 8px rgba(122, 90, 166, 0.26);
+}
+
+@container (max-width: 1050px) {
+  .summary-display-mode-control {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px 12px;
+  }
+
+  .summary-display-mode-main {
+    grid-column: 1 / -1;
+    grid-row: 1;
+  }
+
+  .summary-display-side {
+    grid-row: 2;
+    width: 100%;
+  }
+
+  .summary-display-side--left {
+    grid-column: 1;
+  }
+
+  .summary-display-side--right {
+    grid-column: 2;
+  }
+}
+
+@container (max-width: 720px) {
+  .summary-display-mode-control {
+    grid-template-columns: 1fr;
+  }
+
+  .summary-display-mode-main,
+  .summary-display-side--left,
+  .summary-display-side--right {
+    grid-column: 1;
+  }
+
+  .summary-display-mode-main {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .summary-display-side {
+    grid-row: auto;
+    justify-self: stretch;
+    justify-content: center;
+    flex-wrap: wrap;
+  }
+
+  .summary-display-mode-button {
+    min-width: 0;
+  }
 }
 
 .summary-display-mode-note {
@@ -6760,7 +6876,7 @@ html[data-app-theme="dark"] .plot-card-footer .footer-base-pill {
   }
 
   .summary-display-mode-main,
-.summary-display-mode-subbar {
+  .summary-display-side {
     grid-column: 1;
     width: 100%;
   }
@@ -6774,10 +6890,10 @@ html[data-app-theme="dark"] .plot-card-footer .footer-base-pill {
     min-width: 0;
   }
 
-  .summary-display-mode-subbar {
+  .summary-display-side {
     justify-self: stretch;
-    justify-content: flex-start;
-    overflow-x: auto;
+    justify-content: center;
+    flex-wrap: wrap;
   }
 
   .summary-context-card-inline .summary-context-gene-hint {

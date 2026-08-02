@@ -4949,28 +4949,90 @@ lastz_disk_cache_set <- function(cache_key,
     invisible(result)
 }
 
-run_lastz_process <- function(binary, args) {
-    if (requireNamespace("processx", quietly = TRUE)) {
-        return(processx::run(
-            binary,
-            args = args,
-            echo = FALSE,
-            error_on_status = FALSE,
-            timeout = lastz_process_timeout_ms()
-        ))
-    }
-    sys2_out <- system2(binary, args = args, stdout = TRUE, stderr = TRUE)
-    sys2_status <- attr(sys2_out, "status")
-    list(
-        status = if (is.null(sys2_status) || length(sys2_status) == 0L) {
-            0L
-        } else {
-            suppressWarnings(as.integer(sys2_status[1L]))
-        },
-        stdout = if (is.character(sys2_out)) sys2_out else character(0),
-        stderr = character(0),
-        timeout = FALSE
+cgv_global_lastz_slot_count <- function() {
+    app_env_int("APP_LASTZ_GLOBAL_WORKERS", 0L, min_value = 0L, max_value = 16L)
+}
+
+cgv_with_global_lastz_slot <- function(fn, base_dir = ".") {
+    slots <- cgv_global_lastz_slot_count()
+    if (slots < 1L) return(fn())
+    root <- file.path(get_cgv_cache_root(base_dir), "lastz_global_slots")
+    dir.create(root, recursive = TRUE, showWarnings = FALSE)
+    try(Sys.chmod(root, mode = "0777", use_umask = FALSE), silent = TRUE)
+    wait_seconds <- app_env_int(
+        "APP_LASTZ_GLOBAL_QUEUE_WAIT_SECONDS",
+        1800L,
+        min_value = 30L,
+        max_value = 86400L
     )
+    stale_seconds <- max(
+        300L,
+        as.integer(ceiling(lastz_process_timeout_ms() / 1000)) + 120L
+    )
+    deadline <- as.numeric(Sys.time()) + wait_seconds
+    acquired <- ""
+    repeat {
+        for (slot in seq_len(slots)) {
+            candidate <- file.path(root, sprintf("slot-%02d.lock", slot))
+            if (isTRUE(dir.create(candidate, recursive = FALSE, showWarnings = FALSE))) {
+                acquired <- candidate
+                break
+            }
+            info <- tryCatch(file.info(candidate), error = function(e) NULL)
+            age <- if (!is.null(info) && nrow(info) > 0L && !is.na(info$mtime[[1L]])) {
+                as.numeric(Sys.time()) - as.numeric(info$mtime[[1L]])
+            } else {
+                NA_real_
+            }
+            if (is.finite(age) && age > stale_seconds) {
+                unlink(candidate, recursive = TRUE, force = TRUE)
+            }
+        }
+        if (nzchar(acquired)) break
+        if (as.numeric(Sys.time()) >= deadline) {
+            return(list(
+                status = 124L,
+                stdout = character(0),
+                stderr = "Timed out while waiting for the shared LASTZ execution slot.",
+                timeout = TRUE
+            ))
+        }
+        Sys.sleep(0.1)
+    }
+    on.exit(
+        if (nzchar(acquired) && dir.exists(acquired)) {
+            unlink(acquired, recursive = TRUE, force = TRUE)
+        },
+        add = TRUE
+    )
+    fn()
+}
+
+run_lastz_process <- function(binary, args) {
+    run <- function() {
+        if (requireNamespace("processx", quietly = TRUE)) {
+            return(processx::run(
+                binary,
+                args = args,
+                echo = FALSE,
+                error_on_status = FALSE,
+                timeout = lastz_process_timeout_ms()
+            ))
+        }
+        sys2_out <- system2(binary, args = args, stdout = TRUE, stderr = TRUE)
+        sys2_status <- attr(sys2_out, "status")
+        list(
+            status = if (is.null(sys2_status) || length(sys2_status) == 0L) {
+                0L
+            } else {
+                suppressWarnings(as.integer(sys2_status[1L]))
+            },
+            stdout = if (is.character(sys2_out)) sys2_out else character(0),
+            stderr = character(0),
+            timeout = FALSE
+        )
+    }
+    cgv_with_global_lastz_slot(run)
 }
 
 wrap_fasta_sequence_lines <- function(seq_txt, width = 80L) {

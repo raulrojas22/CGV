@@ -28,6 +28,9 @@ services:
       SP_MAX_LIFETIME_MINUTES: "${SP_MAX_LIFETIME_MINUTES:-120}"
       SP_HEARTBEAT_RATE_MS: "${SP_HEARTBEAT_RATE_MS:-30000}"
       SP_APP_PERF_TIMING: "${SP_APP_PERF_TIMING:-1}"
+      SP_BACKGROUND_REPORTS_ENABLED: "${APP_BACKGROUND_REPORTS_ENABLED:-1}"
+      SP_LASTZ_GLOBAL_WORKERS: "${APP_LASTZ_GLOBAL_WORKERS:-1}"
+      SP_LASTZ_GLOBAL_QUEUE_WAIT_SECONDS: "${APP_LASTZ_GLOBAL_QUEUE_WAIT_SECONDS:-1800}"
     security_opt:
       - no-new-privileges:true
 
@@ -55,6 +58,44 @@ services:
       - ${SP_CACHE_DIR:?set-SP_CACHE_DIR-to-an-absolute-host-path}:/app/cache
     networks:
       - sp-net
+    healthcheck:
+      disable: true
+
+  background-report-worker:
+    image: "${CGV_IMAGE:-cgv:1.1.0}"
+    container_name: cgv-background-report-worker
+    restart: unless-stopped
+    command: ["Rscript", "/app/scripts/background_report_worker.R"]
+    env_file:
+      - .env
+      - path: .env.local
+        required: false
+    environment:
+      APP_DIR: "/app"
+      CGV_DATA_ROOT: "/app"
+      CGV_CACHE_DIR: "/app/cache"
+      CGV_PUBLIC_BASE_URL: "${CGV_PUBLIC_BASE_URL:-https://cgvapp.com}"
+      APP_SHARED_REPORTS_ENABLED: "1"
+      APP_BACKGROUND_REPORTS_ENABLED: "${APP_BACKGROUND_REPORTS_ENABLED:-1}"
+      APP_BACKGROUND_REPORT_POLL_SECONDS: "${APP_BACKGROUND_REPORT_POLL_SECONDS:-3}"
+      APP_BACKGROUND_REPORT_TIMEOUT_MINUTES: "${APP_BACKGROUND_REPORT_TIMEOUT_MINUTES:-30}"
+      APP_BACKGROUND_REPORT_FUTURE_WORKERS: "${APP_BACKGROUND_REPORT_FUTURE_WORKERS:-2}"
+      APP_BACKGROUND_REPORT_LASTZ_WORKERS: "${APP_BACKGROUND_REPORT_LASTZ_WORKERS:-1}"
+      APP_LASTZ_GLOBAL_WORKERS: "${APP_LASTZ_GLOBAL_WORKERS:-1}"
+      APP_LASTZ_GLOBAL_QUEUE_WAIT_SECONDS: "${APP_LASTZ_GLOBAL_QUEUE_WAIT_SECONDS:-1800}"
+      CHROMOTE_CHROME: "/usr/bin/chromium"
+    volumes:
+      - ${SP_ANNOTATIONS_DIR:?set-SP_ANNOTATIONS_DIR-to-an-absolute-host-path}:/app/annotations:ro
+      - ${SP_GENOMES_DIR:?set-SP_GENOMES_DIR-to-an-absolute-host-path}:/app/genomes:ro
+      - ${SP_GO_ANNOTATIONS_DIR:?set-SP_GO_ANNOTATIONS_DIR-to-an-absolute-host-path}:/app/go_annotations:ro
+      - ${SP_DATA_DIR:?set-SP_DATA_DIR-to-an-absolute-host-path}:/app/data:ro
+      - ${SP_CACHE_DIR:?set-SP_CACHE_DIR-to-an-absolute-host-path}:/app/cache
+      - ${SP_NCBI_DOWNLOADS_DIR:?set-SP_NCBI_DOWNLOADS_DIR-to-an-absolute-host-path}:/app/ncbi_downloads
+    networks:
+      - sp-net
+    shm_size: "256mb"
+    security_opt:
+      - no-new-privileges:true
     healthcheck:
       disable: true
 

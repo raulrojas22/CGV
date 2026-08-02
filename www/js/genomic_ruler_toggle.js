@@ -86,6 +86,10 @@
       buttons[i].title = rulerVisible
         ? 'Hide genomic coordinates and compressed distance scale'
         : 'Show genomic coordinates and compressed distance scale';
+      var label = buttons[i].querySelector('.summary-genomic-ruler-toggle-label');
+      if (label) {
+        label.textContent = rulerVisible ? 'Hide scale' : 'Show scale';
+      }
     }
   }
 

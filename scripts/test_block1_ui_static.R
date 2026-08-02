@@ -7,6 +7,8 @@ toggle_txt <- paste(readLines(file.path("www", "js", "genomic_ruler_toggle.js"),
 stopifnot(grepl('summary-genomic-context-toggle-label", "Hide neighbors"', ui_txt, fixed = TRUE))
 stopifnot(grepl('summary-genomic-context-toggle-label", "Hide overlaps"', ui_txt, fixed = TRUE))
 stopifnot(grepl("label.textContent = (active ? 'Hide ' : 'Show ')", toggle_txt, fixed = TRUE))
+stopifnot(grepl('summary-genomic-ruler-toggle-label", "Hide scale"', ui_txt, fixed = TRUE))
+stopifnot(grepl("label.textContent = rulerVisible ? 'Hide scale' : 'Show scale'", toggle_txt, fixed = TRUE))
 
 stopifnot(grepl("analytics_labels_with_n <- function", server_txt, fixed = TRUE))
 stopifnot(grepl('"N = ", format(nrow(all_exons)', server_txt, fixed = TRUE))

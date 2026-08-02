@@ -61,4 +61,31 @@ without allocating a ShinyProxy application container. The report route:
 - leaves revocation metadata outside the public report directory.
 
 The lightweight `report-cleaner` service runs every 15 minutes against the
-shared cache. Set `CGV_PUBLIC_BASE_URL` to the public origin before deployment.
+shared cache. `CGV_PUBLIC_BASE_URL` defaults to `https://cgvapp.com` in the
+report worker and can be overridden when deploying another public origin.
+
+## Background report email worker
+
+`docker-compose.shinyproxy.yml` also starts one
+`cgv-background-report-worker`. When a user selects **Email me** in the Share
+dialog, the app writes an immutable session snapshot under
+`${SP_CACHE_DIR}/background_reports`. The worker claims jobs serially, restores
+the snapshot in an internal CGV process, uses Chromium headless to run the
+existing complete report capture, publishes through `/share/<token>`, and sends
+the secret URL with the existing Resend branding.
+
+The report sender inherits `FEEDBACK_RESEND_API_KEY`, `FEEDBACK_FROM_EMAIL`,
+and `FEEDBACK_TO_EMAIL` by default. Thus it uses the verified CGV sender and
+directs replies to the CGV Gmail inbox. Optional `REPORT_*` variables can
+override that identity. Enable and tune the worker with:
+
+```dotenv
+APP_BACKGROUND_REPORTS_ENABLED=1
+APP_BACKGROUND_REPORT_TIMEOUT_MINUTES=30
+APP_BACKGROUND_REPORT_FUTURE_WORKERS=2
+APP_BACKGROUND_REPORT_LASTZ_WORKERS=1
+APP_LASTZ_GLOBAL_WORKERS=1
+```
+
+Chromium and the R package `chromote` live in `cgv-deps`; the deployment script
+automatically rebuilds that dependency image when either is missing.

@@ -130,11 +130,24 @@ For deployment details, see [DOCKER_DEPLOY.md](DOCKER_DEPLOY.md).
 ### LASTZ resource and cache policy
 
 - Web containers run at most one LASTZ job concurrently (`APP_LASTZ_WORKERS=1`); Desktop uses up to two when the machine has enough CPUs.
+- ShinyProxy sessions and the detached report worker also share a filesystem semaphore (`APP_LASTZ_GLOBAL_WORKERS=1` on the NAS), so a new alignment waits instead of competing with an active emailed report.
 - LASTZ Blocks and MultiPIP share one General+CIGARX alignment for the same reference, loci, window, binary, and arguments. Changing the alignment window creates a new exact alignment instead of cropping a larger approximation.
 - The in-memory cache is bounded by both entry count and bytes. Successful alignments for preloaded genomes may also use the shared `cache/lastz_alignments` disk cache, bounded by size and TTL.
 - Uploaded/private genome paths are excluded from the persistent cache. Timeouts and engine errors are never cached.
 
 The main controls are `APP_LASTZ_CACHE_MAX_ENTRIES`, `APP_LASTZ_CACHE_MAX_MB`, `APP_LASTZ_DISK_CACHE_MAX_MB`, and `APP_LASTZ_DISK_CACHE_TTL_DAYS`.
+
+### Background interactive reports
+
+Web users can choose **Email me** in Share analysis. CGV stores an immutable
+work-session snapshot in the shared cache, and the serial
+`background-report-worker` restores it in an internal Shiny session. Chromium
+headless drives the existing complete capture pipeline, so the emailed secret
+URL opens the same interactive, read-only report produced in the foreground.
+The user may continue working or close the original ShinyProxy session after
+the job is queued; later changes create a separate snapshot and do not alter the
+queued report. Background delivery initially accepts portable/preloaded data,
+not session-private uploads.
 
 <details>
 <summary><strong>First-time deployment checklist</strong></summary>

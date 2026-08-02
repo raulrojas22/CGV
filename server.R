@@ -28224,7 +28224,7 @@ function(input, output, session) {
             `aria-label` = "Hide genomic context scale",
             title = "Show or hide genomic coordinates and compressed neighbor-distance context",
             icon("ruler-horizontal"),
-            span("Scale")
+            span(class = "summary-genomic-ruler-toggle-label", "Hide scale")
         )
     }
 
@@ -28297,26 +28297,35 @@ function(input, output, session) {
             }
         } else {
             div(
-                class = "summary-display-mode-subbar",
-                span(class = "summary-display-submode-label", "Visual detail"),
+                class = "summary-display-mode-subbar summary-display-detail-subbar",
+                span(
+                    class = "summary-display-submode-label summary-display-detail-label",
+                    span("Visual"),
+                    span("Detail")
+                ),
                 header_submode_button(input_id, "compact", "Compact", active = identical(current_mode, "compact")),
-                header_submode_button(input_id, "detailed", "Detailed", active = identical(current_mode, "detailed")),
-                header_genomic_ruler_button()
+                header_submode_button(input_id, "detailed", "Detailed", active = identical(current_mode, "detailed"))
             )
         }
         context_subbar <- if (!is_alignment) {
             div(
                 class = "summary-display-mode-subbar summary-display-context-subbar",
-                span(class = "summary-display-submode-label summary-display-context-label", "Context"),
                 header_genomic_context_button("neighbors", "Neighbors", "location-arrow"),
-                header_genomic_context_button("overlaps", "Overlaps", "layer-group")
+                header_genomic_context_button("overlaps", "Overlaps", "layer-group"),
+                header_genomic_ruler_button()
             )
         } else {
             NULL
         }
+        orientation_note <- if (identical(current_orientation, "transcription")) {
+            "All genes face 5\u2032\u21923\u2032; minus-strand loci are mirrored"
+        } else {
+            "Native genomic coordinates"
+        }
         orientation_subbar <- if (!is_alignment) {
             div(
                 class = "summary-display-mode-subbar summary-display-orientation-subbar",
+                title = orientation_note,
                 span(class = "summary-display-submode-label", "Direction"),
                 header_submode_button(
                     orientation_input_id,
@@ -28332,20 +28341,30 @@ function(input, output, session) {
                 ),
                 span(
                     class = "summary-display-orientation-note",
-                    if (identical(current_orientation, "transcription")) {
-                        "All genes face 5\u2032\u21923\u2032; minus-strand loci are mirrored"
-                    } else {
-                        "Native genomic coordinates"
-                    }
+                    `aria-live` = "polite",
+                    orientation_note
                 )
             )
         } else {
             NULL
         }
+        left_controls <- if (!is_alignment) {
+            div(
+                class = "summary-display-side summary-display-side--left",
+                context_subbar
+            )
+        } else {
+            NULL
+        }
+        right_controls <- div(
+            class = "summary-display-side summary-display-side--right",
+            subbar,
+            orientation_subbar
+        )
 
         div(
             class = "summary-display-mode-control",
-            context_subbar,
+            left_controls,
             div(
                 class = "summary-display-mode-main",
                 header_mode_button(
@@ -28370,8 +28389,7 @@ function(input, output, session) {
                     title = align_title
                 )
             ),
-            subbar,
-            orientation_subbar
+            right_controls
         )
     }
 
@@ -34790,6 +34808,36 @@ function(input, output, session) {
     # PORTABLE ANALYSIS / STATIC READ-ONLY REPORTS
     # =========================================================================
     if (isTRUE(app_env_flag("APP_SHARED_REPORTS_ENABLED", default = TRUE))) {
+        background_job_path <- trimws(Sys.getenv("CGV_BACKGROUND_REPORT_JOB_PATH", ""))
+        background_job <- if (nzchar(background_job_path)) {
+            cgv_read_background_report_job(path = background_job_path)
+        } else {
+            NULL
+        }
+        background_bootstrap <- is.list(background_job) &&
+            isTRUE(app_env_flag("CGV_BACKGROUND_REPORT_RENDERER", default = FALSE))
+        background_job_id <- as.character((background_job %||% list())$id %||% "")
+        mark_background_ready <- function(result) {
+            if (!isTRUE(background_bootstrap) || !nzchar(background_job_id)) return(invisible(NULL))
+            cgv_update_background_report(
+                background_job_id,
+                state = "ready",
+                result = result,
+                error = "",
+                base_dir = "."
+            )
+            invisible(NULL)
+        }
+        mark_background_failed <- function(message) {
+            if (!isTRUE(background_bootstrap) || !nzchar(background_job_id)) return(invisible(NULL))
+            try(cgv_update_background_report(
+                background_job_id,
+                state = "failed",
+                error = as.character(message %||% "Background report generation failed."),
+                base_dir = "."
+            ), silent = TRUE)
+            invisible(NULL)
+        }
         sharedAnalysisDomain <- init_shared_analysis_domain(
             input = input,
             output = output,
@@ -34969,9 +35017,55 @@ function(input, output, session) {
                 len <- suppressWarnings(as.numeric(get_chromosome_length_for_chr(ann_path, as.character(chr_name))))
                 if (is.finite(len) && len > 0) len else NA_real_
             },
+            enqueue_background_report_fn = function(snapshot, email, options) {
+                cgv_enqueue_background_report(
+                    snapshot = snapshot,
+                    email = email,
+                    options = options,
+                    base_dir = "."
+                )
+            },
+            background_report_ready_fn = mark_background_ready,
+            background_report_failed_fn = mark_background_failed,
+            background_bootstrap = background_bootstrap,
             app_version = cgv_release_version,
             base_dir = "."
         )
+
+        if (isTRUE(background_bootstrap)) {
+            session$onFlushed(function() {
+                restored <- tryCatch(
+                    shiny::isolate(apply_work_session_snapshot(background_job$snapshot)),
+                    error = function(e) e
+                )
+                if (inherits(restored, "error")) {
+                    mark_background_failed(paste0("Could not restore the queued analysis: ", conditionMessage(restored)))
+                    return(invisible(NULL))
+                }
+                try(cgv_update_background_report(
+                    background_job_id,
+                    state = "rendering",
+                    error = "",
+                    base_dir = "."
+                ), silent = TRUE)
+                session$onFlushed(function() {
+                    launch <- function() {
+                        if (session$isClosed()) return(invisible(NULL))
+                        session$sendCustomMessage("cgv:background-report-bootstrap", list(
+                            options = background_job$options %||% list(),
+                            settle_ms = 3500L
+                        ))
+                        invisible(NULL)
+                    }
+                    if (requireNamespace("later", quietly = TRUE)) {
+                        later::later(launch, delay = 2)
+                    } else {
+                        launch()
+                    }
+                }, once = TRUE)
+                invisible(NULL)
+            }, once = TRUE)
+        }
     } else {
         shinyjs::hide("open_share_analysis_homo")
         shinyjs::hide("open_share_analysis_ortho")

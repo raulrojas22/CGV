@@ -170,8 +170,8 @@ if [ -n \"\$pid\" ] && kill -0 \"\$pid\" 2>/dev/null; then
 else
   echo '  No habia tunel CGV activo'
 fi
-${REMOTE_DOCKER} stop cgv-shinyproxy cgv-nginx >/dev/null 2>&1 || true
-${REMOTE_DOCKER} rm cgv-shinyproxy cgv-nginx >/dev/null 2>&1 || true
+${REMOTE_DOCKER} stop cgv-shinyproxy cgv-nginx cgv-background-report-worker >/dev/null 2>&1 || true
+${REMOTE_DOCKER} rm cgv-shinyproxy cgv-nginx cgv-background-report-worker >/dev/null 2>&1 || true
 echo '  Despliegue ShinyProxy anterior retirado (si existia)'
 "
 
@@ -180,8 +180,11 @@ echo ""
 echo "[3/5] Reconstruyendo imagen Docker en el NAS..."
 nssh "
   cd ${NAS_PATH}/app
-  if [ '${REBUILD_R_DEPS}' = '1' ] || ! ${REMOTE_DOCKER} image inspect '${CGV_DEPS_IMAGE}' >/dev/null 2>&1; then
-    echo '  Construyendo ${CGV_DEPS_IMAGE} (primera vez o actualización explícita de dependencias)...'
+  if [ '${REBUILD_R_DEPS}' = '1' ] ||
+     ! ${REMOTE_DOCKER} image inspect '${CGV_DEPS_IMAGE}' >/dev/null 2>&1 ||
+     ! ${REMOTE_DOCKER} run --rm '${CGV_DEPS_IMAGE}' chromium --version >/dev/null 2>&1 ||
+     ! ${REMOTE_DOCKER} run --rm '${CGV_DEPS_IMAGE}' Rscript -e 'library(chromote)' >/dev/null 2>&1; then
+    echo '  Construyendo ${CGV_DEPS_IMAGE} (incluye Chromium/chromote para reportes en segundo plano)...'
     ${REMOTE_DOCKER} build --pull=false -t '${CGV_DEPS_IMAGE}' -f Dockerfile.dependencies .
   else
     echo '  Reutilizando ${CGV_DEPS_IMAGE}; no se instalarán paquetes R.'
