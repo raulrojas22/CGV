@@ -21,6 +21,38 @@ worker_log <- function(...) {
     message(sprintf("[background-report-worker] %s", sprintf(...)))
 }
 
+worker_home <- trimws(Sys.getenv("HOME", ""))
+if (nzchar(worker_home) && startsWith(worker_home, "/tmp/")) {
+    dir.create(worker_home, recursive = TRUE, showWarnings = FALSE)
+}
+
+resolve_worker_chrome <- function() {
+    configured <- trimws(Sys.getenv("CHROMOTE_CHROME", ""))
+    discovered <- unname(Sys.which(c(
+        "google-chrome",
+        "google-chrome-stable",
+        "chromium",
+        "chromium-browser"
+    )))
+    candidates <- unique(c(configured, discovered))
+    candidates <- candidates[nzchar(candidates) & file.exists(candidates)]
+    for (candidate in candidates) {
+        usable <- tryCatch({
+            version <- suppressWarnings(system2(candidate, "--version", stdout = TRUE, stderr = TRUE))
+            identical(as.integer(attr(version, "status") %||% 0L), 0L)
+        }, error = function(e) FALSE)
+        if (isTRUE(usable)) return(normalizePath(candidate, winslash = "/", mustWork = TRUE))
+    }
+    stop(
+        "No usable headless Chrome/Chromium executable was found. ",
+        "Install Google Chrome in the CGV dependency image or set CHROMOTE_CHROME to a working executable."
+    )
+}
+
+worker_chrome <- resolve_worker_chrome()
+Sys.setenv(CHROMOTE_CHROME = worker_chrome)
+worker_log("headless browser=%s", worker_chrome)
+
 required <- c("processx", "chromote", "httr2", "jsonlite")
 missing <- required[!vapply(required, requireNamespace, logical(1), quietly = TRUE)]
 if (length(missing)) stop("Missing worker packages: ", paste(missing, collapse = ", "))

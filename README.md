@@ -139,10 +139,11 @@ The main controls are `APP_LASTZ_CACHE_MAX_ENTRIES`, `APP_LASTZ_CACHE_MAX_MB`, `
 
 ### Background interactive reports
 
-Web users can choose **Email me** in Share analysis. CGV stores an immutable
-work-session snapshot in the shared cache, and the serial
-`background-report-worker` restores it in an internal Shiny session. Chromium
-headless drives the existing complete capture pipeline, so the emailed secret
+Web users can choose **Email me** in Share analysis or **Email full report**
+beside the Multi-Gene and Cross-Species LASTZ/MultiPIP controls. CGV stores an
+immutable work-session snapshot in the shared cache, and the serial
+`background-report-worker` restores it in an internal Shiny session. Google
+Chrome headless drives the existing complete capture pipeline, so the emailed secret
 URL opens the same interactive, read-only report produced in the foreground.
 The user may continue working or close the original ShinyProxy session after
 the job is queued; later changes create a separate snapshot and do not alter the

@@ -1525,7 +1525,12 @@ init_shared_analysis_domain <- function(input,
         missing = character(0),
         preview = list(),
         busy = FALSE,
-        busy_message = ""
+        busy_message = "",
+        alignment_request = NULL,
+        alignment_busy = FALSE,
+        alignment_error = "",
+        alignment_result = NULL,
+        background_submissions = numeric(0)
     )
 
     has_results <- shiny::reactive({
@@ -1744,6 +1749,215 @@ init_shared_analysis_domain <- function(input,
         contentType = "text/html"
     )
 
+    enqueue_background_snapshot <- function(email,
+                                            include_multi_gene,
+                                            include_cross_species,
+                                            ttl_days = 7L,
+                                            run_lastz = FALSE,
+                                            include_private = FALSE,
+                                            allow_downloads = FALSE,
+                                            request_kind = "report",
+                                            alignment_mode = "") {
+        if (!cgv_background_reports_enabled()) {
+            stop("Background report delivery is not enabled on this deployment.")
+        }
+        email <- trimws(cgv_safe_scalar(email))
+        if (!feedback_is_valid_email(email)) {
+            stop("Enter a valid email address for report delivery.")
+        }
+        now <- as.numeric(Sys.time())
+        recent <- as.numeric(state$background_submissions %||% numeric(0))
+        recent <- recent[is.finite(recent) & recent > now - 3600]
+        if (length(recent) && now - max(recent) < 20) {
+            stop("Please wait a few seconds before queueing another report.")
+        }
+        if (length(recent) >= 6L) {
+            stop("This session has reached the background report limit. Please try again in one hour.")
+        }
+        snapshot <- cgv_scope_shared_snapshot(
+            build_session_snapshot_fn(),
+            include_multi_gene = isTRUE(include_multi_gene),
+            include_cross_species = isTRUE(include_cross_species)
+        )
+        options <- list(
+            capture_mode = "complete",
+            include_multi_gene = isTRUE(include_multi_gene),
+            include_cross_species = isTRUE(include_cross_species),
+            include_private = isTRUE(include_private),
+            allow_downloads = isTRUE(allow_downloads),
+            ttl_days = suppressWarnings(as.integer(ttl_days %||% 7L)),
+            run_lastz = isTRUE(run_lastz),
+            request_kind = cgv_safe_scalar(request_kind, "report"),
+            alignment_mode = cgv_safe_scalar(alignment_mode)
+        )
+        queued <- if (is.function(enqueue_background_report_fn)) {
+            enqueue_background_report_fn(snapshot, email, options)
+        } else {
+            cgv_enqueue_background_report(snapshot, email, options, base_dir = base_dir)
+        }
+        state$background_submissions <- c(recent, now)
+        queued
+    }
+
+    output$alignment_email_status_ui <- shiny::renderUI({
+        if (isTRUE(state$alignment_busy)) {
+            return(shiny::div(
+                class = "cgv-share-progress",
+                shiny::icon("spinner", class = "fa-spin"),
+                shiny::span("Freezing the current analysis and placing it in the report queue…")
+            ))
+        }
+        if (nzchar(state$alignment_error %||% "")) {
+            return(shiny::div(
+                class = "cgv-share-callout cgv-share-callout-error",
+                shiny::icon("triangle-exclamation"),
+                shiny::span(state$alignment_error)
+            ))
+        }
+        result <- state$alignment_result
+        if (!is.list(result)) return(NULL)
+        shiny::div(
+            class = "cgv-share-callout cgv-share-callout-success",
+            shiny::icon("envelope-circle-check"),
+            shiny::div(
+                shiny::strong("Alignment report queued."),
+                shiny::p("You can close this page. CGV will email the complete interactive report when LASTZ and MultiPIP finish."),
+                shiny::p(class = "help-block", paste("Delivery:", result$email)),
+                shiny::p(class = "help-block", paste("Reference:", result$job_id))
+            )
+        )
+    })
+
+    show_alignment_email_dialog <- function(workflow = c("homo", "ortho"), mode = c("blocks", "multipip")) {
+        workflow <- match.arg(workflow)
+        mode <- match.arg(mode)
+        if (cgv_runtime_is_desktop()) {
+            shiny::showNotification(
+                "Background email delivery is available in the CGV web version. The Desktop app keeps analysis data on this computer.",
+                type = "warning",
+                duration = 10
+            )
+            return(invisible(NULL))
+        }
+        count <- if (identical(workflow, "homo")) {
+            length(active_homo_ids_rv() %||% integer(0))
+        } else {
+            length(active_ortho_ids_rv() %||% integer(0))
+        }
+        if (count < 2L) {
+            shiny::showNotification("At least two compatible results are required for an alignment report.", type = "warning")
+            return(invisible(NULL))
+        }
+        state$alignment_request <- list(workflow = workflow, mode = mode)
+        state$alignment_busy <- FALSE
+        state$alignment_error <- ""
+        state$alignment_result <- NULL
+        workflow_label <- if (identical(workflow, "homo")) "Multi-Gene" else "Cross-Species"
+        mode_label <- if (identical(mode, "multipip")) "MultiPIP" else "LASTZ blocks"
+        shiny::showModal(shiny::modalDialog(
+            title = shiny::div(
+                class = "cgv-share-modal-title",
+                shiny::icon("envelope-circle-check"),
+                shiny::div(
+                    shiny::span(class = "cgv-share-modal-kicker", "BACKGROUND DELIVERY"),
+                    shiny::span("Email the complete alignment report")
+                )
+            ),
+            size = "m",
+            easyClose = TRUE,
+            shiny::div(
+                id = "cgv-share-modal-shell",
+                class = "cgv-share-modal-shell cgv-alignment-email-modal",
+                shiny::div(
+                    class = "cgv-share-intro",
+                    shiny::p(
+                        "CGV will freeze the current ", shiny::strong(workflow_label),
+                        " analysis, run LASTZ and MultiPIP in a separate worker, and create the full interactive report."
+                    ),
+                    shiny::p(
+                        class = "help-block",
+                        paste0("Requested from the ", mode_label, " view. You can keep working or close this page after it enters the queue.")
+                    )
+                ),
+                shiny::textInput(
+                    "alignment_delivery_email",
+                    "Email address",
+                    placeholder = "name@example.org",
+                    width = "100%"
+                ),
+                shiny::div(
+                    class = "cgv-share-privacy-note",
+                    shiny::icon("shield-halved"),
+                    shiny::span("The email contains a private secret link valid for 7 days. Background delivery supports preloaded CGV datasets only.")
+                ),
+                shiny::uiOutput("alignment_email_status_ui")
+            ),
+            footer = shiny::tagList(
+                shiny::modalButton("Cancel"),
+                shiny::actionButton(
+                    "queue_alignment_report_email",
+                    "Email full report",
+                    icon = shiny::icon("paper-plane"),
+                    class = "btn btn-primary"
+                )
+            )
+        ))
+        invisible(NULL)
+    }
+
+    shiny::observeEvent(input$email_homo_pip_report, {
+        show_alignment_email_dialog("homo", "blocks")
+    }, ignoreInit = TRUE)
+    shiny::observeEvent(input$email_homo_multipip_report, {
+        show_alignment_email_dialog("homo", "multipip")
+    }, ignoreInit = TRUE)
+    shiny::observeEvent(input$email_ortho_pip_report, {
+        show_alignment_email_dialog("ortho", "blocks")
+    }, ignoreInit = TRUE)
+    shiny::observeEvent(input$email_ortho_multipip_report, {
+        show_alignment_email_dialog("ortho", "multipip")
+    }, ignoreInit = TRUE)
+
+    shiny::observeEvent(input$queue_alignment_report_email, {
+        if (isTRUE(state$alignment_busy) || is.list(state$alignment_result)) return(invisible(NULL))
+        request <- shiny::isolate(state$alignment_request)
+        if (!is.list(request)) return(invisible(NULL))
+        email <- trimws(cgv_safe_scalar(input$alignment_delivery_email))
+        state$alignment_busy <- TRUE
+        state$alignment_error <- ""
+        shinyjs::disable("queue_alignment_report_email")
+        queued <- tryCatch(
+            enqueue_background_snapshot(
+                email = email,
+                include_multi_gene = identical(request$workflow, "homo"),
+                include_cross_species = identical(request$workflow, "ortho"),
+                ttl_days = 7L,
+                run_lastz = TRUE,
+                include_private = FALSE,
+                allow_downloads = FALSE,
+                request_kind = "alignment",
+                alignment_mode = request$mode
+            ),
+            error = function(e) e
+        )
+        state$alignment_busy <- FALSE
+        if (inherits(queued, "error")) {
+            state$alignment_error <- paste0("Could not queue the alignment report: ", conditionMessage(queued))
+            shinyjs::enable("queue_alignment_report_email")
+            return(invisible(NULL))
+        }
+        state$alignment_result <- list(
+            job_id = cgv_safe_scalar(queued$id),
+            email = cgv_safe_scalar(queued$email, email)
+        )
+        shiny::showNotification(
+            "Alignment report queued. You may close CGV; the interactive link will arrive by email.",
+            type = "message",
+            duration = 10
+        )
+        invisible(NULL)
+    }, ignoreInit = TRUE)
+
     show_share_analysis_dialog <- function() {
         if (!isTRUE(has_results())) return(invisible(NULL))
         state$result <- NULL
@@ -1798,7 +2012,8 @@ init_shared_analysis_domain <- function(input,
             figure_studio = length(studio$panels %||% list()) > 0L,
             synteny_possible = length(active_ortho_ids_rv() %||% integer(0)) > 1L ||
                 homo_synteny_available,
-            lastz_eligible = length(active_ortho_ids_rv() %||% integer(0)) > 1L,
+            lastz_eligible = length(active_ortho_ids_rv() %||% integer(0)) > 1L ||
+                (length(active_homo_ids_rv() %||% integer(0)) > 1L && homo_synteny_available),
             has_private_uploads = any(vapply(snapshot_plots, plot_has_uploaded_source, logical(1)))
         )
         desktop <- cgv_runtime_is_desktop()
@@ -1966,7 +2181,7 @@ init_shared_analysis_domain <- function(input,
                             value = FALSE
                         ),
                         shiny::p(
-                            "Optional and computationally intensive. CGV will run the compatible Cross-Species comparison, which can add several minutes, and include both completed alignment views."
+                            "Optional and computationally intensive. CGV will run each compatible selected workflow, which can add several minutes, and include the completed LASTZ and MultiPIP views."
                         )
                         )
                         if (isTRUE(state$preview$multi_gene > 0L) &&
@@ -2243,40 +2458,24 @@ init_shared_analysis_domain <- function(input,
             return(invisible(NULL))
         }
         if (background_delivery) {
-            if (!cgv_background_reports_enabled()) {
-                state$error <- "Background report delivery is not enabled on this deployment."
-                return(invisible(NULL))
-            }
             email <- trimws(cgv_safe_scalar(input$share_delivery_email))
-            if (!feedback_is_valid_email(email)) {
-                state$error <- "Enter a valid email address for report delivery."
-                return(invisible(NULL))
-            }
             state$busy <- TRUE
             state$error <- ""
             state$result <- NULL
             state$busy_message <- "Saving an immutable analysis snapshot in the background queue…"
-            queued <- tryCatch({
-                snapshot <- cgv_scope_shared_snapshot(
-                    build_session_snapshot_fn(),
-                    include_multi_gene = include_multi_gene,
-                    include_cross_species = include_cross_species
-                )
-                options <- list(
-                    capture_mode = "complete",
+            queued <- tryCatch(
+                enqueue_background_snapshot(
+                    email = email,
                     include_multi_gene = include_multi_gene,
                     include_cross_species = include_cross_species,
                     include_private = isTRUE(input$share_include_private),
                     allow_downloads = isTRUE(input$share_allow_downloads),
                     ttl_days = ttl,
-                    run_lastz = isTRUE(input$share_run_lastz)
-                )
-                if (is.function(enqueue_background_report_fn)) {
-                    enqueue_background_report_fn(snapshot, email, options)
-                } else {
-                    cgv_enqueue_background_report(snapshot, email, options, base_dir = base_dir)
-                }
-            }, error = function(e) e)
+                    run_lastz = isTRUE(input$share_run_lastz),
+                    request_kind = "report"
+                ),
+                error = function(e) e
+            )
             state$busy <- FALSE
             if (inherits(queued, "error")) {
                 state$error <- paste0("Could not queue the background report: ", conditionMessage(queued))
@@ -2295,6 +2494,11 @@ init_shared_analysis_domain <- function(input,
             return(invisible(NULL))
         }
         lastz_contexts <- character(0)
+        homo_lastz_available <- include_multi_gene && homo_count > 1L && isTRUE(tryCatch(
+            if (is.function(homo_synteny_available_fn)) homo_synteny_available_fn() else FALSE,
+            error = function(e) FALSE
+        ))
+        if (homo_lastz_available) lastz_contexts <- c(lastz_contexts, "homo")
         if (include_cross_species && ortho_count > 1L) lastz_contexts <- c(lastz_contexts, "ortho")
         homo_synteny_available <- complete_capture && isTRUE(tryCatch(
             if (is.function(homo_synteny_available_fn)) homo_synteny_available_fn() else FALSE,

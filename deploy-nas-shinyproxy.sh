@@ -235,13 +235,14 @@ nssh "
   cd ${NAS_APP_DIR}
   if [ '${REBUILD_R_DEPS}' = '1' ] ||
      ! ${REMOTE_DOCKER} image inspect '${CGV_DEPS_IMAGE}' >/dev/null 2>&1 ||
-     ! ${REMOTE_DOCKER} run --rm '${CGV_DEPS_IMAGE}' chromium --version >/dev/null 2>&1 ||
+     ! ${REMOTE_DOCKER} run --rm --entrypoint /usr/bin/google-chrome '${CGV_DEPS_IMAGE}' --version >/dev/null 2>&1 ||
      ! ${REMOTE_DOCKER} run --rm '${CGV_DEPS_IMAGE}' Rscript -e 'library(chromote)' >/dev/null 2>&1; then
-    echo '  Construyendo ${CGV_DEPS_IMAGE} (incluye Chromium/chromote para reportes en segundo plano)...'
+    echo '  Construyendo ${CGV_DEPS_IMAGE} (incluye Google Chrome/chromote para reportes en segundo plano)...'
     ${REMOTE_DOCKER} build --pull=false -t '${CGV_DEPS_IMAGE}' -f Dockerfile.dependencies .
   else
     echo '  Reutilizando ${CGV_DEPS_IMAGE}; no se instalarán paquetes R.'
   fi
+  ${REMOTE_DOCKER} run --rm --entrypoint /usr/bin/google-chrome '${CGV_DEPS_IMAGE}' --version >/dev/null
   CGV_DEPS_IMAGE='${CGV_DEPS_IMAGE}' ${REMOTE_DOCKER} compose build
 "
 

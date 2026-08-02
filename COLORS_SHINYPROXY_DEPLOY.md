@@ -111,7 +111,9 @@ Los cambios normales de R, JavaScript, CSS o contenido reutilizan:
 cgv-deps:1.0.0
 ```
 
-El deploy comprueba que la base contenga Chromium y el paquete R `chromote`.
+El deploy comprueba que la base contenga Google Chrome headless utilizable y el
+paquete R `chromote`; el paquete `chromium` de Ubuntu no se usa porque sólo
+instala un lanzador de Snap que no funciona dentro del contenedor.
 En la primera publicación del sistema de reportes la reconstruirá
 automáticamente si faltan. Para forzar una reconstrucción posterior:
 

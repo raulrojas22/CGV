@@ -186,6 +186,13 @@ echo "  Imagen CGV activa: ${CURRENT_IMAGE}"
 echo "  HTTP interno: proxy=${PROXY_CODE}, nginx=${NGINX_CODE}"
 
 if [[ "$MODE" == "check" ]]; then
+  WORKER_STATE="$(rssh "podman inspect '${BACKGROUND_WORKER_NAME}' --format '{{.State.Status}}' 2>/dev/null || true")"
+  WORKER_IMAGE="$(rssh "podman inspect '${BACKGROUND_WORKER_NAME}' --format '{{.ImageName}}' 2>/dev/null || true")"
+  [[ "$WORKER_STATE" == "running" ]] || die "el worker de reportes no está activo: ${WORKER_STATE:-ausente}"
+  [[ "$WORKER_IMAGE" == "$CURRENT_IMAGE" ]] || die "el worker usa ${WORKER_IMAGE:-ninguna}, no ${CURRENT_IMAGE}"
+  rssh "podman exec '${BACKGROUND_WORKER_NAME}' /usr/bin/google-chrome --version >/dev/null" || \
+    die "el worker no contiene un navegador headless utilizable; los reportes por correo fallarán"
+  echo "  Worker:     ${WORKER_STATE}, navegador headless OK"
   echo ""
   echo "CHECK OK: no se realizaron cambios en Colors."
   exit 0
@@ -254,10 +261,10 @@ rsync -az --delete-delay --itemize-changes \
   --exclude='/deploy/nginx/cgv-shinyproxy-colors.conf' \
   "${SCRIPT_DIR}/" "${REMOTE_TARGET}:${APP_DIR}/"
 
-# Copy only the three existing feedback mail variables. The minimal file is
-# never tracked, is mode 0600 on Colors, and is mounted only into the worker.
+# Copy only the allow-listed mail variables. The minimal file is never tracked,
+# is mode 0600 on Colors, and is mounted only into the background worker.
 EMAIL_ENV_STAGING="$(mktemp "${TMPDIR:-/tmp}/cgv-colors-report-email.XXXXXX")"
-awk '/^(FEEDBACK_RESEND_API_KEY|FEEDBACK_TO_EMAIL|FEEDBACK_FROM_EMAIL)=/' \
+awk '/^(FEEDBACK_RESEND_API_KEY|FEEDBACK_TO_EMAIL|FEEDBACK_FROM_EMAIL|REPORT_FROM_EMAIL|REPORT_REPLY_TO_EMAIL|REPORT_LOGO_PATH)=/' \
   "$LOCAL_EMAIL_ENV" > "$EMAIL_ENV_STAGING"
 chmod 600 "$EMAIL_ENV_STAGING"
 rsync -az --chmod=Fu=rw,Fgo= \
@@ -291,17 +298,18 @@ rssh "set -e
 echo ""
 echo "[4/7] Construyendo imagen inmutable ${NEW_IMAGE}..."
 DEPS_HAVE_REPORT_RUNTIME=0
-if rssh "podman image exists '${CGV_DEPS_IMAGE}' && podman run --rm --entrypoint /usr/bin/which '${CGV_DEPS_IMAGE}' chromium >/dev/null && podman run --rm --entrypoint Rscript '${CGV_DEPS_IMAGE}' -e \"quit(status=if(requireNamespace('chromote', quietly=TRUE)) 0 else 1)\" >/dev/null"; then
+if rssh "podman image exists '${CGV_DEPS_IMAGE}' && podman run --rm --entrypoint /usr/bin/google-chrome '${CGV_DEPS_IMAGE}' --version >/dev/null && podman run --rm --entrypoint Rscript '${CGV_DEPS_IMAGE}' -e \"quit(status=if(requireNamespace('chromote', quietly=TRUE)) 0 else 1)\" >/dev/null"; then
   DEPS_HAVE_REPORT_RUNTIME=1
 fi
 if [[ "$REBUILD_R_DEPS" == "1" || "$DEPS_HAVE_REPORT_RUNTIME" == "0" ]]; then
   if [[ "$DEPS_HAVE_REPORT_RUNTIME" == "0" ]]; then
-    echo "  La base no contiene Chromium/chromote; se reconstruirá automáticamente."
+    echo "  La base no contiene Google Chrome/chromote; se reconstruirá automáticamente."
   fi
   rssh "cd '${APP_DIR}' && podman build --pull=never -t '${CGV_DEPS_IMAGE}' -f Dockerfile.dependencies ."
 else
-  echo "  Chromium y chromote ya están disponibles en ${CGV_DEPS_IMAGE}."
+  echo "  Google Chrome y chromote ya están disponibles en ${CGV_DEPS_IMAGE}."
 fi
+rssh "podman run --rm --entrypoint /usr/bin/google-chrome '${CGV_DEPS_IMAGE}' --version >/dev/null"
 rssh "cd '${APP_DIR}' && podman build --pull=never \
   --build-arg CGV_DEPS_IMAGE='${CGV_DEPS_IMAGE}' \
   --label org.opencontainers.image.revision='${SOURCE_REV}' \
@@ -385,7 +393,7 @@ start_background_worker() {
       --env APP_PREWARM_ON_START=0 \\
       --env APP_PREWARM_BLOCK_START=0 \\
       --env APP_SESSION_METRICS=0 \\
-      --env CHROMOTE_CHROME=/usr/bin/chromium \\
+      --env CHROMOTE_CHROME=/usr/bin/google-chrome \\
       --volume '${APP_DIR}/annotations:/app/annotations:ro' \\
       --volume '${APP_DIR}/genomes:/app/genomes:ro' \\
       --volume '${APP_DIR}/go_annotations:/app/go_annotations:ro' \\
