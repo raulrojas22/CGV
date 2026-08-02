@@ -10,9 +10,10 @@ https://cgv.mobilomics.org
   -> contenedor CGV versionado por release
 ```
 
-El despliegue normal actualiza únicamente la aplicación. No reemplaza
-ShinyProxy, nginx, `docker-socket-proxy`, las redes seguras ni los datos
-biológicos persistentes.
+El despliegue normal actualiza la aplicación sin reemplazar ShinyProxy, nginx,
+`docker-socket-proxy`, las redes seguras ni los datos biológicos persistentes.
+También mantiene el worker aislado de reportes por correo y añade únicamente
+sus variables permitidas a la configuración de las sesiones CGV.
 
 ## Antes de desplegar
 
@@ -66,8 +67,10 @@ emergencia conocida:
 1. Audita la infraestructura remota en modo lectura.
 2. Ejecuta parseo y pruebas `testthat` locales.
 3. Respalda la configuración y el estado actual.
-4. Sincroniza solamente código de aplicación, excluyendo infraestructura,
-   secretos, datos, cachés y archivos de trabajo locales.
+4. Sincroniza solamente código de aplicación, excluyendo secretos, datos,
+   cachés y archivos de trabajo locales. La configuración de ShinyProxy se
+   respalda y sólo recibe las tres variables permitidas para reportes y el
+   semáforo global de LASTZ.
 5. Construye una imagen inmutable como:
 
    ```text
@@ -77,7 +80,10 @@ emergencia conocida:
 6. Verifica que `ui.R`, `server.R` y `global.R` dentro de la imagen coincidan
    con los archivos locales.
 7. Ejecuta el prewarm y cambia producción a la nueva imagen.
-8. Comprueba socket proxy, HTTP interno, instancia CGV y URL pública.
+8. Inicia `cgv-background-report-worker` con el mismo release, sin puertos
+   públicos, con usuario no privilegiado, sistema de archivos de sólo lectura,
+   4 GB de memoria y acceso únicamente a los datasets y caché compartidos.
+9. Comprueba socket proxy, HTTP interno, instancia CGV, worker y URL pública.
 
 Las sesiones abiertas se cierran durante la conmutación. El tiempo de corte
 normal es el necesario para reiniciar ShinyProxy y crear la primera instancia
@@ -105,11 +111,31 @@ Los cambios normales de R, JavaScript, CSS o contenido reutilizan:
 cgv-deps:1.0.0
 ```
 
-Sólo cuando cambien `Dockerfile.dependencies` o
-`docker/install_packages.R`, reconstruye explícitamente la base:
+El deploy comprueba que la base contenga Chromium y el paquete R `chromote`.
+En la primera publicación del sistema de reportes la reconstruirá
+automáticamente si faltan. Para forzar una reconstrucción posterior:
 
 ```bash
 REBUILD_R_DEPS=1 ./deploy-colors-shinyproxy.sh
+```
+
+## Reportes interactivos por correo
+
+Al escoger **Email me**, la sesión guarda un snapshot inmutable en el caché de
+Colors. El worker restaura ese snapshot, genera el mismo reporte interactivo y
+envía el enlace bajo `https://cgv.mobilomics.org/share/...` usando la
+configuración existente de feedback. El usuario puede continuar trabajando o
+cerrar la sesión; otro alineamiento crea un trabajo separado.
+
+El worker se ejecuta en serie y comparte un único cupo global de LASTZ con las
+sesiones públicas. El remitente corresponde a `FEEDBACK_FROM_EMAIL` y las
+respuestas se dirigen a `FEEDBACK_TO_EMAIL`.
+
+Comprobación rápida después del deploy:
+
+```bash
+ssh colors 'podman ps --filter name=cgv-background-report-worker'
+ssh colors 'podman logs --tail 40 cgv-background-report-worker'
 ```
 
 ## Datos persistentes
