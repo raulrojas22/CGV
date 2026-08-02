@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # Safe application-only deployment for CGV on Colors.
 #
-# This script deliberately does not deploy or rewrite ShinyProxy, nginx, the
-# socket proxy, their Compose file, or persistent biological data. It only
-# builds a versioned CGV image and switches the already-hardened stack to it.
+# This script preserves ShinyProxy, nginx, the socket proxy, their Compose file,
+# and persistent biological data. It builds a versioned CGV image, adds only
+# the allow-listed background-report flags to the backed-up ShinyProxy config,
+# and switches the already-hardened stack to the new release.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -12,6 +13,11 @@ REMOTE_PATH="${REMOTE_PATH:-/home/rarojas/cgv}"
 APP_DIR="${REMOTE_PATH}/app"
 PUBLIC_HOSTNAME="${PUBLIC_HOSTNAME:-cgv.mobilomics.org}"
 COMPOSE_FILE="${APP_DIR}/docker-compose.shinyproxy.colors.yml"
+BACKGROUND_WORKER_NAME="cgv-background-report-worker"
+BACKGROUND_REPORT_MEMORY="${BACKGROUND_REPORT_MEMORY:-4g}"
+LOCAL_EMAIL_ENV="${SCRIPT_DIR}/.env.local"
+REMOTE_EMAIL_ENV="${APP_DIR}/.env.background-reports"
+EMAIL_ENV_STAGING=""
 CGV_DEPS_IMAGE="${CGV_DEPS_IMAGE:-cgv-deps:1.0.0}"
 SHINYPROXY_IMAGE="${SHINYPROXY_IMAGE:-docker.io/openanalytics/shinyproxy:3.2.4@sha256:281dfddd3c8c54ea2dfa74390480d0f7769b53fd0bbef6d57f272574fd10fa3c}"
 SHINYPROXY_DIGEST="${SHINYPROXY_IMAGE##*@}"
@@ -36,6 +42,7 @@ Variables opcionales:
   REMOTE_PATH=/home/rarojas/cgv
   CGV_DEPS_IMAGE=cgv-deps:1.0.0
   REBUILD_R_DEPS=1   Reconstruye explícitamente la base de dependencias R.
+  BACKGROUND_REPORT_MEMORY=4g
 
 El deploy normal exige que Git esté limpio y crea una imagen inmutable con
 la forma localhost/cgv:release-<commit>-<fecha UTC>.
@@ -58,9 +65,20 @@ done
 
 [[ "$REBUILD_R_DEPS" == "0" || "$REBUILD_R_DEPS" == "1" ]] || \
   die "REBUILD_R_DEPS debe ser 0 o 1"
+[[ "$BACKGROUND_REPORT_MEMORY" =~ ^[1-9][0-9]*[mMgG]$ ]] || \
+  die "BACKGROUND_REPORT_MEMORY debe usar un valor como 2048m o 4g"
+[[ "$PUBLIC_HOSTNAME" =~ ^[A-Za-z0-9.-]+$ ]] || \
+  die "PUBLIC_HOSTNAME no es válido"
 
 for command_name in curl git ssh rsync shasum; do
   command -v "$command_name" >/dev/null 2>&1 || die "falta el comando local '${command_name}'"
+done
+
+[[ -f "$LOCAL_EMAIL_ENV" ]] || \
+  die "falta ${LOCAL_EMAIL_ENV}; se necesita para enviar reportes desde Colors"
+for email_key in FEEDBACK_RESEND_API_KEY FEEDBACK_TO_EMAIL FEEDBACK_FROM_EMAIL; do
+  grep -Eq "^${email_key}=.+$" "$LOCAL_EMAIL_ENV" || \
+    die "falta ${email_key} en ${LOCAL_EMAIL_ENV}"
 done
 
 git -C "$SCRIPT_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1 || \
@@ -86,6 +104,9 @@ fi
 cleanup() {
   ssh -S "$SSH_SOCK" -O exit "$REMOTE_TARGET" >/dev/null 2>&1 || true
   rm -f "$SSH_SOCK"
+  if [[ -n "$EMAIL_ENV_STAGING" ]]; then
+    rm -f "$EMAIL_ENV_STAGING"
+  fi
 }
 trap cleanup EXIT
 
@@ -178,6 +199,7 @@ if [[ "$SKIP_TESTS" == "0" ]]; then
     cd "$SCRIPT_DIR"
     Rscript -e "invisible(parse(file='global.R')); invisible(parse(file='ui.R')); invisible(parse(file='server.R'))"
     Rscript -e "if (!requireNamespace('testthat', quietly=TRUE)) stop('testthat no está instalado'); testthat::test_dir('tests/testthat', reporter='summary')"
+    Rscript scripts/test_background_report_jobs.R
   )
 else
   echo ""
@@ -199,7 +221,15 @@ rssh "set -e
   cp -p '${COMPOSE_FILE}' '${BACKUP_DIR}/docker-compose.shinyproxy.colors.yml'
   cp -p '${APP_DIR}/shinyproxy/application.yml' '${BACKUP_DIR}/application.yml'
   cp -p '${APP_DIR}/deploy/nginx/cgv-shinyproxy-colors.conf' '${BACKUP_DIR}/cgv-shinyproxy-colors.conf'
+  if [ -f '${REMOTE_EMAIL_ENV}' ]; then
+    cp -p '${REMOTE_EMAIL_ENV}' '${BACKUP_DIR}/background-report-email.env'
+  else
+    : > '${BACKUP_DIR}/background-report-email.absent'
+  fi
   podman inspect cgv-docker-socket-proxy cgv-shinyproxy cgv-nginx > '${BACKUP_DIR}/infrastructure.inspect.json'
+  if podman container exists '${BACKGROUND_WORKER_NAME}'; then
+    podman inspect '${BACKGROUND_WORKER_NAME}' > '${BACKUP_DIR}/background-worker.inspect.json'
+  fi
   podman ps -a --no-trunc > '${BACKUP_DIR}/podman-ps.txt'
 "
 
@@ -208,7 +238,7 @@ echo "[3/7] Sincronizando sólo el código de aplicación..."
 rsync -az --delete-delay --itemize-changes \
   -e "ssh -S $SSH_SOCK" \
   --exclude='/.git' \
-  --exclude='/.env' --exclude='/.env.local' --exclude='/.Renviron' \
+  --exclude='/.env' --exclude='/.env.local' --exclude='/.env.background-reports' --exclude='/.Renviron' \
   --exclude='/.codex_work' --exclude='/.codex_backups' --exclude='/.claude' --exclude='/.qodo' \
   --exclude='/.Rproj.user' --exclude='/.Rhistory' --exclude='/.Rapp.history' \
   --exclude='/annotations' --exclude='/genomes' --exclude='/go_annotations' \
@@ -224,13 +254,53 @@ rsync -az --delete-delay --itemize-changes \
   --exclude='/deploy/nginx/cgv-shinyproxy-colors.conf' \
   "${SCRIPT_DIR}/" "${REMOTE_TARGET}:${APP_DIR}/"
 
+# Copy only the three existing feedback mail variables. The minimal file is
+# never tracked, is mode 0600 on Colors, and is mounted only into the worker.
+EMAIL_ENV_STAGING="$(mktemp "${TMPDIR:-/tmp}/cgv-colors-report-email.XXXXXX")"
+awk '/^(FEEDBACK_RESEND_API_KEY|FEEDBACK_TO_EMAIL|FEEDBACK_FROM_EMAIL)=/' \
+  "$LOCAL_EMAIL_ENV" > "$EMAIL_ENV_STAGING"
+chmod 600 "$EMAIL_ENV_STAGING"
+rsync -az --chmod=F600 \
+  -e "ssh -S $SSH_SOCK" \
+  "$EMAIL_ENV_STAGING" "${REMOTE_TARGET}:${REMOTE_EMAIL_ENV}"
+rssh "chmod 600 '${REMOTE_EMAIL_ENV}' && test \"\$(stat -c '%a' '${REMOTE_EMAIL_ENV}')\" = 600"
+
+# Colors keeps its hardened ShinyProxy configuration on the server. Add only
+# the allow-listed flags required by background reports; the complete file was
+# backed up above and is restored verbatim by rollback_release().
+rssh "set -e
+  config='${APP_DIR}/shinyproxy/application.yml'
+  if ! grep -q 'APP_BACKGROUND_REPORTS_ENABLED:' \"\$config\"; then
+    staged=\"\${config}.background.\$\$\"
+    awk '
+      { print }
+      /APP_PERF_TIMING:/ {
+        print \"        APP_BACKGROUND_REPORTS_ENABLED: \\\"\${SP_BACKGROUND_REPORTS_ENABLED:1}\\\"\"
+        print \"        APP_LASTZ_GLOBAL_WORKERS: \\\"\${SP_LASTZ_GLOBAL_WORKERS:1}\\\"\"
+        print \"        APP_LASTZ_GLOBAL_QUEUE_WAIT_SECONDS: \\\"\${SP_LASTZ_GLOBAL_QUEUE_WAIT_SECONDS:1800}\\\"\"
+      }
+    ' \"\$config\" > \"\$staged\"
+    chmod --reference=\"\$config\" \"\$staged\"
+    mv \"\$staged\" \"\$config\"
+  fi
+  grep -q 'APP_BACKGROUND_REPORTS_ENABLED: \"\${SP_BACKGROUND_REPORTS_ENABLED:1}\"' \"\$config\"
+  grep -q 'APP_LASTZ_GLOBAL_WORKERS: \"\${SP_LASTZ_GLOBAL_WORKERS:1}\"' \"\$config\"
+  grep -q 'CGV_PUBLIC_BASE_URL: \"https://${PUBLIC_HOSTNAME}\"' \"\$config\"
+"
+
 echo ""
 echo "[4/7] Construyendo imagen inmutable ${NEW_IMAGE}..."
-if [[ "$REBUILD_R_DEPS" == "1" ]]; then
+DEPS_HAVE_REPORT_RUNTIME=0
+if rssh "podman image exists '${CGV_DEPS_IMAGE}' && podman run --rm --entrypoint /usr/bin/which '${CGV_DEPS_IMAGE}' chromium >/dev/null && podman run --rm --entrypoint Rscript '${CGV_DEPS_IMAGE}' -e \"quit(status=if(requireNamespace('chromote', quietly=TRUE)) 0 else 1)\" >/dev/null"; then
+  DEPS_HAVE_REPORT_RUNTIME=1
+fi
+if [[ "$REBUILD_R_DEPS" == "1" || "$DEPS_HAVE_REPORT_RUNTIME" == "0" ]]; then
+  if [[ "$DEPS_HAVE_REPORT_RUNTIME" == "0" ]]; then
+    echo "  La base no contiene Chromium/chromote; se reconstruirá automáticamente."
+  fi
   rssh "cd '${APP_DIR}' && podman build --pull=never -t '${CGV_DEPS_IMAGE}' -f Dockerfile.dependencies ."
 else
-  rssh "podman image exists '${CGV_DEPS_IMAGE}'" || \
-    die "falta ${CGV_DEPS_IMAGE}; usa REBUILD_R_DEPS=1 de forma explícita"
+  echo "  Chromium y chromote ya están disponibles en ${CGV_DEPS_IMAGE}."
 fi
 rssh "cd '${APP_DIR}' && podman build --pull=never \
   --build-arg CGV_DEPS_IMAGE='${CGV_DEPS_IMAGE}' \
@@ -242,17 +312,21 @@ LOCAL_HASHES="$(
   cd "$SCRIPT_DIR"
   shasum -a 256 \
     ui.R server.R global.R \
+    R/background_report_jobs.R scripts/background_report_worker.R \
+    www/js/reproducible_report.js \
     www/home_preview_cgv.html www/css/cgv_compiled.css |
     awk '{print $1}' | paste -sd: -
 )"
 REMOTE_HASHES="$(
   rssh "podman run --rm --user 10001:10001 --entrypoint sha256sum '${NEW_IMAGE}' \
     /app/ui.R /app/server.R /app/global.R \
+    /app/R/background_report_jobs.R /app/scripts/background_report_worker.R \
+    /app/www/js/reproducible_report.js \
     /app/www/home_preview_cgv.html /app/www/css/cgv_compiled.css" |
     awk '{print $1}' | paste -sd: -
 )"
 [[ "$LOCAL_HASHES" == "$REMOTE_HASHES" ]] || die "los hashes de la imagen no coinciden con el commit local"
-echo "  Hashes ui/server/global/home/CSS y lectura con UID 10001: OK"
+echo "  Hashes app/worker/reporte/home/CSS y lectura con UID 10001: OK"
 
 echo ""
 echo "[5/7] Precalentando índices y preparando permisos persistentes..."
@@ -266,6 +340,7 @@ rssh "set -e
 "
 
 teardown_stack_command="
+  podman rm -f ${BACKGROUND_WORKER_NAME} >/dev/null 2>&1 || true
   podman stop cgv-shinyproxy >/dev/null 2>&1 || true
   session_ids=\$(podman ps -aq --filter name=sp-container- 2>/dev/null || true)
   if [ -n \"\$session_ids\" ]; then podman rm -f \$session_ids >/dev/null; fi
@@ -275,12 +350,62 @@ teardown_stack_command="
   podman network rm sp-net >/dev/null 2>&1 || true
 "
 
+start_background_worker() {
+  local expected_image="$1"
+  rssh "set -e
+    podman rm -f '${BACKGROUND_WORKER_NAME}' >/dev/null 2>&1 || true
+    podman run -d \\
+      --name '${BACKGROUND_WORKER_NAME}' \\
+      --restart unless-stopped \\
+      --no-healthcheck \\
+      --user 10001:10001 \\
+      --network sp-net \\
+      --read-only \\
+      --security-opt no-new-privileges \\
+      --cap-drop all \\
+      --memory '${BACKGROUND_REPORT_MEMORY}' \\
+      --pids-limit 512 \\
+      --shm-size 512m \\
+      --tmpfs /tmp:rw,nosuid,nodev,noexec,size=1g,mode=1777 \\
+      --env-file '${REMOTE_EMAIL_ENV}' \\
+      --env APP_DIR=/app \\
+      --env HOME=/tmp/cgv-worker \\
+      --env CGV_DATA_ROOT=/app \\
+      --env CGV_CACHE_DIR=/app/cache \\
+      --env CGV_NCBI_DOWNLOADS_DIR=/app/ncbi_downloads \\
+      --env CGV_PUBLIC_BASE_URL='https://${PUBLIC_HOSTNAME}' \\
+      --env APP_SHARED_REPORTS_ENABLED=1 \\
+      --env APP_BACKGROUND_REPORTS_ENABLED=1 \\
+      --env APP_BACKGROUND_REPORT_POLL_SECONDS=3 \\
+      --env APP_BACKGROUND_REPORT_TIMEOUT_MINUTES=30 \\
+      --env APP_BACKGROUND_REPORT_FUTURE_WORKERS=2 \\
+      --env APP_BACKGROUND_REPORT_LASTZ_WORKERS=1 \\
+      --env APP_LASTZ_GLOBAL_WORKERS=1 \\
+      --env APP_LASTZ_GLOBAL_QUEUE_WAIT_SECONDS=1800 \\
+      --env APP_PREWARM_ON_START=0 \\
+      --env APP_PREWARM_BLOCK_START=0 \\
+      --env APP_SESSION_METRICS=0 \\
+      --env CHROMOTE_CHROME=/usr/bin/chromium \\
+      --volume '${APP_DIR}/annotations:/app/annotations:ro' \\
+      --volume '${APP_DIR}/genomes:/app/genomes:ro' \\
+      --volume '${APP_DIR}/go_annotations:/app/go_annotations:ro' \\
+      --volume '${APP_DIR}/data:/app/data:ro' \\
+      --volume '${APP_DIR}/cache:/app/cache' \\
+      --volume '${REMOTE_PATH}/ncbi_downloads:/app/ncbi_downloads' \\
+      '${expected_image}' \\
+      Rscript /app/scripts/background_report_worker.R >/dev/null
+  "
+}
+
 wait_for_release() {
   local expected_image="$1"
+  local require_worker="${2:-1}"
   rssh "set -e
     for i in \$(seq 1 120); do
       socket_state=\$(podman inspect cgv-docker-socket-proxy --format '{{.State.Health.Status}}' 2>/dev/null || true)
       running=\$(podman ps --filter ancestor='${expected_image}' -q | wc -l | tr -d ' ')
+      worker_state=\$(podman inspect '${BACKGROUND_WORKER_NAME}' --format '{{.State.Status}}' 2>/dev/null || true)
+      worker_image=\$(podman inspect '${BACKGROUND_WORKER_NAME}' --format '{{.ImageName}}' 2>/dev/null || true)
       codes=\$(python3 - <<'PY'
 import http.client
 out=[]
@@ -297,8 +422,10 @@ PY
 )
       proxy_code=\$(printf '%s' \"\$codes\" | awk '{print \$1}')
       nginx_code=\$(printf '%s' \"\$codes\" | awk '{print \$2}')
-      if [ \"\$socket_state\" = healthy ] && printf '%s' \"\$proxy_code\" | grep -Eq '^[23][0-9][0-9]$' && printf '%s' \"\$nginx_code\" | grep -Eq '^[23][0-9][0-9]$' && [ \"\$running\" -ge 1 ]; then
-        echo \"ready: socket=\$socket_state proxy=\$proxy_code nginx=\$nginx_code app_instances=\$running wait=\${i}s\"
+      worker_ok=0
+      if [ '${require_worker}' = 0 ] || { [ \"\$worker_state\" = running ] && [ \"\$worker_image\" = '${expected_image}' ]; }; then worker_ok=1; fi
+      if [ \"\$socket_state\" = healthy ] && [ \"\$worker_ok\" = 1 ] && printf '%s' \"\$proxy_code\" | grep -Eq '^[23][0-9][0-9]$' && printf '%s' \"\$nginx_code\" | grep -Eq '^[23][0-9][0-9]$' && [ \"\$running\" -ge 1 ]; then
+        echo \"ready: socket=\$socket_state proxy=\$proxy_code nginx=\$nginx_code app_instances=\$running worker=\${worker_state:-not-required} wait=\${i}s\"
         exit 0
       fi
       sleep 1
@@ -317,10 +444,15 @@ rollback_release() {
     cp -p '${BACKUP_DIR}/docker-compose.shinyproxy.colors.yml' docker-compose.shinyproxy.colors.yml
     cp -p '${BACKUP_DIR}/application.yml' shinyproxy/application.yml
     cp -p '${BACKUP_DIR}/cgv-shinyproxy-colors.conf' deploy/nginx/cgv-shinyproxy-colors.conf
+    if [ -f '${BACKUP_DIR}/background-report-email.env' ]; then
+      cp -p '${BACKUP_DIR}/background-report-email.env' '${REMOTE_EMAIL_ENV}'
+    else
+      rm -f '${REMOTE_EMAIL_ENV}'
+    fi
     ${teardown_stack_command}
     CGV_IMAGE='${CURRENT_IMAGE}' SHINYPROXY_IMAGE='${SHINYPROXY_IMAGE}' \
       podman-compose -f docker-compose.shinyproxy.colors.yml up -d
-  " && wait_for_release "$CURRENT_IMAGE"
+  " && wait_for_release "$CURRENT_IMAGE" 0
 }
 
 echo ""
@@ -335,9 +467,13 @@ rssh "set -e
     podman-compose -f docker-compose.shinyproxy.colors.yml up -d
 "
 CUTOVER_STATUS=$?
+if [[ "$CUTOVER_STATUS" -eq 0 ]]; then
+  start_background_worker "$NEW_IMAGE"
+  CUTOVER_STATUS=$?
+fi
 set -e
 
-if [[ "$CUTOVER_STATUS" -ne 0 ]] || ! wait_for_release "$NEW_IMAGE"; then
+if [[ "$CUTOVER_STATUS" -ne 0 ]] || ! wait_for_release "$NEW_IMAGE" 1; then
   echo "ERROR: la nueva release no superó la validación; se inicia rollback." >&2
   if rollback_release; then
     die "deploy revertido correctamente a ${CURRENT_IMAGE}"
@@ -355,6 +491,9 @@ rssh "set -e
   legacy=\$(podman ps --filter ancestor=localhost/cgv:1.0.0 -q | wc -l | tr -d ' ')
   test \"\$legacy\" = 0
   podman logs --since 5m cgv-shinyproxy 2>&1 | grep -q 'Started ShinyProxy 3.2.4'
+  test \"\$(podman inspect '${BACKGROUND_WORKER_NAME}' --format '{{.State.Status}}')\" = running
+  test \"\$(podman inspect '${BACKGROUND_WORKER_NAME}' --format '{{.ImageName}}')\" = '${NEW_IMAGE}'
+  podman logs --tail 40 '${BACKGROUND_WORKER_NAME}' 2>&1 | grep -q '\[background-report-worker\] ready'
   podman ps --format '{{.Names}}|{{.Image}}|{{.Status}}|{{.Networks}}'
 "
 FINAL_STATUS=$?
@@ -391,4 +530,5 @@ echo "  Release:  ${NEW_IMAGE}"
 echo "  Anterior: ${CURRENT_IMAGE}"
 echo "  Respaldo: ${BACKUP_DIR}"
 echo "  Público:  HTTP ${PUBLIC_CODE}"
+echo "  Reportes: worker activo (${BACKGROUND_WORKER_NAME})"
 echo "============================================"
