@@ -34,6 +34,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libgit2-dev \
     libxt-dev \
     cmake \
+    chromium \
+    fonts-liberation \
     lastz \
     samtools \
     tabix \

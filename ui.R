@@ -133,27 +133,39 @@ initial_summary_context_header <- function(search_mode_label = "Multi-Gene", gen
       div(
         class = "summary-display-mode-control",
         div(
-          class = "summary-display-mode-subbar summary-display-context-subbar",
-          span(class = "summary-display-submode-label summary-display-context-label", "Context"),
-          tags$button(
-            type = "button",
-            class = "summary-display-submode-button summary-genomic-context-toggle summary-genomic-context-toggle--neighbors is-active",
-            `data-genomic-context-toggle` = "neighbors",
-            `aria-pressed` = "true",
-            `aria-label` = "Hide neighboring genes",
-            title = "Hide neighboring genes on gene cards",
-            icon("location-arrow"),
-            span(class = "summary-genomic-context-toggle-label", "Hide neighbors")
-          ),
-          tags$button(
-            type = "button",
-            class = "summary-display-submode-button summary-genomic-context-toggle summary-genomic-context-toggle--overlaps is-active",
-            `data-genomic-context-toggle` = "overlaps",
-            `aria-pressed` = "true",
-            `aria-label` = "Hide overlapping genes",
-            title = "Hide overlapping genes on gene cards",
-            icon("layer-group"),
-            span(class = "summary-genomic-context-toggle-label", "Hide overlaps")
+          class = "summary-display-side summary-display-side--left",
+          div(
+            class = "summary-display-mode-subbar summary-display-context-subbar",
+            tags$button(
+              type = "button",
+              class = "summary-display-submode-button summary-genomic-context-toggle summary-genomic-context-toggle--neighbors is-active",
+              `data-genomic-context-toggle` = "neighbors",
+              `aria-pressed` = "true",
+              `aria-label` = "Hide neighboring genes",
+              title = "Hide neighboring genes on gene cards",
+              icon("location-arrow"),
+              span(class = "summary-genomic-context-toggle-label", "Hide neighbors")
+            ),
+            tags$button(
+              type = "button",
+              class = "summary-display-submode-button summary-genomic-context-toggle summary-genomic-context-toggle--overlaps is-active",
+              `data-genomic-context-toggle` = "overlaps",
+              `aria-pressed` = "true",
+              `aria-label` = "Hide overlapping genes",
+              title = "Hide overlapping genes on gene cards",
+              icon("layer-group"),
+              span(class = "summary-genomic-context-toggle-label", "Hide overlaps")
+            ),
+            tags$button(
+              type = "button",
+              class = "summary-display-submode-button summary-genomic-ruler-toggle is-active",
+              `data-genomic-ruler-toggle` = "true",
+              `aria-pressed` = "true",
+              `aria-label` = "Hide genomic context scale",
+              title = "Show or hide genomic coordinates and compressed neighbor-distance context",
+              icon("ruler-horizontal"),
+              span(class = "summary-genomic-ruler-toggle-label", "Hide scale")
+            )
           )
         ),
         div(
@@ -186,38 +198,37 @@ initial_summary_context_header <- function(search_mode_label = "Multi-Gene", gen
           )
         ),
         div(
-          class = "summary-display-mode-subbar",
-          span(class = "summary-display-submode-label", "Visual detail"),
-          tags$button(type = "button", class = "summary-display-submode-button is-active", `aria-pressed` = "true", "Compact"),
-          tags$button(type = "button", class = "summary-display-submode-button", `aria-pressed` = "false", "Detailed"),
-          tags$button(
-            type = "button",
-            class = "summary-display-submode-button summary-genomic-ruler-toggle is-active",
-            `data-genomic-ruler-toggle` = "true",
-            `aria-pressed` = "true",
-            `aria-label` = "Hide genomic context scale",
-            icon("ruler-horizontal"),
-            span("Scale")
+          class = "summary-display-side summary-display-side--right",
+          div(
+            class = "summary-display-mode-subbar summary-display-detail-subbar",
+            span(
+              class = "summary-display-submode-label summary-display-detail-label",
+              span("Visual"),
+              span("Detail")
+            ),
+            tags$button(type = "button", class = "summary-display-submode-button is-active", `aria-pressed` = "true", "Compact"),
+            tags$button(type = "button", class = "summary-display-submode-button", `aria-pressed` = "false", "Detailed")
+          ),
+          div(
+            class = "summary-display-mode-subbar summary-display-orientation-subbar",
+            title = "Native genomic coordinates",
+            span(class = "summary-display-submode-label", "Direction"),
+            tags$button(
+              type = "button",
+              class = "summary-display-submode-button is-active",
+              `aria-pressed` = "true",
+              onclick = sprintf("if(window.Shiny){Shiny.setInputValue('%s','genomic',{priority:'event'});}", orientation_input_id),
+              "Genomic"
+            ),
+            tags$button(
+              type = "button",
+              class = "summary-display-submode-button",
+              `aria-pressed` = "false",
+              onclick = sprintf("if(window.Shiny){Shiny.setInputValue('%s','transcription',{priority:'event'});}", orientation_input_id),
+              "5\u2032\u21923\u2032"
+            ),
+            span(class = "summary-display-orientation-note", `aria-live` = "polite", "Native genomic coordinates")
           )
-        ),
-        div(
-          class = "summary-display-mode-subbar summary-display-orientation-subbar",
-          span(class = "summary-display-submode-label", "Direction"),
-          tags$button(
-            type = "button",
-            class = "summary-display-submode-button is-active",
-            `aria-pressed` = "true",
-            onclick = sprintf("if(window.Shiny){Shiny.setInputValue('%s','genomic',{priority:'event'});}", orientation_input_id),
-            "Genomic"
-          ),
-          tags$button(
-            type = "button",
-            class = "summary-display-submode-button",
-            `aria-pressed` = "false",
-            onclick = sprintf("if(window.Shiny){Shiny.setInputValue('%s','transcription',{priority:'event'});}", orientation_input_id),
-            "5\u2032\u21923\u2032"
-          ),
-          span(class = "summary-display-orientation-note", "Native genomic coordinates")
         )
       )
     )

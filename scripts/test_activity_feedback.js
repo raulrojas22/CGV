@@ -19,7 +19,9 @@ const elements = {
     hidden: true,
     attributes: { 'aria-hidden': 'true' },
     classList: classList(),
-    setAttribute(name, value) { this.attributes[name] = String(value); }
+    style: {},
+    setAttribute(name, value) { this.attributes[name] = String(value); },
+    removeAttribute(name) { delete this.attributes[name]; }
   },
   'app-work-indicator-headline': { textContent: '' },
   'app-work-indicator-detail': { textContent: '' }
@@ -27,6 +29,13 @@ const elements = {
 const documentAttributes = Object.create(null);
 const nativeHandlers = Object.create(null);
 const jqueryHandlers = Object.create(null);
+let mainRect = { left: 320, width: 960 };
+const main = {
+  getBoundingClientRect() { return mainRect; }
+};
+const shell = {
+  addEventListener(name, handler) { nativeHandlers[`shell:${name}`] = handler; }
+};
 
 global.document = {
   readyState: 'complete',
@@ -35,7 +44,11 @@ global.document = {
     removeAttribute(name) { delete documentAttributes[name]; }
   },
   getElementById(id) { return elements[id] || null; },
-  querySelector() { return null; },
+  querySelector(selector) {
+    if (selector === '.app-main') return main;
+    if (selector === '.app-shell') return shell;
+    return null;
+  },
   addEventListener(name, handler) { nativeHandlers[name] = handler; }
 };
 
@@ -57,6 +70,14 @@ const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 (async function () {
   assert.ok(window.cgvActivity, 'activity API should be exposed');
+  assert.strictEqual(elements['app-work-indicator'].style.left, '800px');
+  assert.strictEqual(elements['app-work-indicator'].style.width, '460px');
+  assert.strictEqual(elements['app-work-indicator'].attributes['data-layout-anchor'], 'app-main');
+
+  mainRect = { left: 100, width: 1180 };
+  nativeHandlers['shell:transitionend']();
+  await wait(8);
+  assert.strictEqual(elements['app-work-indicator'].style.left, '690px');
 
   window.cgvActivity.begin('generic', {
     headline: 'CGV is working', detail: 'Processing data…', priority: 5, delay: 0

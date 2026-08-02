@@ -1508,6 +1508,10 @@ init_shared_analysis_domain <- function(input,
                                         homo_synteny_available_fn = NULL,
                                         homo_synteny_groups_fn = NULL,
                                         plot_chr_length_fn = NULL,
+                                        enqueue_background_report_fn = NULL,
+                                        background_report_ready_fn = NULL,
+                                        background_report_failed_fn = NULL,
+                                        background_bootstrap = FALSE,
                                         app_version = "unknown",
                                         base_dir = ".") {
     state <- shiny::reactiveValues(
@@ -1592,6 +1596,21 @@ init_shared_analysis_domain <- function(input,
         }
         result <- state$result
         if (!is.list(result)) return(NULL)
+        if (isTRUE(result$background)) {
+            return(shiny::div(
+                class = "cgv-share-result",
+                shiny::div(
+                    class = "cgv-share-callout cgv-share-callout-success",
+                    shiny::icon("envelope-circle-check"),
+                    shiny::strong("Report queued for email delivery.")
+                ),
+                shiny::p(
+                    "CGV saved an immutable copy of this analysis. You can keep working or close this page; the queued report will not change."
+                ),
+                shiny::p(class = "help-block", paste("Delivery:", result$email)),
+                shiny::p(class = "help-block", paste("Reference:", result$job_id))
+            ))
+        }
         if (isTRUE(result$desktop)) {
             return(shiny::div(
                 class = "cgv-share-callout cgv-share-callout-success",
@@ -1783,6 +1802,7 @@ init_shared_analysis_domain <- function(input,
             has_private_uploads = any(vapply(snapshot_plots, plot_has_uploaded_source, logical(1)))
         )
         desktop <- cgv_runtime_is_desktop()
+        background_available <- !desktop && cgv_background_reports_enabled()
         light_logo_src <- versioned_asset_path("favicon2.ico?v=2")
         dark_logo_src <- versioned_asset_path("favicon.ico?v=2")
         modal_logo_src <- if (identical(
@@ -1828,9 +1848,39 @@ init_shared_analysis_domain <- function(input,
                     shiny::icon("clock"),
                     shiny::strong("Report generation can take several minutes."),
                     shiny::p(
-                        "This is one of CGV's most intensive processes. Keep CGV and this window open, and please wait until it finishes."
+                        if (background_available) {
+                            "Generate it in this session and keep the page open, or choose email delivery below to freeze the current analysis and continue working."
+                        } else {
+                            "This is one of CGV's most intensive processes. Keep CGV and this window open, and please wait until it finishes."
+                        }
                     )
                 ),
+                if (background_available) shiny::div(
+                    class = "cgv-share-options cgv-share-delivery-mode",
+                    shiny::radioButtons(
+                        "share_delivery_mode",
+                        "Delivery",
+                        choiceNames = list(
+                            shiny::HTML("Generate here &mdash; keep this page open"),
+                            shiny::HTML("Email me &mdash; continue working or close this page")
+                        ),
+                        choiceValues = c("session", "email"),
+                        selected = "session"
+                    ),
+                    shiny::conditionalPanel(
+                        condition = "input.share_delivery_mode == 'email'",
+                        shiny::textInput(
+                            "share_delivery_email",
+                            "Email address",
+                            placeholder = "name@example.org",
+                            width = "100%"
+                        ),
+                        shiny::p(
+                            class = "help-block",
+                            "CGV will freeze the current analysis, generate the complete interactive report in a separate worker, and email the secret link. Background delivery currently supports preloaded CGV datasets."
+                        )
+                    )
+                ) else NULL,
                 shiny::div(
                     class = "cgv-share-options cgv-share-capture-mode",
                     shiny::radioButtons(
@@ -2032,6 +2082,9 @@ init_shared_analysis_domain <- function(input,
                 state$busy <- FALSE
                 state$pending <- NULL
                 state$error <- message
+                if (isTRUE(background_bootstrap) && is.function(background_report_failed_fn)) {
+                    try(background_report_failed_fn(message), silent = TRUE)
+                }
             }
         }, delay = seconds)
         invisible(NULL)
@@ -2169,8 +2222,13 @@ init_shared_analysis_domain <- function(input,
     shiny::observeEvent(input$publish_shared_analysis, {
         if (isTRUE(state$busy)) return(invisible(NULL))
         desktop <- cgv_runtime_is_desktop()
+        background_delivery <- !desktop && identical(
+            tolower(cgv_safe_scalar(input$share_delivery_mode, "session")),
+            "email"
+        )
         capture_mode <- tolower(cgv_safe_scalar(input$share_capture_mode, "complete"))
         if (!capture_mode %in% c("complete", "fast")) capture_mode <- "complete"
+        if (background_delivery) capture_mode <- "complete"
         complete_capture <- identical(capture_mode, "complete")
         ttl <- if (desktop) 7L else suppressWarnings(as.integer(input$share_ttl_days %||% 7L))
         homo_count <- length(active_homo_ids_rv() %||% integer(0))
@@ -2182,6 +2240,58 @@ init_shared_analysis_domain <- function(input,
             (!has_both || isTRUE(input$share_include_cross_species))
         if (!include_multi_gene && !include_cross_species) {
             state$error <- "Select at least one analysis workflow for the report."
+            return(invisible(NULL))
+        }
+        if (background_delivery) {
+            if (!cgv_background_reports_enabled()) {
+                state$error <- "Background report delivery is not enabled on this deployment."
+                return(invisible(NULL))
+            }
+            email <- trimws(cgv_safe_scalar(input$share_delivery_email))
+            if (!feedback_is_valid_email(email)) {
+                state$error <- "Enter a valid email address for report delivery."
+                return(invisible(NULL))
+            }
+            state$busy <- TRUE
+            state$error <- ""
+            state$result <- NULL
+            state$busy_message <- "Saving an immutable analysis snapshot in the background queue…"
+            queued <- tryCatch({
+                snapshot <- cgv_scope_shared_snapshot(
+                    build_session_snapshot_fn(),
+                    include_multi_gene = include_multi_gene,
+                    include_cross_species = include_cross_species
+                )
+                options <- list(
+                    capture_mode = "complete",
+                    include_multi_gene = include_multi_gene,
+                    include_cross_species = include_cross_species,
+                    include_private = isTRUE(input$share_include_private),
+                    allow_downloads = isTRUE(input$share_allow_downloads),
+                    ttl_days = ttl,
+                    run_lastz = isTRUE(input$share_run_lastz)
+                )
+                if (is.function(enqueue_background_report_fn)) {
+                    enqueue_background_report_fn(snapshot, email, options)
+                } else {
+                    cgv_enqueue_background_report(snapshot, email, options, base_dir = base_dir)
+                }
+            }, error = function(e) e)
+            state$busy <- FALSE
+            if (inherits(queued, "error")) {
+                state$error <- paste0("Could not queue the background report: ", conditionMessage(queued))
+                return(invisible(NULL))
+            }
+            state$result <- list(
+                background = TRUE,
+                job_id = cgv_safe_scalar(queued$id),
+                email = cgv_safe_scalar(queued$email, email)
+            )
+            shiny::showNotification(
+                "Report queued. You can keep working or close CGV; the interactive link will arrive by email.",
+                type = "message",
+                duration = 10
+            )
             return(invisible(NULL))
         }
         lastz_contexts <- character(0)
@@ -2227,7 +2337,7 @@ init_shared_analysis_domain <- function(input,
             ttl_days = ttl,
             desktop = desktop,
             capture_mode = capture_mode,
-            accept_missing = FALSE,
+            accept_missing = isTRUE(background_bootstrap),
             run_lastz = complete_capture &&
                 isTRUE(input$share_run_lastz) &&
                 length(lastz_contexts) > 0L,
@@ -2511,10 +2621,16 @@ init_shared_analysis_domain <- function(input,
                     expires_at = published$expires_at
                 )
                 session$sendCustomMessage("cgv:shared-report-created", state$result)
+                if (isTRUE(background_bootstrap) && is.function(background_report_ready_fn)) {
+                    try(background_report_ready_fn(state$result), silent = TRUE)
+                }
             }
             report_perf_mark(pending, "publication_completed")
         }, error = function(e) {
             state$error <- paste0("Could not create the report: ", conditionMessage(e))
+            if (isTRUE(background_bootstrap) && is.function(background_report_failed_fn)) {
+                try(background_report_failed_fn(conditionMessage(e)), silent = TRUE)
+            }
         })
         invisible(NULL)
     }, ignoreInit = TRUE)

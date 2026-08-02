@@ -294,6 +294,7 @@ if (file.exists("R/alias_resolution.R")) {
 }
 sys.source("R/utils.R", envir = lib_env)
 sys.source("R/feedback_delivery.R", envir = lib_env)
+sys.source("R/background_report_jobs.R", envir = lib_env)
 sys.source("R/modules.R", envir = lib_env)
 sys.source("R/server_cache_warm.R", envir = lib_env)
 sys.source("R/server_go_domain.R", envir = lib_env)

@@ -1041,6 +1041,28 @@
     renderReceipts();
   }
 
+  function bootstrapBackgroundReport(message) {
+    if (!window.Shiny || typeof window.Shiny.setInputValue !== "function") return;
+    var options = (message && message.options) || {};
+    var set = function (id, value) {
+      window.Shiny.setInputValue(id, value, { priority: "event" });
+    };
+    set("share_delivery_mode", "session");
+    set("share_capture_mode", String(options.capture_mode || "complete"));
+    set("share_include_multi_gene", options.include_multi_gene !== false);
+    set("share_include_cross_species", options.include_cross_species !== false);
+    set("share_include_private", !!options.include_private);
+    set("share_allow_downloads", !!options.allow_downloads);
+    set("share_ttl_days", Number(options.ttl_days || 7));
+    set("share_run_lastz", !!options.run_lastz);
+    window.setTimeout(function () {
+      set("publish_shared_analysis", {
+        background: true,
+        nonce: Date.now() + Math.random()
+      });
+    }, Math.max(500, Number((message && message.settle_ms) || 2500)));
+  }
+
   function bindShiny() {
     if (!window.Shiny || typeof window.Shiny.addCustomMessageHandler !== "function") return;
     window.Shiny.addCustomMessageHandler("cgv:capture-analysis-assets", captureForServer);
@@ -1051,6 +1073,7 @@
     });
     window.Shiny.addCustomMessageHandler("cgv:shared-report-created", rememberReport);
     window.Shiny.addCustomMessageHandler("cgv:shared-report-revoked", handleRevoked);
+    window.Shiny.addCustomMessageHandler("cgv:background-report-bootstrap", bootstrapBackgroundReport);
   }
 
   function scrollShareModalToTop() {
@@ -1121,6 +1144,11 @@
   document.addEventListener("click", function (event) {
     var target = event.target && event.target.closest ? event.target.closest("#publish_shared_analysis") : null;
     if (target) {
+      var delivery = document.querySelector("input[name='share_delivery_mode']:checked");
+      if (delivery && delivery.value === "email") {
+        window.setTimeout(scrollShareModalToTop, 80);
+        return;
+      }
       reportCaptureRequested = true;
       var shell = document.getElementById("cgv-share-modal-shell");
       var modal = shell && shell.closest ? shell.closest(".modal") : null;

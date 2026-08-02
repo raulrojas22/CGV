@@ -14,6 +14,7 @@ services:
       APP_PORT: "3838"
       APP_DEBUG_LOGS: "${APP_DEBUG_LOGS:-0}"
       APP_PERF_TIMING: "${APP_PERF_TIMING:-0}"
+      APP_BACKGROUND_REPORTS_ENABLED: "${APP_BACKGROUND_REPORTS_ENABLED:-1}"
       APP_FUTURE_MODE: "${APP_FUTURE_MODE:-multisession}"
       APP_FUTURE_WORKERS: "${APP_FUTURE_WORKERS:-2}"
       APP_SHINY_JSON_DIGITS: "${APP_SHINY_JSON_DIGITS:-12}"
@@ -25,6 +26,8 @@ services:
       APP_TRANSPORT_TIMING: "${APP_TRANSPORT_TIMING:-0}"
       APP_TRANSPORT_FLUSH_MS: "${APP_TRANSPORT_FLUSH_MS:-5000}"
       APP_LASTZ_WORKERS: "${APP_LASTZ_WORKERS:-1}"
+      APP_LASTZ_GLOBAL_WORKERS: "${APP_LASTZ_GLOBAL_WORKERS:-1}"
+      APP_LASTZ_GLOBAL_QUEUE_WAIT_SECONDS: "${APP_LASTZ_GLOBAL_QUEUE_WAIT_SECONDS:-1800}"
       APP_LASTZ_CACHE_MAX_ENTRIES: "${APP_LASTZ_CACHE_MAX_ENTRIES:-48}"
       APP_LASTZ_CACHE_MAX_MB: "${APP_LASTZ_CACHE_MAX_MB:-128}"
       APP_LASTZ_DISK_CACHE: "${APP_LASTZ_DISK_CACHE:-1}"
@@ -50,3 +53,32 @@ services:
       - ${CGV_DATA_DIR:-./data}:/app/data:ro
       - ${CGV_CACHE_DIR:-./cache}:/app/cache
       - ${CGV_NCBI_DOWNLOADS_DIR:-./ncbi_downloads}:/app/ncbi_downloads
+
+  background-report-worker:
+    image: ${CGV_IMAGE:-cgv:latest}
+    env_file:
+      - .env
+      - path: .env.local
+        required: false
+    restart: unless-stopped
+    command: ["Rscript", "/app/scripts/background_report_worker.R"]
+    environment:
+      APP_DIR: "/app"
+      CGV_DATA_ROOT: "/app"
+      CGV_CACHE_DIR: "/app/cache"
+      CGV_PUBLIC_BASE_URL: "${CGV_PUBLIC_BASE_URL:-https://cgvapp.com}"
+      APP_SHARED_REPORTS_ENABLED: "1"
+      APP_BACKGROUND_REPORTS_ENABLED: "${APP_BACKGROUND_REPORTS_ENABLED:-1}"
+      APP_LASTZ_GLOBAL_WORKERS: "${APP_LASTZ_GLOBAL_WORKERS:-1}"
+      APP_LASTZ_GLOBAL_QUEUE_WAIT_SECONDS: "${APP_LASTZ_GLOBAL_QUEUE_WAIT_SECONDS:-1800}"
+      CHROMOTE_CHROME: "/usr/bin/chromium"
+    volumes:
+      - ${CGV_ANNOTATIONS_DIR:-./annotations}:/app/annotations:ro
+      - ${CGV_GENOMES_DIR:-./genomes}:/app/genomes:ro
+      - ${CGV_GO_ANNOTATIONS_DIR:-./go_annotations}:/app/go_annotations:ro
+      - ${CGV_DATA_DIR:-./data}:/app/data:ro
+      - ${CGV_CACHE_DIR:-./cache}:/app/cache
+      - ${CGV_NCBI_DOWNLOADS_DIR:-./ncbi_downloads}:/app/ncbi_downloads
+    shm_size: "256mb"
+    healthcheck:
+      disable: true
