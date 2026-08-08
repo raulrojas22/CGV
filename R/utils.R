@@ -23,6 +23,96 @@ app_perf_enabled <- function() {
     !raw %in% c("", "0", "false", "no", "off")
 }
 
+# Optional persistent capture for manual before/after comparisons.
+# Nothing is written unless APP_PERF_TIMING is enabled and APP_PERF_LOG_DIR is set.
+# Each R process gets its own file so concurrent ShinyProxy sessions never append
+# to the same log.
+.app_perf_log_path <- NULL
+.app_perf_log_pid <- NA_integer_
+
+app_perf_log_file <- function() {
+    if (!isTRUE(app_perf_enabled())) {
+        return("")
+    }
+    current_pid <- as.integer(Sys.getpid())
+    if (!is.null(.app_perf_log_path) && identical(.app_perf_log_pid, current_pid)) {
+        return(.app_perf_log_path)
+    }
+
+    log_root <- trimws(as.character(Sys.getenv("APP_PERF_LOG_DIR", "") %||% ""))
+    if (!nzchar(log_root)) {
+        .app_perf_log_path <<- ""
+        .app_perf_log_pid <<- current_pid
+        return("")
+    }
+
+    safe_token <- function(x, fallback) {
+        out <- trimws(as.character(x %||% ""))[1L]
+        out <- gsub("[^A-Za-z0-9._-]+", "_", out)
+        out <- gsub("^_+|_+$", "", out)
+        if (nzchar(out)) out else fallback
+    }
+
+    run_label <- safe_token(Sys.getenv("APP_PERF_RUN_LABEL", "manual"), "manual")
+    node_name <- safe_token(Sys.info()[["nodename"]] %||% "host", "host")
+    log_dir <- file.path(log_root, run_label)
+    dir_ok <- tryCatch({
+        dir.create(log_dir, recursive = TRUE, showWarnings = FALSE)
+        dir.exists(log_dir) && file.access(log_dir, mode = 2L) == 0L
+    }, error = function(e) FALSE)
+    if (!isTRUE(dir_ok)) {
+        .app_perf_log_path <<- ""
+        .app_perf_log_pid <<- current_pid
+        return("")
+    }
+
+    started_tag <- format(Sys.time(), "%Y%m%dT%H%M%OS3Z", tz = "UTC")
+    started_tag <- gsub("[^0-9TZ]", "", started_tag)
+    path <- file.path(
+        log_dir,
+        sprintf(
+            "perf_%s_%s_%s_pid%s.log",
+            run_label,
+            started_tag,
+            node_name,
+            as.character(current_pid)
+        )
+    )
+
+    meta_keys <- c(
+        "CGV_IMAGE", "APP_BUILD_REVISION",
+        "APP_FUTURE_MODE", "APP_FUTURE_WORKERS",
+        "APP_LASTZ_WORKERS", "APP_LASTZ_GLOBAL_WORKERS",
+        "APP_GFF_CACHE_MAX_MB", "APP_GFF_GENE_INDEX_CACHE_MAX_MB",
+        "APP_GFF_GENE_LIGHT_CACHE_MAX_MB", "APP_IDENTITY_DEBOUNCE_MS",
+        "APP_GIRAFE_COMPACT_SVG", "APP_GIRAFE_SVG_DECIMALS",
+        "APP_ORTHO_RENDER_CHUNK_SIZE", "APP_ORTHO_AUTO_RENDER_MORE"
+    )
+    meta_values <- Sys.getenv(meta_keys, unset = "")
+    meta_lines <- sprintf("# meta %s=%s", meta_keys, gsub("[\r\n]+", " ", meta_values))
+    header <- c(
+        "# CGV_PERF_LOG_V1",
+        sprintf("# run_label=%s", run_label),
+        sprintf("# started_utc=%s", format(Sys.time(), "%Y-%m-%dT%H:%M:%OS3Z", tz = "UTC")),
+        sprintf("# process_id=%s", as.character(current_pid)),
+        sprintf("# host=%s", node_name),
+        sprintf("# r_version=%s", gsub("[\r\n]+", " ", R.version.string)),
+        meta_lines,
+        sprintf("# capture_id=%s", started_tag)
+    )
+    wrote_header <- tryCatch({
+        writeLines(header, con = path, useBytes = TRUE)
+        TRUE
+    }, error = function(e) FALSE)
+
+    .app_perf_log_path <<- if (isTRUE(wrote_header)) path else ""
+    .app_perf_log_pid <<- current_pid
+    if (isTRUE(wrote_header)) {
+        message("[PERF_LOG] ", path)
+    }
+    .app_perf_log_path
+}
+
 app_debug_log <- function(..., .sep = "") {
     if (!isTRUE(app_debug_enabled())) {
         return(invisible(FALSE))
@@ -64,7 +154,12 @@ app_perf_mark <- function(run = NULL, step = "", context = "APP") {
     if (!nzchar(msg)) {
         msg <- "tick"
     }
-    message(head, " ", msg)
+    line <- paste0(head, " ", msg)
+    message(line)
+    log_path <- app_perf_log_file()
+    if (nzchar(log_path)) {
+        try(cat(line, "\n", file = log_path, append = TRUE), silent = TRUE)
+    }
     invisible(elapsed)
 }
 
