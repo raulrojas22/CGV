@@ -3,8 +3,8 @@
 #
 # This script preserves ShinyProxy, nginx, the socket proxy, their Compose file,
 # and persistent biological data. It builds a versioned CGV image, adds only
-# the allow-listed background-report flags to the backed-up ShinyProxy config,
-# and switches the already-hardened stack to the new release.
+# allow-listed runtime flags to the backed-up ShinyProxy config, and switches
+# the already-hardened stack to the new release.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -23,6 +23,7 @@ SHINYPROXY_IMAGE="${SHINYPROXY_IMAGE:-docker.io/openanalytics/shinyproxy:3.2.4@s
 SHINYPROXY_DIGEST="${SHINYPROXY_IMAGE##*@}"
 SHINYPROXY_RUNTIME_IMAGE="docker.io/openanalytics/shinyproxy@${SHINYPROXY_DIGEST}"
 REBUILD_R_DEPS="${REBUILD_R_DEPS:-0}"
+PERF_RUN_LABEL="${PERF_RUN_LABEL:-manual}"
 MODE="deploy"
 SKIP_TESTS=0
 SSH_SOCK="/tmp/cgv-colors-deploy-$$.sock"
@@ -43,6 +44,7 @@ Variables opcionales:
   CGV_DEPS_IMAGE=cgv-deps:1.0.0
   REBUILD_R_DEPS=1   Reconstruye explícitamente la base de dependencias R.
   BACKGROUND_REPORT_MEMORY=4g
+  PERF_RUN_LABEL=antes_colors_01
 
 El deploy normal exige que Git esté limpio y crea una imagen inmutable con
 la forma localhost/cgv:release-<commit>-<fecha UTC>.
@@ -65,6 +67,8 @@ done
 
 [[ "$REBUILD_R_DEPS" == "0" || "$REBUILD_R_DEPS" == "1" ]] || \
   die "REBUILD_R_DEPS debe ser 0 o 1"
+[[ "$PERF_RUN_LABEL" =~ ^[A-Za-z0-9._-]+$ ]] || \
+  die "PERF_RUN_LABEL solo puede contener letras, numeros, punto, guion y guion bajo"
 [[ "$BACKGROUND_REPORT_MEMORY" =~ ^[1-9][0-9]*[mMgG]$ ]] || \
   die "BACKGROUND_REPORT_MEMORY debe usar un valor como 2048m o 4g"
 [[ "$PUBLIC_HOSTNAME" =~ ^[A-Za-z0-9.-]+$ ]] || \
@@ -120,6 +124,7 @@ echo "  Modo:       ${MODE}"
 echo "  Fuente:     ${SOURCE_BRANCH}@${SOURCE_REV}"
 echo "  Destino:    ${REMOTE_TARGET}:${APP_DIR}"
 echo "  URL:        https://${PUBLIC_HOSTNAME}"
+echo "  Captura:    ${PERF_RUN_LABEL}"
 echo "============================================"
 echo ""
 
@@ -273,8 +278,9 @@ rsync -az --chmod=Fu=rw,Fgo= \
 rssh "chmod 600 '${REMOTE_EMAIL_ENV}' && test \"\$(stat -c '%a' '${REMOTE_EMAIL_ENV}')\" = 600"
 
 # Colors keeps its hardened ShinyProxy configuration on the server. Add only
-# the allow-listed flags required by background reports; the complete file was
-# backed up above and is restored verbatim by rollback_release().
+# the allow-listed flags required by background reports and manual performance
+# capture; the complete file was backed up above and is restored verbatim by
+# rollback_release().
 rssh "set -e
   config='${APP_DIR}/shinyproxy/application.yml'
   if ! grep -q 'APP_BACKGROUND_REPORTS_ENABLED:' \"\$config\"; then
@@ -290,8 +296,34 @@ rssh "set -e
     chmod --reference=\"\$config\" \"\$staged\"
     mv \"\$staged\" \"\$config\"
   fi
+  if ! grep -q 'APP_PERF_LOG_DIR:' \"\$config\"; then
+    staged=\"\${config}.perf.\$\$\"
+    awk '
+      { print }
+      /APP_PERF_TIMING:/ {
+        print \"        APP_PERF_LOG_DIR: \\\"/app/cache/perf_runs\\\"\"
+        print \"        APP_PERF_RUN_LABEL: \\\"manual\\\"\"
+        print \"        APP_BUILD_REVISION: \\\"unknown\\\"\"
+      }
+    ' \"\$config\" > \"\$staged\"
+    chmod --reference=\"\$config\" \"\$staged\"
+    mv \"\$staged\" \"\$config\"
+  fi
+  if ! grep -q 'APP_PERF_RUN_LABEL:' \"\$config\"; then
+    sed -i '/APP_PERF_LOG_DIR:/a\        APP_PERF_RUN_LABEL: \"manual\"' \"\$config\"
+  fi
+  if ! grep -q 'APP_BUILD_REVISION:' \"\$config\"; then
+    sed -i '/APP_PERF_RUN_LABEL:/a\        APP_BUILD_REVISION: \"unknown\"' \"\$config\"
+  fi
+  sed -i -E 's|^        APP_PERF_TIMING:.*|        APP_PERF_TIMING: \"1\"|' \"\$config\"
+  sed -i -E 's|^        APP_PERF_RUN_LABEL:.*|        APP_PERF_RUN_LABEL: \"${PERF_RUN_LABEL}\"|' \"\$config\"
+  sed -i -E 's|^        APP_BUILD_REVISION:.*|        APP_BUILD_REVISION: \"${NEW_IMAGE}\"|' \"\$config\"
   grep -q 'APP_BACKGROUND_REPORTS_ENABLED: \"\${SP_BACKGROUND_REPORTS_ENABLED:1}\"' \"\$config\"
   grep -q 'APP_LASTZ_GLOBAL_WORKERS: \"\${SP_LASTZ_GLOBAL_WORKERS:1}\"' \"\$config\"
+  grep -q 'APP_PERF_TIMING: \"1\"' \"\$config\"
+  grep -q 'APP_PERF_LOG_DIR: \"/app/cache/perf_runs\"' \"\$config\"
+  grep -q 'APP_PERF_RUN_LABEL: \"${PERF_RUN_LABEL}\"' \"\$config\"
+  grep -q 'APP_BUILD_REVISION: \"${NEW_IMAGE}\"' \"\$config\"
   grep -q 'CGV_PUBLIC_BASE_URL: \"https://${PUBLIC_HOSTNAME}\"' \"\$config\"
 "
 

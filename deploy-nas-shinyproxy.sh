@@ -46,6 +46,7 @@ CGV_IMAGE="${CGV_IMAGE:-${ENV_CGV_IMAGE:-cgv:1.0.0}}"
 CGV_DEPS_IMAGE="${CGV_DEPS_IMAGE:-$(local_env_value CGV_DEPS_IMAGE cgv-deps:1.0.0)}"
 REBUILD_R_DEPS="${REBUILD_R_DEPS:-0}"
 CGV_NGINX_PORT="${CGV_NGINX_PORT:-$(local_env_value CGV_NGINX_PORT 18080)}"
+PERF_RUN_LABEL="${PERF_RUN_LABEL:-manual}"
 
 SSH_SOCK="/tmp/deploy-nas-sp-ssh-$$"
 ssh -fNM -S "$SSH_SOCK" "${NAS_USER}@${NAS_HOST}"
@@ -77,12 +78,17 @@ echo "============================================"
 echo "  CGV ShinyProxy — Deploy to NAS"
 echo "  https://cgvapp.com"
 echo "  Modo: multiusuario (1 contenedor/usuario)"
+echo "  Captura rendimiento: ${PERF_RUN_LABEL}"
 echo "  R dependencies: ${CGV_DEPS_IMAGE} (rebuild=${REBUILD_R_DEPS})"
 echo "============================================"
 echo ""
 
 if [[ "${REBUILD_R_DEPS}" != "0" && "${REBUILD_R_DEPS}" != "1" ]]; then
   echo "ERROR: REBUILD_R_DEPS debe ser 0 o 1." >&2
+  exit 1
+fi
+if ! [[ "${PERF_RUN_LABEL}" =~ ^[A-Za-z0-9._-]+$ ]]; then
+  echo "ERROR: PERF_RUN_LABEL solo puede contener letras, numeros, punto, guion y guion bajo." >&2
   exit 1
 fi
 
@@ -291,6 +297,8 @@ nssh "
   upsert_env SP_DATA_DIR '${NAS_APP_DIR}/data'
   upsert_env SP_CACHE_DIR '${NAS_APP_DIR}/cache'
   upsert_env SP_NCBI_DOWNLOADS_DIR '${NAS_APP_DIR}/ncbi_downloads'
+  upsert_env SP_APP_PERF_TIMING '1'
+  upsert_env SP_PERF_RUN_LABEL '${PERF_RUN_LABEL}'
 
   echo '  Iniciando servicios con rutas absolutas del host NAS...'
   ${REMOTE_DOCKER} compose -f docker-compose.shinyproxy.yml up -d
