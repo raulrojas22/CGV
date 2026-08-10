@@ -61,23 +61,28 @@ chromote::set_chrome_args(worker_chrome_args)
 worker_log("headless browser args=%s", paste(worker_chrome_args, collapse = " "))
 
 verify_worker_chrome <- function(timeout_seconds = 30) {
-    previous_timeout <- getOption("chromote.timeout")
-    options(chromote.timeout = timeout_seconds)
-    on.exit(options(chromote.timeout = previous_timeout), add = TRUE)
+    verifier <- file.path(base_dir, "scripts", "verify_headless_chrome.R")
+    if (!file.exists(verifier)) stop("Missing isolated headless Chrome verifier: ", verifier)
 
-    browser <- NULL
-    on.exit({
-        if (!is.null(browser)) try(browser$close(), silent = TRUE)
-        if (chromote::has_default_chromote_object()) {
-            try(chromote::default_chromote_object()$close(), silent = TRUE)
-        }
-    }, add = TRUE)
-
-    browser <- chromote::ChromoteSession$new()
-    version <- browser$Browser$getVersion()
-    product <- trimws(as.character(version$product %||% ""))
-    if (!nzchar(product)) stop("Headless Chrome started but did not return its browser version.")
-    product
+    child_env <- Sys.getenv()
+    child_env[["CHROMOTE_CHROME"]] <- worker_chrome
+    result <- processx::run(
+        "Rscript",
+        c("--vanilla", verifier),
+        env = child_env,
+        echo = FALSE,
+        error_on_status = FALSE,
+        timeout = max(1, as.numeric(timeout_seconds)) * 1000
+    )
+    if (!identical(as.integer(result$status %||% 1L), 0L)) {
+        detail <- trimws(paste(c(result$stderr, result$stdout), collapse = "\n"))
+        if (!nzchar(detail)) detail <- "isolated verifier exited unsuccessfully"
+        stop("Headless Chrome preflight failed: ", detail)
+    }
+    products <- trimws(as.character(result$stdout %||% character(0)))
+    products <- products[grepl("^(Chrome|Chromium)/", products)]
+    if (!length(products)) stop("Headless Chrome preflight did not return a browser product.")
+    products[[length(products)]]
 }
 
 poll_seconds <- max(1, suppressWarnings(as.numeric(Sys.getenv("APP_BACKGROUND_REPORT_POLL_SECONDS", "3"))))

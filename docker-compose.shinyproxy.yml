@@ -70,6 +70,7 @@ services:
     image: "${CGV_IMAGE:-cgv:1.1.0}"
     container_name: cgv-background-report-worker
     restart: unless-stopped
+    init: true
     command: ["Rscript", "/app/scripts/background_report_worker.R"]
     env_file:
       - .env

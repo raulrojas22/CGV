@@ -129,9 +129,11 @@ envía el enlace bajo `https://cgv.mobilomics.org/share/...` usando la
 configuración existente de feedback. El usuario puede continuar trabajando o
 cerrar la sesión; otro alineamiento crea un trabajo separado.
 
-El worker se ejecuta en serie y comparte un único cupo global de LASTZ con las
-sesiones públicas. El remitente corresponde a `FEEDBACK_FROM_EMAIL` y las
-respuestas se dirigen a `FEEDBACK_TO_EMAIL`.
+El worker se ejecuta en serie y comparte dos cupos globales de LASTZ con las
+sesiones públicas (`APP_LASTZ_GLOBAL_WORKERS=2`). Esto permite dos alineamientos
+simultáneos sin liberar una cantidad no acotada de procesos. El remitente
+corresponde a `FEEDBACK_FROM_EMAIL` y las respuestas se dirigen a
+`FEEDBACK_TO_EMAIL`.
 
 Comprobación rápida después del deploy:
 

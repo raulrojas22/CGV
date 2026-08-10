@@ -130,7 +130,7 @@ For deployment details, see [DOCKER_DEPLOY.md](DOCKER_DEPLOY.md).
 ### LASTZ resource and cache policy
 
 - Web containers run at most one LASTZ job concurrently (`APP_LASTZ_WORKERS=1`); Desktop uses up to two when the machine has enough CPUs.
-- ShinyProxy sessions and the detached report worker also share a filesystem semaphore (`APP_LASTZ_GLOBAL_WORKERS=1` on the NAS), so a new alignment waits instead of competing with an active emailed report.
+- ShinyProxy sessions and the detached report worker also share a filesystem semaphore. Colors uses `APP_LASTZ_GLOBAL_WORKERS=2`; other deployments default to one unless explicitly tuned, so excess alignments wait instead of competing without a bound.
 - LASTZ Blocks and MultiPIP share one General+CIGARX alignment for the same reference, loci, window, binary, and arguments. Changing the alignment window creates a new exact alignment instead of cropping a larger approximation.
 - The in-memory cache is bounded by both entry count and bytes. Successful alignments for preloaded genomes may also use the shared `cache/lastz_alignments` disk cache, bounded by size and TTL.
 - Uploaded/private genome paths are excluded from the persistent cache. Timeouts and engine errors are never cached.
