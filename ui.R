@@ -532,14 +532,20 @@ figure_studio_page <- function() {
     div(
       class = "figure-studio-header",
       div(
-        class = "figure-studio-heading",
+        class = "figure-studio-header-main",
         div(
-          class = "figure-studio-kicker",
-          icon("object-group"),
-          span("Publication workspace")
+          class = "figure-studio-hero-icon",
+          icon("object-group")
         ),
-        h2("Figure Studio"),
-        p("Build a publication-ready figure one independent chart panel at a time.")
+        div(
+          class = "figure-studio-heading",
+          div(
+            class = "figure-studio-kicker",
+            span("Publication workspace")
+          ),
+          h2("Figure Studio"),
+          p("Build a publication-ready figure one independent chart panel at a time.")
+        )
       ),
       div(
         class = "figure-studio-header-actions",
@@ -645,67 +651,81 @@ figure_studio_page <- function() {
     div(
       class = "figure-studio-toolbar",
       div(
-        class = "figure-studio-title-fields",
+        class = "figure-studio-title-column",
+        div(
+          class = "figure-studio-toolbar-intro",
+          span(class = "figure-studio-toolbar-icon", icon("sliders-h")),
+          div(
+            span(class = "figure-studio-pane-kicker", "Figure setup"),
+            strong("Shape the publication frame")
+          )
+        ),
+        div(
+          class = "figure-studio-title-fields",
+          tags$label(
+            class = "figure-studio-field figure-studio-field-title",
+            span("Figure title"),
+            tags$input(
+              id = "figure-studio-title",
+              type = "text",
+              value = "CGV comparative analysis",
+              maxlength = "140",
+              placeholder = "Optional — leave blank for no figure title",
+              title = "Optional figure heading. Clear this field to export without a title.",
+              autocomplete = "off"
+            )
+          ),
+          tags$label(
+            class = "figure-studio-field figure-studio-field-subtitle",
+            span("Subtitle (optional)"),
+            tags$input(
+              id = "figure-studio-subtitle",
+              type = "text",
+              value = "",
+              maxlength = "200",
+              placeholder = "Study, cohort, method, or comparison",
+              title = "Optional line shown beneath the figure title.",
+              autocomplete = "off"
+            )
+          )
+        )
+      ),
+      div(
+        class = "figure-studio-layout-fields",
         tags$label(
-          class = "figure-studio-field figure-studio-field-title",
-          span("Figure title"),
-          tags$input(
-            id = "figure-studio-title",
-            type = "text",
-            value = "CGV comparative analysis",
-            maxlength = "140",
-            placeholder = "Optional — leave blank for no figure title",
-            title = "Optional figure heading. Clear this field to export without a title.",
-            autocomplete = "off"
+          class = "figure-studio-field",
+          title = "Set the publication grid to one, two, or three columns.",
+          span("Columns"),
+          tags$select(
+            id = "figure-studio-columns",
+            tags$option(value = "1", "1"),
+            tags$option(value = "2", selected = "selected", "2"),
+            tags$option(value = "3", "3")
           )
         ),
         tags$label(
-          class = "figure-studio-field figure-studio-field-subtitle",
-          span("Subtitle (optional)"),
-          tags$input(
-            id = "figure-studio-subtitle",
-            type = "text",
-            value = "",
-            maxlength = "200",
-            placeholder = "Study, cohort, method, or comparison",
-            title = "Optional line shown beneath the figure title.",
-            autocomplete = "off"
+          class = "figure-studio-field",
+          title = "Apply the selected color profile to the preview and final export.",
+          span("Figure style"),
+          tags$select(
+            id = "figure-studio-profile",
+            tags$option(value = "color", "Full Color"),
+            tags$option(value = "paper-color", "Paper Color"),
+            tags$option(value = "colorblind", "Colorblind"),
+            tags$option(value = "gray", "Paper Gray"),
+            tags$option(value = "mono", "Paper Mono")
           )
-        )
-      ),
-      tags$label(
-        class = "figure-studio-field",
-        title = "Set the publication grid to one, two, or three columns.",
-        span("Columns"),
-        tags$select(
-          id = "figure-studio-columns",
-          tags$option(value = "1", "1"),
-          tags$option(value = "2", selected = "selected", "2"),
-          tags$option(value = "3", "3")
-        )
-      ),
-      tags$label(
-        class = "figure-studio-field",
-        title = "Apply the selected color profile to the preview and final export.",
-        span("Figure style"),
-        tags$select(
-          id = "figure-studio-profile",
-          tags$option(value = "color", "Full Color"),
-          tags$option(value = "paper-color", "Paper Color"),
-          tags$option(value = "colorblind", "Colorblind"),
-          tags$option(value = "gray", "Paper Gray"),
-          tags$option(value = "mono", "Paper Mono")
-        )
-      ),
-      tags$label(
-        class = "figure-studio-field",
-        title = "Controls PNG raster resolution only. SVG remains vector.",
-        span("PNG size"),
-        tags$select(
-          id = "figure-studio-resolution",
-          tags$option(value = "1", "Screen (1×)"),
-          tags$option(value = "2", selected = "selected", "High (2×)"),
-          tags$option(value = "3", "Ultra (3×)")
+        ),
+        tags$label(
+          class = "figure-studio-field",
+          title = "Controls PNG raster resolution only. SVG remains vector.",
+          span("PNG size"),
+          tags$select(
+            id = "figure-studio-resolution",
+            tags$option(value = "1", "Screen (1×)"),
+            tags$option(value = "2", selected = "selected", "High (2×)"),
+            tags$option(value = "3", "Ultra (3×)")
+          )
         )
       ),
       div(
@@ -742,7 +762,9 @@ figure_studio_page <- function() {
         class = "figure-studio-library",
         div(
           class = "figure-studio-pane-heading",
+          div(class = "figure-studio-pane-icon", icon("th-large")),
           div(
+            class = "figure-studio-pane-title",
             span(class = "figure-studio-pane-kicker", "Panel library"),
             h3("Add one chart")
           ),
@@ -790,6 +812,8 @@ figure_studio_page <- function() {
         div(
           class = "figure-studio-canvas-topline",
           div(
+            class = "figure-studio-canvas-meta",
+            span(class = "figure-studio-canvas-kicker", "Composition"),
             strong(id = "figure-studio-panel-summary", "0 panels"),
             span(
               id = "figure-studio-save-status",
@@ -821,6 +845,7 @@ figure_studio_page <- function() {
           id = "figure-studio-empty",
           class = "figure-studio-empty",
           div(class = "figure-studio-empty-icon", icon("object-group")),
+          span(class = "figure-studio-empty-kicker", "Publication canvas"),
           h3("Start with an empty publication canvas"),
           p("Add as many panels as the figure needs. Each panel contains one chart and can be reordered, resized, duplicated, or removed."),
           tags$button(
@@ -848,7 +873,9 @@ figure_studio_page <- function() {
         class = "figure-studio-inspector",
         div(
           class = "figure-studio-pane-heading",
+          div(class = "figure-studio-pane-icon", icon("sliders-h")),
           div(
+            class = "figure-studio-pane-title",
             span(class = "figure-studio-pane-kicker", "Selected panel"),
             h3(id = "figure-studio-inspector-title", "No panel selected")
           )
