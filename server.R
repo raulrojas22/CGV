@@ -389,8 +389,14 @@ function(input, output, session) {
             run = NULL,
             expected = character(0),
             ready = character(0),
+            painted = character(0),
             first_logged = FALSE,
-            total_logged = FALSE
+            total_logged = FALSE,
+            first_ready_ms = NA_real_,
+            first_painted_logged = FALSE,
+            first_painted_ms = NA_real_,
+            ready_to_paint_logged = FALSE,
+            total_painted_logged = FALSE
         )
     }
 
@@ -412,6 +418,13 @@ function(input, output, session) {
         tracker_rv(tr)
         if (is.list(run)) {
             app_perf_mark(run, "timing_start", context)
+            if (isTRUE(app_perf_enabled())) {
+                browser_context <- if (grepl("^HOMO", context)) "homologous" else if (grepl("^ORTHO", context)) "orthologous" else ""
+                session$sendCustomMessage("cgv_plot_timing_start", list(
+                    run_id = as.character(run$id %||% ""),
+                    context = browser_context
+                ))
+            }
         }
         invisible(NULL)
     }
@@ -423,6 +436,15 @@ function(input, output, session) {
         tr$expected <- ids_chr
         run <- tr$run
         if (is.list(run)) {
+            if (isTRUE(app_perf_enabled())) {
+                browser_context <- if (grepl("^HOMO", context)) "homologous" else if (grepl("^ORTHO", context)) "orthologous" else ""
+                output_prefix <- if (identical(browser_context, "homologous")) "plot_homo_" else if (identical(browser_context, "orthologous")) "plot_ortho_" else "plot_"
+                session$sendCustomMessage("cgv_plot_timing_expect", list(
+                    run_id = as.character(run$id %||% ""),
+                    context = browser_context,
+                    output_ids = paste0(output_prefix, ids_chr, "-plot")
+                ))
+            }
             app_perf_mark(run, sprintf("expected_plots=%d", as.integer(length(ids_chr))), context)
 
             # Backfill timing markers if plots were already marked ready before expected was set.
@@ -441,6 +463,11 @@ function(input, output, session) {
                     context
                 )
                 tr$first_logged <- TRUE
+                tr$first_ready_ms <- elapsed_ms
+                if (!isTRUE(tr$ready_to_paint_logged) && is.finite(tr$first_painted_ms) && is.finite(elapsed_ms)) {
+                    app_perf_mark_ms(run, "server_ready_to_browser_paint_ms", max(0, tr$first_painted_ms - elapsed_ms), context)
+                    tr$ready_to_paint_logged <- TRUE
+                }
             }
             if (!isTRUE(tr$total_logged) && length(ids_chr) > 0L && length(matched_ready) >= length(ids_chr)) {
                 app_perf_mark(
@@ -480,6 +507,11 @@ function(input, output, session) {
                 context
             )
             tr$first_logged <- TRUE
+            tr$first_ready_ms <- elapsed_ms
+            if (!isTRUE(tr$ready_to_paint_logged) && is.finite(tr$first_painted_ms) && is.finite(elapsed_ms)) {
+                app_perf_mark_ms(run, "server_ready_to_browser_paint_ms", max(0, tr$first_painted_ms - elapsed_ms), context)
+                tr$ready_to_paint_logged <- TRUE
+            }
         }
         if (!isTRUE(tr$total_logged) && length(expected_ids) > 0L && length(matched_ready) >= length(expected_ids)) {
             app_perf_mark(
@@ -501,6 +533,7 @@ function(input, output, session) {
         }
         tr$expected <- setdiff(as.character(tr$expected %||% character(0)), pid)
         tr$ready <- setdiff(as.character(tr$ready %||% character(0)), pid)
+        tr$painted <- setdiff(as.character(tr$painted %||% character(0)), pid)
         tracker_rv(tr)
         invisible(NULL)
     }
@@ -1117,6 +1150,64 @@ function(input, output, session) {
     orthoDownloadOutputsBound <- reactiveVal(character())
     homoPlotTimingTracker <- reactiveVal(empty_plot_timing_tracker())
     orthoPlotTimingTracker <- reactiveVal(empty_plot_timing_tracker())
+
+    handle_browser_plot_paint <- function(tracker_rv, payload, context = "APP_TIMING") {
+        tr <- tracker_rv()
+        run <- tr$run
+        run_id <- trimws(as.character(payload$run_id %||% ""))
+        output_id <- trimws(as.character(payload$output_id %||% ""))
+        if (!is.list(run) || !nzchar(run_id) || !identical(run_id, as.character(run$id %||% "")) || !nzchar(output_id)) {
+            return(invisible(FALSE))
+        }
+        if (output_id %in% as.character(tr$painted %||% character(0))) {
+            return(invisible(FALSE))
+        }
+        tr$painted <- unique(c(as.character(tr$painted %||% character(0)), output_id))
+        elapsed_ms <- suppressWarnings(as.numeric(ms_since_run_start(run)))
+        client_click_ms <- suppressWarnings(as.numeric(payload$click_to_paint_ms %||% NA_real_))
+        svg_bytes <- suppressWarnings(as.numeric(payload$svg_bytes %||% NA_real_))
+        svg_nodes <- suppressWarnings(as.numeric(payload$svg_nodes %||% NA_real_))
+        if (!isTRUE(tr$first_painted_logged)) {
+            app_perf_mark_ms(run, "browser_first_plot_painted_ms", elapsed_ms, context)
+            if (is.finite(client_click_ms)) {
+                app_perf_mark_ms(run, "client_click_to_first_paint_ms", client_click_ms, context)
+            }
+            if (is.finite(tr$first_ready_ms) && is.finite(elapsed_ms)) {
+                app_perf_mark_ms(run, "server_ready_to_browser_paint_ms", max(0, elapsed_ms - tr$first_ready_ms), context)
+                tr$ready_to_paint_logged <- TRUE
+            }
+            if (is.finite(svg_bytes)) app_perf_mark_ms(run, "browser_svg_bytes", svg_bytes, context)
+            if (is.finite(svg_nodes)) app_perf_mark_ms(run, "browser_svg_nodes", svg_nodes, context)
+            tr$first_painted_logged <- TRUE
+            tr$first_painted_ms <- elapsed_ms
+        }
+        expected_outputs <- if (grepl("^HOMO", context)) {
+            paste0("plot_homo_", as.character(tr$expected %||% character(0)), "-plot")
+        } else if (grepl("^ORTHO", context)) {
+            paste0("plot_ortho_", as.character(tr$expected %||% character(0)), "-plot")
+        } else {
+            character(0)
+        }
+        if (!isTRUE(tr$total_painted_logged) && length(expected_outputs) > 0L && all(expected_outputs %in% tr$painted)) {
+            app_perf_mark_ms(run, "browser_total_plots_painted_ms", elapsed_ms, context)
+            tr$total_painted_logged <- TRUE
+        }
+        tracker_rv(tr)
+        invisible(TRUE)
+    }
+
+    observeEvent(input$cgv_plot_painted, {
+        payload <- input$cgv_plot_painted %||% list()
+        run_id <- trimws(as.character(payload$run_id %||% ""))
+        if (!nzchar(run_id)) return(invisible(NULL))
+        homo_run <- (homoPlotTimingTracker()$run %||% list())$id %||% ""
+        ortho_run <- (orthoPlotTimingTracker()$run %||% list())$id %||% ""
+        if (identical(run_id, as.character(homo_run))) {
+            handle_browser_plot_paint(homoPlotTimingTracker, payload, "HOMO_TIMING")
+        } else if (identical(run_id, as.character(ortho_run))) {
+            handle_browser_plot_paint(orthoPlotTimingTracker, payload, "ORTHO_TIMING")
+        }
+    }, ignoreInit = TRUE, ignoreNULL = TRUE)
     genePlotRendererWarmed <- reactiveVal(FALSE)
     orthoAlignedRenderCache <- reactiveVal(list(key = "", plot_obj = NULL))
     orthoAlignedTrackCache <- new.env(parent = emptyenv())
