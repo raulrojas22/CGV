@@ -31,6 +31,23 @@ assert(identical(slot_result, 42L), "global LASTZ semaphore returns the protecte
 slot_root <- file.path(Sys.getenv("CGV_CACHE_DIR"), "lastz_global_slots")
 assert(length(list.dirs(slot_root, recursive = FALSE)) == 0L, "global LASTZ slot is released after execution")
 
+if (.Platform$OS.type == "unix") {
+    Sys.setenv(APP_LASTZ_GLOBAL_WORKERS = "2")
+    concurrent_started <- proc.time()[["elapsed"]]
+    concurrent_jobs <- lapply(seq_len(2L), function(job_id) {
+        parallel::mcparallel(cgv_with_global_lastz_slot(function() {
+            Sys.sleep(1)
+            job_id
+        }, base_dir = test_root))
+    })
+    concurrent_results <- unname(unlist(parallel::mccollect(concurrent_jobs), use.names = FALSE))
+    concurrent_elapsed <- proc.time()[["elapsed"]] - concurrent_started
+    assert(identical(sort(as.integer(concurrent_results)), c(1L, 2L)), "two global LASTZ slots return both protected results")
+    assert(concurrent_elapsed < 1.8, "two configured global LASTZ slots execute concurrently")
+    assert(length(list.dirs(slot_root, recursive = FALSE)) == 0L, "both global LASTZ slots are released after concurrent execution")
+    Sys.setenv(APP_LASTZ_GLOBAL_WORKERS = "1")
+}
+
 preloaded_ref <- list(name = "reference.fa", relative_path = "genomes/reference.fa", available = TRUE)
 snapshot <- list(
     schema_version = 2L,
@@ -122,6 +139,7 @@ assert(grepl("preloaded CGV data", private_error, fixed = TRUE), "private upload
 
 domain_text <- paste(readLines(file.path("R", "server_shared_analysis_domain.R"), warn = FALSE), collapse = "\n")
 worker_text <- paste(readLines(file.path("scripts", "background_report_worker.R"), warn = FALSE), collapse = "\n")
+chrome_verifier_text <- paste(readLines(file.path("scripts", "verify_headless_chrome.R"), warn = FALSE), collapse = "\n")
 compose_text <- paste(readLines("docker-compose.shinyproxy.yml", warn = FALSE), collapse = "\n")
 shinyproxy_text <- paste(readLines(file.path("shinyproxy", "application.yml"), warn = FALSE), collapse = "\n")
 colors_deploy_text <- paste(readLines("deploy-colors-shinyproxy.sh", warn = FALSE), collapse = "\n")
@@ -145,12 +163,21 @@ assert(grepl("CGV_BACKGROUND_REPORT_JOB_PATH", worker_text, fixed = TRUE), "work
 assert(grepl("resolve_worker_chrome", worker_text, fixed = TRUE), "worker validates its headless browser before accepting jobs")
 assert(grepl("chromote::set_chrome_args", worker_text, fixed = TRUE), "worker configures Chrome through the supported chromote API")
 assert(grepl('"--no-sandbox"', worker_text, fixed = TRUE), "worker disables Chrome's inner sandbox inside the hardened container")
+assert(grepl('file.path(base_dir, "scripts", "verify_headless_chrome.R")', worker_text, fixed = TRUE), "worker runs its Chrome preflight in an isolated short-lived process")
+assert(grepl("processx::run", worker_text, fixed = TRUE), "worker waits for and reaps the isolated Chrome verifier")
+preflight_text <- sub("^[\\s\\S]*verify_worker_chrome <- function", "verify_worker_chrome <- function", worker_text, perl = TRUE)
+preflight_end <- regexpr("\npoll_seconds <-", preflight_text, fixed = TRUE)[[1L]]
+assert(preflight_end > 0L, "worker preflight function has a bounded static test region")
+preflight_text <- substr(preflight_text, 1L, preflight_end - 1L)
+assert(!grepl("ChromoteSession$new", preflight_text, fixed = TRUE), "long-lived worker never starts a persistent chromote event loop during preflight")
+assert(grepl("ChromoteSession$new", chrome_verifier_text, fixed = TRUE), "isolated verifier starts a real chromote session")
 headless_preflight_call <- regexpr("headless_product <- verify_worker_chrome()", worker_text, fixed = TRUE)[[1L]]
 ready_marker_write <- regexpr("writeLines(c(", worker_text, fixed = TRUE)[[1L]]
 assert(headless_preflight_call > 0L && ready_marker_write > headless_preflight_call, "worker starts headless Chrome before publishing its ready marker")
 assert(grepl('paste0("browser=", headless_product)', worker_text, fixed = TRUE), "worker ready marker records the verified browser product")
 assert(grepl("google-chrome-stable_current_amd64.deb", dependencies_text, fixed = TRUE), "dependency image installs a container-native headless browser")
 assert(grepl("background-report-worker:", compose_text, fixed = TRUE), "ShinyProxy compose runs the detached report worker")
+assert(grepl("init: true", compose_text, fixed = TRUE), "report worker uses an init process to reap browser children")
 assert(grepl("worker.ready", compose_text, fixed = TRUE), "report worker health depends on successful delivery preflight")
 assert(grepl("FEEDBACK_RESEND_API_KEY", shinyproxy_text, fixed = TRUE), "ShinyProxy sessions inherit the Resend delivery secret")
 assert(grepl("REPORT_RESEND_API_KEY", shinyproxy_text, fixed = TRUE), "ShinyProxy sessions inherit an optional report-specific secret")
@@ -162,6 +189,8 @@ assert(grepl("APP_BACKGROUND_REPORTS_ENABLED", colors_deploy_text, fixed = TRUE)
 assert(grepl("REPORT_FROM_EMAIL", colors_deploy_text, fixed = TRUE), "Colors worker receives the branded report sender")
 assert(grepl("requireNamespace('chromote'", colors_deploy_text, fixed = TRUE), "Colors deploy rebuilds dependencies when the headless runtime is absent")
 assert(grepl("/usr/bin/google-chrome", colors_deploy_text, fixed = TRUE), "Colors validates the exact headless browser used by the worker")
+assert(grepl("--init", colors_deploy_text, fixed = TRUE), "Colors worker uses an init process to reap browser children")
+assert(grepl("APP_LASTZ_GLOBAL_WORKERS='${APP_LASTZ_GLOBAL_WORKERS}'", colors_deploy_text, fixed = TRUE), "Colors worker and public sessions share the configured LASTZ capacity")
 assert(grepl("^browser=Chrome/", colors_deploy_text, fixed = TRUE), "Colors check requires a durable successful headless browser marker")
 assert(!grepl("--chmod=F600", colors_deploy_text, fixed = TRUE), "Colors secret sync stays compatible with macOS openrsync")
 assert(grepl("--chmod=Fu=rw,Fgo=", colors_deploy_text, fixed = TRUE), "Colors secret sync preserves mode 0600 portably")

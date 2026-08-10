@@ -15,6 +15,7 @@ PUBLIC_HOSTNAME="${PUBLIC_HOSTNAME:-cgv.mobilomics.org}"
 COMPOSE_FILE="${APP_DIR}/docker-compose.shinyproxy.colors.yml"
 BACKGROUND_WORKER_NAME="cgv-background-report-worker"
 BACKGROUND_REPORT_MEMORY="${BACKGROUND_REPORT_MEMORY:-4g}"
+APP_LASTZ_GLOBAL_WORKERS="${APP_LASTZ_GLOBAL_WORKERS:-2}"
 LOCAL_EMAIL_ENV="${SCRIPT_DIR}/.env.local"
 REMOTE_EMAIL_ENV="${APP_DIR}/.env.background-reports"
 EMAIL_ENV_STAGING=""
@@ -44,6 +45,7 @@ Variables opcionales:
   CGV_DEPS_IMAGE=cgv-deps:1.0.0
   REBUILD_R_DEPS=1   Reconstruye explícitamente la base de dependencias R.
   BACKGROUND_REPORT_MEMORY=4g
+  APP_LASTZ_GLOBAL_WORKERS=2
   PERF_RUN_LABEL=antes_colors_01
 
 El deploy normal exige que Git esté limpio y crea una imagen inmutable con
@@ -71,6 +73,9 @@ done
   die "PERF_RUN_LABEL solo puede contener letras, numeros, punto, guion y guion bajo"
 [[ "$BACKGROUND_REPORT_MEMORY" =~ ^[1-9][0-9]*[mMgG]$ ]] || \
   die "BACKGROUND_REPORT_MEMORY debe usar un valor como 2048m o 4g"
+[[ "$APP_LASTZ_GLOBAL_WORKERS" =~ ^[1-9][0-9]*$ ]] && \
+  (( APP_LASTZ_GLOBAL_WORKERS <= 16 )) || \
+  die "APP_LASTZ_GLOBAL_WORKERS debe ser un entero entre 1 y 16"
 [[ "$PUBLIC_HOSTNAME" =~ ^[A-Za-z0-9.-]+$ ]] || \
   die "PUBLIC_HOSTNAME no es válido"
 
@@ -333,12 +338,18 @@ rssh "set -e
   sed -i -E 's|^        APP_PERF_RUN_LABEL:.*|        APP_PERF_RUN_LABEL: \"${PERF_RUN_LABEL}\"|' \"\$config\"
   sed -i -E 's|^        APP_BUILD_REVISION:.*|        APP_BUILD_REVISION: \"${NEW_IMAGE}\"|' \"\$config\"
   grep -q 'APP_BACKGROUND_REPORTS_ENABLED: \"\${SP_BACKGROUND_REPORTS_ENABLED:1}\"' \"\$config\"
-  grep -q 'APP_LASTZ_GLOBAL_WORKERS: \"\${SP_LASTZ_GLOBAL_WORKERS:1}\"' \"\$config\"
+  grep -q 'APP_LASTZ_GLOBAL_WORKERS:' \"\$config\"
   grep -q 'APP_PERF_TIMING: \"1\"' \"\$config\"
   grep -q 'APP_PERF_LOG_DIR: \"/app/cache/perf_runs\"' \"\$config\"
   grep -q 'APP_PERF_RUN_LABEL: \"${PERF_RUN_LABEL}\"' \"\$config\"
   grep -q 'APP_BUILD_REVISION: \"${NEW_IMAGE}\"' \"\$config\"
   grep -q 'CGV_PUBLIC_BASE_URL: \"https://${PUBLIC_HOSTNAME}\"' \"\$config\"
+"
+
+rssh "set -e
+  config='${APP_DIR}/shinyproxy/application.yml'
+  sed -i -E 's|^        APP_LASTZ_GLOBAL_WORKERS:.*|        APP_LASTZ_GLOBAL_WORKERS: \"\${SP_LASTZ_GLOBAL_WORKERS:${APP_LASTZ_GLOBAL_WORKERS}}\"|' \"\$config\"
+  grep -q 'APP_LASTZ_GLOBAL_WORKERS: \"\${SP_LASTZ_GLOBAL_WORKERS:${APP_LASTZ_GLOBAL_WORKERS}}\"' \"\$config\"
 "
 
 echo ""
@@ -366,7 +377,7 @@ LOCAL_HASHES="$(
   cd "$SCRIPT_DIR"
   shasum -a 256 \
     ui.R server.R global.R \
-    R/background_report_jobs.R scripts/background_report_worker.R \
+    R/background_report_jobs.R scripts/background_report_worker.R scripts/verify_headless_chrome.R \
     www/js/reproducible_report.js \
     www/home_preview_cgv.html www/css/cgv_compiled.css |
     awk '{print $1}' | paste -sd: -
@@ -374,7 +385,7 @@ LOCAL_HASHES="$(
 REMOTE_HASHES="$(
   rssh "podman run --rm --user 10001:10001 --entrypoint sha256sum '${NEW_IMAGE}' \
     /app/ui.R /app/server.R /app/global.R \
-    /app/R/background_report_jobs.R /app/scripts/background_report_worker.R \
+    /app/R/background_report_jobs.R /app/scripts/background_report_worker.R /app/scripts/verify_headless_chrome.R \
     /app/www/js/reproducible_report.js \
     /app/www/home_preview_cgv.html /app/www/css/cgv_compiled.css" |
     awk '{print $1}' | paste -sd: -
@@ -412,6 +423,7 @@ start_background_worker() {
     podman run -d \\
       --name '${BACKGROUND_WORKER_NAME}' \\
       --restart unless-stopped \\
+      --init \\
       --no-healthcheck \\
       --user 10001:10001 \\
       --network sp-net \\
@@ -435,7 +447,7 @@ start_background_worker() {
       --env APP_BACKGROUND_REPORT_TIMEOUT_MINUTES=30 \\
       --env APP_BACKGROUND_REPORT_FUTURE_WORKERS=2 \\
       --env APP_BACKGROUND_REPORT_LASTZ_WORKERS=1 \\
-      --env APP_LASTZ_GLOBAL_WORKERS=1 \\
+      --env APP_LASTZ_GLOBAL_WORKERS='${APP_LASTZ_GLOBAL_WORKERS}' \\
       --env APP_LASTZ_GLOBAL_QUEUE_WAIT_SECONDS=1800 \\
       --env APP_PREWARM_ON_START=0 \\
       --env APP_PREWARM_BLOCK_START=0 \\
