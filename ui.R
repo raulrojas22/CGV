@@ -1820,11 +1820,13 @@ fluidPage(
       tags$link(rel = "stylesheet", href = versioned_asset_path("css/cross_species_header_status.css")),
       tags$link(rel = "stylesheet", href = versioned_asset_path("css/cgv_desktop_downloads.css")),
       tags$script(HTML(sprintf(
-        "window.__cgvTransportTiming = %s; window.__cgvTransportFlushMs = %s;",
+        "window.__cgvTransportTiming = %s; window.__cgvTransportFlushMs = %s; window.__cgvPlotPaintTiming = %s;",
         jsonlite::toJSON(app_env_flag("APP_TRANSPORT_TIMING", FALSE), auto_unbox = TRUE),
-        jsonlite::toJSON(app_env_int("APP_TRANSPORT_FLUSH_MS", 5000L, min_value = 50L), auto_unbox = TRUE)
+        jsonlite::toJSON(app_env_int("APP_TRANSPORT_FLUSH_MS", 5000L, min_value = 50L), auto_unbox = TRUE),
+        jsonlite::toJSON(app_perf_enabled(), auto_unbox = TRUE)
       ))),
       tags$script(src = versioned_asset_path("js/transport_metrics.js")),
+      tags$script(src = versioned_asset_path("js/plot_paint_timing.js")),
       tags$script(src = versioned_asset_path("js/lazy_jszip.js")),
       tags$script(src = versioned_asset_path("js/version_probe.js")),
       tags$script(src = versioned_asset_path("js/rounded_rects.js")),
