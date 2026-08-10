@@ -269,8 +269,20 @@ rsync -az --delete-delay --itemize-changes \
 # Copy only the allow-listed mail variables. The minimal file is never tracked,
 # is mode 0600 on Colors, and is mounted only into the background worker.
 EMAIL_ENV_STAGING="$(mktemp "${TMPDIR:-/tmp}/cgv-colors-report-email.XXXXXX")"
-awk '/^(FEEDBACK_RESEND_API_KEY|FEEDBACK_TO_EMAIL|FEEDBACK_FROM_EMAIL|REPORT_FROM_EMAIL|REPORT_REPLY_TO_EMAIL|REPORT_LOGO_PATH)=/' \
-  "$LOCAL_EMAIL_ENV" > "$EMAIL_ENV_STAGING"
+awk '
+  BEGIN { single_quote = sprintf("%c", 39) }
+  /^(FEEDBACK_RESEND_API_KEY|FEEDBACK_TO_EMAIL|FEEDBACK_FROM_EMAIL|REPORT_FROM_EMAIL|REPORT_REPLY_TO_EMAIL|REPORT_LOGO_PATH)=/ {
+    separator = index($0, "=")
+    key = substr($0, 1, separator - 1)
+    value = substr($0, separator + 1)
+    first = substr(value, 1, 1)
+    last = substr(value, length(value), 1)
+    if (length(value) >= 2 && ((first == "\"" && last == "\"") || (first == single_quote && last == single_quote))) {
+      value = substr(value, 2, length(value) - 2)
+    }
+    print key "=" value
+  }
+' "$LOCAL_EMAIL_ENV" > "$EMAIL_ENV_STAGING"
 chmod 600 "$EMAIL_ENV_STAGING"
 rsync -az --chmod=Fu=rw,Fgo= \
   -e "ssh -S $SSH_SOCK" \
@@ -394,6 +406,7 @@ start_background_worker() {
   local expected_image="$1"
   rssh "set -e
     podman rm -f '${BACKGROUND_WORKER_NAME}' >/dev/null 2>&1 || true
+    rm -f '${APP_DIR}/cache/background_reports/worker.ready'
     podman run -d \\
       --name '${BACKGROUND_WORKER_NAME}' \\
       --restart unless-stopped \\
@@ -463,7 +476,16 @@ PY
       proxy_code=\$(printf '%s' \"\$codes\" | awk '{print \$1}')
       nginx_code=\$(printf '%s' \"\$codes\" | awk '{print \$2}')
       worker_ok=0
-      if [ '${require_worker}' = 0 ] || { [ \"\$worker_state\" = running ] && [ \"\$worker_image\" = '${expected_image}' ]; }; then worker_ok=1; fi
+      if [ '${require_worker}' = 0 ]; then
+        worker_ok=1
+      elif [ \"\$worker_state\" = running ] && [ \"\$worker_image\" = '${expected_image}' ] && \
+           podman logs --tail 80 '${BACKGROUND_WORKER_NAME}' 2>&1 | grep -q '\[background-report-worker\] ready'; then
+        if podman exec '${BACKGROUND_WORKER_NAME}' grep -q 'worker.ready' /app/scripts/background_report_worker.R 2>/dev/null; then
+          if podman exec '${BACKGROUND_WORKER_NAME}' test -s /app/cache/background_reports/worker.ready 2>/dev/null; then worker_ok=1; fi
+        else
+          worker_ok=1
+        fi
+      fi
       if [ \"\$socket_state\" = healthy ] && [ \"\$worker_ok\" = 1 ] && printf '%s' \"\$proxy_code\" | grep -Eq '^[23][0-9][0-9]$' && printf '%s' \"\$nginx_code\" | grep -Eq '^[23][0-9][0-9]$' && [ \"\$running\" -ge 1 ]; then
         echo \"ready: socket=\$socket_state proxy=\$proxy_code nginx=\$nginx_code app_instances=\$running worker=\${worker_state:-not-required} wait=\${i}s\"
         exit 0
@@ -472,13 +494,14 @@ PY
     done
     podman ps -a --format '{{.Names}}|{{.Image}}|{{.Status}}|{{.Ports}}' >&2
     podman logs --tail 120 cgv-shinyproxy >&2 || true
+    podman logs --tail 120 '${BACKGROUND_WORKER_NAME}' >&2 || true
     exit 1
   "
 }
 
 rollback_release() {
   echo "ROLLBACK: restaurando ${CURRENT_IMAGE}..." >&2
-  rssh "set -e
+  if ! rssh "set -e
     cd '${APP_DIR}'
     cp -p '${BACKUP_DIR}/app.env' .env
     cp -p '${BACKUP_DIR}/docker-compose.shinyproxy.colors.yml' docker-compose.shinyproxy.colors.yml
@@ -492,7 +515,10 @@ rollback_release() {
     ${teardown_stack_command}
     CGV_IMAGE='${CURRENT_IMAGE}' SHINYPROXY_IMAGE='${SHINYPROXY_IMAGE}' \
       podman-compose -f docker-compose.shinyproxy.colors.yml up -d
-  " && wait_for_release "$CURRENT_IMAGE" 0
+  "; then
+    return 1
+  fi
+  start_background_worker "$CURRENT_IMAGE" && wait_for_release "$CURRENT_IMAGE" 1
 }
 
 echo ""
@@ -525,15 +551,17 @@ echo ""
 echo "[7/7] Verificación final..."
 set +e
 rssh "set -e
-  test \"\$(podman inspect cgv-shinyproxy --format '{{.ImageName}}')\" = '${SHINYPROXY_RUNTIME_IMAGE}'
-  ! podman inspect cgv-shinyproxy --format '{{range .Mounts}}{{println .Destination}}{{end}}' | grep -qx '/var/run/docker.sock'
-  test \"\$(podman network inspect sp-control --format '{{.Internal}}')\" = true
+  fail_guard() { echo \"FINAL_GUARD_FAILED: \$1\" >&2; exit 1; }
+  test \"\$(podman inspect cgv-shinyproxy --format '{{.ImageName}}')\" = '${SHINYPROXY_RUNTIME_IMAGE}' || fail_guard shinyproxy-image
+  if podman inspect cgv-shinyproxy --format '{{range .Mounts}}{{println .Destination}}{{end}}' | grep -qx '/var/run/docker.sock'; then fail_guard direct-docker-socket; fi
+  test \"\$(podman network inspect sp-control --format '{{.Internal}}')\" = true || fail_guard sp-control-not-internal
   legacy=\$(podman ps --filter ancestor=localhost/cgv:1.0.0 -q | wc -l | tr -d ' ')
-  test \"\$legacy\" = 0
-  podman logs --since 5m cgv-shinyproxy 2>&1 | grep -q 'Started ShinyProxy 3.2.4'
-  test \"\$(podman inspect '${BACKGROUND_WORKER_NAME}' --format '{{.State.Status}}')\" = running
-  test \"\$(podman inspect '${BACKGROUND_WORKER_NAME}' --format '{{.ImageName}}')\" = '${NEW_IMAGE}'
-  podman logs --tail 40 '${BACKGROUND_WORKER_NAME}' 2>&1 | grep -q '\[background-report-worker\] ready'
+  test \"\$legacy\" = 0 || fail_guard legacy-cgv-container
+  podman logs --since 5m cgv-shinyproxy 2>&1 | grep -q 'Started ShinyProxy 3.2.4' || fail_guard shinyproxy-start-log
+  test \"\$(podman inspect '${BACKGROUND_WORKER_NAME}' --format '{{.State.Status}}')\" = running || fail_guard worker-not-running
+  test \"\$(podman inspect '${BACKGROUND_WORKER_NAME}' --format '{{.ImageName}}')\" = '${NEW_IMAGE}' || fail_guard worker-image
+  podman logs --tail 80 '${BACKGROUND_WORKER_NAME}' 2>&1 | grep -q '\[background-report-worker\] ready' || fail_guard worker-ready-log
+  podman exec '${BACKGROUND_WORKER_NAME}' test -s /app/cache/background_reports/worker.ready || fail_guard worker-ready-marker
   podman ps --format '{{.Names}}|{{.Image}}|{{.Status}}|{{.Networks}}'
 "
 FINAL_STATUS=$?
