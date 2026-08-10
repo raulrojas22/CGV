@@ -1,12 +1,6 @@
 #!/usr/bin/env Rscript
 
 options(warn = 1)
-options(chromote.chrome_args = unique(c(
-    getOption("chromote.chrome_args", character(0)),
-    "--no-sandbox",
-    "--disable-dev-shm-usage",
-    "--disable-gpu"
-)))
 
 `%||%` <- function(a, b) if (!is.null(a)) a else b
 
@@ -57,6 +51,35 @@ required <- c("processx", "chromote", "httr2", "jsonlite")
 missing <- required[!vapply(required, requireNamespace, logical(1), quietly = TRUE)]
 if (length(missing)) stop("Missing worker packages: ", paste(missing, collapse = ", "))
 
+worker_chrome_args <- unique(c(
+    "--no-sandbox",
+    "--disable-dev-shm-usage",
+    "--disable-gpu",
+    chromote::get_chrome_args()
+))
+chromote::set_chrome_args(worker_chrome_args)
+worker_log("headless browser args=%s", paste(worker_chrome_args, collapse = " "))
+
+verify_worker_chrome <- function(timeout_seconds = 30) {
+    previous_timeout <- getOption("chromote.timeout")
+    options(chromote.timeout = timeout_seconds)
+    on.exit(options(chromote.timeout = previous_timeout), add = TRUE)
+
+    browser <- NULL
+    on.exit({
+        if (!is.null(browser)) try(browser$close(), silent = TRUE)
+        if (chromote::has_default_chromote_object()) {
+            try(chromote::default_chromote_object()$close(), silent = TRUE)
+        }
+    }, add = TRUE)
+
+    browser <- chromote::ChromoteSession$new()
+    version <- browser$Browser$getVersion()
+    product <- trimws(as.character(version$product %||% ""))
+    if (!nzchar(product)) stop("Headless Chrome started but did not return its browser version.")
+    product
+}
+
 poll_seconds <- max(1, suppressWarnings(as.numeric(Sys.getenv("APP_BACKGROUND_REPORT_POLL_SECONDS", "3"))))
 timeout_minutes <- max(5, suppressWarnings(as.numeric(Sys.getenv("APP_BACKGROUND_REPORT_TIMEOUT_MINUTES", "30"))))
 renderer_port <- suppressWarnings(as.integer(Sys.getenv("APP_BACKGROUND_REPORT_PORT", "3891")))
@@ -72,7 +95,12 @@ delivery_preflight <- cgv_report_delivery_preflight(delivery_config)
 if (!isTRUE(delivery_preflight$ok)) {
     stop("Report email delivery preflight failed: ", delivery_preflight$error)
 }
-writeLines(format(Sys.time(), "%Y-%m-%dT%H:%M:%S%z"), ready_path, useBytes = TRUE)
+headless_product <- verify_worker_chrome()
+worker_log("headless browser preflight ready; product=%s", headless_product)
+writeLines(c(
+    format(Sys.time(), "%Y-%m-%dT%H:%M:%S%z"),
+    paste0("browser=", headless_product)
+), ready_path, useBytes = TRUE)
 worker_log(
     "email delivery ready; sender=%s reply_to=%s",
     delivery_config$from_email,

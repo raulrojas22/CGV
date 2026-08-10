@@ -195,9 +195,11 @@ if [[ "$MODE" == "check" ]]; then
   WORKER_IMAGE="$(rssh "podman inspect '${BACKGROUND_WORKER_NAME}' --format '{{.ImageName}}' 2>/dev/null || true")"
   [[ "$WORKER_STATE" == "running" ]] || die "el worker de reportes no está activo: ${WORKER_STATE:-ausente}"
   [[ "$WORKER_IMAGE" == "$CURRENT_IMAGE" ]] || die "el worker usa ${WORKER_IMAGE:-ninguna}, no ${CURRENT_IMAGE}"
-  rssh "podman exec '${BACKGROUND_WORKER_NAME}' /usr/bin/google-chrome --version >/dev/null" || \
-    die "el worker no contiene un navegador headless utilizable; los reportes por correo fallarán"
-  echo "  Worker:     ${WORKER_STATE}, navegador headless OK"
+  rssh "podman exec '${BACKGROUND_WORKER_NAME}' test -s /app/cache/background_reports/worker.ready" || \
+    die "el worker no completó el preflight headless; los reportes por correo fallarán"
+  rssh "podman exec '${BACKGROUND_WORKER_NAME}' grep -q '^browser=Chrome/' /app/cache/background_reports/worker.ready" || \
+    die "el worker no registró un arranque headless correcto en su marcador"
+  echo "  Worker:     ${WORKER_STATE}, preflight headless OK"
   echo ""
   echo "CHECK OK: no se realizaron cambios en Colors."
   exit 0
@@ -562,6 +564,7 @@ rssh "set -e
   test \"\$(podman inspect '${BACKGROUND_WORKER_NAME}' --format '{{.ImageName}}')\" = '${NEW_IMAGE}' || fail_guard worker-image
   podman logs --tail 80 '${BACKGROUND_WORKER_NAME}' 2>&1 | grep -q '\[background-report-worker\] ready' || fail_guard worker-ready-log
   podman exec '${BACKGROUND_WORKER_NAME}' test -s /app/cache/background_reports/worker.ready || fail_guard worker-ready-marker
+  podman exec '${BACKGROUND_WORKER_NAME}' grep -q '^browser=Chrome/' /app/cache/background_reports/worker.ready || fail_guard worker-browser-marker
   podman ps --format '{{.Names}}|{{.Image}}|{{.Status}}|{{.Networks}}'
 "
 FINAL_STATUS=$?
