@@ -8348,30 +8348,103 @@ html[data-app-theme="dark"] .table-hover>tbody>tr:hover>td {
 
 }
 
-/* Notificaciones y alertas */
+/* Mensajes inline: comparten la superficie visual de los popups, sin
+ * convertir cualquier .alert de Bootstrap en una notificacion flotante. */
 .alert {
-  position: fixed;
-  bottom: 20px;
-  right: 20px;
-  z-index: 9999;
-  min-width: 300px;
-  animation: slideIn 0.5s ease-in-out;
-  border: none;
+  position: relative;
+  border: 1px solid var(--app-message-border);
+  border-left: 4px solid var(--app-message-accent);
+  border-radius: var(--app-message-radius);
+  background: var(--app-message-bg);
+  color: var(--app-message-text);
+  box-shadow: 0 5px 14px rgba(29, 53, 71, 0.10);
 
-  &.alert-success {
-    background-color: $accent-color;
-    color: $white;
-  }
+  &.alert-success { border-left-color: #18BC9C; }
+  &.alert-danger { border-left-color: #C74D4D; }
+  &.alert-warning { border-left-color: #B67A22; }
+  &.alert-info { border-left-color: #3B82A0; }
+}
 
-  &.alert-danger {
-    background-color: #E74C3C;
-    color: $white;
-  }
+/* Shiny crea sus avisos fuera del arbol principal. Esta capa neutraliza los
+ * fondos Bootstrap verde/azul y deja el estado como un acento lateral. */
+#shiny-notification-panel {
+  top: 18px;
+  right: 18px;
+  bottom: auto;
+  width: calc(100vw - 36px);
+  max-width: 380px;
+  padding: 0;
+  background: transparent;
+  z-index: 12100;
+}
 
-  &.alert-info {
-    background-color: #3498DB;
-    color: $white;
-  }
+#shiny-notification-panel .shiny-notification {
+  position: relative;
+  min-height: 54px;
+  margin: 0 0 10px;
+  padding: 15px 44px 15px 16px;
+  overflow: hidden;
+  border: 1px solid var(--app-message-border);
+  border-left: 4px solid var(--app-message-accent);
+  border-radius: 12px;
+  background: var(--app-message-bg);
+  color: var(--app-message-text);
+  box-shadow: var(--app-message-shadow);
+  font-family: var(--app-font-family), Roboto, "Helvetica Neue", Arial, sans-serif;
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1.42;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  animation: app-notification-in 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+#shiny-notification-panel .shiny-notification-message {
+  border-left-color: #3B82A0;
+}
+
+#shiny-notification-panel .shiny-notification-warning {
+  border-left-color: #B67A22;
+}
+
+#shiny-notification-panel .shiny-notification-error {
+  border-left-color: #C74D4D;
+}
+
+#shiny-notification-panel .shiny-notification-close {
+  top: 50%;
+  right: 10px;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  transform: translateY(-50%);
+  border: 1px solid color-mix(in srgb, var(--app-message-border) 78%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--app-message-bg) 72%, transparent);
+  color: var(--app-message-muted);
+  font-size: 18px;
+  font-weight: 500;
+  line-height: 1;
+  transition: border-color 140ms ease, background-color 140ms ease, color 140ms ease;
+}
+
+#shiny-notification-panel .shiny-notification-close:hover,
+#shiny-notification-panel .shiny-notification-close:focus-visible {
+  border-color: var(--app-message-accent);
+  background: color-mix(in srgb, var(--app-message-accent) 12%, var(--app-message-bg));
+  color: var(--app-message-text);
+  outline: none;
+}
+
+#shiny-notification-panel .shiny-notification-content-action a {
+  color: var(--app-message-accent);
+  font-weight: 750;
+  text-underline-offset: 2px;
+}
+
+@keyframes app-notification-in {
+  from { opacity: 0; transform: translateY(-8px) scale(0.985); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
 }
 
 /* Spinner de carga */
@@ -9616,10 +9689,11 @@ html[data-app-theme="dark"] .plot-module-render-status {
     }
   }
 
-  .alert {
-    width: 90%;
-    right: 5%;
-    bottom: 10px;
+  #shiny-notification-panel {
+    top: 10px;
+    right: 10px;
+    width: calc(100vw - 20px);
+    max-width: calc(100vw - 20px);
   }
 
   .panel-content {
@@ -10513,8 +10587,9 @@ html[data-app-theme="dark"] .app-notification-center-badge {
 
 /* Dark-mode messaging surfaces (tooltips, popups, alerts, modals) */
 html[data-app-theme="dark"] .alert {
-  background: linear-gradient(180deg, #132a40 0%, #10263b 100%) !important;
-  border: 1px solid #365a7c !important;
+  background: var(--app-message-bg) !important;
+  border: 1px solid var(--app-message-border) !important;
+  border-left: 4px solid var(--app-message-accent) !important;
   color: #e7f1fb !important;
   box-shadow: 0 10px 22px rgba(0, 0, 0, 0.42) !important;
 }
@@ -10544,21 +10619,19 @@ html[data-app-theme="dark"] .plot-close-btn:hover {
 }
 
 html[data-app-theme="dark"] .alert.alert-success {
-  background: linear-gradient(180deg, #12463f 0%, #0f3833 100%) !important;
-  border-color: #247c70 !important;
-  color: #e9fff8 !important;
+  border-left-color: #38D0B4 !important;
 }
 
 html[data-app-theme="dark"] .alert.alert-danger {
-  background: linear-gradient(180deg, #4a2323 0%, #3b1d1d 100%) !important;
-  border-color: #9a4a4a !important;
-  color: #ffecec !important;
+  border-left-color: #E47777 !important;
 }
 
 html[data-app-theme="dark"] .alert.alert-info {
-  background: linear-gradient(180deg, #15354d 0%, #112b3f 100%) !important;
-  border-color: #3d6f95 !important;
-  color: #e7f3ff !important;
+  border-left-color: #70B7D3 !important;
+}
+
+html[data-app-theme="dark"] .alert.alert-warning {
+  border-left-color: #E3AC55 !important;
 }
 
 html[data-app-theme="dark"] .waiter-overlay {
@@ -15860,14 +15933,6 @@ datalist, datalist option {
 .promoter-download-btn:hover {
   background: #149A83;
   border-color: #0D7C6B;
-}
-.alert {
-  position: fixed;
-  bottom: 20px;
-  right: 20px;
-  z-index: 9999;
-  min-width: 300px;
-  animation: slideIn 0.5s ease-in-out;
 }
 .app-status-popup {
   position: fixed;
