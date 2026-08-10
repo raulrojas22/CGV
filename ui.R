@@ -127,110 +127,248 @@ initial_summary_context_header <- function(search_mode_label = "Multi-Gene", gen
         icon("bell"),
         span(class = "app-notification-center-badge", "0")
       )
-    ),
+    )
+  )
+}
+
+result_workspace_subheader <- function(scope = c("homo", "ortho")) {
+  scope <- match.arg(scope)
+  is_ortho <- identical(scope, "ortho")
+  sort_choices <- if (is_ortho) {
+    c(
+      "Load order" = "load",
+      "Total exon difference (high to low)" = "exondiff_desc",
+      "Total exon difference (low to high)" = "exondiff_asc",
+      "Transcript length (longest first)" = "tx_len_desc",
+      "Transcript length (shortest first)" = "tx_len_asc",
+      "Exon count (high to low)" = "exon_desc",
+      "Exon count (low to high)" = "exon_asc",
+      "Organism name (A-Z)" = "organism_asc",
+      "Organism name (Z-A)" = "organism_desc",
+      "Transcript name (A-Z)" = "tx_asc",
+      "Transcript name (Z-A)" = "tx_desc"
+    )
+  } else {
+    c(
+      "Load order" = "load",
+      "Total exon difference (high to low)" = "exondiff_desc",
+      "Total exon difference (low to high)" = "exondiff_asc",
+      "Transcript length (longest first)" = "tx_len_desc",
+      "Transcript length (shortest first)" = "tx_len_asc",
+      "Exon count (high to low)" = "exon_desc",
+      "Exon count (low to high)" = "exon_asc",
+      "Transcript name (A-Z)" = "tx_asc",
+      "Transcript name (Z-A)" = "tx_desc",
+      "Chromosome (A-Z)" = "chr_asc",
+      "Chromosome (Z-A)" = "chr_desc"
+    )
+  }
+  workflow_label <- if (is_ortho) "Cross-Species" else "Multi-Gene"
+
+  workspace_nav_button <- function(view, label, icon_name, active = FALSE, disabled = FALSE) {
+    htmltools::tagAppendAttributes(
+      actionButton(
+        inputId = paste0(scope, "_workspace_", view),
+        label = span(label),
+        icon = icon(icon_name),
+        class = paste("result-workspace-nav-button", if (isTRUE(active)) "is-active" else "")
+      ),
+      `data-workspace-view` = view,
+      `aria-pressed` = if (isTRUE(active)) "true" else "false",
+      disabled = if (isTRUE(disabled)) NA else NULL
+    )
+  }
+
+  tool_trigger <- function(name, label, icon_name) {
+    tags$button(
+      id = paste0(scope, "_workspace_", name, "_trigger"),
+      type = "button",
+      class = "result-workspace-tool-trigger",
+      `data-workspace-menu-trigger` = name,
+      `aria-expanded` = "false",
+      `aria-controls` = paste0(scope, "_workspace_", name, "_menu"),
+      disabled = NA,
+      icon(icon_name),
+      span(label),
+      icon("chevron-down", class = "result-workspace-tool-chevron")
+    )
+  }
+
+  div(
+    id = paste0(scope, "_result_workspace_subheader"),
+    class = "result-workspace-subheader",
+    `data-workspace-scope` = scope,
     div(
-      class = "summary-context-mode-slot",
+      class = "result-workspace-navigation",
       div(
-        class = "summary-display-mode-control",
+        class = "result-workspace-tabs",
+        role = "tablist",
+        `aria-label` = paste(workflow_label, "result views"),
+        workspace_nav_button("visualization", "Visualization", "eye", active = TRUE),
+        workspace_nav_button("alignment", "Alignment", "project-diagram", disabled = TRUE),
+        workspace_nav_button("analytics", "Analytics", "chart-bar", disabled = TRUE),
+        workspace_nav_button("table", "Table", "table", disabled = TRUE)
+      )
+    ),
+    if (is_ortho) {
+      div(
+        class = "result-workspace-alignment-methods",
+        `data-workspace-alignment-methods` = "ortho",
+        `aria-label` = "Cross-Species alignment method",
+        span(class = "result-workspace-alignment-methods-label", icon("project-diagram"), "Method"),
         div(
-          class = "summary-display-side summary-display-side--left",
-          div(
-            class = "summary-display-mode-subbar summary-display-context-subbar",
-            tags$button(
-              type = "button",
-              class = "summary-display-submode-button summary-genomic-context-toggle summary-genomic-context-toggle--neighbors is-active",
-              `data-genomic-context-toggle` = "neighbors",
-              `aria-pressed` = "true",
-              `aria-label` = "Hide neighboring genes",
-              title = "Hide neighboring genes on gene cards",
-              icon("location-arrow"),
-              span(class = "summary-genomic-context-toggle-label", "Hide neighbors")
-            ),
-            tags$button(
-              type = "button",
-              class = "summary-display-submode-button summary-genomic-context-toggle summary-genomic-context-toggle--overlaps is-active",
-              `data-genomic-context-toggle` = "overlaps",
-              `aria-pressed` = "true",
-              `aria-label` = "Hide overlapping genes",
-              title = "Hide overlapping genes on gene cards",
-              icon("layer-group"),
-              span(class = "summary-genomic-context-toggle-label", "Hide overlaps")
-            ),
-            tags$button(
-              type = "button",
-              class = "summary-display-submode-button summary-genomic-ruler-toggle is-active",
-              `data-genomic-ruler-toggle` = "true",
-              `aria-pressed` = "true",
-              `aria-label` = "Hide genomic context scale",
-              title = "Show or hide genomic coordinates and compressed neighbor-distance context",
-              icon("ruler-horizontal"),
-              span(class = "summary-genomic-ruler-toggle-label", "Hide scale")
-            )
-          )
-        ),
-        div(
-          class = "summary-display-mode-main",
+          class = "result-workspace-alignment-method-options",
+          role = "group",
+          `aria-label` = "Choose an alignment method",
           tags$button(
             type = "button",
-            class = "summary-display-mode-button summary-display-mode-button--visualize is-active",
+            class = "result-workspace-alignment-method is-active",
+            `data-workspace-alignment-method` = "aligned",
             `aria-pressed` = "true",
-            title = "Switch to visualization mode",
-            icon("eye"),
-            span(
-              class = "summary-display-mode-copy",
-              span(class = "summary-display-mode-label", "Visualize mode"),
-              span(class = "summary-display-mode-detail", "Explore gene models")
-            )
+            title = "Compare ordered gene and transcript structures across organisms",
+            "Synteny"
           ),
           tags$button(
             type = "button",
-            class = "summary-display-mode-button summary-display-mode-button--align is-disabled",
+            class = "result-workspace-alignment-method",
+            `data-workspace-alignment-method` = "pip_blocks",
             `aria-pressed` = "false",
-            `aria-disabled` = "true",
-            disabled = NA,
-            title = "Available after loading data",
-            icon("project-diagram"),
-            span(
-              class = "summary-display-mode-copy",
-              span(class = "summary-display-mode-label", "Alignment mode"),
-              span(class = "summary-display-mode-detail", align_detail)
-            )
-          )
-        ),
-        div(
-          class = "summary-display-side summary-display-side--right",
-          div(
-            class = "summary-display-mode-subbar summary-display-detail-subbar",
-            span(
-              class = "summary-display-submode-label summary-display-detail-label",
-              span("Visual"),
-              span("Detail")
-            ),
-            tags$button(type = "button", class = "summary-display-submode-button is-active", `aria-pressed` = "true", "Compact"),
-            tags$button(type = "button", class = "summary-display-submode-button", `aria-pressed` = "false", "Detailed")
+            title = "Inspect local LASTZ alignment blocks across organism loci",
+            "LASTZ Blocks"
           ),
-          div(
-            class = "summary-display-mode-subbar summary-display-orientation-subbar",
-            title = "Native genomic coordinates",
-            span(class = "summary-display-submode-label", "Direction"),
-            tags$button(
-              type = "button",
-              class = "summary-display-submode-button is-active",
-              `aria-pressed` = "true",
-              onclick = sprintf("if(window.Shiny){Shiny.setInputValue('%s','genomic',{priority:'event'});}", orientation_input_id),
-              "Genomic"
-            ),
-            tags$button(
-              type = "button",
-              class = "summary-display-submode-button",
-              `aria-pressed` = "false",
-              onclick = sprintf("if(window.Shiny){Shiny.setInputValue('%s','transcription',{priority:'event'});}", orientation_input_id),
-              "5\u2032\u21923\u2032"
-            ),
-            span(class = "summary-display-orientation-note", `aria-live` = "polite", "Native genomic coordinates")
+          tags$button(
+            type = "button",
+            class = "result-workspace-alignment-method",
+            `data-workspace-alignment-method` = "pip_multipip",
+            `aria-pressed` = "false",
+            title = "Inspect reference-centered conservation segments across organisms",
+            "MultiPIP"
           )
         )
       )
+    } else {
+      NULL
+    },
+    div(
+      class = "result-workspace-tools",
+      div(
+        class = "result-workspace-zoom",
+        id = paste0(scope, "-zoom-control"),
+        style = "display:none;",
+        tags$button(
+          id = paste0(scope, "-zoom-out"), class = "plot-zoom-btn",
+          `data-zoom-action` = "out", `data-zoom-mode` = scope,
+          title = "Zoom out", disabled = NA, "\u2212"
+        ),
+        span(id = paste0(scope, "-zoom-label"), class = "plot-zoom-label", "1\u00d7"),
+        tags$button(
+          id = paste0(scope, "-zoom-in"), class = "plot-zoom-btn",
+          `data-zoom-action` = "in", `data-zoom-mode` = scope,
+          title = "Zoom in", "+"
+        )
+      ),
+      div(
+        class = "result-workspace-tool",
+        `data-workspace-tool` = "view",
+        tool_trigger("view", "View", "sliders-h"),
+        div(
+          id = paste0(scope, "_workspace_view_menu"),
+          class = "result-workspace-menu result-workspace-menu--view",
+          `data-workspace-menu` = "view",
+          role = "dialog",
+          `aria-label` = "Visualization settings",
+          div(
+            class = "result-workspace-menu-heading",
+            div(icon("sliders-h"), span(strong("View settings"), tags$small("Choose detail, context and direction"))),
+            tags$button(type = "button", class = "result-workspace-menu-close", `aria-label` = "Close view settings", icon("times"))
+          ),
+          uiOutput(paste0(scope, "_header_mode_switch"))
+        )
+      ),
+      div(
+        class = "result-workspace-tool",
+        `data-workspace-tool` = "sort",
+        tool_trigger("sort", "Sort", "sort-amount-desc"),
+        div(
+          id = paste0(scope, "_workspace_sort_menu"),
+          class = "result-workspace-menu result-workspace-menu--sort",
+          `data-workspace-menu` = "sort",
+          role = "dialog",
+          `aria-label` = "Sort plots",
+          div(
+            class = "result-workspace-menu-heading",
+            div(icon("sort-amount-desc"), span(strong("Sort plots"), tags$small("Reorder the current visualization"))),
+            tags$button(type = "button", class = "result-workspace-menu-close", `aria-label` = "Close sort menu", icon("times"))
+          ),
+          selectInput(
+            inputId = paste0(scope, "_sort_mode"),
+            label = NULL,
+            choices = sort_choices,
+            selected = "load",
+            width = "100%"
+          )
+        )
+      ),
+      div(
+        class = "result-workspace-tool",
+        `data-workspace-tool` = "download",
+        tool_trigger("download", "Download", "download"),
+        div(
+          id = paste0(scope, "_workspace_download_menu"),
+          class = "result-workspace-menu result-workspace-menu--download",
+          `data-workspace-menu` = "download",
+          role = "dialog",
+          `aria-label` = "Download current results",
+          div(
+            class = "result-workspace-menu-heading",
+            div(icon("download"), span(strong("Download"), tags$small("Exports adapt to the active view"))),
+            tags$button(type = "button", class = "result-workspace-menu-close", `aria-label` = "Close download menu", icon("times"))
+          ),
+          div(
+            class = "result-workspace-download-list",
+            div(
+              class = "result-workspace-download-option workspace-download-visualization",
+              actionButton(
+                inputId = paste0("btn_download_all_", scope, "_svg"),
+                label = tagList(icon("file-zipper"), span(strong("Result SVGs"), tags$small("Download all visible gene plots as a ZIP"))),
+                class = "btn btn-sm btn-download-zip result-workspace-download-button",
+                style = "display:none;",
+                onclick = sprintf("exportAllSVGs('%s')", scope)
+              )
+            ),
+            div(
+              class = "result-workspace-download-option workspace-download-analytics",
+              actionButton(
+                inputId = paste0("btn_download_all_", scope, "_analytics_svg"),
+                label = tagList(icon("file-zipper"), span(strong("Analytics SVGs"), tags$small("Download available analytics charts as a ZIP"))),
+                class = "btn btn-sm btn-download-zip result-workspace-download-button",
+                style = "display:none;",
+                onclick = sprintf("exportAnalyticsSVGs('%s')", scope)
+              )
+            ),
+            div(
+              class = "result-workspace-download-option workspace-download-table",
+              downloadButton(
+                paste0("download_", scope, "_summary_csv"),
+                tagList(icon("file-csv"), span(strong("Summary CSV"), tags$small("Export the complete result table"))),
+                class = "btn-sm btn-download result-workspace-download-button"
+              )
+            )
+          )
+        )
+      )
+    ),
+    actionButton(
+      inputId = paste0("toggle_", scope, "_analytics"),
+      label = "Toggle analytics",
+      class = "result-workspace-legacy-toggle",
+      style = "display:none;"
+    ),
+    actionButton(
+      inputId = paste0("toggle_", scope, "_summary"),
+      label = "Toggle summary table",
+      class = "result-workspace-legacy-toggle",
+      style = "display:none;"
     )
   )
 }
@@ -2107,6 +2245,8 @@ fluidPage(
       tags$script(src = versioned_asset_path("js/info_button_relocator.js")),
       tags$script(src = versioned_asset_path("js/ortho_lazy_loader.js")),
       tags$script(src = versioned_asset_path("js/summary_context_layout.js")),
+      tags$script(src = versioned_asset_path("js/result_workspace.js")),
+      tags$script(src = versioned_asset_path("js/gene_match_evidence_help.js")),
       tags$script(src = versioned_asset_path("js/ncbi_search.js")),
       tags$script(src = versioned_asset_path("js/organism_images.js")),
       tags$script(src = versioned_asset_path("js/mobile_enhancements.js"), defer = NA),
@@ -3508,6 +3648,109 @@ fluidPage(
           return out;
         }
 
+        function normalizeGeneMatchFilter(value) {
+          return String(value || '').toLocaleLowerCase().replace(/\\s+/g, ' ').trim();
+        }
+
+        function updateGeneMatchBrowser(browser, requestedPage) {
+          if (!browser) return;
+          var allItems = Array.prototype.slice.call(browser.querySelectorAll('[data-gene-match-item=true]'));
+          var input = browser.querySelector('.gene-match-filter-input');
+          var filterText = normalizeGeneMatchFilter(input ? input.value : '');
+          var pageSize = parseInt(browser.getAttribute('data-page-size') || '24', 10);
+          if (!isFinite(pageSize) || pageSize < 1) pageSize = 24;
+          var matchingItems = allItems.filter(function(item) {
+            var searchable = normalizeGeneMatchFilter(item.getAttribute('data-search-text') || item.textContent || '');
+            return !filterText || searchable.indexOf(filterText) !== -1;
+          });
+          var pageCount = Math.max(1, Math.ceil(matchingItems.length / pageSize));
+          var currentPage = parseInt(requestedPage || browser.getAttribute('data-current-page') || '1', 10);
+          if (!isFinite(currentPage)) currentPage = 1;
+          currentPage = Math.max(1, Math.min(pageCount, currentPage));
+          browser.setAttribute('data-current-page', String(currentPage));
+
+          var visibleStart = (currentPage - 1) * pageSize;
+          var visibleEnd = Math.min(visibleStart + pageSize, matchingItems.length);
+          var visibleSet = new Set(matchingItems.slice(visibleStart, visibleEnd));
+          allItems.forEach(function(item) {
+            item.hidden = !visibleSet.has(item);
+          });
+
+          var exactCount = allItems.filter(function(item) {
+            return item.getAttribute('data-exact-match') === 'true';
+          }).length;
+          var resultCount = browser.querySelector('.gene-match-result-count');
+          if (resultCount) {
+            var resultLabel = String(browser.getAttribute('data-result-label') || 'suggestion').trim() || 'suggestion';
+            var totalLabel = allItems.length + ' total ' + resultLabel + (allItems.length === 1 ? '' : 's');
+            var exactLabel = exactCount ? ' • ' + exactCount + ' exact match' + (exactCount === 1 ? '' : 'es') : '';
+            resultCount.textContent = filterText
+              ? matchingItems.length + ' matching • ' + totalLabel + exactLabel
+              : totalLabel + exactLabel;
+          }
+
+          var pageStatus = browser.querySelector('.gene-match-page-status');
+          if (pageStatus) {
+            pageStatus.textContent = matchingItems.length
+              ? 'Showing ' + (visibleStart + 1) + '–' + visibleEnd + ' of ' + matchingItems.length +
+                ' • Page ' + currentPage + ' of ' + pageCount
+              : 'No suggestions match this filter';
+          }
+          var pagination = browser.querySelector('.gene-match-pagination');
+          if (pagination) pagination.hidden = matchingItems.length === 0 || pageCount <= 1;
+          var prev = browser.querySelector('.gene-match-page-prev');
+          var next = browser.querySelector('.gene-match-page-next');
+          if (prev) prev.disabled = currentPage <= 1;
+          if (next) next.disabled = currentPage >= pageCount;
+
+          var empty = browser.querySelector('.gene-match-filter-empty');
+          if (!empty) {
+            empty = document.createElement('p');
+            empty.className = 'gene-match-filter-empty';
+            empty.textContent = 'No suggestions match this filter.';
+            var list = browser.querySelector('.partial-gene-suggestion-list');
+            if (list && list.parentNode) list.parentNode.insertBefore(empty, list.nextSibling);
+          }
+          empty.hidden = matchingItems.length !== 0;
+          browser.setAttribute('data-gene-match-ready', 'true');
+        }
+
+        function initGeneMatchBrowsers(root) {
+          var scope = root && root.querySelectorAll ? root : document;
+          var browsers = [];
+          if (scope.matches && scope.matches('.gene-match-browser')) browsers.push(scope);
+          browsers = browsers.concat(Array.prototype.slice.call(scope.querySelectorAll('.gene-match-browser')));
+          browsers.forEach(function(browser) {
+            if (browser.getAttribute('data-gene-match-ready') !== 'true') updateGeneMatchBrowser(browser, 1);
+          });
+        }
+
+        document.addEventListener('input', function(evt) {
+          var input = evt.target;
+          if (!input || !input.matches || !input.matches('.gene-match-filter-input')) return;
+          updateGeneMatchBrowser(input.closest('.gene-match-browser'), 1);
+        }, true);
+
+        document.addEventListener('click', function(evt) {
+          var pageButton = evt.target && evt.target.closest ? evt.target.closest('.gene-match-page-btn') : null;
+          if (!pageButton) return;
+          evt.preventDefault();
+          var browser = pageButton.closest('.gene-match-browser');
+          if (!browser) return;
+          var currentPage = parseInt(browser.getAttribute('data-current-page') || '1', 10) || 1;
+          updateGeneMatchBrowser(browser, currentPage + (pageButton.matches('.gene-match-page-prev') ? -1 : 1));
+        }, true);
+
+        var geneMatchObserver = new MutationObserver(function(mutations) {
+          mutations.forEach(function(mutation) {
+            Array.prototype.slice.call(mutation.addedNodes || []).forEach(function(node) {
+              if (node && node.nodeType === 1) initGeneMatchBrowsers(node);
+            });
+          });
+        });
+        if (document.body) geneMatchObserver.observe(document.body, { childList: true, subtree: true });
+        initGeneMatchBrowsers(document);
+
         document.addEventListener('click', function(evt) {
           var btn = evt.target && evt.target.closest ? evt.target.closest('.partial-gene-suggestion-btn') : null;
           if (!btn || !window.Shiny || !Shiny.setInputValue) return;
@@ -4426,17 +4669,7 @@ fluidPage(
       div(
         id = "app-status-popup-loader",
         class = "app-status-popup-loader",
-        div(
-          class = "app-dna-loader",
-          div(
-            class = "app-dna-wave app-dna-wave-top",
-            lapply(seq_len(16), function(i) span(class = "app-dna-node", style = sprintf("--i:%d;", i - 1)))
-          ),
-          div(
-            class = "app-dna-wave app-dna-wave-bottom",
-            lapply(seq_len(16), function(i) span(class = "app-dna-node", style = sprintf("--i:%d;", i - 1)))
-          )
-        ),
+        span(class = "app-status-popup-current-label", "Current activity"),
         div(id = "app-status-popup-loader-text", class = "app-status-popup-loader-text", "Working...")
       ),
       div(id = "app-status-popup-log", class = "app-status-popup-log")
@@ -5338,8 +5571,8 @@ fluidPage(
                       },
                       {
                         title: 'Alignment, optional',
-                        copy: 'Use alignment to compare transcript structures within the same gene when multiple transcript isoforms are available.',
-                        short: 'Compare isoforms.',
+                        copy: 'Use Synteny to compare transcript structures within the same gene when multiple transcript isoforms are available.',
+                        short: 'Compare isoforms with Synteny.',
                         media: guideVideo('guide-multigene-05-alignment-optional.mp4')
                       },
                       {
@@ -5918,79 +6151,35 @@ fluidPage(
               class = "summary-context-section",
               style = "display:none;",
               initial_summary_context_header("Multi-Gene", "Genes: pending"),
-              uiOutput("homo_context_header")
+              uiOutput("homo_context_header"),
+              result_workspace_subheader("homo")
             ),
             div(
               id = "homo_summary_section",
               class = "summary-section homo-summary-section",
               style = "display:none;",
               div(
-                class = "summary-header",
+                class = "result-workspace-view-intro",
                 div(
-                  class = "summary-actions",
-                  actionButton(
-                    inputId = "toggle_homo_analytics",
-                    label   = tagList("\u25B6", icon("chart-bar"), " Show Analytics"),
-                    class   = "btn btn-sm btn-analytics-toggle",
-                    style   = "display:none;"
-                  ),
-                  actionButton(
-                    inputId = "toggle_homo_summary",
-                    label = span("\u25B6 Show Summary Table"),
-                    class = "btn btn-sm btn-summary-toggle"
-                  ),
-                  downloadButton("download_homo_summary_csv", span("Download CSV"), class = "btn-sm btn-download"),
-                  actionButton(
-                    inputId = "btn_download_all_homo_svg",
-                    label = span(icon("file-zipper"), " Download result SVGs (.zip)"),
-                    class = "btn btn-sm btn-download-zip",
-                    style = "display:none;",
-                    onclick = "exportAllSVGs('homo')"
-                  ),
-                  div(
-                    class = "plot-zoom-control",
-                    style = "display:none;",
-                    id = "homo-zoom-control",
-                    tags$button(
-                      id = "homo-zoom-out", class = "plot-zoom-btn",
-                      `data-zoom-action` = "out", `data-zoom-mode` = "homo",
-                      title = "Zoom out", disabled = NA, "−"
-                    ),
-                    span(id = "homo-zoom-label", class = "plot-zoom-label", "1\u00d7"),
-                    tags$button(
-                      id = "homo-zoom-in", class = "plot-zoom-btn",
-                      `data-zoom-action` = "in", `data-zoom-mode` = "homo",
-                      title = "Zoom in", "\u002b"
-                    )
-                  ),
-                  div(
-                    class = "plot-sort-toolbar",
-                    span(class = "plot-sort-toolbar-label", icon("sort-amount-desc"), span("Sort plots")),
-                    selectInput(
-                      inputId = "homo_sort_mode",
-                      label = NULL,
-                      choices = c(
-                        "Load order" = "load",
-                        "Total exon difference (high to low)" = "exondiff_desc",
-                        "Total exon difference (low to high)" = "exondiff_asc",
-                        "Transcript length (longest first)" = "tx_len_desc",
-                        "Transcript length (shortest first)" = "tx_len_asc",
-                        "Exon count (high to low)" = "exon_desc",
-                        "Exon count (low to high)" = "exon_asc",
-                        "Transcript name (A-Z)" = "tx_asc",
-                        "Transcript name (Z-A)" = "tx_desc",
-                        "Chromosome (A-Z)" = "chr_asc",
-                        "Chromosome (Z-A)" = "chr_desc"
-                      ),
-                      selected = "load",
-                      width = "320px"
-                    )
-                  )
+                  class = "result-workspace-view-intro-copy",
+                  span(class = "result-workspace-view-kicker", icon("table"), " Structured results"),
+                  h2("Summary table"),
+                  p("Search, sort and review the records behind the current gene visualizations.")
+                ),
+                tags$button(
+                  type = "button",
+                  class = "result-workspace-view-back",
+                  `data-workspace-back` = "true",
+                  `data-workspace-scope` = "homo",
+                  `aria-label` = "Back to Multi-Gene visualization",
+                  icon("arrow-left"),
+                  span("Back to visualization")
                 )
               ),
               div(
                 id = "homo_summary_body",
-                style = "display:none; margin-top:8px;",
+                class = "result-workspace-table-body",
+                style = "display:none;",
                 DT::dataTableOutput("homo_summary_dt")
               )
             ),
@@ -6002,16 +6191,27 @@ fluidPage(
               div(
                 id = "homo_analytics_body",
                 class = "analytics-body",
-                style = "display:none; margin-top:12px;",
+                style = "display:none; margin-top:2px;",
+                div(
+                  class = "result-workspace-view-intro",
+                  div(
+                    class = "result-workspace-view-intro-copy",
+                    span(class = "result-workspace-view-kicker", icon("chart-bar"), " Comparative metrics"),
+                    h2("Analytics"),
+                    p("Explore statistical views generated from the active set of gene results.")
+                  ),
+                  tags$button(
+                    type = "button",
+                    class = "result-workspace-view-back",
+                    `data-workspace-back` = "true",
+                    `data-workspace-scope` = "homo",
+                    `aria-label` = "Back to Multi-Gene visualization",
+                    icon("arrow-left"),
+                    span("Back to visualization")
+                  )
+                ),
                 div(
                 class = "analytics-tabs-shell",
-                  actionButton(
-                    inputId = "btn_download_all_homo_analytics_svg",
-                    label = span(icon("file-zipper"), " SVG ZIP"),
-                    class = "btn btn-sm btn-download-zip btn-analytics-download-all",
-                    style = "display:none;",
-                    onclick = "exportAnalyticsSVGs('homo')"
-                  ),
                   tabsetPanel(
                     id = "homo_analytics_tabs",
                     type = "pills",
@@ -6188,79 +6388,35 @@ fluidPage(
               class = "summary-context-section",
               style = "display:none;",
               initial_summary_context_header("Cross-Species", "Gene: pending", "Compare across organisms"),
-              uiOutput("ortho_context_header")
+              uiOutput("ortho_context_header"),
+              result_workspace_subheader("ortho")
             ),
             div(
               id = "ortho_summary_section",
               class = "summary-section ortho-summary-section",
               style = "display:none;",
               div(
-                class = "summary-header",
+                class = "result-workspace-view-intro",
                 div(
-                  class = "summary-actions",
-                  actionButton(
-                    inputId = "toggle_ortho_analytics",
-                    label   = tagList("\u25B6", icon("chart-bar"), " Show Analytics"),
-                    class   = "btn btn-sm btn-analytics-toggle",
-                    style   = "display:none;"
-                  ),
-                  actionButton(
-                    inputId = "toggle_ortho_summary",
-                    label = span("\u25B6 Show Summary Table"),
-                    class = "btn btn-sm btn-summary-toggle btn-ortho-summary-toggle"
-                  ),
-                  downloadButton("download_ortho_summary_csv", span("Download CSV"), class = "btn-sm btn-download"),
-                  actionButton(
-                    inputId = "btn_download_all_ortho_svg",
-                    label = span(icon("file-zipper"), " Download result SVGs (.zip)"),
-                    class = "btn btn-sm btn-download-zip",
-                    style = "display:none;",
-                    onclick = "exportAllSVGs('ortho')"
-                  ),
-                  div(
-                    class = "plot-zoom-control",
-                    style = "display:none;",
-                    id = "ortho-zoom-control",
-                    tags$button(
-                      id = "ortho-zoom-out", class = "plot-zoom-btn",
-                      `data-zoom-action` = "out", `data-zoom-mode` = "ortho",
-                      title = "Zoom out", disabled = NA, "−"
-                    ),
-                    span(id = "ortho-zoom-label", class = "plot-zoom-label", "1\u00d7"),
-                    tags$button(
-                      id = "ortho-zoom-in", class = "plot-zoom-btn",
-                      `data-zoom-action` = "in", `data-zoom-mode` = "ortho",
-                      title = "Zoom in", "\u002b"
-                    )
-                  ),
-                  div(
-                    class = "plot-sort-toolbar",
-                    span(class = "plot-sort-toolbar-label", icon("sort-amount-desc"), span("Sort plots")),
-                    selectInput(
-                      inputId = "ortho_sort_mode",
-                      label = NULL,
-                      choices = c(
-                        "Load order" = "load",
-                        "Total exon difference (high to low)" = "exondiff_desc",
-                        "Total exon difference (low to high)" = "exondiff_asc",
-                        "Transcript length (longest first)" = "tx_len_desc",
-                        "Transcript length (shortest first)" = "tx_len_asc",
-                        "Exon count (high to low)" = "exon_desc",
-                        "Exon count (low to high)" = "exon_asc",
-                        "Organism name (A-Z)" = "organism_asc",
-                        "Organism name (Z-A)" = "organism_desc",
-                        "Transcript name (A-Z)" = "tx_asc",
-                        "Transcript name (Z-A)" = "tx_desc"
-                      ),
-                      selected = "load",
-                      width = "320px"
-                    )
-                  )
+                  class = "result-workspace-view-intro-copy",
+                  span(class = "result-workspace-view-kicker", icon("table"), " Structured results"),
+                  h2("Summary table"),
+                  p("Search, sort and review the records behind the cross-species comparison.")
+                ),
+                tags$button(
+                  type = "button",
+                  class = "result-workspace-view-back",
+                  `data-workspace-back` = "true",
+                  `data-workspace-scope` = "ortho",
+                  `aria-label` = "Back to Cross-Species visualization",
+                  icon("arrow-left"),
+                  span("Back to visualization")
                 )
               ),
               div(
                 id = "ortho_summary_body",
-                style = "display:none; margin-top:8px;",
+                class = "result-workspace-table-body",
+                style = "display:none;",
                 DT::dataTableOutput("ortho_summary_dt")
               )
             ),
@@ -6272,16 +6428,27 @@ fluidPage(
               div(
                 id = "ortho_analytics_body",
                 class = "analytics-body",
-                style = "display:none; margin-top:12px;",
+                style = "display:none; margin-top:2px;",
+                div(
+                  class = "result-workspace-view-intro",
+                  div(
+                    class = "result-workspace-view-intro-copy",
+                    span(class = "result-workspace-view-kicker", icon("chart-bar"), " Comparative metrics"),
+                    h2("Analytics"),
+                    p("Explore statistical views generated from the active cross-species result set.")
+                  ),
+                  tags$button(
+                    type = "button",
+                    class = "result-workspace-view-back",
+                    `data-workspace-back` = "true",
+                    `data-workspace-scope` = "ortho",
+                    `aria-label` = "Back to Cross-Species visualization",
+                    icon("arrow-left"),
+                    span("Back to visualization")
+                  )
+                ),
                 div(
                 class = "analytics-tabs-shell",
-                  actionButton(
-                    inputId = "btn_download_all_ortho_analytics_svg",
-                    label = span(icon("file-zipper"), " SVG ZIP"),
-                    class = "btn btn-sm btn-download-zip btn-analytics-download-all",
-                    style = "display:none;",
-                    onclick = "exportAnalyticsSVGs('ortho')"
-                  ),
                   tabsetPanel(
                     id = "ortho_analytics_tabs",
                     type = "pills",

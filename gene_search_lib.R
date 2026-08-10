@@ -431,6 +431,186 @@ safe_get_json <- function(req, timeout_sec = 10) {
     })
 }
 
+# ------------------------------------------------------------------------------
+# Ensembl Compara orthology evidence
+# ------------------------------------------------------------------------------
+
+normalize_ensembl_species_name <- function(organism = NULL, ensembl_species = NULL) {
+    explicit <- tolower(trimws(as.character(ensembl_species %||% "")))
+    if (length(explicit) > 0L && !is.na(explicit[1]) && nzchar(explicit[1])) {
+        return(gsub("[^a-z0-9]+", "_", explicit[1]))
+    }
+
+    org <- tolower(trimws(as.character(organism %||% "")))
+    if (length(org) == 0L || is.na(org[1]) || !nzchar(org[1])) return("")
+    org <- org[1]
+    org <- sub("\\s+(ssp\\.|subsp\\.|var\\.|strain|cultivar|cv\\.).*$", "", org, perl = TRUE)
+    tokens <- strsplit(gsub("[^a-z0-9]+", " ", org), " +", perl = TRUE)[[1]]
+    tokens <- tokens[nzchar(tokens)]
+    if (length(tokens) < 2L) return("")
+    paste(tokens[1:2], collapse = "_")
+}
+
+ensembl_compara_division <- function(kingdom = NULL, organism = NULL) {
+    txt <- tolower(paste(as.character(kingdom %||% ""), as.character(organism %||% "")))
+    if (grepl("plant|viridiplantae|arabidopsis|oryza|zea|triticum|solanum", txt, perl = TRUE)) {
+        return("plants")
+    }
+    if (grepl("fung|yeast|aspergillus|saccharomyces", txt, perl = TRUE)) return("fungi")
+    if (grepl("metazoa|insect|drosophila|caenorhabditis", txt, perl = TRUE)) return("metazoa")
+    ""
+}
+
+empty_ensembl_homology_df <- function() {
+    data.frame(
+        source_id = character(0),
+        source_species = character(0),
+        source_taxon_id = integer(0),
+        target_id = character(0),
+        target_species = character(0),
+        target_taxon_id = integer(0),
+        homology_type = character(0),
+        method = character(0),
+        taxonomy_level = character(0),
+        confidence = numeric(0),
+        source_perc_id = numeric(0),
+        target_perc_id = numeric(0),
+        stringsAsFactors = FALSE
+    )
+}
+
+parse_ensembl_homology_response <- function(payload) {
+    entries <- tryCatch(payload$data, error = function(e) NULL)
+    if (!is.list(entries) || length(entries) == 0L) return(empty_ensembl_homology_df())
+    homologies <- unlist(lapply(entries, function(entry) entry$homologies %||% list()), recursive = FALSE)
+    if (!is.list(homologies) || length(homologies) == 0L) return(empty_ensembl_homology_df())
+
+    scalar_chr <- function(x) {
+        out <- as.character(x %||% "")
+        if (length(out) == 0L || is.na(out[1])) "" else out[1]
+    }
+    scalar_num <- function(x) {
+        out <- suppressWarnings(as.numeric(x %||% NA_real_))
+        if (length(out) == 0L || !is.finite(out[1])) NA_real_ else out[1]
+    }
+    rows <- lapply(homologies, function(homology) {
+        source <- homology$source %||% list()
+        target <- homology$target %||% list()
+        data.frame(
+            source_id = scalar_chr(source$id),
+            source_species = scalar_chr(source$species),
+            source_taxon_id = suppressWarnings(as.integer(scalar_num(source$taxon_id))),
+            target_id = scalar_chr(target$id),
+            target_species = scalar_chr(target$species),
+            target_taxon_id = suppressWarnings(as.integer(scalar_num(target$taxon_id))),
+            homology_type = scalar_chr(homology$type),
+            method = scalar_chr(homology$method_link_type),
+            taxonomy_level = scalar_chr(homology$taxonomy_level),
+            confidence = scalar_num(homology$confidence),
+            source_perc_id = scalar_num(source$perc_id),
+            target_perc_id = scalar_num(target$perc_id),
+            stringsAsFactors = FALSE
+        )
+    })
+    out <- do.call(rbind, rows)
+    out <- out[nzchar(out$source_id) & nzchar(out$target_id), , drop = FALSE]
+    rownames(out) <- NULL
+    out
+}
+
+fetch_ensembl_orthologs <- function(source_gene_id, source_species, target_species,
+                                    compara = "", timeout_sec = NULL) {
+    source_gene_id <- trimws(as.character(source_gene_id %||% ""))[1]
+    source_species <- normalize_ensembl_species_name(ensembl_species = source_species)
+    target_species <- normalize_ensembl_species_name(ensembl_species = target_species)
+    compara <- tolower(trimws(as.character(compara %||% ""))[1])
+    if (!nzchar(source_gene_id) || !nzchar(source_species) || !nzchar(target_species)) {
+        return(list(status = "invalid_request", rows = empty_ensembl_homology_df(), error = "Missing Ensembl gene or species identifier."))
+    }
+
+    cache_key <- paste(.alias_memory_cache_version, "orthology", source_species, source_gene_id, target_species, compara, sep = "|")
+    cached <- get_alias_cache_value(cache_key)
+    if (is.list(cached) && !is.null(cached$status)) return(cached)
+
+    url <- paste(ENSEMBL_REST, "homology", "id", source_species, utils::URLencode(source_gene_id, reserved = TRUE), sep = "/")
+    req <- httr2::req_headers(httr2::request(url), Accept = "application/json")
+    query_args <- list(type = "orthologues", target_species = target_species, sequence = "none")
+    if (nzchar(compara)) query_args$compara <- compara
+    req <- do.call(httr2::req_url_query, c(list(req), query_args))
+    timeout_value <- suppressWarnings(as.numeric(timeout_sec %||% get_alias_timeout_ensembl()))
+    if (!is.finite(timeout_value) || timeout_value <= 0) timeout_value <- get_alias_timeout_ensembl()
+
+    result <- tryCatch({
+        resp <- httr2::req_perform(
+            httr2::req_retry(
+                httr2::req_timeout(req, timeout_value),
+                max_tries = get_safe_get_json_max_tries(),
+                max_seconds = get_safe_get_json_max_seconds()
+            )
+        )
+        payload <- httr2::resp_body_json(resp, simplifyVector = FALSE)
+        rows <- parse_ensembl_homology_response(payload)
+        list(status = if (nrow(rows) > 0L) "ok" else "no_ortholog", rows = rows, error = "")
+    }, error = function(e) {
+        list(status = "unavailable", rows = empty_ensembl_homology_df(), error = conditionMessage(e))
+    })
+    if (!identical(result$status, "unavailable")) {
+        set_alias_cache_value(cache_key, result)
+        set_alias_disk_cache_value(cache_key, result)
+    }
+    result
+}
+
+evaluate_ensembl_orthology_pair <- function(source_gene_id, target_gene_id, target_species,
+                                             homology_result) {
+    source_gene_id <- toupper(trimws(as.character(source_gene_id %||% ""))[1])
+    target_gene_id <- toupper(trimws(as.character(target_gene_id %||% ""))[1])
+    target_species <- normalize_ensembl_species_name(ensembl_species = target_species)
+    status <- as.character((homology_result %||% list())$status %||% "unavailable")
+    rows <- tryCatch(homology_result$rows, error = function(e) NULL)
+    if (!identical(status, "ok") || !is.data.frame(rows) || nrow(rows) == 0L) {
+        return(list(
+            verified = FALSE,
+            status = if (identical(status, "no_ortholog")) "no_ortholog" else "evidence_unavailable",
+            homology_type = "",
+            matching_rows = empty_ensembl_homology_df()
+        ))
+    }
+
+    hit <- toupper(trimws(as.character(rows$source_id %||% ""))) == source_gene_id &
+        toupper(trimws(as.character(rows$target_id %||% ""))) == target_gene_id
+    if (nzchar(target_species)) {
+        hit <- hit & tolower(trimws(as.character(rows$target_species %||% ""))) == target_species
+    }
+    matching <- rows[hit, , drop = FALSE]
+    if (nrow(matching) == 0L) {
+        return(list(
+            verified = FALSE,
+            status = "different_locus",
+            homology_type = "",
+            matching_rows = matching
+        ))
+    }
+
+    types <- unique(tolower(trimws(as.character(matching$homology_type %||% ""))))
+    one_to_one <- types == "ortholog_one2one"
+    if (!any(one_to_one)) {
+        return(list(
+            verified = FALSE,
+            status = "non_one_to_one",
+            homology_type = paste(types[nzchar(types)], collapse = ", "),
+            matching_rows = matching
+        ))
+    }
+    matching <- matching[one_to_one, , drop = FALSE]
+    list(
+        verified = TRUE,
+        status = "verified_one_to_one",
+        homology_type = "ortholog_one2one",
+        matching_rows = matching
+    )
+}
+
 # Normalizers and lightweight relevance scoring to avoid cross-gene false
 # positives.
 normalize_match_token <- function(x) {

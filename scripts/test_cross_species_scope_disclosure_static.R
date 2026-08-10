@@ -19,6 +19,12 @@ stopifnot(
   !grepl("summary-cross-species-scope-notice", compiled_css_txt, fixed = TRUE),
   grepl(".summary-cross-species-scope-panel {", scss_txt, fixed = TRUE),
   grepl(".summary-cross-species-scope-panel {", compiled_css_txt, fixed = TRUE),
+  grepl("isolation: isolate;", scss_txt, fixed = TRUE),
+  grepl("isolation: isolate;", compiled_css_txt, fixed = TRUE),
+  grepl(".summary-context-section:has(.summary-cross-species-scope[open]) > .shiny-html-output {", scss_txt, fixed = TRUE),
+  grepl(".summary-context-section:has(.summary-cross-species-scope[open]) > .shiny-html-output {", compiled_css_txt, fixed = TRUE),
+  grepl(".summary-context-section:has(.summary-cross-species-scope[open]) > .result-workspace-subheader {", scss_txt, fixed = TRUE),
+  grepl(".summary-context-section:has(.summary-cross-species-scope[open]) > .result-workspace-subheader {", compiled_css_txt, fixed = TRUE),
   grepl("closeScopeDisclosures", layout_js_txt, fixed = TRUE),
   grepl("event.key !== 'Escape'", layout_js_txt, fixed = TRUE)
 )

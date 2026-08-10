@@ -65,6 +65,19 @@ if (!is.finite(renderer_port) || renderer_port < 1024L || renderer_port > 65535L
 paths <- cgv_background_report_paths(base_dir)
 log_dir <- file.path(paths$root, "logs")
 dir.create(log_dir, recursive = TRUE, showWarnings = FALSE)
+ready_path <- file.path(paths$root, "worker.ready")
+if (file.exists(ready_path)) unlink(ready_path, force = TRUE)
+delivery_config <- cgv_report_delivery_config()
+delivery_preflight <- cgv_report_delivery_preflight(delivery_config)
+if (!isTRUE(delivery_preflight$ok)) {
+    stop("Report email delivery preflight failed: ", delivery_preflight$error)
+}
+writeLines(format(Sys.time(), "%Y-%m-%dT%H:%M:%S%z"), ready_path, useBytes = TRUE)
+worker_log(
+    "email delivery ready; sender=%s reply_to=%s",
+    delivery_config$from_email,
+    delivery_config$reply_to
+)
 try(cgv_recover_stale_background_reports(base_dir, stale_minutes = timeout_minutes + 10), silent = TRUE)
 
 wait_for_renderer <- function(process, port, timeout_seconds = 180) {

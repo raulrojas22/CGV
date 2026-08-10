@@ -397,11 +397,10 @@ After the cards appear:
 
 **Detailed** exposes feature-level layers and richer tooltips. Use it to distinguish exon, CDS, UTR, intron, and other annotated elements.
 
-**Aligned** compares transcripts belonging to one loaded gene. It becomes available when at least one selected gene has multiple transcript tracks.
-
-**LASTZ Blocks** projects local sequence-alignment blocks over the canonical transcript locus.
-
-**MultiPIP** stacks gap-free local segments by identity to show where conservation concentrates across the selected transcripts.
+**Synteny** compares transcripts belonging to one loaded gene. It is the only
+alignment method in Multi-Gene Search and becomes available when at least one
+selected gene has multiple transcript tracks. LASTZ Blocks and MultiPIP are
+available only in Cross-Species Search.
 
 ## 4.8 Sort and compare
 
@@ -758,11 +757,25 @@ Removing a card changes the summary table, analytics set, and Figure Studio avai
 
 ## 7.2 Aligned-synteny mapping events
 
-CGV uses visual event categories:
+CGV uses visual event categories read from each upper track to the next lower
+track:
 
-- **1:1 direct** - one block corresponds preferentially to one block;
-- **1:n or n:1 correspondence** - one block maps to several blocks, or several blocks map to one;
-- **partial or ambiguous** - support is divided or does not form a clean direct mapping.
+- **1:1 direct (blue, solid)** - one upper block corresponds preferentially to
+  one lower block;
+- **1:n split (teal, dashed)** - one upper block maps to several lower blocks;
+- **n:1 merge (violet, dash-dot)** - several upper blocks map to one lower
+  block;
+- **partial or ambiguous (grey, dotted)** - support is divided or does not form
+  a clean direct, split, or merge mapping.
+
+Here **n means several blocks**, not a sequence-identity score. Ribbon color
+encodes the mapping category; identity percentage is shown in the ribbon
+tooltip and controlled by the minimum-identity filter.
+
+Feature boxes use a separate color language. In the default palette, red/pink
+marks exon extent, gold/yellow marks CDS, cyan/blue marks UTR, and grey marks
+the gene span. These feature colors do not mean low, medium, or high identity
+and do not indicate an error or warning.
 
 The ribbon tooltip is the authoritative source for the event label, identity, and support. Ribbon width and curvature are visual aids and should not be treated as independent quantitative measures.
 
@@ -1310,8 +1323,8 @@ publishing, choose:
   **Cross-Species**, or both;
 - whether to include private or uploaded sequence content;
 - whether readers may download the reproducibility ZIP;
-- whether CGV should run the compatible current LASTZ and MultiPIP comparisons
-  before capturing both alignment views;
+- whether CGV should run the compatible current Cross-Species LASTZ and
+  MultiPIP comparisons before capturing both alignment views;
 - an expiry of 7, 14, or 30 days. The default is 7 days.
 
 When reader downloads are disabled, CSV, FASTA, and ZIP files are not published
@@ -1321,6 +1334,9 @@ HTML remain visible.
 **Complete** is the recommended mode. It generates structural views, Analytics
 charts, and eligible aligned-synteny views that have not yet been opened.
 Optional LASTZ/MultiPIP execution is available only in this mode.
+These sequence-alignment views belong to Cross-Species Search. In Multi-Gene
+Search, Synteny is the only alignment method and is available when a loaded
+gene has more than one transcript.
 
 **Fast** captures only views that are already rendered and idle. It does not
 activate hidden Analytics, structures, alignments, or synteny. The report
@@ -1575,7 +1591,7 @@ all downloaded organisms.
 - single and batch gene entry;
 - visualization generation;
 - Compact and Detailed inspection;
-- transcript alignment;
+- transcript Synteny alignment;
 - figure and table export.
 
 **Cross-Species Search** covers:

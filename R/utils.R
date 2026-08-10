@@ -3233,6 +3233,101 @@ normalize_partial_gene_suggestions_df <- function(df, source_labels = FALSE, sou
     df
 }
 
+collapse_partial_gene_suggestions_by_locus <- function(df, query = "") {
+    if (is.null(df) || !is.data.frame(df) || nrow(df) == 0L) {
+        out <- normalize_partial_gene_suggestions_df(df)
+        out$alias_names <- character(0)
+        return(out)
+    }
+    has_source_labels <- "source_labels" %in% names(df)
+    has_source_preview <- "source_label_preview" %in% names(df)
+    out <- normalize_partial_gene_suggestions_df(
+        df,
+        source_labels = has_source_labels,
+        source_label_preview = has_source_preview
+    )
+    out$alias_names <- rep("", nrow(out))
+
+    query_key <- normalize_partial_gene_query(query)
+    gene_key <- normalize_partial_gene_query(out$gene_name)
+    file_key <- tolower(trimws(as.character(out$file_label %||% "")))
+    local_ids <- trimws(as.character(out$local_gene_id %||% ""))
+    local_symbols <- trimws(as.character(out$local_symbol %||% ""))
+
+    # Direct annotation-name matches may not carry a locus ID, while alias rows do.
+    # Infer the missing ID only when the same official symbol maps unambiguously to
+    # one locus inside the same organism/annotation source.
+    known <- nzchar(local_ids) & nzchar(local_symbols)
+    if (any(known)) {
+        symbol_map <- split(local_ids[known], paste(file_key[known], normalize_partial_gene_query(local_symbols[known]), sep = "\r"))
+        symbol_map <- lapply(symbol_map, function(ids) unique(ids[nzchar(ids)]))
+        missing <- which(!nzchar(local_ids))
+        for (idx in missing) {
+            ids <- symbol_map[[paste(file_key[[idx]], gene_key[[idx]], sep = "\r")]] %||% character(0)
+            if (length(ids) == 1L) {
+                local_ids[[idx]] <- ids[[1L]]
+                out$local_gene_id[[idx]] <- ids[[1L]]
+            }
+        }
+    }
+
+    identity_key <- ifelse(
+        nzchar(local_ids),
+        paste(file_key, "locus", local_ids, sep = "\r"),
+        paste(file_key, "name", gene_key, sep = "\r")
+    )
+    groups <- split(seq_len(nrow(out)), identity_key)
+    collapsed <- lapply(groups, function(idx) {
+        rows <- out[idx, , drop = FALSE]
+        row_gene_keys <- normalize_partial_gene_query(rows$gene_name)
+        exact <- nzchar(query_key) & row_gene_keys == query_key
+        match_exact <- tolower(as.character(rows$match_type %||% "")) == "exact"
+        score <- suppressWarnings(as.numeric(rows$score %||% 0))
+        score[!is.finite(score)] <- 0
+        ord <- order(!(exact | match_exact), -score, nchar(as.character(rows$gene_name)), tolower(as.character(rows$gene_name)))
+        best <- rows[ord[[1L]], , drop = FALSE]
+
+        symbols <- unique(trimws(as.character(rows$local_symbol %||% "")))
+        symbols <- symbols[nzchar(symbols)]
+        preferred_symbols <- symbols[!grepl("^LOC[0-9]+$", symbols, ignore.case = TRUE)]
+        canonical <- if (length(preferred_symbols) > 0L) preferred_symbols[[1L]] else ""
+        if (nzchar(canonical)) {
+            canonical_rows <- which(normalize_partial_gene_query(rows$gene_name) == normalize_partial_gene_query(canonical))
+            if (length(canonical_rows) > 0L) {
+                best <- rows[canonical_rows[[1L]], , drop = FALSE]
+            }
+            best$gene_name <- canonical
+            best$local_symbol <- canonical
+        }
+
+        all_names <- unique(trimws(as.character(rows$gene_name %||% "")))
+        all_names <- all_names[nzchar(all_names)]
+        aliases <- all_names[normalize_partial_gene_query(all_names) != normalize_partial_gene_query(best$gene_name[[1L]])]
+        best$alias_names <- paste(aliases, collapse = " | ")
+        ids <- unique(trimws(as.character(rows$local_gene_id %||% "")))
+        ids <- ids[nzchar(ids)]
+        if (length(ids) > 0L) best$local_gene_id <- ids[[1L]]
+        best$score <- max(score, na.rm = TRUE)
+        best$match_type <- if (any(exact | match_exact)) {
+            "exact"
+        } else if (any(as.character(rows$match_type %||% "") == "prefix")) {
+            "prefix"
+        } else {
+            "contains"
+        }
+        counts <- suppressWarnings(as.integer(rows$source_count %||% 1L))
+        counts[!is.finite(counts) | counts < 1L] <- 1L
+        best$source_count <- max(counts)
+        best$requires_confirmation <- all(as.logical(rows$requires_confirmation %||% FALSE), na.rm = TRUE)
+        best
+    })
+    collapsed <- do.call(rbind, collapsed)
+    collapsed_exact <- tolower(as.character(collapsed$match_type %||% "")) == "exact"
+    collapsed <- collapsed[order(!collapsed_exact, -suppressWarnings(as.numeric(collapsed$score %||% 0)), tolower(as.character(collapsed$gene_name))), , drop = FALSE]
+    rownames(collapsed) <- NULL
+    collapsed
+}
+
 is_verified_local_description_alias_match <- function(match_row) {
     if (is.null(match_row) || !is.data.frame(match_row) || nrow(match_row) == 0L) return(FALSE)
     row <- match_row[1, , drop = FALSE]
@@ -3302,8 +3397,8 @@ find_partial_gene_suggestions_from_choices <- function(choices, query, file_labe
     if (nchar(q_comp) < min_query_chars) {
         return(empty_partial_gene_suggestions_df())
     }
-    max_suggestions <- suppressWarnings(as.integer(max_suggestions %||% 10L))
-    if (!is.finite(max_suggestions) || is.na(max_suggestions) || max_suggestions < 1L) {
+    max_suggestions <- suppressWarnings(as.numeric(max_suggestions %||% 10L))
+    if (is.na(max_suggestions) || max_suggestions < 1) {
         max_suggestions <- 10L
     }
     display <- trimws(as.character(choices %||% character(0)))
@@ -3315,15 +3410,16 @@ find_partial_gene_suggestions_from_choices <- function(choices, query, file_labe
     exact_hit <- comp == q_comp
     hit_prefix <- !exact_hit & startsWith(comp, q_comp)
     hit_contains <- !exact_hit & !hit_prefix & grepl(q_comp, comp, fixed = TRUE)
-    hit <- hit_prefix | hit_contains
+    hit <- exact_hit | hit_prefix | hit_contains
     if (!any(hit)) {
         return(empty_partial_gene_suggestions_df())
     }
     out <- data.frame(
         gene_name = display[hit],
         file_label = rep(as.character(file_label %||% ""), sum(hit)),
-        match_type = ifelse(hit_prefix[hit], "prefix", "contains"),
-        score = ifelse(hit_prefix[hit], 100, 60) - pmax(0, nchar(comp[hit]) - nchar(q_comp)),
+        match_type = ifelse(exact_hit[hit], "exact", ifelse(hit_prefix[hit], "prefix", "contains")),
+        score = ifelse(exact_hit[hit], 160, ifelse(hit_prefix[hit], 100, 60)) -
+            pmax(0, nchar(comp[hit]) - nchar(q_comp)),
         source_count = rep(1L, sum(hit)),
         stringsAsFactors = FALSE
     )
@@ -3332,7 +3428,9 @@ find_partial_gene_suggestions_from_choices <- function(choices, query, file_labe
     out <- out[!duplicated(out$key), , drop = FALSE]
     out$key <- NULL
     out <- out[order(-out$score, nchar(out$gene_name), tolower(out$gene_name)), , drop = FALSE]
-    if (nrow(out) > max_suggestions) out <- out[seq_len(max_suggestions), , drop = FALSE]
+    if (is.finite(max_suggestions) && nrow(out) > max_suggestions) {
+        out <- out[seq_len(as.integer(max_suggestions)), , drop = FALSE]
+    }
     rownames(out) <- NULL
     normalize_partial_gene_suggestions_df(out)
 }
@@ -3401,8 +3499,8 @@ find_partial_gene_alias_suggestions_sqlite <- function(annotation_paths, query, 
     }
     labels <- as.character(file_labels %||% basename(paths))
     if (length(labels) != length(paths)) labels <- basename(paths)
-    max_per_file <- suppressWarnings(as.integer(max_per_file %||% 20L))
-    if (!is.finite(max_per_file) || is.na(max_per_file) || max_per_file < 1L) max_per_file <- 20L
+    max_per_file <- suppressWarnings(as.numeric(max_per_file %||% 20L))
+    if (is.na(max_per_file) || max_per_file < 1) max_per_file <- 20L
     dets <- det_list
     if (!is.list(dets)) dets <- vector("list", length(paths))
     if (length(dets) < length(paths)) length(dets) <- length(paths)
@@ -3428,27 +3526,38 @@ find_partial_gene_alias_suggestions_sqlite <- function(annotation_paths, query, 
         if (is.null(con)) return(NULL)
 
         query_alias_rows <- function(like_value) {
+            row_limit_sql <- if (is.finite(max_per_file)) {
+                sprintf(" LIMIT %d", as.integer(min(.Machine$integer.max, max_per_file * 4)))
+            } else {
+                ""
+            }
             sql <- sprintf(
                 paste0(
                     "SELECT query_term_original, query_term_clean_strict, query_term_upper, local_gene_id, local_symbol, term_type, confidence, source_db ",
                     "FROM alias_index WHERE term_type IN (%s) AND LENGTH(query_term_original) <= 100 AND ",
                     "(query_term_clean_strict LIKE ?1 OR query_term_upper LIKE ?1 OR UPPER(local_symbol) LIKE ?1) ",
-                    "ORDER BY CASE confidence WHEN 'HIGH' THEN 1 WHEN 'MEDIUM' THEN 2 ELSE 3 END, LENGTH(query_term_original), query_term_original ",
-                    "LIMIT %d"
+                    "ORDER BY CASE confidence WHEN 'HIGH' THEN 1 WHEN 'MEDIUM' THEN 2 ELSE 3 END, LENGTH(query_term_original), query_term_original%s"
                 ),
                 type_sql,
-                as.integer(max_per_file * 4L)
+                row_limit_sql
             )
             tryCatch(DBI::dbGetQuery(con, sql, params = list(like_value)), error = function(e) data.frame())
         }
 
-        alias_rows <- query_alias_rows(q_like_prefix)
-        match_type <- "prefix"
-        if (!is.data.frame(alias_rows) || nrow(alias_rows) == 0L) {
-            alias_rows <- query_alias_rows(q_like_contains)
-            match_type <- "contains"
+        prefix_rows <- normalize_alias_index_df(query_alias_rows(q_like_prefix))
+        contains_rows <- normalize_alias_index_df(query_alias_rows(q_like_contains))
+        prefix_rows$.partial_match_type <- rep("prefix", nrow(prefix_rows))
+        contains_rows$.partial_match_type <- rep("contains", nrow(contains_rows))
+        alias_rows <- rbind(prefix_rows, contains_rows)
+        if (nrow(alias_rows) > 0L) {
+            alias_key <- paste(
+                normalize_partial_gene_query(alias_rows$query_term_original),
+                trimws(as.character(alias_rows$local_gene_id %||% "")),
+                trimws(as.character(alias_rows$local_symbol %||% "")),
+                sep = "\r"
+            )
+            alias_rows <- alias_rows[!duplicated(alias_key), , drop = FALSE]
         }
-        alias_rows <- normalize_alias_index_df(alias_rows)
         if (!is.data.frame(alias_rows) || nrow(alias_rows) == 0L) return(NULL)
 
         display <- trimws(as.character(alias_rows$local_symbol %||% ""))
@@ -3477,14 +3586,16 @@ find_partial_gene_alias_suggestions_sqlite <- function(annotation_paths, query, 
         display[use_term] <- term_token[use_term]
         display[!nzchar(display)] <- trimws(as.character(alias_rows$local_gene_id[!nzchar(display)] %||% ""))
 
-        keep <- nzchar(display) & normalize_partial_gene_query(display) != q_comp
+        keep <- nzchar(display)
         if (!any(keep)) return(NULL)
         alias_rows <- alias_rows[keep, , drop = FALSE]
         display <- display[keep]
+        row_match_type <- as.character(alias_rows$.partial_match_type %||% "contains")
         conf <- toupper(trimws(as.character(alias_rows$confidence %||% "")))
         cr <- unname(confidence_rank[conf])
         cr[is.na(cr)] <- 1L
-        score <- cr + if (identical(match_type, "prefix")) 70 else 35
+        exact_display <- normalize_partial_gene_query(display) == q_comp
+        score <- cr + ifelse(exact_display, 140, ifelse(row_match_type == "prefix", 70, 35))
         score <- score - pmax(0, nchar(normalize_partial_gene_query(display)) - nchar(q_comp))
         src <- trimws(as.character(alias_rows$source_db %||% ""))
         ev <- tolower(trimws(as.character(alias_rows$evidence_source %||% "")))
@@ -3498,7 +3609,7 @@ find_partial_gene_alias_suggestions_sqlite <- function(annotation_paths, query, 
         out <- data.frame(
             gene_name = display,
             file_label = rep(labels[[i]], length(display)),
-            match_type = rep(match_type, length(display)),
+            match_type = ifelse(exact_display, "exact", row_match_type),
             score = score,
             source_count = rep(1L, length(display)),
             local_gene_id = trimws(as.character(alias_rows$local_gene_id %||% "")),
@@ -3516,7 +3627,9 @@ find_partial_gene_alias_suggestions_sqlite <- function(annotation_paths, query, 
         out <- out[!duplicated(out$key), , drop = FALSE]
         out$display_preference <- NULL
         out$key <- NULL
-        if (nrow(out) > max_per_file) out <- out[seq_len(max_per_file), , drop = FALSE]
+        if (is.finite(max_per_file) && nrow(out) > max_per_file) {
+            out <- out[seq_len(as.integer(max_per_file)), , drop = FALSE]
+        }
         normalize_partial_gene_suggestions_df(out)
     })
     rows <- rows[vapply(rows, function(x) is.data.frame(x) && nrow(x) > 0L, logical(1))]
@@ -3544,10 +3657,10 @@ find_deterministic_partial_gene_suggestions <- function(annotation_paths, query,
     }
     labels <- as.character(file_labels %||% basename(paths))
     if (length(labels) != length(paths)) labels <- basename(paths)
-    max_per_file <- suppressWarnings(as.integer(max_per_file %||% 20L))
-    if (!is.finite(max_per_file) || is.na(max_per_file) || max_per_file < 1L) max_per_file <- 20L
-    max_total <- suppressWarnings(as.integer(max_total %||% 20L))
-    if (!is.finite(max_total) || is.na(max_total) || max_total < 1L) max_total <- 20L
+    max_per_file <- suppressWarnings(as.numeric(max_per_file %||% 20L))
+    if (is.na(max_per_file) || max_per_file < 1) max_per_file <- 20L
+    max_total <- suppressWarnings(as.numeric(max_total %||% 20L))
+    if (is.na(max_total) || max_total < 1) max_total <- 20L
     min_shared <- suppressWarnings(as.integer(min_shared_organisms %||% 1L))
     if (!is.finite(min_shared) || is.na(min_shared) || min_shared < 1L) min_shared <- 1L
 
@@ -3577,7 +3690,13 @@ find_deterministic_partial_gene_suggestions <- function(annotation_paths, query,
             best$source_labels <- best$file_label
             best$source_count <- length(labels_u)
             best$score <- max(suppressWarnings(as.numeric(df$score %||% 0)), na.rm = TRUE) + best$source_count * 5
-            best$match_type <- if (any(as.character(df$match_type %||% "") == "prefix")) "prefix" else "contains"
+            best$match_type <- if (any(as.character(df$match_type %||% "") == "exact")) {
+                "exact"
+            } else if (any(as.character(df$match_type %||% "") == "prefix")) {
+                "prefix"
+            } else {
+                "contains"
+            }
             best
         }))
         grouped$gene_key <- NULL
@@ -3603,7 +3722,9 @@ find_deterministic_partial_gene_suggestions <- function(annotation_paths, query,
             if (length(labels_u) <= source_label_preview) return(paste(labels_u, collapse = ", "))
             paste0(paste(labels_u[seq_len(source_label_preview)], collapse = ", "), sprintf(" +%d more", length(labels_u) - source_label_preview))
         }, character(1))
-        if (nrow(grouped) > max_total) grouped <- grouped[seq_len(max_total), , drop = FALSE]
+        if (is.finite(max_total) && nrow(grouped) > max_total) {
+            grouped <- grouped[seq_len(as.integer(max_total)), , drop = FALSE]
+        }
         rownames(grouped) <- NULL
         normalize_partial_gene_suggestions_df(grouped, source_labels = TRUE, source_label_preview = TRUE)
     }
@@ -4158,8 +4279,8 @@ find_cross_species_alias_family_suggestions <- function(annotation_paths, query,
     if (length(labels) != length(paths)) {
         labels <- basename(paths)
     }
-    max_per_file <- suppressWarnings(as.integer(max_per_file %||% 12L))
-    if (!is.finite(max_per_file) || is.na(max_per_file) || max_per_file < 1L) {
+    max_per_file <- suppressWarnings(as.numeric(max_per_file %||% 12L))
+    if (is.na(max_per_file) || max_per_file < 1) {
         max_per_file <- 12L
     }
 
@@ -4193,13 +4314,19 @@ find_cross_species_alias_family_suggestions <- function(annotation_paths, query,
                 return(NULL)
             }
             like_param <- paste0("%", q_comp, "%")
+            alias_limit_sql <- if (is.finite(max_per_file)) {
+                sprintf(" LIMIT %d", as.integer(min(.Machine$integer.max, max_per_file * 8)))
+            } else {
+                ""
+            }
             tryCatch(
                 DBI::dbGetQuery(
                     idx,
                     paste0(
                         "SELECT * FROM alias_index WHERE ",
                         "(LOWER(query_term_clean_strict) LIKE ?1 OR LOWER(local_symbol) LIKE ?1 OR LOWER(description) LIKE ?1) ",
-                        "AND LENGTH(query_term_original) <= 180 LIMIT 250"
+                        "AND LENGTH(query_term_original) <= 180",
+                        alias_limit_sql
                     ),
                     params = list(like_param)
                 ),
@@ -4265,8 +4392,8 @@ find_cross_species_alias_family_suggestions <- function(annotation_paths, query,
         alias_rows$.gene_key <- gene_key
         alias_rows <- alias_rows[order(-alias_rows$.score, nchar(alias_rows$display_gene), tolower(alias_rows$display_gene)), , drop = FALSE]
         alias_rows <- alias_rows[!duplicated(alias_rows$.gene_key), , drop = FALSE]
-        if (nrow(alias_rows) > max_per_file) {
-            alias_rows <- alias_rows[seq_len(max_per_file), , drop = FALSE]
+        if (is.finite(max_per_file) && nrow(alias_rows) > max_per_file) {
+            alias_rows <- alias_rows[seq_len(as.integer(max_per_file)), , drop = FALSE]
         }
         data.frame(
             gene_name = alias_rows$display_gene,
@@ -4321,12 +4448,12 @@ find_cross_species_alias_family_suggestions <- function(annotation_paths, query,
         paste0(paste(labels_u[seq_len(source_label_preview)], collapse = ", "), sprintf(" +%d more", length(labels_u) - source_label_preview))
     }, character(1))
 
-    max_total <- suppressWarnings(as.integer(max_total %||% 20L))
-    if (!is.finite(max_total) || is.na(max_total) || max_total < 1L) {
+    max_total <- suppressWarnings(as.numeric(max_total %||% 20L))
+    if (is.na(max_total) || max_total < 1) {
         max_total <- 20L
     }
-    if (nrow(grouped) > max_total) {
-        grouped <- grouped[seq_len(max_total), , drop = FALSE]
+    if (is.finite(max_total) && nrow(grouped) > max_total) {
+        grouped <- grouped[seq_len(as.integer(max_total)), , drop = FALSE]
     }
     rownames(grouped) <- NULL
     grouped
@@ -7911,6 +8038,191 @@ search_gene_in_file <- function(file_path, gene_names, show_diagnostics = TRUE, 
         error = function(e) {
             if (isTRUE(return_meta)) list(data = NULL, matched_gene_id = NA_character_, matched_gene_name = NA_character_) else NULL
         }
+    )
+}
+
+orthology_identity_from_lookup_result <- function(result, base_dir = ".") {
+    result <- result %||% list()
+    lookup <- result$lookup %||% list()
+    det <- result$det %||% lookup$det_resolved %||% list()
+    match_row <- lookup$alias_index_match
+    local_gene_id <- trimws(as.character(lookup$matched_gene_id %||% ""))
+    local_feature_id <- ""
+    local_symbol <- trimws(as.character(lookup$matched_gene_name %||% ""))
+    if (is.data.frame(match_row) && nrow(match_row) > 0L) {
+        local_gene_id <- trimws(as.character(match_row$local_gene_id[1] %||% local_gene_id))
+        local_feature_id <- trimws(as.character(match_row$local_feature_id[1] %||% ""))
+        local_symbol <- trimws(as.character(match_row$local_symbol[1] %||% local_symbol))
+    }
+    organism <- trimws(as.character(det$organism %||% result$file_label %||% ""))
+    species <- if (exists("normalize_ensembl_species_name", mode = "function")) {
+        normalize_ensembl_species_name(
+            organism = organism,
+            ensembl_species = det$ensembl_species %||% det$ensembl_name %||% ""
+        )
+    } else {
+        ""
+    }
+    ids <- if (exists("ensembl_gene_ids_for_alias_locus", mode = "function")) {
+        tryCatch(
+            ensembl_gene_ids_for_alias_locus(
+                local_gene_id = local_gene_id,
+                local_feature_id = local_feature_id,
+                local_symbol = local_symbol,
+                organism_id = as.character(det$species_id %||% det$preloaded_id %||% ""),
+                annotation_path = as.character(result$file_path %||% ""),
+                organism_name = organism,
+                taxid = as.character(det$taxid %||% ""),
+                base_dir = base_dir
+            ),
+            error = function(e) character(0)
+        )
+    } else {
+        character(0)
+    }
+    list(
+        file_idx = suppressWarnings(as.integer(result$file_idx %||% NA_integer_)),
+        file_label = as.character(result$file_label %||% organism),
+        organism = organism,
+        species = species,
+        local_gene_id = local_gene_id,
+        local_symbol = local_symbol,
+        ensembl_gene_ids = unique(as.character(ids %||% character(0))),
+        kingdom = as.character(det$kingdom %||% "")
+    )
+}
+
+validate_cross_species_orthology_results <- function(results, fetch_fun = NULL, base_dir = ".") {
+    found_positions <- which(vapply(results, function(result) isTRUE((result %||% list())$found), logical(1)))
+    if (length(found_positions) < 2L) {
+        return(list(
+            status = "insufficient_matches",
+            approved_positions = integer(0),
+            rejected_positions = found_positions,
+            identities = list(),
+            evidence = list(),
+            message = "Fewer than two organisms have resolvable local loci."
+        ))
+    }
+    if (is.null(fetch_fun)) {
+        if (!exists("fetch_ensembl_orthologs", mode = "function")) {
+            return(list(
+                status = "evidence_unavailable",
+                approved_positions = integer(0),
+                rejected_positions = found_positions,
+                identities = list(),
+                evidence = list(),
+                message = "The Ensembl Compara evidence resolver is unavailable."
+            ))
+        }
+        fetch_fun <- fetch_ensembl_orthologs
+    }
+
+    identities <- lapply(found_positions, function(pos) orthology_identity_from_lookup_result(results[[pos]], base_dir = base_dir))
+    names(identities) <- as.character(found_positions)
+    usable <- which(vapply(identities, function(identity) {
+        nzchar(as.character(identity$species %||% "")) &&
+            length(as.character(identity$ensembl_gene_ids %||% character(0))) == 1L
+    }, logical(1)))
+    if (length(usable) < 2L) {
+        return(list(
+            status = "unresolved_identifiers",
+            approved_positions = integer(0),
+            rejected_positions = found_positions,
+            identities = identities,
+            evidence = list(),
+            message = "At least two loci need one unambiguous Ensembl gene identifier."
+        ))
+    }
+
+    adjacency <- matrix(FALSE, nrow = length(identities), ncol = length(identities))
+    diag(adjacency) <- TRUE
+    evidence <- list()
+    pair_index <- utils::combn(usable, 2L, simplify = FALSE)
+    for (pair in pair_index) {
+        left_idx <- pair[[1L]]
+        right_idx <- pair[[2L]]
+        left <- identities[[left_idx]]
+        right <- identities[[right_idx]]
+        compara <- if (exists("ensembl_compara_division", mode = "function")) {
+            ensembl_compara_division(kingdom = left$kingdom, organism = left$organism)
+        } else {
+            ""
+        }
+        fetched <- tryCatch(
+            fetch_fun(
+                source_gene_id = left$ensembl_gene_ids[[1L]],
+                source_species = left$species,
+                target_species = right$species,
+                compara = compara
+            ),
+            error = function(e) list(status = "unavailable", rows = NULL, error = conditionMessage(e))
+        )
+        verdict <- if (exists("evaluate_ensembl_orthology_pair", mode = "function")) {
+            evaluate_ensembl_orthology_pair(
+                source_gene_id = left$ensembl_gene_ids[[1L]],
+                target_gene_id = right$ensembl_gene_ids[[1L]],
+                target_species = right$species,
+                homology_result = fetched
+            )
+        } else {
+            list(verified = FALSE, status = "evidence_unavailable", homology_type = "")
+        }
+        evidence[[length(evidence) + 1L]] <- list(
+            left_position = found_positions[[left_idx]],
+            right_position = found_positions[[right_idx]],
+            left = left,
+            right = right,
+            fetch_status = as.character(fetched$status %||% "unavailable"),
+            verdict = verdict
+        )
+        if (isTRUE(verdict$verified)) {
+            adjacency[left_idx, right_idx] <- TRUE
+            adjacency[right_idx, left_idx] <- TRUE
+        }
+    }
+
+    # Connected components represent sets joined by explicit one-to-one
+    # Ensembl Compara relationships. A tie is intentionally rejected because
+    # choosing one biological group would require user intent.
+    remaining <- usable
+    components <- list()
+    while (length(remaining) > 0L) {
+        component <- remaining[[1L]]
+        repeat {
+            expanded <- unique(c(component, which(apply(adjacency[component, , drop = FALSE], 2L, any))))
+            if (setequal(expanded, component)) break
+            component <- expanded
+        }
+        component <- intersect(component, usable)
+        components[[length(components) + 1L]] <- component
+        remaining <- setdiff(remaining, component)
+    }
+    sizes <- vapply(components, length, integer(1))
+    best_size <- if (length(sizes) > 0L) max(sizes) else 0L
+    best <- which(sizes == best_size & sizes >= 2L)
+    if (length(best) != 1L) {
+        return(list(
+            status = if (best_size >= 2L) "ambiguous_orthology_groups" else "no_verified_pair",
+            approved_positions = integer(0),
+            rejected_positions = found_positions,
+            identities = identities,
+            evidence = evidence,
+            message = if (best_size >= 2L) {
+                "More than one equally supported orthology group was found; a reference locus must be selected."
+            } else {
+                "The same or similar gene name did not produce a verified one-to-one ortholog pair."
+            }
+        ))
+    }
+    approved <- found_positions[components[[best[[1L]]]]]
+    list(
+        status = "verified",
+        approved_positions = approved,
+        rejected_positions = setdiff(found_positions, approved),
+        identities = identities,
+        evidence = evidence,
+        message = sprintf("Verified one-to-one orthology across %d organisms.", length(approved))
     )
 }
 

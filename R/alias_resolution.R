@@ -670,6 +670,41 @@ alias_index_terms_for_gene <- function(local_gene_id = "", local_feature_id = ""
     normalize_alias_index_df(out)
 }
 
+ensembl_gene_ids_for_alias_locus <- function(local_gene_id = "", local_feature_id = "", local_symbol = "",
+                                             organism_id = "", annotation_path = "", organism_name = "",
+                                             taxid = "", base_dir = ".") {
+    terms <- alias_index_terms_for_gene(
+        local_gene_id = local_gene_id,
+        local_feature_id = local_feature_id,
+        local_symbol = local_symbol,
+        organism_id = organism_id,
+        annotation_path = annotation_path,
+        organism_name = organism_name,
+        taxid = taxid,
+        base_dir = base_dir,
+        max_aliases = 160L
+    )
+    ids <- character(0)
+    if (is.data.frame(terms) && nrow(terms) > 0L) {
+        term_type <- tolower(trimws(as.character(terms$term_type %||% "")))
+        ids <- trimws(as.character(terms$query_term_original[term_type == "ensembl_gene_id"] %||% character(0)))
+    }
+
+    # Some Ensembl Plants identifiers (notably Arabidopsis ATxGxxxxx) are the
+    # native GFF locus ID and therefore do not get a separate ensembl_gene_id row.
+    local_candidates <- trimws(as.character(c(local_gene_id, local_feature_id)))
+    local_candidates <- sub("^(gene|transcript)[:-]", "", local_candidates, ignore.case = TRUE, perl = TRUE)
+    ensembl_like <- grepl(
+        "^(ENS[A-Z0-9]*G[0-9]+|AT[1-5CM]G[0-9]+|Zm[0-9]+[A-Za-z]+[0-9]+|Os[0-9]+g[0-9]+|TraesCS[A-Za-z0-9._-]+)$",
+        local_candidates,
+        ignore.case = TRUE,
+        perl = TRUE
+    )
+    ids <- unique(c(ids, local_candidates[ensembl_like]))
+    ids <- ids[!is.na(ids) & nzchar(ids)]
+    unique(ids)
+}
+
 alias_index_match_to_lookup <- function(match_row, file_path, input_gene) {
     if (is.null(match_row) || !is.data.frame(match_row) || nrow(match_row) == 0L) return(NULL)
     row <- match_row[1, , drop = FALSE]

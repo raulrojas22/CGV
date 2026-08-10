@@ -2012,8 +2012,7 @@ init_shared_analysis_domain <- function(input,
             figure_studio = length(studio$panels %||% list()) > 0L,
             synteny_possible = length(active_ortho_ids_rv() %||% integer(0)) > 1L ||
                 homo_synteny_available,
-            lastz_eligible = length(active_ortho_ids_rv() %||% integer(0)) > 1L ||
-                (length(active_homo_ids_rv() %||% integer(0)) > 1L && homo_synteny_available),
+            lastz_eligible = length(active_ortho_ids_rv() %||% integer(0)) > 1L,
             has_private_uploads = any(vapply(snapshot_plots, plot_has_uploaded_source, logical(1)))
         )
         desktop <- cgv_runtime_is_desktop()
@@ -2181,7 +2180,7 @@ init_shared_analysis_domain <- function(input,
                             value = FALSE
                         ),
                         shiny::p(
-                            "Optional and computationally intensive. CGV will run each compatible selected workflow, which can add several minutes, and include the completed LASTZ and MultiPIP views."
+                            "Optional and computationally intensive. CGV will run the compatible selected Cross-Species comparison, which can add several minutes, and include the completed LASTZ and MultiPIP views."
                         )
                         )
                         if (isTRUE(state$preview$multi_gene > 0L) &&
@@ -2243,7 +2242,10 @@ init_shared_analysis_domain <- function(input,
                 ),
                 shiny::actionButton(
                     "publish_shared_analysis",
-                    if (desktop) "Build files" else "Create secret link",
+                    shiny::span(
+                        class = "cgv-share-submit-label",
+                        if (desktop) "Build files" else "Create secret link"
+                    ),
                     icon = shiny::icon(if (desktop) "file-export" else "share-nodes"),
                     class = "btn btn-primary"
                 )
@@ -2494,11 +2496,6 @@ init_shared_analysis_domain <- function(input,
             return(invisible(NULL))
         }
         lastz_contexts <- character(0)
-        homo_lastz_available <- include_multi_gene && homo_count > 1L && isTRUE(tryCatch(
-            if (is.function(homo_synteny_available_fn)) homo_synteny_available_fn() else FALSE,
-            error = function(e) FALSE
-        ))
-        if (homo_lastz_available) lastz_contexts <- c(lastz_contexts, "homo")
         if (include_cross_species && ortho_count > 1L) lastz_contexts <- c(lastz_contexts, "ortho")
         homo_synteny_available <- complete_capture && isTRUE(tryCatch(
             if (is.function(homo_synteny_available_fn)) homo_synteny_available_fn() else FALSE,

@@ -334,6 +334,9 @@
     popup.classList.add('open');
     syncPopupBounds(popup);
     setToggleExpanded(true);
+    if (window.cgvActivity && typeof window.cgvActivity.refreshLayout === 'function') {
+      window.cgvActivity.refreshLayout();
+    }
   }
 
   function closePopup(popup) {
@@ -344,14 +347,16 @@
       target.classList.remove('open');
     }
     setToggleExpanded(false);
+    if (window.cgvActivity && typeof window.cgvActivity.refreshLayout === 'function') {
+      window.cgvActivity.refreshLayout();
+    }
   }
 
   function scheduleAutoClose(popup) {
     clearAutoCloseTimer();
     autoCloseTimer = setTimeout(function () {
       if (popup && !manualOpen) {
-        popup.classList.remove('open');
-        setToggleExpanded(false);
+        closePopup(popup);
       }
     }, AUTO_CLOSE_MS);
   }
