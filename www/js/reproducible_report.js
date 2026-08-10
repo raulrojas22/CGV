@@ -1138,6 +1138,27 @@
     document.body.classList.add("cgv-report-capture-active");
   }
 
+  function syncShareDeliveryAction() {
+    var button = document.getElementById("publish_shared_analysis");
+    if (!button) return;
+    var label = button.querySelector(".cgv-share-submit-label");
+    if (!label) return;
+    var delivery = document.querySelector("input[name='share_delivery_mode']:checked");
+    var emailDelivery = !!(delivery && delivery.value === "email");
+    var text = emailDelivery ? "Queue email report" : "Create secret link";
+    label.textContent = text;
+    button.setAttribute("aria-label", text);
+    button.title = emailDelivery ?
+      "Freeze this analysis and place it in the email report queue" :
+      "Create the report in this session";
+  }
+
+  document.addEventListener("change", function (event) {
+    if (event.target && event.target.name === "share_delivery_mode") {
+      syncShareDeliveryAction();
+    }
+  });
+
   // Keep the share modal progress and result blocks in view: they render at
   // the top of the modal body, so make sure the user never has to scroll to
   // notice them after starting a publication or when it finishes.
@@ -1165,6 +1186,7 @@
   if (typeof window.MutationObserver === "function") {
     shareModalObserver = new window.MutationObserver(function (mutations) {
       window.requestAnimationFrame(syncReportCaptureCurtain);
+      window.requestAnimationFrame(syncShareDeliveryAction);
       for (var i = 0; i < mutations.length; i++) {
         var added = mutations[i].addedNodes;
         for (var j = 0; j < added.length; j++) {
@@ -1186,10 +1208,12 @@
     if (document.body) {
       observeShareModal();
       syncReportCaptureCurtain();
+      syncShareDeliveryAction();
     } else {
       document.addEventListener("DOMContentLoaded", function () {
         observeShareModal();
         syncReportCaptureCurtain();
+        syncShareDeliveryAction();
       }, { once: true });
     }
   }

@@ -161,6 +161,11 @@ cgv_enqueue_background_report <- function(snapshot,
         unlink(cgv_background_report_job_path(job_id, base_dir), force = TRUE)
         stop("Could not place the background report in the processing queue.")
     }
+    message(sprintf(
+        "[background-report-queue] enqueued job=%s kind=%s",
+        job_id,
+        as.character(options$request_kind %||% "report")
+    ))
     list(
         id = job_id,
         state = "queued",
@@ -288,6 +293,35 @@ cgv_report_delivery_config <- function(getenv = Sys.getenv) {
         logo_path = env_value("REPORT_LOGO_PATH", feedback_config$logo_path),
         public_url = sub("/+$", "", env_value("CGV_PUBLIC_BASE_URL", feedback_config$public_url))
     )
+}
+
+cgv_report_delivery_preflight <- function(config = cgv_report_delivery_config()) {
+    api_key <- trimws(as.character(config$api_key %||% ""))
+    from_address <- if (exists("feedback_extract_address", mode = "function")) {
+        feedback_extract_address(config$from_email %||% "")
+    } else {
+        trimws(as.character(config$from_email %||% ""))
+    }
+    valid <- if (exists("feedback_is_valid_email", mode = "function")) {
+        feedback_is_valid_email
+    } else {
+        function(x) grepl("^[^\\s@<>]+@[^\\s@<>]+\\.[^\\s@<>]+$", x, perl = TRUE)
+    }
+    if (!nzchar(api_key)) {
+        return(list(
+            ok = FALSE,
+            state = "not_configured",
+            error = "REPORT_RESEND_API_KEY/FEEDBACK_RESEND_API_KEY is not configured."
+        ))
+    }
+    if (!isTRUE(valid(from_address)) || !isTRUE(valid(config$reply_to %||% ""))) {
+        return(list(
+            ok = FALSE,
+            state = "invalid_configuration",
+            error = "Report sender or reply address is invalid."
+        ))
+    }
+    list(ok = TRUE, state = "ready", error = "")
 }
 
 cgv_report_request_meta <- function(job) {
@@ -428,8 +462,9 @@ cgv_report_send_email <- function(job,
                                   success = TRUE,
                                   config = cgv_report_delivery_config(),
                                   transport = NULL) {
-    if (!nzchar(config$api_key %||% "")) {
-        return(list(ok = FALSE, state = "not_configured", status = NA_integer_, provider_id = "", error = "REPORT_RESEND_API_KEY/FEEDBACK_RESEND_API_KEY is not configured."))
+    preflight <- cgv_report_delivery_preflight(config)
+    if (!isTRUE(preflight$ok)) {
+        return(list(ok = FALSE, state = preflight$state, status = NA_integer_, provider_id = "", error = preflight$error))
     }
     email <- trimws(as.character(job$email %||% ""))
     from_address <- if (exists("feedback_extract_address", mode = "function")) feedback_extract_address(config$from_email) else config$from_email

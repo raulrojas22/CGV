@@ -80,6 +80,10 @@ delivery <- cgv_report_send_email(
 )
 assert(isTRUE(delivery$ok), "result email accepts a successful Resend response")
 assert(identical(delivery$provider_id, "report_email_123"), "provider id is retained")
+assert(isTRUE(cgv_report_delivery_preflight(config)$ok), "valid report delivery configuration passes preflight")
+missing_key_config <- config
+missing_key_config$api_key <- ""
+assert(identical(cgv_report_delivery_preflight(missing_key_config)$state, "not_configured"), "missing report API key fails preflight")
 html <- cgv_report_email_html(ready, success = TRUE, config = config)
 assert(grepl(report_result$url, html, fixed = TRUE), "result email contains the secret report URL")
 assert(grepl("interactive CGV report", html, fixed = TRUE), "result email uses branded interactive-report copy")
@@ -119,6 +123,7 @@ assert(grepl("preloaded CGV data", private_error, fixed = TRUE), "private upload
 domain_text <- paste(readLines(file.path("R", "server_shared_analysis_domain.R"), warn = FALSE), collapse = "\n")
 worker_text <- paste(readLines(file.path("scripts", "background_report_worker.R"), warn = FALSE), collapse = "\n")
 compose_text <- paste(readLines("docker-compose.shinyproxy.yml", warn = FALSE), collapse = "\n")
+shinyproxy_text <- paste(readLines(file.path("shinyproxy", "application.yml"), warn = FALSE), collapse = "\n")
 colors_deploy_text <- paste(readLines("deploy-colors-shinyproxy.sh", warn = FALSE), collapse = "\n")
 browser_text <- paste(readLines(file.path("www", "js", "reproducible_report.js"), warn = FALSE), collapse = "\n")
 server_text <- paste(readLines("server.R", warn = FALSE), collapse = "\n")
@@ -135,11 +140,14 @@ for (button_id in c(
 }
 assert(grepl('request_kind = "alignment"', domain_text, fixed = TRUE), "alignment email requests are labelled for branded delivery")
 assert(grepl('run_lastz = TRUE', domain_text, fixed = TRUE), "alignment email requests always run LASTZ in the worker")
-assert(grepl('lastz_contexts <- c(lastz_contexts, "homo")', domain_text, fixed = TRUE), "complete Multi-Gene reports schedule LASTZ")
+assert(!grepl('lastz_contexts <- c(lastz_contexts, "homo")', domain_text, fixed = TRUE), "Multi-Gene reports never schedule LASTZ")
 assert(grepl("CGV_BACKGROUND_REPORT_JOB_PATH", worker_text, fixed = TRUE), "worker launches an isolated snapshot renderer")
 assert(grepl("resolve_worker_chrome", worker_text, fixed = TRUE), "worker validates its headless browser before accepting jobs")
 assert(grepl("google-chrome-stable_current_amd64.deb", dependencies_text, fixed = TRUE), "dependency image installs a container-native headless browser")
 assert(grepl("background-report-worker:", compose_text, fixed = TRUE), "ShinyProxy compose runs the detached report worker")
+assert(grepl("worker.ready", compose_text, fixed = TRUE), "report worker health depends on successful delivery preflight")
+assert(grepl("FEEDBACK_RESEND_API_KEY", shinyproxy_text, fixed = TRUE), "ShinyProxy sessions inherit the Resend delivery secret")
+assert(grepl("REPORT_RESEND_API_KEY", shinyproxy_text, fixed = TRUE), "ShinyProxy sessions inherit an optional report-specific secret")
 assert(grepl('CHROMOTE_CHROME: "/usr/bin/google-chrome"', compose_text, fixed = TRUE), "worker uses the packaged Google Chrome binary")
 assert(grepl('CGV_PUBLIC_BASE_URL: "${CGV_PUBLIC_BASE_URL:-https://cgvapp.com}"', compose_text, fixed = TRUE), "worker always publishes an externally reachable report URL")
 assert(grepl("cgv-background-report-worker", colors_deploy_text, fixed = TRUE), "Colors deploy starts the detached report worker")
@@ -151,5 +159,6 @@ assert(grepl("/usr/bin/google-chrome", colors_deploy_text, fixed = TRUE), "Color
 assert(!grepl("--chmod=F600", colors_deploy_text, fixed = TRUE), "Colors secret sync stays compatible with macOS openrsync")
 assert(grepl("--chmod=Fu=rw,Fgo=", colors_deploy_text, fixed = TRUE), "Colors secret sync preserves mode 0600 portably")
 assert(grepl("cgv:background-report-bootstrap", browser_text, fixed = TRUE), "headless browser can trigger the existing report capture")
+assert(grepl("Queue email report", browser_text, fixed = TRUE), "Share labels the email queue action explicitly")
 
 message("All background report job tests passed.")

@@ -5,8 +5,8 @@ const assert = require('assert');
 const fs = require('fs');
 const vm = require('vm');
 
-function classList() {
-  const values = new Set();
+function classList(initial = []) {
+  const values = new Set(initial);
   return {
     add: (...items) => items.forEach((item) => values.add(item)),
     remove: (...items) => items.forEach((item) => values.delete(item)),
@@ -30,9 +30,15 @@ const documentAttributes = Object.create(null);
 const nativeHandlers = Object.create(null);
 const jqueryHandlers = Object.create(null);
 let mainRect = { left: 320, width: 960 };
+let popupRect = { left: 1090, top: 420, width: 460, height: 300 };
 const main = {
   getBoundingClientRect() { return mainRect; }
 };
+const popup = {
+  classList: classList(),
+  getBoundingClientRect() { return popupRect; }
+};
+elements['app-status-popup'] = popup;
 const shell = {
   addEventListener(name, handler) { nativeHandlers[`shell:${name}`] = handler; }
 };
@@ -53,6 +59,7 @@ global.document = {
 };
 
 global.window = {
+  innerHeight: 900,
   setTimeout,
   clearTimeout,
   addEventListener(name, handler) { nativeHandlers[name] = handler; }
@@ -78,6 +85,28 @@ const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   nativeHandlers['shell:transitionend']();
   await wait(8);
   assert.strictEqual(elements['app-work-indicator'].style.left, '690px');
+
+  popup.classList.add('open');
+  popupRect = { left: 820, top: 440, width: 460, height: 300 };
+  window.cgvActivity.refreshLayout();
+  await wait(8);
+  assert.strictEqual(elements['app-work-indicator'].style.left, '576px');
+  assert.strictEqual(elements['app-work-indicator'].attributes['data-layout-placement'], 'shifted');
+
+  mainRect = { left: 100, width: 600 };
+  popupRect = { left: 250, top: 430, width: 460, height: 300 };
+  window.cgvActivity.refreshLayout();
+  await wait(8);
+  assert.strictEqual(elements['app-work-indicator'].style.bottom, '484px');
+  assert.strictEqual(elements['app-work-indicator'].attributes['data-layout-placement'], 'stacked');
+
+  popup.classList.remove('open');
+  mainRect = { left: 100, width: 1180 };
+  window.cgvActivity.refreshLayout();
+  await wait(8);
+  assert.strictEqual(elements['app-work-indicator'].style.left, '690px');
+  assert.strictEqual(elements['app-work-indicator'].style.bottom, '');
+  assert.strictEqual(elements['app-work-indicator'].attributes['data-layout-placement'], 'center');
 
   window.cgvActivity.begin('generic', {
     headline: 'CGV is working', detail: 'Processing data…', priority: 5, delay: 0

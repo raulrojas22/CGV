@@ -175,10 +175,17 @@
     if (!raw) return null;
     var parts = raw.split(/[\s,]+/);
     if (parts.length < 4) return null;
+    var x = parseFloat(parts[0]);
+    var y = parseFloat(parts[1]);
     var width = parseFloat(parts[2]);
     var height = parseFloat(parts[3]);
     if (!(width > 0) || !(height > 0)) return null;
-    return { width: width, height: height };
+    return {
+      x: isFinite(x) ? x : 0,
+      y: isFinite(y) ? y : 0,
+      width: width,
+      height: height
+    };
   }
 
   function isTranscriptPlotItem(item) {
@@ -227,20 +234,128 @@
     return naturalSize.height * 0.90;
   }
 
+  function stableSvgZoomHeight(svg, fallbackHeight) {
+    if (!svg) return parseFloat(fallbackHeight) || 0;
+
+    var stored = parseFloat(svg.getAttribute('data-zoom-base-h')) || 0;
+    if (stored > 0) return stored;
+
+    var renderedHeight = 0;
+    try {
+      renderedHeight = svg.getBoundingClientRect().height || 0;
+    } catch (err) {}
+
+    var requestedHeight = isTranscriptPlotItem(svg)
+      ? getTranscriptSvgDisplayHeight(svg)
+      : 0;
+    var stableHeight = renderedHeight > 0
+      ? renderedHeight
+      : (requestedHeight > 0 ? requestedHeight : (parseFloat(fallbackHeight) || 0));
+
+    if (stableHeight > 0) {
+      svg.setAttribute('data-zoom-base-h', stableHeight);
+    }
+    return stableHeight;
+  }
+
+  function stableSvgZoomWidth(svg, factor) {
+    if (!svg) return 0;
+
+    var stored = parseFloat(svg.getAttribute('data-zoom-base-w')) || 0;
+    if (stored > 0) return stored;
+
+    var renderedWidth = 0;
+    try {
+      renderedWidth = svg.getBoundingClientRect().width || 0;
+    } catch (err) {}
+    var safeFactor = factor > 1 ? factor : 1;
+    var stableWidth = renderedWidth > 0 ? (renderedWidth / safeFactor) : 0;
+    if (stableWidth > 0) {
+      svg.setAttribute('data-zoom-base-w', stableWidth);
+    }
+    return stableWidth;
+  }
+
+  function effectiveViewBoxForHorizontalZoom(vb, viewportWidth, viewportHeight, preserveAspectRatio) {
+    if (!vb || !(viewportWidth > 0) || !(viewportHeight > 0)) return null;
+
+    var pa = String(preserveAspectRatio || 'xMidYMid meet').trim();
+    if (!pa || pa === 'none' || /(^|\s)none(\s|$)/.test(pa)) {
+      return vb;
+    }
+
+    var useSlice = /(^|\s)slice(\s|$)/.test(pa);
+    var scaleX = viewportWidth / vb.width;
+    var scaleY = viewportHeight / vb.height;
+    var uniformScale = useSlice ? Math.max(scaleX, scaleY) : Math.min(scaleX, scaleY);
+    if (!(uniformScale > 0)) return vb;
+
+    var renderedWidth = vb.width * uniformScale;
+    var renderedHeight = vb.height * uniformScale;
+    var alignX = /xMin/.test(pa) ? 0 : (/xMax/.test(pa) ? 1 : 0.5);
+    var alignY = /YMin/.test(pa) ? 0 : (/YMax/.test(pa) ? 1 : 0.5);
+    var offsetX = (viewportWidth - renderedWidth) * alignX;
+    var offsetY = (viewportHeight - renderedHeight) * alignY;
+
+    // This viewBox, rendered with preserveAspectRatio="none", reproduces the
+    // exact 1x vertical scale and alignment. A wider viewport can therefore
+    // change X only without moving or enlarging the gene structure on Y.
+    return {
+      x: vb.x - (offsetX / uniformScale),
+      y: vb.y - (offsetY / uniformScale),
+      width: viewportWidth / uniformScale,
+      height: viewportHeight / uniformScale
+    };
+  }
+
+  function prepareSvgForHorizontalZoom(svg, factor, svgHeight) {
+    if (!svg || svg.hasAttribute('data-zoom-effective-vb')) return;
+
+    var rawViewBox = String(svg.getAttribute('viewBox') || '').trim();
+    var vb = parseViewBox(svg);
+    if (!rawViewBox || !vb) return;
+
+    var baseViewportWidth = stableSvgZoomWidth(svg, factor);
+    var baseViewportHeight = parseFloat(svgHeight) || 0;
+    if (!(baseViewportWidth > 0) || !(baseViewportHeight > 0)) return;
+
+    var currentPA = svg.getAttribute('preserveAspectRatio') || 'xMidYMid meet';
+    var effective = effectiveViewBoxForHorizontalZoom(
+      vb,
+      baseViewportWidth,
+      baseViewportHeight,
+      currentPA
+    );
+    if (!effective) return;
+
+    svg.setAttribute('data-zoom-orig-vb', rawViewBox);
+    svg.setAttribute('data-zoom-effective-vb', [
+      effective.x,
+      effective.y,
+      effective.width,
+      effective.height
+    ].join(' '));
+    var baseStretchRatio = /(^|\s)none(\s|$)/.test(String(currentPA).trim())
+      ? ((baseViewportWidth / vb.width) / (baseViewportHeight / vb.height))
+      : 1;
+    svg.setAttribute('data-zoom-base-x-ratio', baseStretchRatio > 0 ? baseStretchRatio : 1);
+  }
+
   function syncTranscriptPlotContainerHeight(item, displayHeight) {
     if (!isTranscriptPlotItem(item)) return;
 
     var plotContainer = item.closest('.promoter-plot-container');
     if (!plotContainer) return;
 
-    if (isCompactVisualMode()) {
-      plotContainer.style.setProperty('height', COMPACT_PLOT_CONTAINER_HEIGHT + 'px', 'important');
-      plotContainer.style.setProperty('min-height', COMPACT_PLOT_CONTAINER_HEIGHT + 'px', 'important');
-      return;
-    }
+    // The zoom control is horizontal-only. Keep enough vertical room for the
+    // complete 1x SVG and never let a later zoom pass make the plot shorter.
+    var baseHeight = isCompactVisualMode()
+      ? COMPACT_PLOT_CONTAINER_HEIGHT
+      : DETAILED_PLOT_CONTAINER_HEIGHT;
+    var safeHeight = Math.max(baseHeight, Math.ceil(parseFloat(displayHeight) || 0));
 
-    plotContainer.style.setProperty('height', DETAILED_PLOT_CONTAINER_HEIGHT + 'px', 'important');
-    plotContainer.style.setProperty('min-height', DETAILED_PLOT_CONTAINER_HEIGHT + 'px', 'important');
+    plotContainer.style.setProperty('height', safeHeight + 'px', 'important');
+    plotContainer.style.setProperty('min-height', safeHeight + 'px', 'important');
   }
 
   function getTranscriptSvgUniformPreserveAspectRatio() {
@@ -299,6 +414,12 @@
       svg.style.setProperty('margin-right', 'auto', 'important');
       var verticalOffset = getTranscriptSvgVerticalOffset();
       svg.style.setProperty('transform', verticalOffset !== 0 ? ('translateY(' + verticalOffset + 'px)') : '', 'important');
+      if (displayHeight > 0) {
+        svg.setAttribute('data-zoom-base-h', displayHeight);
+      } else {
+        stableSvgZoomHeight(svg, displayHeight);
+      }
+      stableSvgZoomWidth(svg, 1);
 
       if (shouldUseUniformFit) {
         restoreDecorations(svg);
@@ -499,6 +620,15 @@
       }
       svg.style.width  = '';
       svg.style.height = '';
+      svg.removeAttribute('data-zoom-base-h');
+      svg.removeAttribute('data-zoom-base-w');
+      var originalViewBox = svg.getAttribute('data-zoom-orig-vb');
+      if (originalViewBox !== null) {
+        svg.setAttribute('viewBox', originalViewBox);
+      }
+      svg.removeAttribute('data-zoom-orig-vb');
+      svg.removeAttribute('data-zoom-effective-vb');
+      svg.removeAttribute('data-zoom-base-x-ratio');
     }
 
     fitItemToAvailableWidth(item);
@@ -509,7 +639,7 @@
     if (!(naturalH > 0)) return;
     syncTranscriptPlotContainerHeight(item, naturalH);
     item.setAttribute('data-natural-h', naturalH);
-    item.style.height = naturalH + 'px';
+    item.style.setProperty('height', naturalH + 'px', 'important');
 
     // Kill padding-bottom on inner div (this is what makes the plot grow tall)
     var inner = item.querySelector('.girafe_container');
@@ -518,7 +648,7 @@
         inner.setAttribute('data-orig-pb', inner.style.paddingBottom || '');
       }
       inner.style.paddingBottom = '0';
-      inner.style.height = naturalH + 'px';
+      inner.style.setProperty('height', naturalH + 'px', 'important');
     }
 
     // Stretch SVG horizontally only + counter-scale text and arrow head
@@ -528,10 +658,17 @@
       if (!svg.hasAttribute('data-orig-pa')) {
         svg.setAttribute('data-orig-pa', svg.getAttribute('preserveAspectRatio') || '');
       }
+      var svgHeight = stableSvgZoomHeight(svg, naturalH);
+      prepareSvgForHorizontalZoom(svg, factor, svgHeight);
+      var effectiveViewBox = svg.getAttribute('data-zoom-effective-vb');
+      if (effectiveViewBox) {
+        svg.setAttribute('viewBox', effectiveViewBox);
+      }
       svg.setAttribute('preserveAspectRatio', 'none');
-      svg.style.width  = '100%';
-      svg.style.height = naturalH + 'px';
-      counterScaleDecorations(svg, factor);
+      svg.style.setProperty('width', '100%', 'important');
+      svg.style.setProperty('height', svgHeight + 'px', 'important');
+      var baseStretchRatio = parseFloat(svg.getAttribute('data-zoom-base-x-ratio')) || 1;
+      counterScaleDecorations(svg, baseStretchRatio * factor);
     }
   }
 
@@ -545,6 +682,35 @@
     var vbW = parseFloat(parts[2]);
     var vbH = parseFloat(parts[3]);
     return (vbW > 0 && vbH > 0) ? wrapWidth * (vbH / vbW) : 0;
+  }
+
+  // Capture the vertical geometry once, at 1x, and reuse it at every zoom
+  // level. Transcript plots have a known safe minimum; using a transient
+  // getBoundingClientRect() value alone can make the first 1.25x pass a few
+  // pixels shorter while Shiny/ggiraph is still settling.
+  function stableZoomHeight(item, wrapWidth, factor) {
+    var stored = parseFloat(item.getAttribute('data-natural-h')) || 0;
+    if (stored > 0) return stored;
+
+    var itemHeight = 0;
+    try {
+      itemHeight = item.getBoundingClientRect().height || 0;
+    } catch (err) {}
+
+    if (isTranscriptPlotItem(item)) {
+      var svg = item.querySelector('svg[viewBox]');
+      if (svg) stableSvgZoomWidth(svg, factor);
+      var displayHeight = svg ? getTranscriptSvgDisplayHeight(svg) : 0;
+      var baseHeight = isCompactVisualMode()
+        ? COMPACT_PLOT_CONTAINER_HEIGHT
+        : DETAILED_PLOT_CONTAINER_HEIGHT;
+      var stableHeight = Math.max(baseHeight, Math.ceil(displayHeight || 0), Math.ceil(itemHeight || 0));
+      syncTranscriptPlotContainerHeight(item, stableHeight);
+      return stableHeight;
+    }
+
+    var viewBoxHeight = naturalHFromViewBox(item, wrapWidth);
+    return viewBoxHeight > 0 ? viewBoxHeight : itemHeight;
   }
 
   function settleContainerItems(mode) {
@@ -569,7 +735,7 @@
 
     var items = c.querySelectorAll('.girafe_container_std:not([data-natural-h])');
     for (var j = 0; j < items.length; j++) {
-      var nh = naturalHFromViewBox(items[j], wrapWidth);
+      var nh = stableZoomHeight(items[j], wrapWidth, factor);
       stretchItem(items[j], nh, factor);
     }
     if (hasReadyTranscriptPlots(mode)) {
@@ -601,8 +767,7 @@
         var wrapWidth = getWrapWidth(container);
         for (var i = 0; i < items.length; i++) {
           if (!items[i].hasAttribute('data-natural-h')) {
-            var h = items[i].getBoundingClientRect().height;
-            if (!(h > 0)) h = naturalHFromViewBox(items[i], wrapWidth);
+            var h = stableZoomHeight(items[i], wrapWidth, 1);
             items[i].setAttribute('data-natural-h', h || 0);
           }
         }

@@ -109,7 +109,13 @@ assert_true(
     grepl("global future plan unchanged", server_source, fixed = TRUE),
   "LASTZ must use its dedicated background queue without mutating the global future plan."
 )
-assert_true(grepl("run_homo_local_lastz_async", server_source, fixed = TRUE), "Multi-Gene LASTZ must use the non-blocking runner.")
+assert_true(!grepl("homoLastzModesEnabled", server_source, fixed = TRUE), "Multi-Gene alignment choices must not expose LASTZ or MultiPIP.")
+assert_true(grepl('homo_align_choices <- c("Synteny" = "aligned")', server_source, fixed = TRUE), "Multi-Gene must expose Synteny as its sole alignment method.")
+assert_true(grepl('"LASTZ" = "pip_blocks",\n                "MultiPIP" = "pip_multipip"', server_source, fixed = TRUE), "Cross-Species must retain LASTZ and MultiPIP alignment methods.")
+assert_true(grepl('"1:n" = "#00897B"', server_source, fixed = TRUE), "Synteny split relationships must use the distinct teal palette.")
+assert_true(grepl('"n:1" = "#6F5BD3"', server_source, fixed = TRUE), "Synteny merge relationships must use the distinct violet palette.")
+assert_true(grepl('"Feature boxes:"', server_source, fixed = TRUE) && grepl('"Relationship ribbons:"', server_source, fixed = TRUE), "Synteny must visibly separate feature colors from relationship colors.")
+assert_true(grepl("Identity is not encoded by ribbon color.", server_source, fixed = TRUE), "Synteny legend must explain that ribbon color is not an identity scale.")
 assert_true(grepl("multipip_prepared = TRUE", server_source, fixed = TRUE), "Reports must prepare both LASTZ views on the server from canonical results.")
 toolbar_button_pattern <- 'actionButton\\(\\s*inputId\\s*=\\s*"ortho_(pip|multipip)_suggest_reference"'
 assert_true(!grepl(toolbar_button_pattern, server_source, perl = TRUE), "The quadratic reference-suggestion buttons must not be rendered.")
