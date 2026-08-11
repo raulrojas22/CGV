@@ -16,6 +16,9 @@ COMPOSE_FILE="${APP_DIR}/docker-compose.shinyproxy.colors.yml"
 BACKGROUND_WORKER_NAME="cgv-background-report-worker"
 BACKGROUND_REPORT_MEMORY="${BACKGROUND_REPORT_MEMORY:-4g}"
 APP_LASTZ_GLOBAL_WORKERS="${APP_LASTZ_GLOBAL_WORKERS:-2}"
+COLORS_INLINE_FAST_SEQUENCE_PREFETCH="${COLORS_INLINE_FAST_SEQUENCE_PREFETCH:-0}"
+COLORS_HOMO_DEFER_SEQUENCE="${COLORS_HOMO_DEFER_SEQUENCE:-1}"
+COLORS_DEFER_FEATURE_GC="${COLORS_DEFER_FEATURE_GC:-1}"
 LOCAL_EMAIL_ENV="${SCRIPT_DIR}/.env.local"
 REMOTE_EMAIL_ENV="${APP_DIR}/.env.background-reports"
 EMAIL_ENV_STAGING=""
@@ -46,6 +49,9 @@ Variables opcionales:
   REBUILD_R_DEPS=1   Reconstruye explícitamente la base de dependencias R.
   BACKGROUND_REPORT_MEMORY=4g
   APP_LASTZ_GLOBAL_WORKERS=2
+  COLORS_INLINE_FAST_SEQUENCE_PREFETCH=0
+  COLORS_HOMO_DEFER_SEQUENCE=1
+  COLORS_DEFER_FEATURE_GC=1
   PERF_RUN_LABEL=antes_colors_01
 
 El deploy normal exige que Git esté limpio y crea una imagen inmutable con
@@ -69,6 +75,13 @@ done
 
 [[ "$REBUILD_R_DEPS" == "0" || "$REBUILD_R_DEPS" == "1" ]] || \
   die "REBUILD_R_DEPS debe ser 0 o 1"
+for tuning_value in \
+  "$COLORS_INLINE_FAST_SEQUENCE_PREFETCH" \
+  "$COLORS_HOMO_DEFER_SEQUENCE" \
+  "$COLORS_DEFER_FEATURE_GC"; do
+  [[ "$tuning_value" == "0" || "$tuning_value" == "1" ]] || \
+    die "Los flags de first-paint de Colors deben ser 0 o 1"
+done
 [[ "$PERF_RUN_LABEL" =~ ^[A-Za-z0-9._-]+$ ]] || \
   die "PERF_RUN_LABEL solo puede contener letras, numeros, punto, guion y guion bajo"
 [[ "$BACKGROUND_REPORT_MEMORY" =~ ^[1-9][0-9]*[mMgG]$ ]] || \
@@ -344,6 +357,28 @@ rssh "set -e
   grep -q 'APP_PERF_RUN_LABEL: \"${PERF_RUN_LABEL}\"' \"\$config\"
   grep -q 'APP_BUILD_REVISION: \"${NEW_IMAGE}\"' \"\$config\"
   grep -q 'CGV_PUBLIC_BASE_URL: \"https://${PUBLIC_HOSTNAME}\"' \"\$config\"
+"
+
+rssh "set -e
+  config='${APP_DIR}/shinyproxy/application.yml'
+  if grep -q '^        APP_INLINE_FAST_SEQUENCE_PREFETCH:' \"\$config\"; then
+    sed -i -E 's|^        APP_INLINE_FAST_SEQUENCE_PREFETCH:.*|        APP_INLINE_FAST_SEQUENCE_PREFETCH: \"\${SP_INLINE_FAST_SEQUENCE_PREFETCH:${COLORS_INLINE_FAST_SEQUENCE_PREFETCH}}\"|' \"\$config\"
+  else
+    sed -i '/APP_PERF_TIMING:/a\        APP_INLINE_FAST_SEQUENCE_PREFETCH: \"\${SP_INLINE_FAST_SEQUENCE_PREFETCH:${COLORS_INLINE_FAST_SEQUENCE_PREFETCH}}\"' \"\$config\"
+  fi
+  if grep -q '^        APP_HOMO_DEFER_SEQUENCE:' \"\$config\"; then
+    sed -i -E 's|^        APP_HOMO_DEFER_SEQUENCE:.*|        APP_HOMO_DEFER_SEQUENCE: \"\${SP_HOMO_DEFER_SEQUENCE:${COLORS_HOMO_DEFER_SEQUENCE}}\"|' \"\$config\"
+  else
+    sed -i '/APP_INLINE_FAST_SEQUENCE_PREFETCH:/a\        APP_HOMO_DEFER_SEQUENCE: \"\${SP_HOMO_DEFER_SEQUENCE:${COLORS_HOMO_DEFER_SEQUENCE}}\"' \"\$config\"
+  fi
+  if grep -q '^        APP_DEFER_FEATURE_GC:' \"\$config\"; then
+    sed -i -E 's|^        APP_DEFER_FEATURE_GC:.*|        APP_DEFER_FEATURE_GC: \"\${SP_DEFER_FEATURE_GC:${COLORS_DEFER_FEATURE_GC}}\"|' \"\$config\"
+  else
+    sed -i '/APP_HOMO_DEFER_SEQUENCE:/a\        APP_DEFER_FEATURE_GC: \"\${SP_DEFER_FEATURE_GC:${COLORS_DEFER_FEATURE_GC}}\"' \"\$config\"
+  fi
+  grep -q 'APP_INLINE_FAST_SEQUENCE_PREFETCH: \"\${SP_INLINE_FAST_SEQUENCE_PREFETCH:${COLORS_INLINE_FAST_SEQUENCE_PREFETCH}}\"' \"\$config\"
+  grep -q 'APP_HOMO_DEFER_SEQUENCE: \"\${SP_HOMO_DEFER_SEQUENCE:${COLORS_HOMO_DEFER_SEQUENCE}}\"' \"\$config\"
+  grep -q 'APP_DEFER_FEATURE_GC: \"\${SP_DEFER_FEATURE_GC:${COLORS_DEFER_FEATURE_GC}}\"' \"\$config\"
 "
 
 rssh "set -e

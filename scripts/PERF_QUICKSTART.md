@@ -19,6 +19,16 @@ These defaults prioritize first paint. Hidden isoforms are not instantiated
 upfront, hidden orthologous plots stay suspended, and expensive sequence/feature
 GC work is deferred and prefetched after the initial card renders.
 
+Colors deploys use the measured first-paint candidate by default:
+
+- `APP_INLINE_FAST_SEQUENCE_PREFETCH=0`
+- `APP_HOMO_DEFER_SEQUENCE=1`
+- `APP_DEFER_FEATURE_GC=1`
+
+The deploy-time defaults can be overridden with
+`COLORS_INLINE_FAST_SEQUENCE_PREFETCH`, `COLORS_HOMO_DEFER_SEQUENCE`, and
+`COLORS_DEFER_FEATURE_GC` for a controlled rollback or comparison.
+
 ## Recommended: run the suite wrapper
 
 This orchestrates optional cache cleanup, prewarm, the general perf suite, the aligned suite, and copies the testing guides into one output directory.
