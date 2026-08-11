@@ -39,6 +39,7 @@ expect_pattern(paint_js, "MutationObserver", "render mutation tracking")
 expect_pattern(paint_js, "snapshotVisibleSvgs", "stale SVG protection")
 expect_pattern(paint_js, "cgv_plot_painted", "paint event publication")
 expect_pattern(paint_js, "svg_bytes", "rendered SVG size")
+expect_fixed(paint_js, "rawOutputIds == null ? [] : [rawOutputIds]", "single-output Shiny message normalization")
 
 for (metric in c(
     "gc_span_fetch_ms",

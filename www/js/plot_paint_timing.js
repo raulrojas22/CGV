@@ -179,9 +179,14 @@
         runs[runId] = run;
       }
       run.expectedAt = receivedAt;
-      run.outputIds = Array.isArray(message && message.output_ids)
-        ? message.output_ids.map(String).filter(Boolean)
-        : [];
+      var rawOutputIds = message && message.output_ids;
+      // Shiny serializes a length-one character vector as a scalar in some
+      // message paths, while multiple output ids arrive as an array.
+      run.outputIds = (Array.isArray(rawOutputIds)
+        ? rawOutputIds
+        : (rawOutputIds == null ? [] : [rawOutputIds]))
+        .map(String)
+        .filter(Boolean);
       ensureObserver();
       scheduleInspect();
     });
