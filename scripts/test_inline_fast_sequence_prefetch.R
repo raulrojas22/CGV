@@ -15,10 +15,13 @@ on.exit({
 
 Sys.setenv(APP_INLINE_FAST_SEQUENCE_PREFETCH = "1", APP_INLINE_FAST_SEQUENCE_MAX_BP = "10000")
 stopifnot(isTRUE(should_inline_fast_sequence_prefetch(tmp_2bit, 100, 1000)))
+stopifnot(isTRUE(all.equal(deferred_plot_enrichment_delay_seconds(), 0.15)))
 stopifnot(!isTRUE(should_inline_fast_sequence_prefetch(tmp_2bit, 1, 20000)))
 stopifnot(!isTRUE(should_inline_fast_sequence_prefetch(tmp_fasta, 100, 1000)))
 
 Sys.setenv(APP_INLINE_FAST_SEQUENCE_PREFETCH = "0")
 stopifnot(!isTRUE(should_inline_fast_sequence_prefetch(tmp_2bit, 100, 1000)))
+stopifnot(isTRUE(all.equal(deferred_plot_enrichment_delay_seconds(), 1.5)))
+stopifnot(isTRUE(all.equal(deferred_plot_enrichment_delay_seconds(0.5), 2.0)))
 
 cat("inline-fast-sequence-prefetch-ok\n")
