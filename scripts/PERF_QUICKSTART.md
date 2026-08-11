@@ -19,11 +19,14 @@ These defaults prioritize first paint. Hidden isoforms are not instantiated
 upfront, hidden orthologous plots stay suspended, and expensive sequence/feature
 GC work is deferred and prefetched after the initial card renders.
 
-Colors deploys use the measured first-paint candidate by default:
+Colors deploys use the measured baseline by default:
 
-- `APP_INLINE_FAST_SEQUENCE_PREFETCH=0`
-- `APP_HOMO_DEFER_SEQUENCE=1`
-- `APP_DEFER_FEATURE_GC=1`
+- `APP_INLINE_FAST_SEQUENCE_PREFETCH=1`
+- `APP_HOMO_DEFER_SEQUENCE=0`
+- `APP_DEFER_FEATURE_GC=0`
+
+The deferred `0/1/1` candidate was rejected after production measurements:
+it moved cold work into a second render and made warm searches slower.
 
 The deploy-time defaults can be overridden with
 `COLORS_INLINE_FAST_SEQUENCE_PREFETCH`, `COLORS_HOMO_DEFER_SEQUENCE`, and
