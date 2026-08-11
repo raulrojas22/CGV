@@ -204,6 +204,13 @@ should_inline_fast_sequence_prefetch <- function(genome_path, start_pos, end_pos
     is.finite(span) && span > 0 && span <= max_span
 }
 
+deferred_plot_enrichment_delay_seconds <- function(extra_seconds = 0) {
+    base_delay <- if (isTRUE(app_env_flag("APP_INLINE_FAST_SEQUENCE_PREFETCH", TRUE))) 0.15 else 1.5
+    extra_num <- suppressWarnings(as.numeric(extra_seconds %||% 0))
+    if (!is.finite(extra_num) || extra_num < 0) extra_num <- 0
+    base_delay + extra_num
+}
+
 # Función auxiliar para procesar datos del gen (compartida)
 process_gene_data <- function(data) {
     df_separated <- as.data.frame(data, stringsAsFactors = FALSE)
@@ -2966,7 +2973,11 @@ plotServerHomologous <- function(id, data, max_gene_length, min_gene_coord, max_
                     app_perf_mark_ms(module_perf, "feature_gc_span_prefetch_ms", app_perf_elapsed_ms(gc_t0), "HOMO_MOD")
                     invisible(NULL)
                 }
-                if (requireNamespace("later", quietly = TRUE)) later::later(run_prefetch, delay = 0.15) else run_prefetch()
+                if (requireNamespace("later", quietly = TRUE)) {
+                    later::later(run_prefetch, delay = deferred_plot_enrichment_delay_seconds())
+                } else {
+                    run_prefetch()
+                }
                 invisible(TRUE)
             }
 
@@ -2995,7 +3006,11 @@ plotServerHomologous <- function(id, data, max_gene_length, min_gene_coord, max_
                     app_perf_mark_ms(module_perf, "deferred_sequence_prefetch_ms", app_perf_elapsed_ms(sequence_t0), "HOMO_MOD")
                     invisible(NULL)
                 }
-                if (requireNamespace("later", quietly = TRUE)) later::later(run_prefetch, delay = 0.25) else run_prefetch()
+                if (requireNamespace("later", quietly = TRUE)) {
+                    later::later(run_prefetch, delay = deferred_plot_enrichment_delay_seconds(0.5))
+                } else {
+                    run_prefetch()
+                }
                 invisible(TRUE)
             }
 
@@ -3186,7 +3201,10 @@ plotServerHomologous <- function(id, data, max_gene_length, min_gene_coord, max_
                         invisible(NULL)
                     }
 
-                    if (isTRUE(inline_fast)) {
+                    if (!isTRUE(local_need_gc_span) && !isTRUE(local_need_sequence)) {
+                        gene_info(NULL)
+                        app_perf_mark(module_perf, "initial sequence and GC prefetch fully deferred", "HOMO_MOD")
+                    } else if (isTRUE(inline_fast)) {
                         inline_t0 <- app_perf_now()
                         app_perf_mark(module_perf, "inline fast prefetch start", "HOMO_MOD")
                         tryCatch(
@@ -3584,7 +3602,7 @@ plotServerOrtologous <- function(id, data, max_gene_length, min_gene_coord, max_
                     invisible(NULL)
                 }
                 if (requireNamespace("later", quietly = TRUE)) {
-                    later::later(run_prefetch, delay = 0.15)
+                    later::later(run_prefetch, delay = deferred_plot_enrichment_delay_seconds())
                 } else {
                     run_prefetch()
                 }
@@ -3618,7 +3636,7 @@ plotServerOrtologous <- function(id, data, max_gene_length, min_gene_coord, max_
                     invisible(NULL)
                 }
                 if (requireNamespace("later", quietly = TRUE)) {
-                    later::later(run_prefetch, delay = 0.25)
+                    later::later(run_prefetch, delay = deferred_plot_enrichment_delay_seconds(0.5))
                 } else {
                     run_prefetch()
                 }
