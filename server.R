@@ -12779,6 +12779,35 @@ function(input, output, session) {
             remember_lookup(cache_key_initial, nohit)
             return(nohit)
         }
+        operation_alias_index_lookup <- NULL
+        if (exists("make_operation_alias_index_lookup", mode = "function") &&
+            exists("search_alias_index_for_context", mode = "function")) {
+            operation_alias_index_lookup <- tryCatch(
+                make_operation_alias_index_lookup(
+                    query = input_gene,
+                    file_path = file_path,
+                    file_label = file_label,
+                    base_dir = ".",
+                    lookup_fun = get("search_alias_index_for_context", mode = "function")
+                ),
+                error = function(e) NULL
+            )
+        }
+        lookup_alias_index_for_operation <- function(det_resolved) {
+            if (is.function(operation_alias_index_lookup)) {
+                return(operation_alias_index_lookup(det_resolved))
+            }
+            list(
+                result = search_alias_index_for_context(
+                    query = input_gene,
+                    file_path = file_path,
+                    det_info = det_resolved,
+                    file_label = file_label,
+                    base_dir = "."
+                ),
+                reused = FALSE
+            )
+        }
         alias_index_preflight <- function(det_resolved) {
             det <- det_resolved %||% list()
             org_id <- trimws(as.character(det$species_id %||% det$preloaded_id %||% ""))
@@ -12789,22 +12818,19 @@ function(input, output, session) {
             }
             alias_index_t0 <- app_perf_now()
             push_progress(sprintf("\u2022 Local alias index preflight for '%s'...", input_gene))
-            alias_index_res <- tryCatch(
-                search_alias_index_for_context(
-                    query = input_gene,
-                    file_path = file_path,
-                    det_info = det,
-                    file_label = file_label,
-                    base_dir = "."
-                ),
+            alias_index_attempt <- tryCatch(
+                lookup_alias_index_for_operation(det),
                 error = function(e) {
                     app_debug_log("[AliasIndex] preflight failed: ", e$message)
                     NULL
                 }
             )
+            alias_index_res <- (alias_index_attempt %||% list())$result
             alias_index_status <- as.character((alias_index_res %||% list())$status %||% "no_match")
             alias_index_matches <- (alias_index_res %||% list())$matches
-            app_perf_mark_ms(lookup_perf, "lookup_alias_index_ms", app_perf_elapsed_ms(alias_index_t0), perf_context)
+            if (!isTRUE((alias_index_attempt %||% list())$reused)) {
+                app_perf_mark_ms(lookup_perf, "lookup_alias_index_ms", app_perf_elapsed_ms(alias_index_t0), perf_context)
+            }
             if (startsWith(alias_index_status, "multiple") &&
                 is.data.frame(alias_index_matches) && nrow(alias_index_matches) > 0L) {
                 push_progress(sprintf("\u2022 Local alias index found %d possible genes; user selection is required.", nrow(alias_index_matches)))
@@ -12969,22 +12995,19 @@ function(input, output, session) {
             alias_index_checked <- TRUE
             alias_index_t0 <- app_perf_now()
             push_progress(sprintf("\u2022 Local alias index lookup for '%s'...", input_gene))
-            alias_index_res <- tryCatch(
-                search_alias_index_for_context(
-                    query = input_gene,
-                    file_path = file_path,
-                    det_info = det_resolved,
-                    file_label = file_label,
-                    base_dir = "."
-                ),
+            alias_index_attempt <- tryCatch(
+                lookup_alias_index_for_operation(det_resolved),
                 error = function(e) {
                     app_debug_log("[AliasIndex] lookup failed: ", e$message)
                     NULL
                 }
             )
+            alias_index_res <- (alias_index_attempt %||% list())$result
             alias_index_status <- as.character((alias_index_res %||% list())$status %||% "no_match")
             alias_index_matches <- (alias_index_res %||% list())$matches
-            app_perf_mark_ms(lookup_perf, "lookup_alias_index_ms", app_perf_elapsed_ms(alias_index_t0), perf_context)
+            if (!isTRUE((alias_index_attempt %||% list())$reused)) {
+                app_perf_mark_ms(lookup_perf, "lookup_alias_index_ms", app_perf_elapsed_ms(alias_index_t0), perf_context)
+            }
             if (startsWith(alias_index_status, "multiple") &&
                 is.data.frame(alias_index_matches) && nrow(alias_index_matches) > 0L) {
                 push_progress(sprintf("\u2022 Local alias index found %d possible genes; user selection is required.", nrow(alias_index_matches)))
@@ -13094,22 +13117,19 @@ function(input, output, session) {
             exists("alias_index_match_to_lookup", mode = "function")) {
             alias_index_t0 <- app_perf_now()
             push_progress(sprintf("\u2022 Local alias index lookup for '%s'...", input_gene))
-            alias_index_res <- tryCatch(
-                search_alias_index_for_context(
-                    query = input_gene,
-                    file_path = file_path,
-                    det_info = det_resolved,
-                    file_label = file_label,
-                    base_dir = "."
-                ),
+            alias_index_attempt <- tryCatch(
+                lookup_alias_index_for_operation(det_resolved),
                 error = function(e) {
                     app_debug_log("[AliasIndex] lookup failed: ", e$message)
                     NULL
                 }
             )
+            alias_index_res <- (alias_index_attempt %||% list())$result
             alias_index_status <- as.character((alias_index_res %||% list())$status %||% "no_match")
             alias_index_matches <- (alias_index_res %||% list())$matches
-            app_perf_mark_ms(lookup_perf, "lookup_alias_index_ms", app_perf_elapsed_ms(alias_index_t0), perf_context)
+            if (!isTRUE((alias_index_attempt %||% list())$reused)) {
+                app_perf_mark_ms(lookup_perf, "lookup_alias_index_ms", app_perf_elapsed_ms(alias_index_t0), perf_context)
+            }
             if (startsWith(alias_index_status, "multiple") &&
                 is.data.frame(alias_index_matches) && nrow(alias_index_matches) > 0L) {
                 push_progress(sprintf("\u2022 Local alias index found %d possible genes; user selection is required.", nrow(alias_index_matches)))

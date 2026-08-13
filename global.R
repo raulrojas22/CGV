@@ -95,6 +95,32 @@ compute_app_asset_version <- function() {
 
 app_asset_version <- compute_app_asset_version()
 
+# Expose the current build identifier through a tiny static JSON resource.
+# The browser version probe only needs this value; fetching and parsing the
+# complete Shiny page adds avoidable network, HTML parsing, and UI construction
+# work.  A process-local directory also keeps concurrent app versions isolated
+# during rolling deployments.
+.cgv_runtime_metadata_dir <- file.path(
+    tempdir(),
+    sprintf("cgv-runtime-metadata-%s", Sys.getpid())
+)
+dir.create(.cgv_runtime_metadata_dir, recursive = TRUE, showWarnings = FALSE)
+writeLines(
+    jsonlite::toJSON(
+        list(
+            version = app_asset_version,
+            release = cgv_release_version
+        ),
+        auto_unbox = TRUE
+    ),
+    file.path(.cgv_runtime_metadata_dir, "version.json"),
+    useBytes = TRUE
+)
+if ("cgv-meta" %in% names(shiny::resourcePaths())) {
+    shiny::removeResourcePath("cgv-meta")
+}
+shiny::addResourcePath("cgv-meta", .cgv_runtime_metadata_dir)
+
 versioned_asset_path <- function(path) {
     path_txt <- as.character(path %||% "")
     if (!nzchar(path_txt)) {
