@@ -194,6 +194,7 @@ write_alias_index_sqlite_full <- function(alias_index, sqlite_path) {
   DBI::dbExecute(con, "CREATE INDEX IF NOT EXISTS idx_local_gene ON alias_index(local_gene_id)")
   DBI::dbExecute(con, "CREATE INDEX IF NOT EXISTS idx_local_feature ON alias_index(local_feature_id)")
   DBI::dbExecute(con, "CREATE INDEX IF NOT EXISTS idx_local_symbol ON alias_index(local_symbol)")
+  DBI::dbExecute(con, "CREATE INDEX IF NOT EXISTS idx_local_symbol_upper ON alias_index(UPPER(local_symbol))")
   DBI::dbExecute(con, "VACUUM")
   sqlite_path
 }

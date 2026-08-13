@@ -2436,7 +2436,7 @@
         renderAll();
         persistSoon();
         rehydratePanels();
-        if (window.Shiny && typeof window.Shiny.addCustomMessageHandler === "function") {
+        if (!window.CGVFigureStudioLoader && window.Shiny && typeof window.Shiny.addCustomMessageHandler === "function") {
             window.Shiny.addCustomMessageHandler("cgv:figure-studio-restore", function (message) {
                 setTimeout(function () { restoreExternalDraft(message); }, 900);
             });
@@ -2458,10 +2458,15 @@
         restore: restoreExternalDraft
     };
 
-    if (document.readyState === "loading") {
-        document.addEventListener("DOMContentLoaded", init);
-    } else {
-        init();
+    // The normal app route loads this module and its stylesheet together on
+    // first Figure Studio use. Direct/script-only consumers keep the legacy
+    // eager bootstrap for backwards compatibility.
+    if (!window.CGVFigureStudioLoader) {
+        if (document.readyState === "loading") {
+            document.addEventListener("DOMContentLoaded", init);
+        } else {
+            init();
+        }
+        document.addEventListener("shiny:connected", init);
     }
-    document.addEventListener("shiny:connected", init);
 })();

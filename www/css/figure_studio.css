@@ -3,11 +3,6 @@
  * in every app theme so exports match the preview.
  */
 
-#homo_analytics_tabs > .nav,
-#ortho_analytics_tabs > .nav {
-  padding-right: 112px;
-}
-
 .figure-studio-page {
   --figure-studio-accent: #18bc9c;
   --figure-studio-accent-dark: #107c69;
@@ -1040,19 +1035,6 @@ html.figure-studio-preview-open body {
   gap: 8px;
 }
 
-.btn-analytics-download-all[aria-busy="true"] {
-  min-width: 142px;
-  border-color: #78b9ad !important;
-  background: #edf8f5 !important;
-  color: #176f60 !important;
-  cursor: progress !important;
-  opacity: 1 !important;
-}
-
-.btn-analytics-download-all[aria-busy="true"] .fa {
-  color: #18a98c;
-}
-
 .figure-panel-loading,
 .figure-panel-unavailable {
   min-height: 180px;
@@ -1959,16 +1941,6 @@ html[data-app-theme="dark"] .figure-studio-library-note {
 }
 
 @media (max-width: 1080px) {
-  .btn-analytics-download-all {
-    position: static !important;
-    margin: 0 5px 6px 0 !important;
-  }
-
-  #homo_analytics_tabs > .nav,
-  #ortho_analytics_tabs > .nav {
-    padding-right: 0;
-  }
-
   .figure-studio-page {
     height: auto;
     min-height: calc(100dvh - 12px);

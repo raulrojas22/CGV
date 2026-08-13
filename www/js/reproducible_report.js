@@ -552,6 +552,42 @@
   }
 
   function captureForServer(message) {
+    var captureContexts = asArray(message && message.capture_contexts).map(function (context) {
+      return String(context || "").toLowerCase();
+    });
+    var wantsFigureStudio = captureContexts.indexOf("figure_studio") >= 0;
+    var studioStateInput = document.getElementById("figure_studio_state");
+    var hasStudioState = !!String((studioStateInput && studioStateInput.value) || "").trim();
+    var studioLoader = window.CGVFigureStudioLoader;
+    var hasQueuedStudioRestore = !!(
+      studioLoader &&
+      typeof studioLoader.pendingRestoreCount === "function" &&
+      studioLoader.pendingRestoreCount() > 0
+    );
+    if (
+      wantsFigureStudio &&
+      !(message && message.__cgv_figure_studio_capture_ready) &&
+      (hasStudioState || hasQueuedStudioRestore) &&
+      studioLoader &&
+      (typeof studioLoader.whenReady === "function" || typeof studioLoader.load === "function")
+    ) {
+      var resumedMessage = Object.assign({}, message, {
+        __cgv_figure_studio_capture_ready: true
+      });
+      var studioReady = typeof studioLoader.whenReady === "function"
+        ? studioLoader.whenReady()
+        : studioLoader.load();
+      studioReady.then(function () {
+        captureForServer(resumedMessage);
+      }).catch(function (error) {
+        resumedMessage.__cgv_figure_studio_capture_error = error && error.message
+          ? String(error.message)
+          : "module load failed";
+        captureForServer(resumedMessage);
+      });
+      return;
+    }
+
     var captureStartedAt = Date.now();
     var requestId = String((message && message.request_id) || "");
     var limit = Number((message && message.max_total_bytes) || (24 * 1024 * 1024));
@@ -566,6 +602,11 @@
         message && message.capture_contexts,
         captureMode
       );
+      if (message && message.__cgv_figure_studio_capture_error) {
+        captured.missing.push(
+          "Figure Studio: " + String(message.__cgv_figure_studio_capture_error)
+        );
+      }
       var preCaptures = [preSyntenyCaptureByRequest[requestId], preLastzCaptureByRequest[requestId]];
       var preSyntenyMs = Number(preCaptures[0] && preCaptures[0].duration_ms || 0);
       var preLastzMs = Number(preCaptures[1] && preCaptures[1].duration_ms || 0);

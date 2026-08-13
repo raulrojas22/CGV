@@ -209,6 +209,12 @@ has_exact_sqlite_index <- function(sqlite_path) {
   alias_sqlite_builder_env$alias_sqlite_has_exact_index(con)
 }
 
+has_partial_symbol_sqlite_index <- function(sqlite_path) {
+  con <- DBI::dbConnect(RSQLite::SQLite(), sqlite_path, flags = RSQLite::SQLITE_RO)
+  on.exit(DBI::dbDisconnect(con), add = TRUE)
+  alias_sqlite_builder_env$alias_sqlite_has_partial_symbol_index(con)
+}
+
 exact_alias_query_plan <- function(con, query, organism_id) {
   qn <- normalize_gene_query(query)
   org <- gsub("'", "''", as.character(organism_id), fixed = TRUE)
@@ -254,10 +260,42 @@ DBI::dbDisconnect(legacy_con)
 
 migration_first <- alias_sqlite_builder_env$ensure_alias_sqlite_exact_index(legacy_sqlite)
 migration_second <- alias_sqlite_builder_env$ensure_alias_sqlite_exact_index(legacy_sqlite)
+partial_migration_first <- alias_sqlite_builder_env$ensure_alias_sqlite_partial_symbol_index(legacy_sqlite)
+partial_migration_second <- alias_sqlite_builder_env$ensure_alias_sqlite_partial_symbol_index(legacy_sqlite)
 assert_true(isTRUE(migration_first$ok) && isTRUE(migration_first$created),
             "Existing alias SQLite migration did not create idx_query_term_original.")
 assert_true(isTRUE(migration_second$ok) && !isTRUE(migration_second$created),
             "Existing alias SQLite migration is not idempotent.")
+assert_true(isTRUE(partial_migration_first$ok) && isTRUE(partial_migration_first$created),
+            "Existing alias SQLite migration did not create idx_local_symbol_upper.")
+assert_true(isTRUE(partial_migration_second$ok) && !isTRUE(partial_migration_second$created),
+            "Existing partial-symbol SQLite migration is not idempotent.")
+
+invalid_partial_sqlite <- file.path(tmp_root, "invalid-partial-symbol.alias_index.sqlite")
+file.copy(legacy_sqlite, invalid_partial_sqlite)
+invalid_partial_con <- DBI::dbConnect(RSQLite::SQLite(), invalid_partial_sqlite)
+DBI::dbExecute(invalid_partial_con, "DROP INDEX idx_local_symbol_upper")
+DBI::dbExecute(
+  invalid_partial_con,
+  "CREATE INDEX idx_local_symbol_upper ON alias_index(UPPER(local_symbol)) WHERE local_symbol <> ''"
+)
+DBI::dbDisconnect(invalid_partial_con)
+invalid_partial_migration <- alias_sqlite_builder_env$ensure_alias_sqlite_partial_symbol_index(invalid_partial_sqlite)
+assert_true(!isTRUE(invalid_partial_migration$ok) && !isTRUE(invalid_partial_migration$created),
+            "Partial idx_local_symbol_upper was incorrectly accepted as a valid migration target.")
+
+invalid_exact_sqlite <- file.path(tmp_root, "invalid-partial-exact.alias_index.sqlite")
+file.copy(legacy_sqlite, invalid_exact_sqlite)
+invalid_exact_con <- DBI::dbConnect(RSQLite::SQLite(), invalid_exact_sqlite)
+DBI::dbExecute(invalid_exact_con, "DROP INDEX idx_query_term_original")
+DBI::dbExecute(
+  invalid_exact_con,
+  "CREATE INDEX idx_query_term_original ON alias_index(query_term_original) WHERE query_term_original <> ''"
+)
+DBI::dbDisconnect(invalid_exact_con)
+invalid_exact_migration <- alias_sqlite_builder_env$ensure_alias_sqlite_exact_index(invalid_exact_sqlite)
+assert_true(!isTRUE(invalid_exact_migration$ok) && !isTRUE(invalid_exact_migration$created),
+            "Partial idx_query_term_original was incorrectly accepted as a valid migration target.")
 
 legacy_con <- DBI::dbConnect(RSQLite::SQLite(), legacy_sqlite, flags = RSQLite::SQLITE_RO)
 legacy_after <- search_alias_index_sqlite("HKT1;5", legacy_con, organism_id = "mock_species")
@@ -274,16 +312,22 @@ compact_sqlite <- file.path(tmp_root, "compact-builder.alias_index.sqlite")
 write_alias_sqlite_compact(mock_rows, compact_sqlite)
 assert_true(has_exact_sqlite_index(compact_sqlite),
             "Compact alias SQLite builder omitted idx_query_term_original.")
+assert_true(has_partial_symbol_sqlite_index(compact_sqlite),
+            "Compact alias SQLite builder omitted idx_local_symbol_upper.")
 
 full_sqlite <- file.path(tmp_root, "full-builder.alias_index.sqlite")
 build_alias_sqlite_from_tsv(mock_tsv, full_sqlite, external_compact = FALSE)
 assert_true(has_exact_sqlite_index(full_sqlite),
             "Full alias SQLite builder omitted idx_query_term_original.")
+assert_true(has_partial_symbol_sqlite_index(full_sqlite),
+            "Full alias SQLite builder omitted idx_local_symbol_upper.")
 
 script_sqlite <- file.path(tmp_root, "script-builder.alias_index.sqlite")
 alias_sqlite_builder_env$build_sqlite_for_tsv(mock_tsv, script_sqlite, external_compact = TRUE)
 assert_true(has_exact_sqlite_index(script_sqlite),
             "Standalone alias SQLite builder omitted idx_query_term_original.")
+assert_true(has_partial_symbol_sqlite_index(script_sqlite),
+            "Standalone alias SQLite builder omitted idx_local_symbol_upper.")
 assert_true(alias_sqlite_builder_env$sqlite_is_current(mock_tsv, script_sqlite, external_compact = TRUE),
             "Standalone alias SQLite validation did not recognize the required exact-query index.")
 

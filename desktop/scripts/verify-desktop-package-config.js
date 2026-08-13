@@ -79,6 +79,11 @@ for (const requiredMainFragment of [
   "findRscript(preparedRuntimeRoot)",
   "APP_LASTZ_WORKERS: process.env.APP_LASTZ_WORKERS || String(Math.max(1, Math.min(2, os.cpus().length - 1)))",
   "APP_LASTZ_TIMEOUT_SECONDS: process.env.APP_LASTZ_TIMEOUT_SECONDS || \"90\"",
+  "APP_MEMORY_CACHE_BUDGET_MB: process.env.APP_MEMORY_CACHE_BUDGET_MB || \"1024\"",
+  "APP_SEQ_EXTRACT_CACHE_MAX_MB: process.env.APP_SEQ_EXTRACT_CACHE_MAX_MB || \"256\"",
+  "APP_SPLICED_SEQ_CACHE_MAX_MB: process.env.APP_SPLICED_SEQ_CACHE_MAX_MB || \"192\"",
+  "APP_ALIAS_SQLITE_CACHE_MB: process.env.APP_ALIAS_SQLITE_CACHE_MB || \"16\"",
+  "APP_ALIAS_SQLITE_MAX_CONNECTIONS: process.env.APP_ALIAS_SQLITE_MAX_CONNECTIONS || \"8\"",
   "env.FONTCONFIG_FILE = fontconfigFile",
   "env.FONTCONFIG_PATH = fontconfigPath"
 ]) {

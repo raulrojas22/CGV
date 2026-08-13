@@ -8,6 +8,8 @@
 
 .alias_index_memory_cache <- new.env(parent = emptyenv())
 .alias_sqlite_connection_cache <- new.env(parent = emptyenv())
+.alias_sqlite_connection_access <- new.env(parent = emptyenv())
+.alias_sqlite_access_counter <- 0
 .alias_index_mtime_cache <- new.env(parent = emptyenv())
 .alias_sqlite_available <- NULL
 
@@ -269,6 +271,155 @@ normalize_alias_index_df <- function(df) {
 
 # ── SQLite connection management ────────────────────────────────────────────
 
+alias_sqlite_cache_size_mb <- function() {
+    runtime <- tolower(trimws(as.character(Sys.getenv("CGV_RUNTIME", "") %||% "")))
+    default_mb <- if (identical(runtime, "desktop")) 16 else 8
+    raw_value <- trimws(as.character(Sys.getenv("APP_ALIAS_SQLITE_CACHE_MB", "") %||% ""))
+    if (!nzchar(raw_value)) return(default_mb)
+
+    parsed <- suppressWarnings(as.numeric(raw_value))
+    if (length(parsed) == 0L || is.na(parsed[[1L]]) || !is.finite(parsed[[1L]])) {
+        return(default_mb)
+    }
+    min(64, max(1, parsed[[1L]]))
+}
+
+alias_sqlite_cache_size_kib <- function() {
+    as.integer(round(alias_sqlite_cache_size_mb() * 1024))
+}
+
+alias_sqlite_max_connections <- function() {
+    runtime <- tolower(trimws(as.character(Sys.getenv("CGV_RUNTIME", "") %||% "")))
+    default_max <- if (identical(runtime, "desktop")) 8L else 4L
+    raw_value <- trimws(as.character(Sys.getenv("APP_ALIAS_SQLITE_MAX_CONNECTIONS", "") %||% ""))
+    if (!nzchar(raw_value)) return(default_max)
+
+    parsed <- suppressWarnings(as.integer(raw_value))
+    if (length(parsed) == 0L || is.na(parsed[[1L]]) || !is.finite(parsed[[1L]])) {
+        return(default_max)
+    }
+    as.integer(min(32L, max(1L, parsed[[1L]])))
+}
+
+configure_alias_sqlite_read_connection <- function(con) {
+    if (is.null(con)) return(invisible(FALSE))
+    configured <- tryCatch({
+        DBI::dbExecute(con, "PRAGMA query_only = ON")
+        DBI::dbExecute(
+            con,
+            sprintf("PRAGMA cache_size = -%d", alias_sqlite_cache_size_kib())
+        )
+        TRUE
+    }, error = function(e) FALSE)
+    invisible(isTRUE(configured))
+}
+
+alias_sqlite_connection_is_valid <- function(con) {
+    !is.null(con) &&
+        requireNamespace("DBI", quietly = TRUE) &&
+        isTRUE(tryCatch(DBI::dbIsValid(con), error = function(e) FALSE))
+}
+
+alias_sqlite_touch_connection <- function(conn_key) {
+    key <- as.character(conn_key %||% "")
+    if (!nzchar(key)) return(invisible(FALSE))
+    .alias_sqlite_access_counter <<- .alias_sqlite_access_counter + 1
+    if (!is.finite(.alias_sqlite_access_counter)) {
+        .alias_sqlite_access_counter <<- 1
+    }
+    assign(key, .alias_sqlite_access_counter, envir = .alias_sqlite_connection_access)
+    invisible(TRUE)
+}
+
+alias_sqlite_close_connection_key <- function(conn_key) {
+    key <- as.character(conn_key %||% "")
+    if (!nzchar(key)) return(invisible(FALSE))
+    con <- get0(
+        key,
+        envir = .alias_sqlite_connection_cache,
+        inherits = FALSE,
+        ifnotfound = NULL
+    )
+    if (exists(key, envir = .alias_sqlite_connection_cache, inherits = FALSE)) {
+        rm(list = key, envir = .alias_sqlite_connection_cache)
+    }
+    if (exists(key, envir = .alias_sqlite_connection_access, inherits = FALSE)) {
+        rm(list = key, envir = .alias_sqlite_connection_access)
+    }
+    if (is.null(con)) return(invisible(FALSE))
+
+    if (alias_sqlite_connection_is_valid(con)) {
+        disconnected <- tryCatch({
+            DBI::dbDisconnect(con)
+            !alias_sqlite_connection_is_valid(con)
+        }, error = function(e) FALSE)
+        return(invisible(isTRUE(disconnected)))
+    }
+    invisible(TRUE)
+}
+
+purge_alias_sqlite_connection <- function(organism_id = "", base_dir = ".") {
+    org <- trimws(as.character(organism_id %||% ""))
+    if (!nzchar(org)) return(invisible(FALSE))
+    alias_sqlite_close_connection_key(.alias_sqlite_conn_key(org, base_dir))
+}
+
+close_all_alias_sqlite_connections <- function() {
+    keys <- ls(.alias_sqlite_connection_cache, all.names = TRUE)
+    if (length(keys) > 0L) {
+        invisible(lapply(keys, alias_sqlite_close_connection_key))
+    }
+    stale_access <- ls(.alias_sqlite_connection_access, all.names = TRUE)
+    if (length(stale_access) > 0L) {
+        rm(list = stale_access, envir = .alias_sqlite_connection_access)
+    }
+    invisible(length(keys))
+}
+
+prune_alias_sqlite_connections <- function(keep_key = NULL, max_connections = NULL) {
+    keep <- as.character(keep_key %||% "")
+    if (is.null(max_connections)) max_connections <- alias_sqlite_max_connections()
+    max_connections <- suppressWarnings(as.integer(max_connections))
+    if (length(max_connections) == 0L || is.na(max_connections[[1L]]) ||
+        !is.finite(max_connections[[1L]])) {
+        max_connections <- alias_sqlite_max_connections()
+    }
+    max_connections <- as.integer(min(32L, max(1L, max_connections[[1L]])))
+
+    keys <- ls(.alias_sqlite_connection_cache, all.names = TRUE)
+    invalid_keys <- keys[!vapply(keys, function(key) {
+        alias_sqlite_connection_is_valid(get0(
+            key,
+            envir = .alias_sqlite_connection_cache,
+            inherits = FALSE,
+            ifnotfound = NULL
+        ))
+    }, logical(1))]
+    if (length(invalid_keys) > 0L) {
+        invisible(lapply(invalid_keys, alias_sqlite_close_connection_key))
+    }
+
+    keys <- ls(.alias_sqlite_connection_cache, all.names = TRUE)
+    overflow <- length(keys) - max_connections
+    if (overflow <= 0L) return(invisible(character(0)))
+
+    candidates <- setdiff(keys, keep)
+    if (length(candidates) == 0L) return(invisible(character(0)))
+    access_order <- vapply(candidates, function(key) {
+        suppressWarnings(as.numeric(get0(
+            key,
+            envir = .alias_sqlite_connection_access,
+            inherits = FALSE,
+            ifnotfound = -Inf
+        )))
+    }, numeric(1))
+    access_order[!is.finite(access_order)] <- -Inf
+    eviction_order <- candidates[order(access_order, candidates)]
+    evicted <- utils::head(eviction_order, min(overflow, length(eviction_order)))
+    invisible(lapply(evicted, alias_sqlite_close_connection_key))
+    invisible(evicted)
+}
+
 .alias_sqlite_conn_key <- function(organism_id, base_dir) {
     paste0(
         "sqlite|",
@@ -285,7 +436,14 @@ load_alias_index_sqlite <- function(organism_id = "", base_dir = ".") {
 
     conn_key <- .alias_sqlite_conn_key(org, base_dir)
     cached_conn <- get0(conn_key, envir = .alias_sqlite_connection_cache, inherits = FALSE, ifnotfound = NULL)
-    if (!is.null(cached_conn) && DBI::dbIsValid(cached_conn)) return(cached_conn)
+    if (alias_sqlite_connection_is_valid(cached_conn)) {
+        alias_sqlite_touch_connection(conn_key)
+        prune_alias_sqlite_connections(keep_key = conn_key)
+        return(cached_conn)
+    }
+    if (!is.null(cached_conn) || exists(conn_key, envir = .alias_sqlite_connection_access, inherits = FALSE)) {
+        alias_sqlite_close_connection_key(conn_key)
+    }
 
     sqlite_path <- alias_sqlite_path(org, base_dir = base_dir)
     if (!nzchar(sqlite_path) || !file.exists(sqlite_path)) return(NULL)
@@ -296,12 +454,13 @@ load_alias_index_sqlite <- function(organism_id = "", base_dir = ".") {
     )
     if (is.null(con)) return(NULL)
 
-    tryCatch({
-        DBI::dbExecute(con, "PRAGMA query_only = ON")
-        DBI::dbExecute(con, "PRAGMA cache_size = -32000")
-    }, error = function(e) NULL)
+    configure_alias_sqlite_read_connection(con)
 
     assign(conn_key, con, envir = .alias_sqlite_connection_cache)
+    alias_sqlite_touch_connection(conn_key)
+    # Repository callers consume the returned handle synchronously within the
+    # current R event-loop turn. Do not retain it in callbacks or reactive state.
+    prune_alias_sqlite_connections(keep_key = conn_key)
     con
 }
 
@@ -944,6 +1103,7 @@ write_alias_sqlite_compact <- function(df, sqlite_path, schema_version = 2L) {
     DBI::dbExecute(con, "CREATE INDEX IF NOT EXISTS idx_local_gene ON alias_index(local_gene_id)")
     DBI::dbExecute(con, "CREATE INDEX IF NOT EXISTS idx_local_feature ON alias_index(local_feature_id)")
     DBI::dbExecute(con, "CREATE INDEX IF NOT EXISTS idx_local_symbol ON alias_index(local_symbol)")
+    DBI::dbExecute(con, "CREATE INDEX IF NOT EXISTS idx_local_symbol_upper ON alias_index(UPPER(local_symbol))")
 
     meta <- data.frame(
         key = c("schema_version", "format", "row_count"),
@@ -1033,6 +1193,7 @@ build_alias_sqlite_from_tsv <- function(tsv_path, sqlite_path, external_compact 
     DBI::dbExecute(con, "CREATE INDEX IF NOT EXISTS idx_local_gene ON alias_index(local_gene_id)")
     DBI::dbExecute(con, "CREATE INDEX IF NOT EXISTS idx_local_feature ON alias_index(local_feature_id)")
     DBI::dbExecute(con, "CREATE INDEX IF NOT EXISTS idx_local_symbol ON alias_index(local_symbol)")
+    DBI::dbExecute(con, "CREATE INDEX IF NOT EXISTS idx_local_symbol_upper ON alias_index(UPPER(local_symbol))")
     DBI::dbExecute(con, "CREATE INDEX IF NOT EXISTS idx_term_type ON alias_index(term_type)")
     DBI::dbExecute(con, "CREATE INDEX IF NOT EXISTS idx_confidence ON alias_index(confidence)")
 
