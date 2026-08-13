@@ -207,6 +207,7 @@ configure_app_future_plan <- function() {
     if (!mode %in% c("sequential", "multisession")) {
         mode <- "multisession"
     }
+    Sys.setenv(APP_FUTURE_MODE = mode)
 
     if (identical(mode, "multisession")) {
         detected <- suppressWarnings(as.integer(parallel::detectCores(logical = FALSE)))
@@ -268,6 +269,10 @@ configure_app_future_plan <- function() {
             ))
         }
         workers_arg <- if (identical(as.integer(workers), 1L)) I(as.integer(workers)) else as.integer(workers)
+        # APP_MEMORY_CACHE_BUDGET_MB is a total web/container allowance. Set the
+        # effective main + worker process count before workers are created so the
+        # same value is inherited by every persistent multisession process.
+        Sys.setenv(APP_MEMORY_CACHE_PROCESS_COUNT = as.character(workers + 1L))
         tryCatch(
             future::plan(future::multisession, workers = workers_arg),
             error = function(e) {
@@ -279,10 +284,12 @@ configure_app_future_plan <- function() {
                     fallback_workers
                 ))
                 fallback_arg <- if (identical(as.integer(fallback_workers), 1L)) I(as.integer(fallback_workers)) else as.integer(fallback_workers)
+                Sys.setenv(APP_MEMORY_CACHE_PROCESS_COUNT = as.character(fallback_workers + 1L))
                 future::plan(future::multisession, workers = fallback_arg)
             }
         )
     } else {
+        Sys.setenv(APP_MEMORY_CACHE_PROCESS_COUNT = "1")
         future::plan(future::sequential)
     }
 

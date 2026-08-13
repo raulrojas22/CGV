@@ -132,6 +132,35 @@ con <- DBI::dbConnect(RSQLite::SQLite(), sqlite_path)
 invisible(DBI::dbExecute(con, "DROP INDEX idx_query_term_original"))
 invisible(DBI::dbExecute(con, "CREATE INDEX idx_query_term_original ON alias_index(query_term_original)"))
 DBI::dbDisconnect(con)
+run_verifier(FALSE, "sqlite-missing-partial-symbol-index")
+
+con <- DBI::dbConnect(RSQLite::SQLite(), sqlite_path)
+invisible(DBI::dbExecute(
+  con,
+  "CREATE INDEX idx_local_symbol_upper ON alias_index(UPPER(local_symbol)) WHERE local_symbol <> ''"
+))
+DBI::dbDisconnect(con)
+run_verifier(FALSE, "sqlite-partial-partial-symbol-index")
+
+con <- DBI::dbConnect(RSQLite::SQLite(), sqlite_path)
+invisible(DBI::dbExecute(con, "DROP INDEX idx_local_symbol_upper"))
+invisible(DBI::dbExecute(con, "CREATE INDEX idx_local_symbol_upper ON alias_index(local_symbol)"))
+DBI::dbDisconnect(con)
+run_verifier(FALSE, "sqlite-invalid-partial-symbol-index")
+
+con <- DBI::dbConnect(RSQLite::SQLite(), sqlite_path)
+invisible(DBI::dbExecute(con, "DROP INDEX idx_local_symbol_upper"))
+invisible(DBI::dbExecute(
+  con,
+  "CREATE INDEX idx_local_symbol_upper ON alias_index(UPPER(local_symbol), local_gene_id)"
+))
+DBI::dbDisconnect(con)
+run_verifier(FALSE, "sqlite-invalid-partial-symbol-index")
+
+con <- DBI::dbConnect(RSQLite::SQLite(), sqlite_path)
+invisible(DBI::dbExecute(con, "DROP INDEX idx_local_symbol_upper"))
+invisible(DBI::dbExecute(con, "CREATE INDEX idx_local_symbol_upper ON alias_index(UPPER(local_symbol))"))
+DBI::dbDisconnect(con)
 run_verifier(TRUE, "preloaded-alias-index-mount-ok")
 
 sanitized_species_id <- "fixture species/with spaces"

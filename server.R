@@ -5,6 +5,28 @@ function(input, output, session) {
     session_token <- as.character(session$token %||% "unknown")
     session_metric_enabled <- app_env_flag("APP_SESSION_METRICS", default = FALSE)
     if (isTRUE(session_metric_enabled)) {
+        session_memory_metric_fields <- function() {
+            snapshot <- tryCatch(app_memory_telemetry_snapshot(), error = function(e) NULL)
+            if (!is.list(snapshot)) return("")
+            mb_text <- function(value) {
+                num <- suppressWarnings(as.numeric(value %||% NA_real_))
+                if (is.finite(num) && !is.na(num) && num >= 0) sprintf("%.1f", num / 1024^2) else "NA"
+            }
+            sprintf(
+                paste0(
+                    " rss_mb=%s cache_mb=%s cache_budget_mb=%s",
+                    " cache_total_budget_mb=%s cache_process_count=%s",
+                    " cgroup_current_mb=%s cgroup_limit_mb=%s"
+                ),
+                mb_text(snapshot$rss_bytes),
+                mb_text(snapshot$cache_bytes),
+                mb_text(snapshot$cache_budget_bytes),
+                mb_text(snapshot$cache_total_budget_bytes),
+                as.character(as.integer(snapshot$cache_process_count %||% 1L)),
+                mb_text(snapshot$cgroup_current_bytes),
+                mb_text(snapshot$cgroup_limit_bytes)
+            )
+        }
         startup_epoch <- suppressWarnings(as.numeric(Sys.getenv("APP_START_EPOCH", "")))
         startup_msg <- if (is.finite(startup_epoch)) {
             sprintf(" startup_elapsed_s=%.1f", as.numeric(Sys.time()) - startup_epoch)
@@ -12,22 +34,24 @@ function(input, output, session) {
             ""
         }
         message(sprintf(
-            "[SESSION][start] token=%s pid=%d%s data_root=%s cache_dir=%s",
+            "[SESSION][start] token=%s pid=%d%s data_root=%s cache_dir=%s%s",
             session_token,
             Sys.getpid(),
             startup_msg,
             Sys.getenv("CGV_DATA_ROOT", "."),
-            Sys.getenv("CGV_CACHE_DIR", "cache")
+            Sys.getenv("CGV_CACHE_DIR", "cache"),
+            session_memory_metric_fields()
         ))
         session$onSessionEnded(function() {
             elapsed <- app_perf_elapsed_ms(session_t0) / 1000
             gc_info <- tryCatch(sum(gc()[, "used"], na.rm = TRUE), error = function(e) NA_real_)
             message(sprintf(
-                "[SESSION][end] token=%s pid=%d elapsed_s=%.1f gc_used_cells=%s",
+                "[SESSION][end] token=%s pid=%d elapsed_s=%.1f gc_used_cells=%s%s",
                 session_token,
                 Sys.getpid(),
                 elapsed,
-                if (is.finite(gc_info)) as.character(as.integer(gc_info)) else "NA"
+                if (is.finite(gc_info)) as.character(as.integer(gc_info)) else "NA",
+                session_memory_metric_fields()
             ))
         })
     }
@@ -4214,37 +4238,20 @@ function(input, output, session) {
             if (is.null(con)) {
                 return(NULL)
             }
-            sql <- sprintf(
-                paste0(
-                    "SELECT query_term_original, query_term_clean_strict, query_term_upper, local_gene_id, local_symbol, term_type, confidence, source_db ",
-                    "FROM alias_index WHERE term_type IN (%s) AND LENGTH(query_term_original) <= 100 AND ",
-                    "(query_term_clean_strict LIKE ?1 OR query_term_upper LIKE ?1 OR UPPER(local_symbol) LIKE ?1) ",
-                    "ORDER BY CASE confidence WHEN 'HIGH' THEN 1 WHEN 'MEDIUM' THEN 2 ELSE 3 END, LENGTH(query_term_original), query_term_original ",
-                    "LIMIT %d"
-                ),
-                type_sql,
-                as.integer(max_per_file * 2L)
-            )
-            alias_rows <- tryCatch(
-                DBI::dbGetQuery(con, sql, params = list(q_like_prefix)),
-                error = function(e) data.frame()
+            alias_rows <- query_partial_alias_rows_sqlite(
+                con = con,
+                like_value = q_like_prefix,
+                type_sql = type_sql,
+                row_limit_sql = sprintf(" LIMIT %d", as.integer(max_per_file * 2L)),
+                prefix_value = toupper(q_comp)
             )
             match_type <- "prefix"
             if (!is.data.frame(alias_rows) || nrow(alias_rows) == 0L) {
-                sql_contains <- sprintf(
-                    paste0(
-                        "SELECT query_term_original, query_term_clean_strict, query_term_upper, local_gene_id, local_symbol, term_type, confidence, source_db ",
-                        "FROM alias_index WHERE term_type IN (%s) AND LENGTH(query_term_original) <= 100 AND ",
-                        "(query_term_clean_strict LIKE ?1 OR query_term_upper LIKE ?1 OR UPPER(local_symbol) LIKE ?1) ",
-                        "ORDER BY CASE confidence WHEN 'HIGH' THEN 1 WHEN 'MEDIUM' THEN 2 ELSE 3 END, LENGTH(query_term_original), query_term_original ",
-                        "LIMIT %d"
-                    ),
-                    type_sql,
-                    as.integer(max_per_file * 2L)
-                )
-                alias_rows <- tryCatch(
-                    DBI::dbGetQuery(con, sql_contains, params = list(q_like_contains)),
-                    error = function(e) data.frame()
+                alias_rows <- query_partial_alias_rows_sqlite(
+                    con = con,
+                    like_value = q_like_contains,
+                    type_sql = type_sql,
+                    row_limit_sql = sprintf(" LIMIT %d", as.integer(max_per_file * 2L))
                 )
                 match_type <- "contains"
             }
@@ -13446,7 +13453,12 @@ function(input, output, session) {
                     style = "cursor:pointer;",
                     div(
                         class = "species-grid-icon-wrap",
-                        tags$img(class = "species-grid-icon-img", src = icn, alt = org)
+                        tags$img(
+                            class = "species-grid-icon-img",
+                            src = icn,
+                            alt = org,
+                            loading = "lazy"
+                        )
                     ),
                     div(
                         class = "species-grid-text",

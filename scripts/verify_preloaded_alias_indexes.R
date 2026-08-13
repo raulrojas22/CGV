@@ -9,6 +9,8 @@ root <- if (length(root_arg) > 0L) {
 }
 root <- normalizePath(root, winslash = "/", mustWork = TRUE)
 
+`%||%` <- function(x, y) if (is.null(x) || length(x) == 0L) y else x
+
 if (!requireNamespace("DBI", quietly = TRUE) || !requireNamespace("RSQLite", quietly = TRUE)) {
   stop("DBI and RSQLite are required to verify preloaded alias indexes.", call. = FALSE)
 }
@@ -114,6 +116,42 @@ sqlite_alias_index_status <- function(path) {
       return("sqlite-invalid-exact-index")
     }
 
+    partial_symbol_row <- indexes[as.character(indexes$name) == "idx_local_symbol_upper", , drop = FALSE]
+    if (nrow(partial_symbol_row) != 1L) {
+      return("sqlite-missing-partial-symbol-index")
+    }
+    if ("partial" %in% names(partial_symbol_row) &&
+        !identical(as.integer(partial_symbol_row$partial), 0L)) {
+      return("sqlite-partial-partial-symbol-index")
+    }
+    partial_symbol_sql <- DBI::dbGetQuery(
+      con,
+      "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = 'idx_local_symbol_upper' LIMIT 1"
+    )$sql[1]
+    normalized_partial_symbol_sql <- toupper(gsub(
+      "[^A-Za-z0-9_()]+",
+      "",
+      as.character(partial_symbol_sql %||% "")
+    ))
+    partial_symbol_info <- DBI::dbGetQuery(con, "PRAGMA index_xinfo('idx_local_symbol_upper')")
+    if (!("key" %in% names(partial_symbol_info))) {
+      return("sqlite-invalid-partial-symbol-index")
+    }
+    partial_symbol_keys <- partial_symbol_info[as.integer(partial_symbol_info$key) == 1L, , drop = FALSE]
+    if (nrow(partial_symbol_keys) != 1L ||
+        ("cid" %in% names(partial_symbol_keys) &&
+          !identical(as.integer(partial_symbol_keys$cid), -2L)) ||
+        ("coll" %in% names(partial_symbol_keys) &&
+          !identical(toupper(as.character(partial_symbol_keys$coll)), "BINARY")) ||
+        ("desc" %in% names(partial_symbol_keys) &&
+          !identical(as.integer(partial_symbol_keys$desc), 0L)) ||
+        !identical(
+          normalized_partial_symbol_sql,
+          "CREATEINDEXIDX_LOCAL_SYMBOL_UPPERONALIAS_INDEX(UPPER(LOCAL_SYMBOL))"
+        )) {
+      return("sqlite-invalid-partial-symbol-index")
+    }
+
     "sqlite"
   }, error = function(...) "sqlite-unreadable")
 }
@@ -154,7 +192,8 @@ if (length(invalid) > 0L) {
       " organism(s): ",
       invalid_preview,
       ". Every preloaded organism requires a non-empty SQLite alias table and ",
-      "idx_query_term_original on query_term_original. Run ",
+      "idx_query_term_original on query_term_original plus idx_local_symbol_upper ",
+      "on UPPER(local_symbol). Run ",
       "scripts/build_alias_index_sqlite.R before mounting data read-only."
     ),
     call. = FALSE

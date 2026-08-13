@@ -1167,7 +1167,12 @@ build_initial_species_grouped_grid <- function(df_in, input_id, mode) {
         style = "cursor:pointer;",
         div(
           class = "species-grid-icon-wrap",
-          tags$img(class = "species-grid-icon-img", src = icn, alt = org)
+          tags$img(
+            class = "species-grid-icon-img",
+            src = icn,
+            alt = org,
+            loading = "lazy"
+          )
         ),
         div(
           class = "species-grid-text",
@@ -1206,6 +1211,10 @@ initial_ortho_species_grid <- tagList(
 )
 
 source("R/ui_desktop_downloads.R", local = TRUE)
+figure_studio_loader_source <- paste(
+  readLines(file.path("www", "js", "figure_studio_loader.js"), warn = FALSE, encoding = "UTF-8"),
+  collapse = "\n"
+)
 
 fluidPage(
   theme = theme_custom,
@@ -1217,7 +1226,36 @@ fluidPage(
       tags$meta(`http-equiv` = "Cache-Control", content = "no-cache, must-revalidate"),
       tags$meta(`http-equiv` = "Pragma", content = "no-cache"),
       tags$meta(`http-equiv` = "Expires", content = "0"),
-      tags$link(rel = "stylesheet", href = versioned_asset_path("css/figure_studio.css")),
+      # These Analytics rules historically lived in figure_studio.css. Keep
+      # their exact eager behavior while the Studio-only stylesheet is loaded
+      # on demand.
+      tags$style(HTML("
+        #homo_analytics_tabs > .nav,
+        #ortho_analytics_tabs > .nav {
+          padding-right: 112px;
+        }
+        .btn-analytics-download-all[aria-busy=\"true\"] {
+          min-width: 142px;
+          border-color: #78b9ad !important;
+          background: #edf8f5 !important;
+          color: #176f60 !important;
+          cursor: progress !important;
+          opacity: 1 !important;
+        }
+        .btn-analytics-download-all[aria-busy=\"true\"] .fa {
+          color: #18a98c;
+        }
+        @media (max-width: 1080px) {
+          .btn-analytics-download-all {
+            position: static !important;
+            margin: 0 5px 6px 0 !important;
+          }
+          #homo_analytics_tabs > .nav,
+          #ortho_analytics_tabs > .nav {
+            padding-right: 0;
+          }
+        }
+      ")),
       tags$script(HTML("
         (function() {
           function formatBytes(value) {
@@ -2262,7 +2300,12 @@ fluidPage(
       tags$script(src = versioned_asset_path("js/plot_zoom.js")),
       tags$script(src = versioned_asset_path("js/genomic_ruler_toggle.js")),
       tags$script(src = versioned_asset_path("js/export_svg.js")),
-      tags$script(src = versioned_asset_path("js/figure_studio.js")),
+      tags$script(
+        id = "cgv-figure-studio-loader",
+        `data-module-src` = versioned_asset_path("js/figure_studio.js"),
+        `data-style-href` = versioned_asset_path("css/figure_studio.css"),
+        HTML(figure_studio_loader_source)
+      ),
       tags$script(src = versioned_asset_path("js/reproducible_report.js")),
       tags$script(src = versioned_asset_path("js/string_theme.js")),
       tags$script(src = versioned_asset_path("js/status_popup.js")),
@@ -7041,6 +7084,7 @@ fluidPage(
                           src = "icons/databases/mygene.ico",
                           alt = "MyGene",
                           class = "db-source-card-icon",
+                          loading = "lazy",
                           onerror = "this.onerror=null;this.src='icons/DNA.ico';"
                         )
                       ),
@@ -7069,6 +7113,7 @@ fluidPage(
                           src = "icons/databases/ncbi.ico",
                           alt = "NCBI Gene",
                           class = "db-source-card-icon",
+                          loading = "lazy",
                           onerror = "this.onerror=null;this.src='icons/DNA.ico';"
                         )
                       ),
@@ -7097,6 +7142,7 @@ fluidPage(
                           src = "icons/databases/uniprot.ico",
                           alt = "UniProt",
                           class = "db-source-card-icon",
+                          loading = "lazy",
                           onerror = "this.onerror=null;this.src='icons/DNA.ico';"
                         )
                       ),
@@ -7125,6 +7171,7 @@ fluidPage(
                           src = "icons/databases/ensembl.ico",
                           alt = "Ensembl",
                           class = "db-source-card-icon",
+                          loading = "lazy",
                           onerror = "this.onerror=null;this.src='icons/DNA.ico';"
                         )
                       ),
