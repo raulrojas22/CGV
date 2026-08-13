@@ -119,6 +119,15 @@ assert_true(
     ),
     "Cross-Species cache warming must not be invalidated by autocomplete epochs."
 )
+alias_timing_guard <- paste0(
+    "if (!isTRUE((alias_index_attempt %||% list())$reused)) {\n",
+    "                app_perf_mark_ms(lookup_perf, \"lookup_alias_index_ms\""
+)
+alias_timing_guard_matches <- gregexpr(alias_timing_guard, server_txt, fixed = TRUE)[[1L]]
+assert_true(
+    identical(sum(alias_timing_guard_matches > 0L), 3L),
+    "Session alias lookup timing must retain the real query duration when a later stage reuses its result."
+)
 
 tmp_gff <- tempfile(fileext = ".gff3")
 writeLines(

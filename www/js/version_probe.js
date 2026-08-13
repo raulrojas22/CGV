@@ -1,16 +1,14 @@
 /* version_probe.js — Verifica si hay una nueva versión de la app y recarga si es necesario. */
 (function() {
   'use strict';
-  var APP_VERSION = window.__cgvAppVersion || '';
 
   function normalizeVersion(value) {
     return String(value || '').trim();
   }
 
   function buildProbeUrl() {
-    var probeUrl = new URL(window.location.href);
-    probeUrl.searchParams.set('__cgv_probe__', String(Date.now()));
-    return probeUrl.toString();
+    var configuredUrl = String(window.__cgvVersionProbeUrl || 'cgv-meta/version.json');
+    return new URL(configuredUrl, document.baseURI || window.location.href).toString();
   }
 
   function buildReloadUrl(nextVersion) {
@@ -21,22 +19,21 @@
   }
 
   function maybeReloadForNewVersion() {
-    var currentVersion = normalizeVersion(APP_VERSION);
-    if (!currentVersion || !window.fetch || !window.DOMParser) return;
+    // Read configuration at execution time. The script may be downloaded before
+    // the rest of the page has finished parsing in older cached documents.
+    var currentVersion = normalizeVersion(window.__cgvAppVersion);
+    if (!currentVersion || !window.fetch) return;
 
-    fetch(buildProbeUrl(), {
-      cache: 'no-store',
-      credentials: 'same-origin',
-      headers: { 'Cache-Control': 'no-cache' }
+    window.fetch(buildProbeUrl(), {
+      cache: 'no-cache',
+      credentials: 'same-origin'
     })
       .then(function(resp) {
         if (!resp.ok) throw new Error('version probe failed');
-        return resp.text();
+        return resp.json();
       })
-      .then(function(html) {
-        var doc = new DOMParser().parseFromString(html, 'text/html');
-        var meta = doc.querySelector('meta[name="cgv-app-version"]');
-        var latestVersion = normalizeVersion(meta && meta.getAttribute('content'));
+      .then(function(payload) {
+        var latestVersion = normalizeVersion(payload && payload.version);
         if (latestVersion && latestVersion !== currentVersion) {
           window.location.replace(buildReloadUrl(latestVersion));
         }

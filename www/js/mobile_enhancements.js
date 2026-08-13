@@ -12,8 +12,9 @@
   var MOBILE_BP = '(max-width: 960px)';
   var PHONE_BP  = '(max-width: 576px)';
   var isTouchDevice = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+  var mobileMediaQuery = window.matchMedia(MOBILE_BP);
 
-  function isMobile()  { return window.matchMedia(MOBILE_BP).matches; }
+  function isMobile()  { return mobileMediaQuery.matches; }
   function isPhone()   { return window.matchMedia(PHONE_BP).matches; }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -157,14 +158,28 @@
 
   // Observe DOM changes to keep context bar updated
   var contextObserver = new MutationObserver(function () {
-    if (isMobile()) syncContextBar();
+    syncContextBar();
   });
+  var contextObserverTarget = null;
 
-  function startContextObserver() {
-    var target = document.querySelector('.app-main');
-    if (target) {
-      contextObserver.observe(target, { childList: true, subtree: true, characterData: true });
+  function syncContextObserverState() {
+    if (!isMobile()) {
+      contextObserver.disconnect();
+      contextObserverTarget = null;
+      return;
     }
+    var target = document.querySelector('.app-main');
+    if (!target || target === contextObserverTarget) return;
+    contextObserver.disconnect();
+    contextObserver.observe(target, { childList: true, subtree: true, characterData: true });
+    contextObserverTarget = target;
+    syncContextBar();
+  }
+
+  if (mobileMediaQuery.addEventListener) {
+    mobileMediaQuery.addEventListener('change', syncContextObserverState);
+  } else if (mobileMediaQuery.addListener) {
+    mobileMediaQuery.addListener(syncContextObserverState);
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -349,13 +364,13 @@
   function init() {
     observePopups();
     syncContextBar();
-    startContextObserver();
+    syncContextObserverState();
 
     // Re-observe popups after Shiny renders new content
     if (window.Shiny) {
       $(document).on('shiny:value', function () {
         setTimeout(observePopups, 500);
-        setTimeout(syncContextBar, 500);
+        if (isMobile()) setTimeout(syncContextBar, 500);
       });
     }
   }

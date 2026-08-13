@@ -432,7 +432,14 @@ echo ""
 echo "[5/7] Precalentando índices y preparando permisos persistentes..."
 rssh "set -e
   cd '${APP_DIR}'
-  DOCKER_BIN=podman CGV_IMAGE='${NEW_IMAGE}' bash docker/setup-prewarm.sh
+  DOCKER_BIN=podman \
+  CGV_IMAGE='${NEW_IMAGE}' \
+  CGV_ANNOTATIONS_DIR='${APP_DIR}/annotations' \
+  CGV_GENOMES_DIR='${APP_DIR}/genomes' \
+  CGV_GO_ANNOTATIONS_DIR='${APP_DIR}/go_annotations' \
+  CGV_DATA_DIR='${APP_DIR}/data' \
+  CGV_CACHE_DIR='${APP_DIR}/cache' \
+  bash docker/setup-prewarm.sh
   cache_dir=\$(readlink -f '${APP_DIR}/cache')
   ncbi_dir=\$(readlink -f '${REMOTE_PATH}/ncbi_downloads')
   mkdir -p \"\$cache_dir\" \"\$ncbi_dir\"

@@ -1825,6 +1825,16 @@ fluidPage(
         jsonlite::toJSON(app_env_int("APP_TRANSPORT_FLUSH_MS", 5000L, min_value = 50L), auto_unbox = TRUE),
         jsonlite::toJSON(app_perf_enabled(), auto_unbox = TRUE)
       ))),
+      tags$script(HTML(sprintf("
+        window.__cgvAppVersion = %s;
+        window.__cgvVersionProbeUrl = %s;
+        window.__cgvDefaultLightIcon = %s;
+        window.__cgvDefaultDarkIcon = %s;
+      ",
+      jsonlite::toJSON(app_asset_version, auto_unbox = TRUE),
+      jsonlite::toJSON("cgv-meta/version.json", auto_unbox = TRUE),
+      jsonlite::toJSON(versioned_asset_path("favicon2.ico?v=2"), auto_unbox = TRUE),
+      jsonlite::toJSON(versioned_asset_path("favicon.ico?v=2"), auto_unbox = TRUE)))),
       tags$script(src = versioned_asset_path("js/transport_metrics.js")),
       tags$script(src = versioned_asset_path("js/plot_paint_timing.js")),
       tags$script(src = versioned_asset_path("js/lazy_jszip.js")),
@@ -1832,14 +1842,6 @@ fluidPage(
       tags$script(src = versioned_asset_path("js/rounded_rects.js")),
       tags$script(src = versioned_asset_path("js/autocomplete_core.js")),
       tags$script(src = versioned_asset_path("js/footer_scroll_controls.js")),
-      tags$script(HTML(sprintf("
-        window.__cgvAppVersion = %s;
-        window.__cgvDefaultLightIcon = %s;
-        window.__cgvDefaultDarkIcon = %s;
-      ",
-      jsonlite::toJSON(app_asset_version, auto_unbox = TRUE),
-      jsonlite::toJSON(versioned_asset_path("favicon2.ico?v=2"), auto_unbox = TRUE),
-      jsonlite::toJSON(versioned_asset_path("favicon.ico?v=2"), auto_unbox = TRUE)))),
       tags$script(HTML("
         Shiny.addCustomMessageHandler('lastz_debug', function(msg) {
           var level = msg.level || 'log';
@@ -2271,7 +2273,6 @@ fluidPage(
       tags$script(src = versioned_asset_path("js/papers_popup.js")),
       tags$script(src = versioned_asset_path("js/preloaded_assembly_popup.js")),
       tags$script(src = versioned_asset_path("js/metrics_popup.js")),
-      tags$script(src = versioned_asset_path("js/info_button_relocator.js")),
       tags$script(src = versioned_asset_path("js/ortho_lazy_loader.js")),
       tags$script(src = versioned_asset_path("js/summary_context_layout.js")),
       tags$script(src = versioned_asset_path("js/result_workspace.js")),
@@ -2292,6 +2293,8 @@ fluidPage(
         var globalSearchChips = [];
         var lastWorkflowTarget = 'homologous';
         var quickFabPanel = null;
+        var quickFabVisibilityFrame = null;
+        var quickFabResizeObserver = null;
         var suppressWorkflowPanelOnNextNav = false;
 
         function isValidTarget(target) {
@@ -2827,6 +2830,27 @@ fluidPage(
           updateFloatingTopVisibility(scrollY);
         }
 
+        function scheduleQuickFabVisibilityUpdate() {
+          if (quickFabVisibilityFrame !== null) return;
+          var scheduleFrame = window.requestAnimationFrame || function(callback) {
+            return window.setTimeout(callback, 16);
+          };
+          quickFabVisibilityFrame = scheduleFrame(function() {
+            quickFabVisibilityFrame = null;
+            updateQuickFabScrollTopVisibility();
+          });
+        }
+
+        function observeQuickFabScrollSize(node) {
+          if (!node || typeof window.ResizeObserver !== 'function') return;
+          if (!quickFabResizeObserver) {
+            quickFabResizeObserver = new window.ResizeObserver(scheduleQuickFabVisibilityUpdate);
+          }
+          if (node.getAttribute('data-fab-resize-bound') === '1') return;
+          node.setAttribute('data-fab-resize-bound', '1');
+          quickFabResizeObserver.observe(node);
+        }
+
         function scrollAppToTop() {
           var prefersReducedMotion = false;
           try {
@@ -2861,9 +2885,12 @@ fluidPage(
           );
 
           scrollTargets.forEach(function (node) {
-            if (!node || node.getAttribute('data-fab-scroll-bound') === '1') return;
-            node.setAttribute('data-fab-scroll-bound', '1');
-            node.addEventListener('scroll', updateQuickFabScrollTopVisibility, { passive: true });
+            if (!node) return;
+            if (node.getAttribute('data-fab-scroll-bound') !== '1') {
+              node.setAttribute('data-fab-scroll-bound', '1');
+              node.addEventListener('scroll', scheduleQuickFabVisibilityUpdate, { passive: true });
+            }
+            observeQuickFabScrollSize(node);
           });
         }
 
@@ -3222,17 +3249,16 @@ fluidPage(
             settingsToggle.checked = getStoredQuickFabEnabled();
           }
 
-          window.addEventListener('scroll', updateQuickFabScrollTopVisibility, { passive: true });
+          window.addEventListener('scroll', scheduleQuickFabVisibilityUpdate, { passive: true });
+          window.addEventListener('resize', scheduleQuickFabVisibilityUpdate, { passive: true });
+          document.addEventListener('shown.bs.tab', scheduleQuickFabVisibilityUpdate);
+          document.addEventListener('shiny:value', scheduleQuickFabVisibilityUpdate);
           bindQuickFabScrollListeners(document);
-
-          if (!window.__quickFabTopWatcher) {
-            window.__quickFabTopWatcher = window.setInterval(updateQuickFabScrollTopVisibility, 300);
-          }
 
           // Attach listeners to any pane/container added later by Shiny re-renders.
           var paneObserver = new MutationObserver(function() {
             bindQuickFabScrollListeners(document);
-            updateQuickFabScrollTopVisibility();
+            scheduleQuickFabVisibilityUpdate();
           });
           if (document.body && document.body.nodeType === 1) {
             paneObserver.observe(document.body, { childList: true, subtree: true });
@@ -5516,11 +5542,8 @@ fluidPage(
                         muted = NA,
                         loop = NA,
                         playsinline = NA,
-                        preload = "auto",
-                        tabindex = "-1",
-                        if (nzchar(guide_media_map[["guide-intro.mp4"]])) {
-                          tags$source(src = guide_media_map[["guide-intro.mp4"]], type = "video/mp4")
-                        }
+                        preload = "none",
+                        tabindex = "-1"
                       ),
                       span(class = "guide-video-icon", icon("film")),
                       h3("Video / GIF placeholder")
@@ -5764,8 +5787,9 @@ fluidPage(
                 var stepList = root.querySelector('.guide-step-list');
                 var openButtons = root.querySelectorAll('[data-guide-open]');
                 var videoBlobCache = {};
-                var preloadedVideos = {};
-                var videoReadyTimer = null;
+                var nextVideoPreload = null;
+                var guideActivated = false;
+                var currentMediaContent = null;
                 var introMedia = guideVideo('guide-intro.mp4');
                 var introContent = {
                   title: 'Welcome to CGV Guide',
@@ -5851,38 +5875,43 @@ fluidPage(
                     .catch(function() {});
                 }
 
-                function preloadVideo(src) {
-                  if (!src || preloadedVideos[src]) return;
-                  preloadedVideos[src] = true;
-                  var link = document.createElement('link');
-                  link.rel = 'preload';
-                  link.as = 'video';
-                  link.href = src;
-                  document.head.appendChild(link);
-                  if (window.fetch) {
-                    fetch(src, { cache: 'force-cache' }).catch(function() {});
-                  }
-                }
-
-                function preloadRouteVideos(route) {
+                function routeVideoSequence(route) {
                   var data = routeData[route];
-                  if (!data || !data.steps) return;
+                  var sequence = introMedia ? [introMedia] : [];
+                  if (!data || !data.steps) return sequence;
                   data.steps.forEach(function(step) {
-                    preloadVideo(step.media || '');
-                    (step.substeps || []).forEach(function(substep) {
-                      preloadVideo(substep.media || '');
-                    });
+                    if (step.substeps && step.substeps.length) {
+                      step.substeps.forEach(function(substep) {
+                        var nestedMedia = substep.media || step.media || '';
+                        if (nestedMedia) sequence.push(nestedMedia);
+                      });
+                    } else if (step.media) {
+                      sequence.push(step.media);
+                    }
                   });
+                  return sequence;
                 }
 
-                function scheduleVideoFallback(src) {
-                  if (videoReadyTimer) window.clearTimeout(videoReadyTimer);
-                  if (!src) return;
-                  videoReadyTimer = window.setTimeout(function() {
-                    if (!mediaVideo || mediaVideo.classList.contains('is-ready')) return;
-                    if (mediaVideo.dataset.guideSource !== src) return;
-                    loadVideoAsBlob(src);
-                  }, 1600);
+                function getNextVideoSource(content) {
+                  var source = content && content.media ? content.media : '';
+                  if (!source) return '';
+                  var sequence = routeVideoSequence(root.dataset.activeGuideRoute || 'multigene');
+                  var currentIndex = sequence.indexOf(source);
+                  return currentIndex >= 0 ? (sequence[currentIndex + 1] || '') : '';
+                }
+
+                function preloadNextVideo(src) {
+                  if (nextVideoPreload && nextVideoPreload.getAttribute('href') === src) return;
+                  if (nextVideoPreload && nextVideoPreload.parentNode) {
+                    nextVideoPreload.parentNode.removeChild(nextVideoPreload);
+                  }
+                  nextVideoPreload = null;
+                  if (!guideActivated || !src) return;
+                  nextVideoPreload = document.createElement('link');
+                  nextVideoPreload.rel = 'preload';
+                  nextVideoPreload.as = 'video';
+                  nextVideoPreload.href = src;
+                  document.head.appendChild(nextVideoPreload);
                 }
 
                 function getStep(route, index, subIndex) {
@@ -5904,6 +5933,7 @@ fluidPage(
 
                 function updateMedia(content) {
                   if (!content) return;
+                  currentMediaContent = content;
                   if (mediaCaption) mediaCaption.classList.remove('is-refreshing');
                   if (mediaTitle) mediaTitle.textContent = content.title;
                   if (mediaCopy) mediaCopy.textContent = content.copy;
@@ -5911,12 +5941,17 @@ fluidPage(
                     void mediaCaption.offsetWidth;
                     mediaCaption.classList.add('is-refreshing');
                   }
+                  if (!guideActivated) {
+                    markVideoHasMedia(false);
+                    markVideoReady(false);
+                    return;
+                  }
                   if (mediaVideo && content.media) {
                     var current = mediaVideo.dataset.guideOriginalSource || mediaVideo.dataset.guideSource || mediaVideo.getAttribute('src') || mediaVideo.currentSrc || '';
                     if (current !== content.media) {
                       setVideoSource(content.media, false, content.media);
                     }
-                    scheduleVideoFallback(content.media);
+                    preloadNextVideo(getNextVideoSource(content));
                   } else {
                     if (mediaVideo) {
                       mediaVideo.pause();
@@ -5928,6 +5963,7 @@ fluidPage(
                     }
                     markVideoHasMedia(false);
                     markVideoReady(false);
+                    preloadNextVideo('');
                   }
                 }
 
@@ -5977,7 +6013,6 @@ fluidPage(
                 function renderRoute(route) {
                   var data = routeData[route] || routeData.multigene;
                   root.dataset.activeGuideRoute = route;
-                  preloadRouteVideos(route);
                   root.querySelectorAll('[data-guide-route]').forEach(function(card) {
                     card.classList.toggle('is-active', card.dataset.guideRoute === route);
                   });
@@ -6034,6 +6069,29 @@ fluidPage(
                   renderIntro();
                 }
 
+                function isGuideTabActive() {
+                  var pane = root.closest ? root.closest('.tab-pane') : null;
+                  if (pane && (pane.classList.contains('active') || pane.classList.contains('show'))) return true;
+                  var activeButton = document.querySelector('.app-nav-btn.is-active[data-target=guide]');
+                  return !!activeButton;
+                }
+
+                function activateGuideMedia() {
+                  if (guideActivated) return;
+                  guideActivated = true;
+                  root.dataset.guideMediaActive = '1';
+                  if (mediaVideo) mediaVideo.preload = 'auto';
+                  updateMedia(currentMediaContent || introContent);
+                }
+
+                function activateGuideFromEvent(event) {
+                  var target = event && event.target ? event.target : null;
+                  var guideTarget = target && target.closest
+                    ? target.closest('.app-nav-btn[data-target=guide], #navtabs a[data-value=guide]')
+                    : null;
+                  if (guideTarget || isGuideTabActive()) activateGuideMedia();
+                }
+
                 root.querySelectorAll('[data-guide-route]').forEach(function(card) {
                   card.addEventListener('click', function() {
                     var route = card.dataset.guideRoute || 'multigene';
@@ -6041,7 +6099,16 @@ fluidPage(
                     renderRoute(route);
                   });
                 });
+                document.addEventListener('click', activateGuideFromEvent);
+                document.addEventListener('shown.bs.tab', activateGuideFromEvent);
+                if (window.jQuery) {
+                  jQuery(document).on('shown.bs.tab.cgvGuideMedia', activateGuideFromEvent);
+                  jQuery(document).on('shiny:inputchanged.cgvGuideMedia', function(event) {
+                    if (event.name === 'navtabs' && event.value === 'guide') activateGuideMedia();
+                  });
+                }
                 renderRoute('multigene');
+                if (isGuideTabActive()) activateGuideMedia();
               })();
             "))
           )

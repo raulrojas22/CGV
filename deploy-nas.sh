@@ -175,9 +175,9 @@ ${REMOTE_DOCKER} rm cgv-shinyproxy cgv-nginx cgv-background-report-worker >/dev/
 echo '  Despliegue ShinyProxy anterior retirado (si existia)'
 "
 
-# --- Paso 3: Reconstruir imagen Docker ---
+# --- Paso 3: Reconstruir imagen Docker y precalentar datos ---
 echo ""
-echo "[3/5] Reconstruyendo imagen Docker en el NAS..."
+echo "[3/5] Reconstruyendo imagen Docker y precalentando datos en el NAS..."
 nssh "
   cd ${NAS_PATH}/app
   if [ '${REBUILD_R_DEPS}' = '1' ] ||
@@ -190,7 +190,23 @@ nssh "
     echo '  Reutilizando ${CGV_DEPS_IMAGE}; no se instalarán paquetes R.'
   fi
   ${REMOTE_DOCKER} run --rm --entrypoint /usr/bin/google-chrome '${CGV_DEPS_IMAGE}' --version >/dev/null
-  CGV_DEPS_IMAGE='${CGV_DEPS_IMAGE}' ${REMOTE_DOCKER} compose --env-file .env --env-file .env.local up -d --build
+  CGV_DEPS_IMAGE='${CGV_DEPS_IMAGE}' ${REMOTE_DOCKER} compose --env-file .env --env-file .env.local build
+  CGV_DEPS_IMAGE='${CGV_DEPS_IMAGE}' ${REMOTE_DOCKER} compose --env-file .env --env-file .env.local create cgv
+  PREWARM_IMAGE=\$(${REMOTE_DOCKER} inspect --format='{{.Image}}' cgv)
+  PREWARM_ANNOTATIONS_DIR=\$(${REMOTE_DOCKER} inspect --format='{{range .Mounts}}{{if eq .Destination \"/app/annotations\"}}{{.Source}}{{end}}{{end}}' cgv)
+  PREWARM_GENOMES_DIR=\$(${REMOTE_DOCKER} inspect --format='{{range .Mounts}}{{if eq .Destination \"/app/genomes\"}}{{.Source}}{{end}}{{end}}' cgv)
+  PREWARM_GO_ANNOTATIONS_DIR=\$(${REMOTE_DOCKER} inspect --format='{{range .Mounts}}{{if eq .Destination \"/app/go_annotations\"}}{{.Source}}{{end}}{{end}}' cgv)
+  PREWARM_DATA_DIR=\$(${REMOTE_DOCKER} inspect --format='{{range .Mounts}}{{if eq .Destination \"/app/data\"}}{{.Source}}{{end}}{{end}}' cgv)
+  PREWARM_CACHE_DIR=\$(${REMOTE_DOCKER} inspect --format='{{range .Mounts}}{{if eq .Destination \"/app/cache\"}}{{.Source}}{{end}}{{end}}' cgv)
+  if [ -z \"\$PREWARM_IMAGE\" ] || [ -z \"\$PREWARM_ANNOTATIONS_DIR\" ] ||
+     [ -z \"\$PREWARM_GENOMES_DIR\" ] || [ -z \"\$PREWARM_GO_ANNOTATIONS_DIR\" ] ||
+     [ -z \"\$PREWARM_DATA_DIR\" ] || [ -z \"\$PREWARM_CACHE_DIR\" ]; then
+    echo 'ERROR: no se pudo resolver la imagen o los bind mounts efectivos del servicio cgv.' >&2
+    exit 1
+  fi
+  chmod +x docker/setup-prewarm.sh
+  CGV_IMAGE=\"\$PREWARM_IMAGE\" CGV_ANNOTATIONS_DIR=\"\$PREWARM_ANNOTATIONS_DIR\" CGV_GENOMES_DIR=\"\$PREWARM_GENOMES_DIR\" CGV_GO_ANNOTATIONS_DIR=\"\$PREWARM_GO_ANNOTATIONS_DIR\" CGV_DATA_DIR=\"\$PREWARM_DATA_DIR\" CGV_CACHE_DIR=\"\$PREWARM_CACHE_DIR\" DOCKER_BIN='${REMOTE_DOCKER}' bash docker/setup-prewarm.sh
+  CGV_DEPS_IMAGE='${CGV_DEPS_IMAGE}' ${REMOTE_DOCKER} compose --env-file .env --env-file .env.local up -d
 "
 
 # --- Paso 4: Esperar a que la app este healthy ---
@@ -213,7 +229,7 @@ if [ \"\$STATUS\" != 'healthy' ]; then
   ${REMOTE_DOCKER} logs --tail 100 cgv >&2 || true
   exit 1
 fi
-HTTP=\$(curl -s -o /dev/null -w '%{http_code}' http://localhost:3838 || echo '000')
+HTTP=\$(curl -sS -o /dev/null -w '%{http_code}' --max-time 5 http://localhost:3838/healthz.txt 2>/dev/null || echo '000')
 echo \"  HTTP status: \$HTTP\"
 if [ \"\$HTTP\" != '200' ]; then
   echo \"ERROR: CGV respondio con HTTP \$HTTP en el puerto 3838.\" >&2

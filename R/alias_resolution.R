@@ -555,6 +555,59 @@ search_alias_index_for_context <- function(query, file_path, det_info = NULL, fi
     search_alias_index(query, idx, organism_id = org_id)
 }
 
+# Reuse a successful alias-index result only within one lookup operation. A
+# no-match is deliberately not retained: the SQLite path fails closed to
+# no_match after a query error, so retrying it preserves the existing transient
+# error recovery semantics.
+make_operation_alias_index_lookup <- function(query, file_path, file_label = NULL,
+                                              base_dir = ".", lookup_fun = NULL) {
+    if (is.null(lookup_fun)) {
+        if (!exists("search_alias_index_for_context", mode = "function")) {
+            stop("search_alias_index_for_context is unavailable")
+        }
+        lookup_fun <- get("search_alias_index_for_context", mode = "function")
+    }
+    if (!is.function(lookup_fun)) {
+        stop("lookup_fun must be a function")
+    }
+
+    cached_context <- NULL
+    cached_result <- NULL
+    has_cached_result <- FALSE
+
+    effective_context <- function(det_info) {
+        det <- det_info %||% list()
+        list(
+            organism_id = as.character(det$species_id %||% det$preloaded_id %||% ""),
+            organism_name = as.character(det$organism %||% file_label %||% ""),
+            taxid = as.character(det$taxid %||% "")
+        )
+    }
+
+    function(det_info = NULL) {
+        context <- effective_context(det_info)
+        if (isTRUE(has_cached_result) && identical(context, cached_context)) {
+            return(list(result = cached_result, reused = TRUE))
+        }
+
+        result <- lookup_fun(
+            query = query,
+            file_path = file_path,
+            det_info = det_info,
+            file_label = file_label,
+            base_dir = base_dir
+        )
+        status <- as.character((result %||% list())$status %||% "")
+        status <- if (length(status) > 0L) status[[1L]] else ""
+        if (nzchar(status) && grepl("^(unique|multiple)", status)) {
+            cached_context <<- context
+            cached_result <<- result
+            has_cached_result <<- TRUE
+        }
+        list(result = result, reused = FALSE)
+    }
+}
+
 alias_index_terms_for_gene <- function(local_gene_id = "", local_feature_id = "", local_symbol = "",
                                        organism_id = "", annotation_path = "", organism_name = "",
                                        taxid = "", base_dir = ".", max_aliases = 80L) {
@@ -884,6 +937,7 @@ write_alias_sqlite_compact <- function(df, sqlite_path, schema_version = 2L) {
     DBI::dbExecute(con, "PRAGMA temp_store = MEMORY")
     DBI::dbWriteTable(con, "alias_index", as.data.frame(out), overwrite = TRUE)
 
+    DBI::dbExecute(con, "CREATE INDEX IF NOT EXISTS idx_query_term_original ON alias_index(query_term_original)")
     DBI::dbExecute(con, "CREATE INDEX IF NOT EXISTS idx_upper ON alias_index(query_term_upper)")
     DBI::dbExecute(con, "CREATE INDEX IF NOT EXISTS idx_clean_basic ON alias_index(query_term_clean_basic)")
     DBI::dbExecute(con, "CREATE INDEX IF NOT EXISTS idx_clean_strict ON alias_index(query_term_clean_strict)")
@@ -972,6 +1026,7 @@ build_alias_sqlite_from_tsv <- function(tsv_path, sqlite_path, external_compact 
     rm(df)
     invisible(gc())
 
+    DBI::dbExecute(con, "CREATE INDEX IF NOT EXISTS idx_query_term_original ON alias_index(query_term_original)")
     DBI::dbExecute(con, "CREATE INDEX IF NOT EXISTS idx_upper ON alias_index(query_term_upper)")
     DBI::dbExecute(con, "CREATE INDEX IF NOT EXISTS idx_clean_basic ON alias_index(query_term_clean_basic)")
     DBI::dbExecute(con, "CREATE INDEX IF NOT EXISTS idx_clean_strict ON alias_index(query_term_clean_strict)")

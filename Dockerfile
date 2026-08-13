@@ -26,6 +26,6 @@ ENV APP_DIR=/app \
 EXPOSE 3838
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=120s --retries=5 \
-  CMD wget -qO- "http://127.0.0.1:${APP_PORT}/" >/dev/null 2>&1 || exit 1
+  CMD wget -qO- "http://127.0.0.1:${APP_PORT}/healthz.txt" 2>/dev/null | grep -qx 'ok' || exit 1
 
 CMD ["/app/docker/run-app.sh"]

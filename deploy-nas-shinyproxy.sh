@@ -258,7 +258,13 @@ echo "[4/7] Ejecutando prewarming (indices SQLite y caches)..."
 nssh "
   cd ${NAS_APP_DIR}
   chmod +x docker/setup-prewarm.sh
-  DOCKER_BIN='${REMOTE_DOCKER}' bash docker/setup-prewarm.sh ${NAS_APP_DIR}
+  CGV_IMAGE='${CGV_IMAGE}' \
+  CGV_ANNOTATIONS_DIR='${NAS_APP_DIR}/annotations' \
+  CGV_GENOMES_DIR='${NAS_APP_DIR}/genomes' \
+  CGV_GO_ANNOTATIONS_DIR='${NAS_APP_DIR}/go_annotations' \
+  CGV_DATA_DIR='${NAS_APP_DIR}/data' \
+  CGV_CACHE_DIR='${NAS_APP_DIR}/cache' \
+  DOCKER_BIN='${REMOTE_DOCKER}' bash docker/setup-prewarm.sh
 "
 
 # --- Paso 5: Iniciar ShinyProxy ---
@@ -312,18 +318,23 @@ nssh "
   cd ${NAS_APP_DIR}
   MAX=180; ELAPSED=0; READY=0
   while [ \$ELAPSED -lt \$MAX ]; do
-    shiny_code=\$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 http://127.0.0.1:8080 2>/dev/null || true)
-    nginx_code=\$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 http://127.0.0.1:${CGV_NGINX_PORT} 2>/dev/null || true)
     delegate=\$(${REMOTE_DOCKER} ps --filter 'name=sp-container-' --filter status=running --format '{{.Names}}' 2>/dev/null | head -1 || true)
+    app_code=000
+    if [ -n \"\$delegate\" ] &&
+       ${REMOTE_DOCKER} exec \"\$delegate\" sh -c 'wget -qO- http://127.0.0.1:3838/healthz.txt 2>/dev/null | grep -qx ok' >/dev/null 2>&1; then
+      app_code=200
+    fi
+    shiny_code=\$(curl -sS -I -o /dev/null -w '%{http_code}' --max-time 5 http://127.0.0.1:8080 2>/dev/null || true)
+    nginx_code=\$(curl -sS -I -o /dev/null -w '%{http_code}' --max-time 5 http://127.0.0.1:${CGV_NGINX_PORT} 2>/dev/null || true)
     report_worker=\$(${REMOTE_DOCKER} ps --filter 'name=cgv-background-report-worker' --filter status=running --format '{{.Names}}' 2>/dev/null | head -1 || true)
     if echo \"\$shiny_code\" | grep -Eq '^(200|302)$' &&
        echo \"\$nginx_code\" | grep -Eq '^(200|302)$' &&
-       [ -n \"\$delegate\" ] && [ -n \"\$report_worker\" ]; then
-      echo \"  Cadena local lista después de \${ELAPSED}s (ShinyProxy=\$shiny_code, nginx=\$nginx_code, app=\$delegate, worker=\$report_worker)\"
+       [ \"\$app_code\" = '200' ] && [ -n \"\$report_worker\" ]; then
+      echo \"  Cadena local lista después de \${ELAPSED}s (ShinyProxy=\$shiny_code, nginx=\$nginx_code, app=\$delegate/\$app_code, worker=\$report_worker)\"
       READY=1
       break
     fi
-    echo \"  Esperando... (\${ELAPSED}s/\${MAX}s; ShinyProxy=\${shiny_code:-000}, nginx=\${nginx_code:-000}, app=\${delegate:-pendiente})\"
+    echo \"  Esperando... (\${ELAPSED}s/\${MAX}s; ShinyProxy=\${shiny_code:-000}, nginx=\${nginx_code:-000}, app=\${delegate:-pendiente}/\$app_code)\"
     sleep 5
     ELAPSED=\$((ELAPSED + 5))
   done
@@ -372,7 +383,7 @@ nssh "
       tail -30 ${NAS_PATH}/tunnel.log >&2
       exit 1
     fi
-    public_code=\$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 https://cgvapp.com/ 2>/dev/null || true)
+    public_code=\$(curl -sS -I -o /dev/null -w '%{http_code}' --max-time 10 https://cgvapp.com/ 2>/dev/null || true)
     if echo \"\$public_code\" | grep -Eq '^(200|301|302)$'; then
       echo \"  cgvapp.com responde HTTP \$public_code después de \${ELAPSED}s\"
       PUBLIC_OK=1

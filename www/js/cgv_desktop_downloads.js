@@ -424,5 +424,25 @@
       });
   }
 
-  ready(init);
+  function desktopPageIsActive() {
+    var root = document.getElementById("cgv-desktop-downloads-page");
+    if (!root) return false;
+    var pane = root.closest && root.closest(".tab-pane");
+    return !pane || pane.classList.contains("active") || pane.classList.contains("show");
+  }
+
+  function initWhenDesktopIsVisible() {
+    if (desktopPageIsActive()) init();
+  }
+
+  function boot() {
+    initWhenDesktopIsVisible();
+    document.addEventListener("shown.bs.tab", function (event) {
+      var tab = event && event.target;
+      var value = tab && tab.getAttribute ? tab.getAttribute("data-value") : "";
+      if (value === "desktop-app" || desktopPageIsActive()) init();
+    });
+  }
+
+  ready(boot);
 })();
