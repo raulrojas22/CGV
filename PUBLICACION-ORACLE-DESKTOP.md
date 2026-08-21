@@ -1,17 +1,17 @@
-# Publicar CGV Desktop en Oracle Object Storage
+# Publicar CGeV Desktop en Oracle Object Storage
 
 Este flujo separa tres cosas que hoy están mezcladas:
 
 1. `INSTALABLES-FINALES/` es la salida bruta y conserva instaladores,
    actualizadores, firmas y logs.
 2. `desktop/oracle-upload-VERSION/` es el paquete público mínimo.
-3. `desktop-release.json` es el índice estable que leen CGV Web y CGV Desktop
+3. `desktop-release.json` es el índice estable que leen CGeV Web y CGeV Desktop
    para activar los botones de descarga.
 
 Los instaladores no contienen una URL distinta para cada versión: todos consultan
 el mismo `desktop-release.json` estable. Esta primera incorporación del sistema
 Oracle sí requiere generar un nuevo build de Desktop después de configurar la
-URL, porque los instaladores `1.1.0` actuales se construyeron antes de que
+URL, porque los instaladores históricos `1.1.0` se construyeron antes de que
 existieran el manifiesto y esta integración. Después de ese build inicial no hay
 que recompilar sólo para cambiar los archivos apuntados por el manifiesto.
 
@@ -28,14 +28,14 @@ que recompilar sólo para cambiar los archivos apuntados por el manifiesto.
    ./scripts/configurar-url-oracle-desktop.sh "URL_BASE_DE_ORACLE"
    ```
 
-4. Cambia la versión de Desktop a `1.1.1` y ejecuta:
+4. Usa la versión nueva `1.2.0` y ejecuta:
 
    ```bash
    ./regenerar-instalables.sh
    ./scripts/preparar-publicacion-desktop.sh
    ```
 
-5. Abre `desktop/oracle-upload-1.1.1/` y sube todos sus archivos a Oracle.
+5. Abre `desktop/oracle-upload-1.2.0/` y sube todos sus archivos a Oracle.
    Sube `desktop-release.json` al final.
 
 ### Las próximas veces
@@ -115,9 +115,9 @@ cd /Users/rarojas/Documents/A_FULLAPP
 ```
 
 El script guarda la URL completa del manifiesto en
-`www/desktop-release-source.json`. Este cambio se despliega una vez en CGV Web
-y debe quedar incluido en un nuevo build de CGV Desktop —usa una nueva versión,
-por ejemplo `1.1.1`, porque el `1.1.0` existente todavía contiene la integración
+`www/desktop-release-source.json`. Este cambio se despliega una vez en CGeV Web
+y debe quedar incluido en un nuevo build de CGeV Desktop —usa una nueva versión,
+por ejemplo `1.2.0`, porque el `1.1.0` existente todavía contiene la integración
 anterior basada sólo en GitHub. Mientras la URL base no cambie, las versiones
 futuras no requieren modificar la web.
 
@@ -125,7 +125,7 @@ futuras no requieren modificar la web.
 
 Cada binario público diferente debe tener un número de versión nuevo. No
 reemplaces silenciosamente un `1.1.0` por otro binario también llamado `1.1.0`;
-usa, por ejemplo, `1.1.1`. Esto mantiene checksums, cachés y soporte
+usa, por ejemplo, `1.2.0`. Esto mantiene checksums, cachés y soporte
 reproducibles.
 
 ### 1. Regenerar la salida bruta
@@ -173,10 +173,10 @@ archivos grandes todavía no terminaron de subir.
 
 ```bash
 curl -fsS "https://.../o/cgv-desktop/desktop-release.json"
-curl -I "https://.../o/cgv-desktop/CGV-Desktop-VERSION-macOS-arm64.dmg"
+curl -I "https://.../o/cgv-desktop/CGeV-Desktop-VERSION-macOS-arm64.dmg"
 ```
 
-Después abre la sección **CGV Desktop** en la versión web. Los mismos enlaces se
+Después abre la sección **CGeV Desktop** en la versión web. Los mismos enlaces se
 usan dentro de la aplicación Desktop porque ambas superficies comparten
 `R/ui_desktop_downloads.R`, `www/js/cgv_desktop_downloads.js` y el archivo de
 configuración.
@@ -196,7 +196,7 @@ y no se recompilan instaladores por causa de Oracle.
 
 ## Alcance del auto-update
 
-Este flujo mueve a Oracle las **descargas visibles de la página CGV Desktop** en
+Este flujo mueve a Oracle las **descargas visibles de la página CGeV Desktop** en
 Web y Desktop. El `electron-updater` de la aplicación sigue siendo un canal
 separado configurado actualmente con el repositorio de releases de GitHub. No
 se deben subir `latest*.yml`, blockmaps o ZIP de auto-update a Oracle salvo que

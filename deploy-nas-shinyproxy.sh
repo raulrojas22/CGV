@@ -208,7 +208,7 @@ nssh "
   ${REMOTE_DOCKER} stop cgv-nginx 2>/dev/null || echo '  (no habia nginx)'
   ${REMOTE_DOCKER} stop cgv-background-report-worker 2>/dev/null || echo '  (no habia worker de reportes)'
   ${REMOTE_DOCKER} rm cgv cgv-shinyproxy cgv-nginx cgv-background-report-worker 2>/dev/null || true
-  stale=\$(${REMOTE_DOCKER} ps -aq --filter ancestor=${CGV_IMAGE} 2>/dev/null || true)
+  stale=\$(${REMOTE_DOCKER} ps -aq --filter name=sp-container- 2>/dev/null || true)
   if [ -n \"\$stale\" ]; then
     echo '  Deteniendo contenedores CGV dinamicos de ShinyProxy...'
     ${REMOTE_DOCKER} stop \$stale >/dev/null 2>&1 || true
@@ -238,7 +238,20 @@ nssh "
 echo ""
 echo "[3/7] Preparando dependencias de R y construyendo '${CGV_IMAGE}' en el NAS..."
 nssh "
+  set -e
   cd ${NAS_APP_DIR}
+  upsert_env() {
+    key=\"\$1\"
+    value=\"\$2\"
+    if grep -q \"^\${key}=\" .env; then
+      sed -i \"s#^\${key}=.*#\${key}=\${value}#\" .env
+    else
+      printf '%s=%s\n' \"\$key\" \"\$value\" >> .env
+    fi
+  }
+  upsert_env CGV_IMAGE '${CGV_IMAGE}'
+  upsert_env CGV_DEPS_IMAGE '${CGV_DEPS_IMAGE}'
+
   if [ '${REBUILD_R_DEPS}' = '1' ] ||
      ! ${REMOTE_DOCKER} image inspect '${CGV_DEPS_IMAGE}' >/dev/null 2>&1 ||
      ! ${REMOTE_DOCKER} run --rm --entrypoint /usr/bin/google-chrome '${CGV_DEPS_IMAGE}' --version >/dev/null 2>&1 ||
@@ -249,22 +262,57 @@ nssh "
     echo '  Reutilizando ${CGV_DEPS_IMAGE}; no se instalarán paquetes R.'
   fi
   ${REMOTE_DOCKER} run --rm --entrypoint /usr/bin/google-chrome '${CGV_DEPS_IMAGE}' --version >/dev/null
-  CGV_DEPS_IMAGE='${CGV_DEPS_IMAGE}' ${REMOTE_DOCKER} compose build
+  CGV_IMAGE='${CGV_IMAGE}' CGV_DEPS_IMAGE='${CGV_DEPS_IMAGE}' ${REMOTE_DOCKER} compose build
 "
 
-# --- Paso 4: Prewarming (indices SQLite) ---
+# --- Paso 4: Prewarming (indices SQLite y snapshot estatico inmutable) ---
 echo ""
-echo "[4/7] Ejecutando prewarming (indices SQLite y caches)..."
+echo "[4/7] Ejecutando prewarming (indices SQLite, caches y snapshot estatico)..."
 nssh "
+  set -e
   cd ${NAS_APP_DIR}
+
+  static_image_id=\$(${REMOTE_DOCKER} image inspect --format '{{.Id}}' '${CGV_IMAGE}' | tr -d '\r\n')
+  static_revision=\${static_image_id#sha256:}
+  if ! printf '%s\n' \"\$static_revision\" | grep -Eq '^[a-f0-9]{64}$'; then
+    echo \"ERROR: Docker no devolvio un Id sha256 valido para ${CGV_IMAGE}: \$static_image_id\" >&2
+    exit 1
+  fi
+
   chmod +x docker/setup-prewarm.sh
   CGV_IMAGE='${CGV_IMAGE}' \
+  CGV_PUBLISH_STATIC_ASSETS=1 \
+  CGV_STATIC_REVISION=\"\$static_revision\" \
   CGV_ANNOTATIONS_DIR='${NAS_APP_DIR}/annotations' \
   CGV_GENOMES_DIR='${NAS_APP_DIR}/genomes' \
   CGV_GO_ANNOTATIONS_DIR='${NAS_APP_DIR}/go_annotations' \
   CGV_DATA_DIR='${NAS_APP_DIR}/data' \
   CGV_CACHE_DIR='${NAS_APP_DIR}/cache' \
   DOCKER_BIN='${REMOTE_DOCKER}' bash docker/setup-prewarm.sh
+
+  static_release='${NAS_APP_DIR}/cache/static_assets/releases/'\"\$static_revision\"
+  if [ ! -s \"\$static_release/healthz.txt\" ]; then
+    echo \"ERROR: el snapshot estatico no contiene healthz.txt: \$static_release\" >&2
+    exit 1
+  fi
+
+  upsert_env() {
+    key=\"\$1\"
+    value=\"\$2\"
+    if grep -q \"^\${key}=\" .env; then
+      sed -i \"s#^\${key}=.*#\${key}=\${value}#\" .env
+    else
+      printf '%s=%s\n' \"\$key\" \"\$value\" >> .env
+    fi
+  }
+  upsert_env CGV_IMAGE '${CGV_IMAGE}'
+  upsert_env APP_ASSET_VERSION \"\$static_revision\"
+  upsert_env APP_STATIC_BASE_URL \"/cgv-static/\$static_revision\"
+
+  test \"\$(grep '^CGV_IMAGE=' .env | tail -1)\" = \"CGV_IMAGE=${CGV_IMAGE}\"
+  test \"\$(grep '^APP_ASSET_VERSION=' .env | tail -1)\" = \"APP_ASSET_VERSION=\$static_revision\"
+  test \"\$(grep '^APP_STATIC_BASE_URL=' .env | tail -1)\" = \"APP_STATIC_BASE_URL=/cgv-static/\$static_revision\"
+  echo \"  Snapshot estatico listo: \$static_revision\"
 "
 
 # --- Paso 5: Iniciar ShinyProxy ---
@@ -307,7 +355,7 @@ nssh "
   upsert_env SP_PERF_RUN_LABEL '${PERF_RUN_LABEL}'
 
   echo '  Iniciando servicios con rutas absolutas del host NAS...'
-  ${REMOTE_DOCKER} compose -f docker-compose.shinyproxy.yml up -d
+  CGV_IMAGE='${CGV_IMAGE}' ${REMOTE_DOCKER} compose -f docker-compose.shinyproxy.yml up -d
 "
 
 # --- Paso 6: Verificar salud ---
@@ -315,7 +363,28 @@ echo ""
 echo "[6/7] Verificando servicios..."
 echo "  Esperando ShinyProxy, nginx y un contenedor CGV real..."
 nssh "
+  set -e
   cd ${NAS_APP_DIR}
+  static_image_id=\$(${REMOTE_DOCKER} image inspect --format '{{.Id}}' '${CGV_IMAGE}' | tr -d '\r\n')
+  static_revision=\${static_image_id#sha256:}
+  if ! printf '%s\n' \"\$static_revision\" | grep -Eq '^[a-f0-9]{64}$'; then
+    echo \"ERROR: Docker no devolvio un Id sha256 valido para ${CGV_IMAGE}: \$static_image_id\" >&2
+    exit 1
+  fi
+  asset_version=\$(grep '^APP_ASSET_VERSION=' .env | tail -1 | cut -d= -f2-)
+  static_base_url=\$(grep '^APP_STATIC_BASE_URL=' .env | tail -1 | cut -d= -f2-)
+  if [ \"\$asset_version\" != \"\$static_revision\" ] ||
+     [ \"\$static_base_url\" != \"/cgv-static/\$static_revision\" ]; then
+    echo 'ERROR: .env no identifica exactamente el snapshot de la imagen desplegada.' >&2
+    echo \"  imagen=\$static_revision APP_ASSET_VERSION=\$asset_version APP_STATIC_BASE_URL=\$static_base_url\" >&2
+    exit 1
+  fi
+  static_release='${NAS_APP_DIR}/cache/static_assets/releases/'\"\$static_revision\"
+  if [ ! -s \"\$static_release/healthz.txt\" ]; then
+    echo \"ERROR: falta healthz.txt en el snapshot estatico activo: \$static_release\" >&2
+    exit 1
+  fi
+
   MAX=180; ELAPSED=0; READY=0
   while [ \$ELAPSED -lt \$MAX ]; do
     delegate=\$(${REMOTE_DOCKER} ps --filter 'name=sp-container-' --filter status=running --format '{{.Names}}' 2>/dev/null | head -1 || true)
@@ -346,6 +415,47 @@ nssh "
     echo '--- cgv-nginx (últimas 80 líneas) ---' >&2
     ${REMOTE_DOCKER} logs --tail 80 cgv-nginx >&2 2>&1 || true
     exit 1
+  fi
+
+  delegate_image_id=\$(${REMOTE_DOCKER} inspect --format '{{.Image}}' \"\$delegate\" | tr -d '\r\n')
+  delegate_revision=\${delegate_image_id#sha256:}
+  if [ \"\$delegate_revision\" != \"\$static_revision\" ]; then
+    echo 'ERROR: el contenedor CGV no usa la imagen exacta del snapshot estatico.' >&2
+    echo \"  snapshot=\$static_revision app=\$delegate_revision\" >&2
+    exit 1
+  fi
+
+  static_url='http://127.0.0.1:${CGV_NGINX_PORT}/cgv-static/'\"\$static_revision\"
+  static_health_code=\$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 \"\$static_url/healthz.txt\" 2>/dev/null || true)
+  if [ \"\$static_health_code\" != '200' ] ||
+     ! curl -fsS --max-time 10 \"\$static_url/healthz.txt\" | grep -qx 'ok'; then
+    echo \"ERROR: el healthz interno del snapshot respondio HTTP \${static_health_code:-000} o un cuerpo inesperado.\" >&2
+    exit 1
+  fi
+
+  static_head=\$(curl -sS -I --max-time 10 \"\$static_url/healthz.txt\")
+  if ! printf '%s\n' \"\$static_head\" | head -1 | grep -Eq '^HTTP/[0-9.]+ 200([[:space:]]|$)' ||
+     ! printf '%s\n' \"\$static_head\" | tr -d '\r' | grep -Eiq '^Cache-Control:[[:space:]]*public,[[:space:]]*max-age=31536000,[[:space:]]*immutable[[:space:]]*$'; then
+    echo 'ERROR: HEAD interno no confirmo HTTP 200 y Cache-Control inmutable.' >&2
+    exit 1
+  fi
+
+  range_asset=\$(find \"\$static_release\" -type f \( -iname '*.mp4' -o -iname '*.pdf' \) -print | LC_ALL=C sort | head -1 || true)
+  if [ -n \"\$range_asset\" ]; then
+    range_relative=\${range_asset#\"\$static_release\"/}
+    if ! printf '%s\n' \"\$range_relative\" | grep -Eq '^[A-Za-z0-9._/-]+$'; then
+      echo \"ERROR: no es seguro construir la URL del asset de rango: \$range_relative\" >&2
+      exit 1
+    fi
+    range_head=\$(curl -sS --max-time 15 -D - -o /dev/null -H 'Range: bytes=0-1' \"\$static_url/\$range_relative\")
+    if ! printf '%s\n' \"\$range_head\" | head -1 | grep -Eq '^HTTP/[0-9.]+ 206([[:space:]]|$)' ||
+       ! printf '%s\n' \"\$range_head\" | tr -d '\r' | grep -Eiq '^Content-Range:[[:space:]]*bytes[[:space:]]+0-1/[0-9]+[[:space:]]*$'; then
+      echo \"ERROR: nginx no sirvio byte ranges para \$range_relative.\" >&2
+      exit 1
+    fi
+    echo \"  Static smoke OK: healthz=200, cache inmutable, range=206 (\$range_relative)\"
+  else
+    echo '  Static smoke OK: healthz=200 y cache inmutable; no hay MP4/PDF para probar Range.'
   fi
 
   ${REMOTE_DOCKER} ps --filter name=cgv-nginx --filter name=cgv-shinyproxy --filter name=cgv-background-report-worker --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'

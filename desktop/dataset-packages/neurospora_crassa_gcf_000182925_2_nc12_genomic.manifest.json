@@ -3,7 +3,7 @@
   "label": "Neurospora crassa",
   "speciesId": "neurospora_crassa_gcf_000182925_2_nc12_genomic",
   "version": "2026.09",
-  "description": "Neurospora crassa CGV Desktop dataset package.",
+  "description": "Neurospora crassa CGeV Desktop dataset package.",
   "downloadable": true,
   "sizeBytes": 18867847,
   "package": {

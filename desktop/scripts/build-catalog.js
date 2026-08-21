@@ -79,7 +79,7 @@ async function buildCatalog() {
       label: row.label,
       speciesId: speciesId,
       version: datasetVersion,
-      description: `${row.label} — download and install for CGV Desktop.`,
+      description: `${row.label} — download and install for CGeV Desktop.`,
       downloadable: true,
       sizeBytes: stat.size,
       package: {

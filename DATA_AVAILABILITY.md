@@ -59,7 +59,7 @@ Choose one of these paths depending on journal requirements:
 
 - the entire live production dataset if it is very large and can be reconstructed from public upstream sources
 
-## Practical guidance for CGV
+## Practical guidance for CGeV
 
 Given the current project structure:
 
@@ -89,4 +89,4 @@ This means a strong public release often consists of:
 
 ## Suggested statement for manuscript or README
 
-> The CGV source code is distributed through GitHub and archived in Zenodo for versioned citation. Due to size and update frequency, production genome, annotation, and GO resources are maintained outside Git history and mounted at runtime; lightweight registries and reconstruction instructions are provided in the repository.
+> The CGeV source code is distributed through GitHub and archived in Zenodo for versioned citation. Due to size and update frequency, production genome, annotation, and GO resources are maintained outside Git history and mounted at runtime; lightweight registries and reconstruction instructions are provided in the repository.

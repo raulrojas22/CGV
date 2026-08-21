@@ -229,7 +229,7 @@
     var delay = Math.max(0, Number(opts.delay == null ? DEFAULT_DELAY_MS : opts.delay) || 0);
     sources[id] = {
       id: id,
-      headline: clean(opts.headline, existing ? existing.headline : 'CGV is working'),
+      headline: clean(opts.headline, existing ? existing.headline : 'CGeV is working'),
       detail: clean(opts.detail, existing ? existing.detail : 'Processing data…'),
       priority: Number(opts.priority == null ? (existing ? existing.priority : 20) : opts.priority) || 0,
       startedAt: existing ? existing.startedAt : now,
@@ -294,7 +294,7 @@
 
   function shinyBusy() {
     begin('shiny', {
-      headline: 'CGV is working',
+      headline: 'CGeV is working',
       detail: inferBusyDetail(),
       priority: 5,
       delay: 360

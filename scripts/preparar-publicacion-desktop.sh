@@ -101,14 +101,14 @@ case "$BASE_URL" in
 esac
 
 ASSET_SPECS=(
-  "mac-arm64|CGV-Desktop-$VERSION-macOS-arm64.dmg"
-  "mac-x64|CGV-Desktop-$VERSION-macOS-x64.dmg"
-  "linux-appimage|CGV-Desktop-$VERSION-Linux-x86_64.AppImage"
-  "linux-deb|CGV-Desktop-$VERSION-Linux-amd64.deb"
-  "windows-x64|CGV-Desktop-$VERSION-Windows-x64-Setup.exe"
+  "mac-arm64|CGeV-Desktop-$VERSION-macOS-arm64.dmg"
+  "mac-x64|CGeV-Desktop-$VERSION-macOS-x64.dmg"
+  "linux-appimage|CGeV-Desktop-$VERSION-Linux-x86_64.AppImage"
+  "linux-deb|CGeV-Desktop-$VERSION-Linux-amd64.deb"
+  "windows-x64|CGeV-Desktop-$VERSION-Windows-x64-Setup.exe"
 )
 
-say "Validando artefactos de CGV Desktop $VERSION"
+say "Validando artefactos de CGeV Desktop $VERSION"
 for spec in "${ASSET_SPECS[@]}"; do
   filename="${spec#*|}"
   path="$FINAL_DIR/$filename"
@@ -226,7 +226,7 @@ for (const spec of specs) {
 }
 
 const releaseNotes = [
-  "Complete CGV Desktop installers with the private local scientific runtime included.",
+  "Complete CGeV Desktop installers with the private local scientific runtime included.",
   "Native macOS builds for Apple Silicon and Intel, plus Linux AppImage and Debian/Ubuntu packages.",
   "Windows 10 and 11 users can install the Windows x64 setup."
 ];
@@ -234,7 +234,7 @@ const releaseNotes = [
 const manifest = {
   schemaVersion: 1,
   channel: "stable",
-  product: "CGV Desktop",
+  product: "CGeV Desktop",
   version,
   publishedAt: new Date().toISOString(),
   source: {

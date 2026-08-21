@@ -3,7 +3,7 @@
   "label": "Danio rerio",
   "speciesId": "danio_rerio_gcf_049306965_1_grcz12tu_genomic",
   "version": "2026.09",
-  "description": "Danio rerio CGV Desktop dataset package.",
+  "description": "Danio rerio CGeV Desktop dataset package.",
   "downloadable": true,
   "sizeBytes": 477934731,
   "package": {

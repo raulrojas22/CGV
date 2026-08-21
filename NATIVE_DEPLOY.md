@@ -198,7 +198,7 @@ Optional secrets go in `.env.local`:
 ```dotenv
 FEEDBACK_RESEND_API_KEY=...
 FEEDBACK_TO_EMAIL=cgvviewer@gmail.com
-FEEDBACK_FROM_EMAIL="CGV Feedback <feedback@cgvapp.com>"
+FEEDBACK_FROM_EMAIL="CGeV Feedback <feedback@cgvapp.com>"
 # cgvapp.com is verified in Resend.
 FEEDBACK_SEND_RECEIPT=1
 FEEDBACK_PUBLIC_URL=https://cgv.mobilomics.org

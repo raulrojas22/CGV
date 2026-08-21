@@ -3555,7 +3555,7 @@ function(input, output, session) {
                         if (identical(mode, "homologous")) {
                             "Select one or more suggested genes to plot, or search external databases for alternate nomenclature of the original query."
                         } else {
-                            "Choose a candidate term. For Cross-Species searches, matching names or aliases only identify candidate loci; CGV will plot only loci supported by explicit one-to-one orthology evidence."
+                            "Choose a candidate term. For Cross-Species searches, matching names or aliases only identify candidate loci; CGeV will plot only loci supported by explicit one-to-one orthology evidence."
                         }
                     )
                 ),
@@ -3785,9 +3785,9 @@ function(input, output, session) {
                         "The local alias index found several genes for ",
                         tags$strong(paste0(query_txt, ".")),
                         if (identical(mode, "homologous")) {
-                            " Select one or more genes CGV should plot."
+                            " Select one or more genes CGeV should plot."
                         } else {
-                            " Select the reference locus CGV should evaluate for orthology."
+                            " Select the reference locus CGeV should evaluate for orthology."
                         }
                     ),
                     div(
@@ -4778,7 +4778,7 @@ function(input, output, session) {
     close_popup_status <- popupStatusDomain$close_popup_status
     lastz_patience_notice <- paste(
         "LASTZ is computationally intensive and may take several minutes.",
-        "Keep CGV open and please wait until the process finishes."
+        "Keep CGeV open and please wait until the process finishes."
     )
     lastz_progress_text <- function(status_text) {
         paste(trimws(as.character(status_text %||% "")), lastz_patience_notice)
@@ -5423,9 +5423,27 @@ function(input, output, session) {
     }
     if (requireNamespace("later", quietly = TRUE) &&
         isTRUE(app_env_flag("APP_GENE_PLOT_RENDERER_PREWARM", TRUE))) {
-        later::later(function() {
-            tryCatch(warm_gene_plot_renderer_once(), error = function(e) NULL)
-        }, delay = 0.15)
+        # Keep the synchronous ggiraph warm-up out of the first response.  A
+        # cold call takes a few hundred milliseconds, so scheduling it before
+        # the initial flush competes directly with the browser's first paint.
+        # The same warm-up still runs shortly afterwards and remains optional.
+        renderer_prewarm_delay_ms <- app_env_int(
+            "APP_GENE_PLOT_RENDERER_PREWARM_DELAY_MS",
+            1000L,
+            min_value = 0L,
+            max_value = 30000L
+        )
+        session$onFlushed(function() {
+            later::later(function() {
+                session_closed <- tryCatch(
+                    is.function(session$isClosed) && isTRUE(session$isClosed()),
+                    error = function(e) FALSE
+                )
+                if (!session_closed) {
+                    tryCatch(warm_gene_plot_renderer_once(), error = function(e) NULL)
+                }
+            }, delay = renderer_prewarm_delay_ms / 1000)
+        }, once = TRUE)
     }
     sanitize_girafe_tooltip_text <- function(x) {
         txt <- as.character(x %||% "")
@@ -12883,7 +12901,7 @@ function(input, output, session) {
                         best_res$det_resolved <- det
                         best_res$lookup_elapsed_ms <- app_perf_elapsed_ms(lookup_t0)
                         push_progress(sprintf(
-                            "\u2022 CGV resolved stable ID '%s' as %s using the local alias index.",
+                            "\u2022 CGeV resolved stable ID '%s' as %s using the local alias index.",
                             input_gene,
                             as.character(best_res$matched_gene_id %||% best_res$matched_gene_name %||% selected_alias_match$local_gene_id[1] %||% "")
                         ))
@@ -13059,7 +13077,7 @@ function(input, output, session) {
                         best_res$alias_index_status <- alias_index_status
                         best_res$alias_index_match <- selected_alias_match
                         push_progress(sprintf(
-                            "\u2022 CGV resolved '%s' as alias of %s using the local alias index.",
+                            "\u2022 CGeV resolved '%s' as alias of %s using the local alias index.",
                             input_gene,
                             as.character(best_res$matched_gene_id %||% best_res$matched_gene_name %||% selected_alias_match$local_gene_id[1] %||% "")
                         ))
@@ -13181,7 +13199,7 @@ function(input, output, session) {
                         best_res$alias_index_status <- alias_index_status
                         best_res$alias_index_match <- selected_alias_match
                         push_progress(sprintf(
-                            "\u2022 CGV resolved '%s' as alias of %s using the local alias index.",
+                            "\u2022 CGeV resolved '%s' as alias of %s using the local alias index.",
                             input_gene,
                             as.character(best_res$matched_gene_id %||% best_res$matched_gene_name %||% selected_alias_match$local_gene_id[1] %||% "")
                         ))
@@ -19512,7 +19530,7 @@ function(input, output, session) {
                         if (nzchar(alias_used)) {
                             tagList("You searched for ", tags$strong(query_gene), ". The plotted local record was selected through alias evidence.")
                         } else {
-                            tagList("CGV found this record locally. Offline aliases indexed for this gene are listed below.")
+                            tagList("CGeV found this record locally. Offline aliases indexed for this gene are listed below.")
                         }
                     ),
                     tags$dl(
@@ -29239,7 +29257,7 @@ function(input, output, session) {
                             found_alias = "The gene was resolved from the local precomputed alias index.",
                             found_external = "The gene was recovered after checking external databases.",
                             found = "The gene is available in this organism.",
-                            local_search = "CGV is checking the local annotation first.",
+                            local_search = "CGeV is checking the local annotation first.",
                             external_pending = "No local match yet. External databases will be checked in the background.",
                             external_search = "No local match yet. External databases are being checked.",
                             not_found = "No local or external match was found for this organism.",
@@ -35342,7 +35360,7 @@ function(input, output, session) {
         payload <- list(
             name = full_name,
             email = email,
-            subject = sprintf("[CGV %s] %s", if (is_bug) "Bug" else "Suggestion", title),
+            subject = sprintf("[CGeV %s] %s", if (is_bug) "Bug" else "Suggestion", title),
             feedback_type = feedback_label,
             full_name = full_name,
             reporter_email = email,
@@ -35381,7 +35399,7 @@ function(input, output, session) {
                     state = "not_attempted",
                     status = NA_integer_,
                     provider_id = "",
-                    error = "Primary CGV inbox delivery was not accepted."
+                    error = "Primary CGeV inbox delivery was not accepted."
                 )
             }
             payload$delivery <- c(
@@ -35413,7 +35431,7 @@ function(input, output, session) {
                 reset_feedback_form(is_bug)
                 if (identical(receipt_delivery$state, "disabled")) {
                     notify_feedback(
-                        "Thanks. Your feedback was sent to the CGV inbox. Replies will go to the email you provided.",
+                        "Thanks. Your feedback was sent to the CGeV inbox. Replies will go to the email you provided.",
                         tone = "success"
                     )
                 } else if (isTRUE(receipt_delivery$ok)) {
@@ -35425,7 +35443,7 @@ function(input, output, session) {
                         ")."
                     )
                     notify_feedback(
-                        "Thanks. Your feedback was sent to CGV, and a confirmation copy is on its way to your email.",
+                        "Thanks. Your feedback was sent to CGeV, and a confirmation copy is on its way to your email.",
                         tone = "success"
                     )
                 } else {
@@ -35438,7 +35456,7 @@ function(input, output, session) {
                         receipt_delivery$error
                     )
                     notify_feedback(
-                        "Your feedback was sent to CGV, but we could not send the confirmation copy. We can still reply to the email you provided.",
+                        "Your feedback was sent to CGeV, but we could not send the confirmation copy. We can still reply to the email you provided.",
                         tone = "warning"
                     )
                 }
@@ -35466,7 +35484,7 @@ function(input, output, session) {
                     )
                 } else {
                     notify_feedback(
-                        "Your feedback was saved, but the email could not be delivered to the CGV inbox. Please try again shortly.",
+                        "Your feedback was saved, but the email could not be delivered to the CGeV inbox. Please try again shortly.",
                         tone = "error"
                     )
                 }

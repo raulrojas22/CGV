@@ -1,0 +1,76 @@
+#!/usr/bin/env Rscript
+
+read_text <- function(path) {
+  paste(readLines(path, warn = FALSE, encoding = "UTF-8"), collapse = "\n")
+}
+
+assert <- function(condition, message) {
+  if (!isTRUE(condition)) stop(message, call. = FALSE)
+}
+
+nas_shinyproxy <- read_text("deploy-nas-shinyproxy.sh")
+nas_direct <- read_text("deploy-nas.sh")
+
+build_pos <- regexpr("compose build", nas_shinyproxy, fixed = TRUE)[1]
+image_env_positions <- gregexpr(
+  "upsert_env CGV_IMAGE '${CGV_IMAGE}'", nas_shinyproxy, fixed = TRUE
+)[[1]]
+image_env_positions <- image_env_positions[image_env_positions > 0]
+inspect_pos <- regexpr("image inspect --format '{{.Id}}' '${CGV_IMAGE}'", nas_shinyproxy, fixed = TRUE)[1]
+prewarm_pos <- regexpr("bash docker/setup-prewarm.sh", nas_shinyproxy, fixed = TRUE)[1]
+compose_up_pos <- regexpr("compose -f docker-compose.shinyproxy.yml up -d", nas_shinyproxy, fixed = TRUE)[1]
+asset_env_pos <- regexpr("upsert_env APP_ASSET_VERSION", nas_shinyproxy, fixed = TRUE)[1]
+base_env_pos <- regexpr("upsert_env APP_STATIC_BASE_URL", nas_shinyproxy, fixed = TRUE)[1]
+tunnel_pos <- regexpr("# --- Paso 7: Lanzar Cloudflare tunnel ---", nas_shinyproxy, fixed = TRUE)[1]
+smoke_pos <- regexpr("Static smoke OK", nas_shinyproxy, fixed = TRUE)[1]
+
+assert(all(c(build_pos, image_env_positions, inspect_pos, prewarm_pos, compose_up_pos, asset_env_pos,
+             base_env_pos, tunnel_pos, smoke_pos) > 0),
+       "The NAS ShinyProxy static-release sequence is incomplete.")
+assert(length(image_env_positions) >= 2L,
+       "CGV_IMAGE must be pinned both for build and with the static release environment.")
+assert(min(image_env_positions) < build_pos,
+       "The exact application image tag must be persisted before compose build.")
+assert(max(image_env_positions) < compose_up_pos,
+       "The exact application image tag must be persisted again before compose up.")
+assert(build_pos < inspect_pos && inspect_pos < prewarm_pos,
+       "The exact image Id must be derived after build and before prewarm.")
+assert(asset_env_pos < compose_up_pos && base_env_pos < compose_up_pos,
+       "Static revision variables must be persisted before compose up.")
+assert(smoke_pos < tunnel_pos,
+       "The internal static smoke must finish before the public tunnel starts.")
+
+required_contracts <- c(
+  "static_revision=\\${static_image_id#sha256:}",
+  "grep -Eq '^[a-f0-9]{64}$'",
+  "CGV_PUBLISH_STATIC_ASSETS=1",
+  "CGV_STATIC_REVISION=\\\"\\$static_revision\\\"",
+  "CGV_IMAGE='${CGV_IMAGE}' CGV_DEPS_IMAGE='${CGV_DEPS_IMAGE}'",
+  "CGV_IMAGE='${CGV_IMAGE}' ${REMOTE_DOCKER} compose -f docker-compose.shinyproxy.yml up -d",
+  "cache/static_assets/releases/",
+  "$static_release/healthz.txt",
+  "upsert_env APP_ASSET_VERSION \\\"\\$static_revision\\\"",
+  "upsert_env APP_STATIC_BASE_URL \\\"/cgv-static/\\$static_revision\\\"",
+  "curl -sS -I --max-time 10 \\\"\\$static_url/healthz.txt\\\"",
+  "Cache-Control:[[:space:]]*public",
+  "find \\\"\\$static_release\\\" -type f",
+  "-iname '*.mp4' -o -iname '*.pdf'",
+  "Range: bytes=0-1",
+  "Content-Range:[[:space:]]*bytes",
+  "HTTP/[0-9.]+ 206"
+)
+assert(all(vapply(required_contracts, grepl, logical(1), x = nas_shinyproxy, fixed = TRUE)),
+       "One or more immutable-static guards are missing from the NAS ShinyProxy deploy.")
+
+assert(!grepl("CGV_PUBLISH_STATIC_ASSETS=1", nas_direct, fixed = TRUE),
+       "The direct NAS deployment must not activate immutable static publication.")
+assert(!grepl("APP_STATIC_BASE_URL=/cgv-static/", nas_direct, fixed = TRUE),
+       "The direct NAS deployment must not opt into the ShinyProxy static route.")
+assert(grepl("inspect --format '{{.Image}}' \\\"\\$delegate\\\"", nas_shinyproxy, fixed = TRUE),
+       "The running ShinyProxy delegate must be tied back to the static image Id.")
+assert(grepl("ps -aq --filter name=sp-container-", nas_shinyproxy, fixed = TRUE),
+       "All delegates from the prior release must be removed regardless of image tag.")
+assert(!grepl("ps -aq --filter ancestor=${CGV_IMAGE}", nas_shinyproxy, fixed = TRUE),
+       "Delegate cleanup must not depend on the new mutable image tag.")
+
+message("NAS ShinyProxy immutable-static deployment contract is guarded.")

@@ -34,14 +34,14 @@ guide_media_path <- function(path) {
       if (is.finite(mtime)) as.character(round(mtime)) else "0",
       if (is.finite(size)) as.character(round(size)) else "0"
     )
-    return(sprintf("%s?gv=%s", path, video_version))
+    return(sprintf("%s?gv=%s", static_asset_path(path), video_version))
   }
   ""
 }
 
-cgv_manual_path <- guide_media_path(file.path("docs", "CGV_User_Manual.pdf"))
+cgv_manual_path <- guide_media_path(file.path("docs", "CGeV_User_Manual.pdf"))
 if (!nzchar(cgv_manual_path)) {
-  cgv_manual_path <- "docs/CGV_User_Manual.pdf"
+  cgv_manual_path <- "docs/CGeV_User_Manual.pdf"
 }
 
 guide_media_files <- c(
@@ -564,7 +564,7 @@ figure_studio_page <- function() {
           id = "figure-studio-back",
           type = "button",
           class = "figure-studio-btn figure-studio-btn-secondary",
-          `data-figure-tooltip` = "Return to the CGV results without deleting this temporary draft",
+          `data-figure-tooltip` = "Return to the CGeV results without deleting this temporary draft",
           icon("arrow-left"),
           span("Back to results")
         ),
@@ -572,7 +572,7 @@ figure_studio_page <- function() {
           id = "figure-studio-new",
           type = "button",
           class = "figure-studio-btn figure-studio-btn-secondary",
-          `data-figure-tooltip` = "Start a clean composition while preserving CGV results",
+          `data-figure-tooltip` = "Start a clean composition while preserving CGeV results",
           icon("file"),
           span("New figure")
         ),
@@ -644,7 +644,7 @@ figure_studio_page <- function() {
         ),
         tags$li(
           span(class = "figure-studio-guide-number", "5"),
-          div(strong("Export or keep working later"), span("Download SVG/PNG. Save the CGV session if you want this draft restored later."))
+          div(strong("Export or keep working later"), span("Download SVG/PNG. Save the CGeV session if you want this draft restored later."))
         )
       )
     ),
@@ -668,7 +668,7 @@ figure_studio_page <- function() {
             tags$input(
               id = "figure-studio-title",
               type = "text",
-              value = "CGV comparative analysis",
+              value = "CGeV comparative analysis",
               maxlength = "140",
               placeholder = "Optional — leave blank for no figure title",
               title = "Optional figure heading. Clear this field to export without a title.",
@@ -782,7 +782,7 @@ figure_studio_page <- function() {
         p(class = "figure-studio-pane-copy", "Choose a data context, then add any available visualization as a new panel."),
         tags$label(
           class = "figure-studio-field figure-studio-field-block",
-          title = "Choose which CGV workflow supplies charts to the library.",
+          title = "Choose which CGeV workflow supplies charts to the library.",
           span("Data context"),
           tags$select(
             id = "figure-studio-context",
@@ -804,7 +804,7 @@ figure_studio_page <- function() {
         div(
           class = "figure-studio-library-note",
           icon("info-circle"),
-          span("Unavailable charts remain visible and explain which CGV result must be generated first.")
+          span("Unavailable charts remain visible and explain which CGeV result must be generated first.")
         )
       ),
       div(
@@ -817,7 +817,7 @@ figure_studio_page <- function() {
             strong(id = "figure-studio-panel-summary", "0 panels"),
             span(
               id = "figure-studio-save-status",
-              title = "This temporary draft is kept only when you save the CGV session.",
+              title = "This temporary draft is kept only when you save the CGeV session.",
               "Temporary draft"
             )
           ),
@@ -1329,6 +1329,7 @@ fluidPage(
           var desktopDatasetProgress = {};
           var desktopDatasetManifest = null;
           var desktopDatasetRemovalSelection = new Set();
+          var desktopDatasetRefreshPromise = null;
 
           function isInstalledDesktopDataset(item) {
             var status = item && item.local && item.local.status || '';
@@ -1436,7 +1437,7 @@ fluidPage(
             if (cachePath && manifest && manifest.cacheRoot) cachePath.textContent = manifest.cacheRoot;
 
             if (!window.cgvDesktop) {
-              root.innerHTML = '<div class=\"desktop-organism-empty\">Desktop organism downloads are available only in CGV Desktop.</div>';
+              root.innerHTML = '<div class=\"desktop-organism-empty\">Desktop organism downloads are available only in CGeV Desktop.</div>';
               return;
             }
             if (!datasets.length) {
@@ -1713,8 +1714,52 @@ fluidPage(
             return listPromise;
           }
 
+          function requestDesktopDatasets(options) {
+            options = options || {};
+            // Share only the currently active request. Once it settles, a later
+            // Settings activation or explicit Refresh must revalidate again.
+            if (!desktopDatasetRefreshPromise) {
+              desktopDatasetRefreshPromise = Promise.resolve()
+                .then(function() { return refreshDesktopDatasets(); })
+                .then(function(manifest) {
+                  desktopDatasetRefreshPromise = null;
+                  return manifest;
+                }, function(error) {
+                  desktopDatasetRefreshPromise = null;
+                  throw error;
+                });
+            }
+            if (!options.clearStatus) return desktopDatasetRefreshPromise;
+            return desktopDatasetRefreshPromise.then(function(manifest) {
+              if (manifest) clearDesktopOrganismStatusIfIdle();
+              return manifest;
+            });
+          }
+
+          function desktopSettingsIsActive() {
+            var settingsRoot = document.querySelector('.app-settings-pane');
+            var pane = settingsRoot && settingsRoot.closest ? settingsRoot.closest('.tab-pane') : null;
+            if (pane && (pane.classList.contains('active') || pane.classList.contains('show'))) return true;
+            var activeTab = document.querySelector('#navtabs li.active > a[data-value=\"settings\"], #navtabs a.active[data-value=\"settings\"]');
+            if (activeTab) return true;
+            return !!document.querySelector('.app-nav-btn.is-active[data-target=\"settings\"]');
+          }
+
+          function eventActivatesDesktopSettings(event) {
+            if (event && event.name === 'navtabs' && event.value === 'settings') return true;
+            var target = event && event.target;
+            var settingsTarget = target && target.closest
+              ? target.closest('.app-nav-btn[data-target=\"settings\"], #navtabs a[data-value=\"settings\"]')
+              : null;
+            if (settingsTarget) return true;
+            return !!(event && String(event.type || '').indexOf('shown') === 0 && desktopSettingsIsActive());
+          }
+
+          function activateDesktopDatasetsFromEvent(event) {
+            if (eventActivatesDesktopSettings(event)) requestDesktopDatasets();
+          }
+
           document.addEventListener('DOMContentLoaded', function() {
-            refreshDesktopDatasets();
             var openCatalogBtn = document.getElementById('desktop-organism-open-catalog');
             var closeCatalogBtn = document.getElementById('desktop-organism-modal-close');
             var catalogModal = document.getElementById('desktop-organism-modal');
@@ -1729,6 +1774,7 @@ fluidPage(
             var removalSubmitBtn = document.getElementById('desktop-organism-remove-selected');
             function openCatalogModal() {
               if (!catalogModal) return;
+              requestDesktopDatasets();
               catalogModal.classList.add('is-open');
               catalogModal.setAttribute('aria-hidden', 'false');
               renderDesktopOrganismModalList();
@@ -1768,7 +1814,7 @@ fluidPage(
             });
             var refreshBtn = document.getElementById('desktop-organism-refresh');
             if (refreshBtn) refreshBtn.addEventListener('click', function() {
-              refreshDesktopDatasets({ clearStatus: true });
+              requestDesktopDatasets({ clearStatus: true });
             });
             var resetBtn = document.getElementById('desktop-organism-reset');
             if (resetBtn) resetBtn.addEventListener('click', openRemovalModal);
@@ -1851,10 +1897,20 @@ fluidPage(
                 }
               });
             }
+            document.addEventListener('click', activateDesktopDatasetsFromEvent);
+            document.addEventListener('shown.bs.tab', activateDesktopDatasetsFromEvent);
+            if (window.jQuery) {
+              jQuery(document).on('shown.bs.tab.cgvDesktopDatasets', activateDesktopDatasetsFromEvent);
+              jQuery(document).on('shiny:inputchanged.cgvDesktopDatasets', function(event) {
+                if (event.name === 'navtabs' && event.value === 'settings') requestDesktopDatasets();
+              });
+            }
+            if (!window.cgvDesktop) renderDesktopDatasets({ datasets: [] });
+            else if (desktopSettingsIsActive()) requestDesktopDatasets();
           });
         })();
       ")),
-      tags$title("CGV | Comparative Gene Viewer"),
+      tags$title("CGeV | Comparative Gene Viewer"),
       tags$link(rel = "stylesheet", href = versioned_asset_path("css/cross_species_header_status.css")),
       tags$link(rel = "stylesheet", href = versioned_asset_path("css/cgv_desktop_downloads.css")),
       tags$script(HTML(sprintf(
@@ -4794,7 +4850,7 @@ fluidPage(
       ),
       div(
         class = "app-work-indicator-copy",
-        tags$strong(id = "app-work-indicator-headline", "CGV is working"),
+        tags$strong(id = "app-work-indicator-headline", "CGeV is working"),
         span(id = "app-work-indicator-detail", "Processing data…")
       )
     ),
@@ -4818,11 +4874,11 @@ fluidPage(
             class = "app-brand-logo",
             `data-light-src` = versioned_asset_path("favicon2.ico?v=2"),
             `data-dark-src` = versioned_asset_path("favicon.ico?v=2"),
-            alt = "CGV logo"
+            alt = "CGeV logo"
           ),
           div(
             class = "app-brand-text",
-            div(class = "app-brand-title", "CGV"),
+            div(class = "app-brand-title", "CGeV"),
             div(class = "app-brand-divider"),
             div(
               class = "app-brand-descriptor",
@@ -5189,7 +5245,7 @@ fluidPage(
           icon("object-group"),
           span("Figure Studio")
         ),
-        tags$button(type = "button", class = "app-nav-btn", `data-target` = "guide", title = "CGV Guide", icon("route"), span("CGV Guide")),
+        tags$button(type = "button", class = "app-nav-btn", `data-target` = "guide", title = "CGeV Guide", icon("route"), span("CGeV Guide")),
         tags$button(type = "button", class = "app-nav-btn", `data-target` = "settings", title = "Settings", icon("cog"), span("Settings")),
 
         tags$button(type = "button", class = "app-nav-btn", `data-target` = "feedback", title = "Feedback", icon("comment-dots"), span("Feedback")),
@@ -5197,11 +5253,11 @@ fluidPage(
           type = "button",
           class = "app-nav-btn app-nav-btn-desktop",
           `data-target` = "desktop-app",
-          `data-tooltip` = "CGV Desktop downloads",
-          `aria-label` = "CGV Desktop downloads",
-          title = "CGV Desktop downloads",
+          `data-tooltip` = "CGeV Desktop downloads",
+          `aria-label` = "CGeV Desktop downloads",
+          title = "CGeV Desktop downloads",
           icon("laptop"),
-          span("CGV Desktop")
+          span("CGeV Desktop")
         ),
         div(class = "app-nav-separator"),
         div(
@@ -5365,7 +5421,7 @@ fluidPage(
         type = "hidden",
         selected = "home",
         tabPanel(
-          title = "CGV Guide",
+          title = "CGeV Guide",
           value = "guide",
           div(
             class = "content-wrapper app-main-pane app-guide-pane",
@@ -5378,7 +5434,7 @@ fluidPage(
                   class = "guide-route-intro",
                   div(
                     class = "guide-intro-copy",
-                    span(class = "guide-kicker", icon("route"), "CGV Guide"),
+                    span(class = "guide-kicker", icon("route"), "CGeV Guide"),
                     h1(class = "guide-title", "Choose a workflow, then follow each step"),
                     p(class = "guide-subtitle", "Use the video routes for a guided walkthrough or open the complete Web and Desktop reference.")
                   ),
@@ -5388,7 +5444,7 @@ fluidPage(
                     div(
                       class = "guide-manual-copy",
                       span(class = "guide-manual-eyebrow", "Complete documentation"),
-                      strong("CGV User Manual"),
+                      strong("CGeV User Manual"),
                       tags$small("English · Web and Desktop · Always opens the latest published edition")
                     ),
                     div(
@@ -5398,15 +5454,15 @@ fluidPage(
                         target = "_blank",
                         rel = "noopener noreferrer",
                         class = "guide-manual-open",
-                        `aria-label` = "Open the latest CGV User Manual",
+                        `aria-label` = "Open the latest CGeV User Manual",
                         icon("arrow-up-right-from-square"),
                         span("Open manual")
                       ),
                       tags$a(
                         href = cgv_manual_path,
-                        download = "CGV_User_Manual.pdf",
+                        download = "CGeV_User_Manual.pdf",
                         class = "guide-manual-download",
-                        `aria-label` = "Download the latest CGV User Manual PDF",
+                        `aria-label` = "Download the latest CGeV User Manual PDF",
                         icon("download"),
                         span("PDF")
                       )
@@ -5465,7 +5521,7 @@ fluidPage(
                   span(class = "guide-route-icon", icon("object-group")),
                   span(class = "guide-route-copy",
                     tags$strong("Figure Studio"),
-                    tags$small("Compose CGV results as a publication-ready multi-panel figure.")
+                    tags$small("Compose CGeV results as a publication-ready multi-panel figure.")
                   )
                 )
               ),
@@ -5571,7 +5627,7 @@ fluidPage(
                   class = "guide-video-shell",
                   div(
                     class = "guide-media-caption",
-                    h3(id = "guide-media-title", "Welcome to CGV Guide"),
+                    h3(id = "guide-media-title", "Welcome to CGeV Guide"),
                     p(id = "guide-media-copy", "Choose a workflow, then select the step you want to learn. The intro video appears here until you pick a specific step.")
                   ),
                   div(
@@ -5635,8 +5691,8 @@ fluidPage(
                         copy: 'Select the organism or assembly that will define the annotation set for the Multi-Gene workflow.',
                         short: 'Preloaded, NCBI, or upload.',
                         substeps: [
-                          { title: 'Preloaded organism', short: 'Use an available organism.', copy: 'Choose an organism whose reference annotation and genome are available in this CGV session. Hosted deployments may provide references directly, while CGV Desktop installs them on demand.', media: guideVideo('guide-multigene-01a-preloaded-organism.mp4') },
-                          { title: 'NCBI search', short: 'Find a new assembly.', copy: 'Search NCBI when the organism is not preloaded, then let CGV prepare the selected assembly for the workflow.', media: guideVideo('guide-multigene-01b-ncbi-search.mp4') },
+                          { title: 'Preloaded organism', short: 'Use an available organism.', copy: 'Choose an organism whose reference annotation and genome are available in this CGeV session. Hosted deployments may provide references directly, while CGeV Desktop installs them on demand.', media: guideVideo('guide-multigene-01a-preloaded-organism.mp4') },
+                          { title: 'NCBI search', short: 'Find a new assembly.', copy: 'Search NCBI when the organism is not preloaded, then let CGeV prepare the selected assembly for the workflow.', media: guideVideo('guide-multigene-01b-ncbi-search.mp4') },
                           { title: 'Upload files', short: 'Bring your own data.', copy: 'Upload compatible annotation and genome files when you want to work with your own local dataset.', media: guideVideo('guide-multigene-01c-upload-files.mp4') }
                         ]
                       },
@@ -5646,7 +5702,7 @@ fluidPage(
                         short: 'One gene or batch genes.',
                         substeps: [
                           { title: 'Add one gene', short: 'Search a single gene.', copy: 'Enter one gene name, select the best match when suggestions appear, and add it to the current analysis.', media: guideVideo('guide-multigene-02a-add-one-gene.mp4') },
-                          { title: 'Add batch genes', short: 'Build a comparison set.', copy: 'Add several genes to the batch list before running the visualization, so CGV can render them as one comparison.', media: guideVideo('guide-multigene-02b-add-batch-genes.mp4') }
+                          { title: 'Add batch genes', short: 'Build a comparison set.', copy: 'Add several genes to the batch list before running the visualization, so CGeV can render them as one comparison.', media: guideVideo('guide-multigene-02b-add-batch-genes.mp4') }
                         ]
                       },
                       {
@@ -5688,16 +5744,16 @@ fluidPage(
                     steps: [
                       {
                         title: 'Choose organisms',
-                        copy: 'Build the organism set that CGV will use for the cross-species comparison.',
+                        copy: 'Build the organism set that CGeV will use for the cross-species comparison.',
                         short: 'Preloaded, NCBI, upload, or mixed.',
                         substeps: [
-                          { title: 'Preloaded organisms', short: 'Use available species.', copy: 'Select organisms from the available registry when their annotations and genomes are ready in this session. In CGV Desktop, install organisms from the catalog before using them here.', media: guideVideo('guide-cross-01a-preloaded-organisms.mp4') },
+                          { title: 'Preloaded organisms', short: 'Use available species.', copy: 'Select organisms from the available registry when their annotations and genomes are ready in this session. In CGeV Desktop, install organisms from the catalog before using them here.', media: guideVideo('guide-cross-01a-preloaded-organisms.mp4') },
                           { title: 'NCBI search', short: 'Add external assemblies.', copy: 'Search NCBI to add organisms or assemblies that are not part of the preloaded set.', media: guideVideo('guide-cross-01b-ncbi-search.mp4') },
                           { title: 'Upload files', short: 'Use your own data.', copy: 'Upload compatible annotation and genome files for organisms that should be included in the comparison.', media: guideVideo('guide-cross-01c-upload-files.mp4') },
                           { title: 'Mixed sources', short: 'Combine inputs.', copy: 'Combine preloaded organisms, NCBI-downloaded assemblies, and uploaded files in the same cross-species analysis.', media: guideVideo('guide-cross-01d-mixed-sources.mp4') }
                         ]
                       },
-                      { title: 'Search gene', copy: 'Enter one target gene and let CGV resolve compatible identifiers across the selected organisms. Additional family members found only within individual organisms are not listed here; use Multi-Gene Search to explore a family in one organism.', short: 'Focus on one shared gene.', media: guideVideo('guide-cross-02-search-gene.mp4') },
+                      { title: 'Search gene', copy: 'Enter one target gene and let CGeV resolve compatible identifiers across the selected organisms. Additional family members found only within individual organisms are not listed here; use Multi-Gene Search to explore a family in one organism.', short: 'Focus on one shared gene.', media: guideVideo('guide-cross-02-search-gene.mp4') },
                       {
                         title: 'Generate visualization',
                         copy: 'Click Generate visualization to render the selected cross-species comparison and keep the returned charts in the workspace.',
@@ -5733,30 +5789,30 @@ fluidPage(
                   },
                   common: {
                     title: 'Common Analysis',
-                    summary: 'Shared tools for interpreting models, charts, reports, sessions, settings, and cleanup in CGV.',
+                    summary: 'Shared tools for interpreting models, charts, reports, sessions, settings, and cleanup in CGeV.',
                     open: '',
                     steps: [
                       { title: 'Review analytics charts', copy: 'Analyze the statistics generated from the current visualizations, including structural and sequence-derived summaries.', short: 'Statistics from rendered data.', media: guideVideo('guide-common-01-review-analytics-charts.mp4') },
                       { title: 'Review tables/results', copy: 'Inspect the tables and result summaries that support the currently rendered gene or cross-species views.', short: 'Structured result views.', media: guideVideo('guide-common-02-review-tables-results.mp4') },
                       { title: 'Visualize transcript variants', copy: 'Compare transcript isoforms from the same gene to inspect differences in exon structure, CDS organization, UTRs, and transcript length.', short: 'Isoforms from one gene.', media: guideVideo('guide-common-03-visualize-transcript-variants.mp4') },
-                      { title: 'Inspect gene information', copy: 'Open gene context layers from available external databases and CGV popups to add biological meaning to the visualization.', short: 'External database context.', media: guideVideo('guide-common-04-inspect-gene-information.mp4') },
+                      { title: 'Inspect gene information', copy: 'Open gene context layers from available external databases and CGeV popups to add biological meaning to the visualization.', short: 'External database context.', media: guideVideo('guide-common-04-inspect-gene-information.mp4') },
                       { title: 'Download promoter sequences', copy: 'Use promoter tools when you need upstream sequence context associated with the selected gene model.', short: 'Promoter sequence context.', media: guideVideo('guide-common-05-download-promoter-sequences.mp4') },
-                      { title: 'Review literature', copy: 'Inspect literature associated with the gene when CGV can connect the gene context to papers or external references.', short: 'Gene-associated papers.', media: guideVideo('guide-common-06-review-literature.mp4') },
+                      { title: 'Review literature', copy: 'Inspect literature associated with the gene when CGeV can connect the gene context to papers or external references.', short: 'Gene-associated papers.', media: guideVideo('guide-common-06-review-literature.mp4') },
                       { title: 'Review organism and assembly info', copy: 'Open organism photos, assembly reports, assembly statistics, and related organism metadata when available.', short: 'Organisms, assemblies, photos.', media: guideVideo('guide-common-07-review-organism-assembly-info.mp4') },
-                      { title: 'Configure external alias lookup', copy: 'Turn external alias lookup sources on or off to control which databases CGV uses when local gene names do not match directly.', short: 'Control alias databases.', media: guideVideo('guide-common-08-configure-external-alias-lookup.mp4') },
+                      { title: 'Configure external alias lookup', copy: 'Turn external alias lookup sources on or off to control which databases CGeV uses when local gene names do not match directly.', short: 'Control alias databases.', media: guideVideo('guide-common-08-configure-external-alias-lookup.mp4') },
                       {
                         title: 'Sessions',
                         copy: 'Save or restore work sessions so you can continue an analysis without rebuilding it from scratch.',
                         short: 'Save or load work.',
                         substeps: [
                           { title: 'Save work session', short: 'Export current state.', copy: 'Save the current plots and settings as a session file when you want to return to the same analysis later.', media: guideVideo('guide-common-09a-save-work-session.mp4') },
-                          { title: 'Load work session', short: 'Restore previous state.', copy: 'Load a previously saved session file to restore plots and settings into the current CGV session.', media: guideVideo('guide-common-09b-load-work-session.mp4') }
+                          { title: 'Load work session', short: 'Restore previous state.', copy: 'Load a previously saved session file to restore plots and settings into the current CGeV session.', media: guideVideo('guide-common-09b-load-work-session.mp4') }
                         ]
                       },
                       {
                         title: window.cgvDesktop ? 'Export interactive report' : 'Share analysis',
                         copy: window.cgvDesktop
-                          ? 'Use Share to save a self-contained read-only HTML report and reproducibility ZIP locally. CGV Desktop does not upload the analysis or create a public URL.'
+                          ? 'Use Share to save a self-contained read-only HTML report and reproducibility ZIP locally. CGeV Desktop does not upload the analysis or create a public URL.'
                           : 'Use Share to create an expiring secret read-only URL. Choose Multi-Gene, Cross-Species, or both, review privacy and download options, and copy the completed link for the intended readers.',
                         short: window.cgvDesktop ? 'Save HTML and ZIP locally.' : 'Create a secret read-only link.',
                         media: window.cgvDesktop
@@ -5768,19 +5824,19 @@ fluidPage(
                   },
                   'figure-studio': {
                     title: 'Figure Studio',
-                    summary: 'Turn structural views, alignments, analytics, and labels already generated in CGV into one reusable multi-panel figure.',
+                    summary: 'Turn structural views, alignments, analytics, and labels already generated in CGeV into one reusable multi-panel figure.',
                     open: 'figure-studio',
                     steps: [
                       {
                         title: 'Open the workspace',
-                        copy: 'Open Figure Studio after generating the CGV results you want to compose. The source library only includes figures available in the current analysis.',
+                        copy: 'Open Figure Studio after generating the CGeV results you want to compose. The source library only includes figures available in the current analysis.',
                         short: 'Start from current results.',
                         media: guideVideo('guide-figure-studio-01-open-workspace.mp4')
                       },
                       {
                         title: 'Add source panels',
                         copy: 'Choose gene structures, synteny or alignment views, analytics charts, and other available SVG sources, then add the required panels to the canvas.',
-                        short: 'Choose CGV visual sources.',
+                        short: 'Choose CGeV visual sources.',
                         media: guideVideo('guide-figure-studio-02-add-panels.mp4')
                       },
                       {
@@ -5799,14 +5855,14 @@ fluidPage(
                   },
                   'desktop-downloads': {
                     title: 'Desktop Downloads',
-                    summary: 'Install organisms from the CGV Desktop catalog. The base installer ships without organisms; up to 25 installable organisms are available depending on the catalog and what you choose to download.',
+                    summary: 'Install organisms from the CGeV Desktop catalog. The base installer ships without organisms; up to 25 installable organisms are available depending on the catalog and what you choose to download.',
                     open: 'settings',
                     desktopOnly: true,
                     steps: [
-                      { title: 'Open Settings', copy: 'Go to Settings and find the Organisms section. This section is available only in CGV Desktop.', short: 'Go to Settings.', media: guideVideo('guide-desktop-downloads-01-open-settings.mp4') },
+                      { title: 'Open Settings', copy: 'Go to Settings and find the Organisms section. This section is available only in CGeV Desktop.', short: 'Go to Settings.', media: guideVideo('guide-desktop-downloads-01-open-settings.mp4') },
                       { title: 'Open organism catalog', copy: 'Click Open catalog to view the downloadable organism library for this desktop profile.', short: 'View the library.', media: guideVideo('guide-desktop-downloads-02-open-organism-catalog.mp4') },
                       { title: 'Search or filter', copy: 'Use search and status filters to find an organism. The catalog can provide up to 25 installable organisms, but only downloaded organisms appear in Preloaded selectors.', short: 'Find an organism.', media: guideVideo('guide-desktop-downloads-03-search-and-filter.mp4') },
-                      { title: 'Download organism', copy: 'Click Download for the organism you need. CGV Desktop downloads the package, verifies it, extracts it, and installs local caches.', short: 'Install references.', media: guideVideo('guide-desktop-downloads-04-download-organism.mp4') },
+                      { title: 'Download organism', copy: 'Click Download for the organism you need. CGeV Desktop downloads the package, verifies it, extracts it, and installs local caches.', short: 'Install references.', media: guideVideo('guide-desktop-downloads-04-download-organism.mp4') },
                       { title: 'Confirm availability', copy: 'After installation, return to Multi-Gene or Cross-Species Search and choose the organism from the Preloaded organism selectors.', short: 'Use the organism.', media: guideVideo('guide-desktop-downloads-05-confirm-availability.mp4') },
                       { title: 'Remove organisms', copy: 'Choose one, several, or all installed catalog organisms and remove only the selected local datasets and caches.', short: 'Selective cleanup.', media: guideVideo('guide-desktop-downloads-06-remove-installed-organisms.mp4') }
                     ]
@@ -5835,7 +5891,7 @@ fluidPage(
                 var currentMediaContent = null;
                 var introMedia = guideVideo('guide-intro.mp4');
                 var introContent = {
-                  title: 'Welcome to CGV Guide',
+                  title: 'Welcome to CGeV Guide',
                   copy: 'Choose a workflow, then select the step you want to learn. The intro video appears here until you pick a specific step.',
                   media: introMedia
                 };
@@ -6276,7 +6332,7 @@ fluidPage(
           figure_studio_page()
         ),
         tabPanel(
-          title = "CGV Desktop",
+          title = "CGeV Desktop",
           value = "desktop-app",
           cgv_desktop_downloads_page()
         ),
@@ -7360,7 +7416,7 @@ fluidPage(
               div(
                 class = "help-section",
                 h3(icon("share-nodes"), span("Shared analysis reports")),
-                p("Secret read-only reports created in this browser appear below. They can be copied or revoked without a CGV account."),
+                p("Secret read-only reports created in this browser appear below. They can be copied or revoked without a CGeV account."),
                 div(id = "cgv-shared-report-list", class = "cgv-shared-report-list"),
                 p(
                   class = "app-submenu-hint",
@@ -7387,7 +7443,7 @@ fluidPage(
                   class = "feedback-hero-copy",
                   div(class = "feedback-kicker", icon("comment-dots"), span("Community Feedback")),
                   h2("Feedback & Support"),
-                  p("Help us improve CGV. Report bugs, suggest features, or flag rough edges in the workflow."),
+                  p("Help us improve CGeV. Report bugs, suggest features, or flag rough edges in the workflow."),
                   div(
                     class = "feedback-pill-row home-stagger-parent",
                     span(class = "feedback-pill home-stagger-child", icon("flask"), span("Scientific workflows")),
@@ -7403,7 +7459,7 @@ fluidPage(
                 div(
                   class = "feedback-manual-prompt-copy",
                   span("Documentation"),
-                  h3("Check the CGV User Manual"),
+                  h3("Check the CGeV User Manual"),
                   p("Search the complete Web and Desktop reference for workflows, interpretation guidance, exports, and troubleshooting.")
                 ),
                 tags$a(
@@ -7411,7 +7467,7 @@ fluidPage(
                   target = "_blank",
                   rel = "noopener noreferrer",
                   class = "feedback-manual-prompt-action",
-                  `aria-label` = "Open the latest CGV User Manual",
+                  `aria-label` = "Open the latest CGeV User Manual",
                   icon("arrow-up-right-from-square"),
                   span("Open manual")
                 )
@@ -7427,7 +7483,7 @@ fluidPage(
                   div(class = "feedback-info-card-icon", icon("circle-info")),
                   h4("What we capture automatically"),
                   tags$ul(
-                    tags$li("The CGV section active when you submitted."),
+                    tags$li("The CGeV section active when you submitted."),
                     tags$li("Submission timestamp and page context."),
                     tags$li("Your contact details for follow-up.")
                   )
@@ -7440,7 +7496,7 @@ fluidPage(
                   h4("What happens after you send it?"),
                   tags$ul(
                     class = "feedback-step-list",
-                    tags$li(span(class = "feedback-step-num", "1"), "Your report is delivered to the CGV inbox."),
+                    tags$li(span(class = "feedback-step-num", "1"), "Your report is delivered to the CGeV inbox."),
                     tags$li(span(class = "feedback-step-num", "2"), "Bug reports blocking analysis get reviewed first."),
                     tags$li(span(class = "feedback-step-num", "3"), "Suggestions shape community-facing improvements.")
                   )
@@ -7532,7 +7588,7 @@ fluidPage(
                       h3(icon("lightbulb"), span("Feature suggestion")),
                       textInput("sugg_title", HTML('Short Title <span class="field-required">*</span>'), placeholder = "Example: Add PDF export for publication-ready figures", width = "100%"),
                       textAreaInput("sugg_problem", HTML('What is missing or difficult today? <span class="field-required">*</span>'), placeholder = "Describe the gap in the current workflow.", width = "100%", rows = 4),
-                      textAreaInput("sugg_idea", "What would you like CGV to do? (Optional)", placeholder = "Explain the feature or improvement you would like to see.", width = "100%", rows = 4)
+                      textAreaInput("sugg_idea", "What would you like CGeV to do? (Optional)", placeholder = "Explain the feature or improvement you would like to see.", width = "100%", rows = 4)
                     )
                   ),
 

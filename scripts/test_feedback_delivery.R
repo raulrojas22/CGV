@@ -22,7 +22,7 @@ mock_getenv <- function(name, unset = "") {
 config <- feedback_delivery_config(getenv = mock_getenv)
 assert_true(
     identical(config$send_receipt, TRUE),
-    "reporter confirmation defaults on for the verified CGV sending domain"
+    "reporter confirmation defaults on for the verified CGeV sending domain"
 )
 config$public_url <- "https://cgv.mobilomics.org"
 config$backup_url <- "https://cgvapp.com"
@@ -30,23 +30,23 @@ config$logo_path <- ""
 config$send_receipt <- TRUE
 assert_true(
     identical(config$to_email, "cgvviewer@gmail.com"),
-    "blank recipient falls back to the CGV Gmail inbox"
+    "blank recipient falls back to the CGeV Gmail inbox"
 )
 assert_true(
-    identical(config$from_email, "CGV Feedback <feedback@cgvapp.com>"),
-    "blank sender falls back to the verified CGV sending domain"
+    identical(config$from_email, "CGeV Feedback <feedback@cgvapp.com>"),
+    "blank sender falls back to the verified CGeV sending domain"
 )
 
 payload <- list(
     submission_id = "feedback_test_123",
     reporter_email = "scientist@example.org",
-    subject = "[CGV Bug] Example report",
+    subject = "[CGeV Bug] Example report",
     message = "Example feedback body"
 )
 body <- feedback_email_body(payload, config)
 assert_true(
     identical(unlist(body$to), "cgvviewer@gmail.com"),
-    "email body targets the CGV Gmail inbox"
+    "email body targets the CGeV Gmail inbox"
 )
 assert_true(
     identical(unlist(body$reply_to), "scientist@example.org"),
@@ -61,11 +61,11 @@ assert_true(
 )
 assert_true(
     grepl("<html>", body$html, fixed = TRUE),
-    "CGV inbox notification includes an HTML version"
+    "CGeV inbox notification includes an HTML version"
 )
 assert_true(
     grepl("scientist@example.org", body$html, fixed = TRUE),
-    "CGV inbox HTML identifies the reporter email"
+    "CGeV inbox HTML identifies the reporter email"
 )
 
 receipt_body <- feedback_email_body(payload, config, kind = "receipt")
@@ -75,7 +75,7 @@ assert_true(
 )
 assert_true(
     identical(unlist(receipt_body$reply_to), "cgvviewer@gmail.com"),
-    "confirmation replies return to the CGV inbox"
+    "confirmation replies return to the CGeV inbox"
 )
 assert_true(
     grepl("We received your feedback", receipt_body$html, fixed = TRUE),
@@ -84,7 +84,7 @@ assert_true(
 assert_true(
     grepl("https://cgv.mobilomics.org", receipt_body$html, fixed = TRUE) &&
         grepl("https://cgvapp.com", receipt_body$html, fixed = TRUE),
-    "confirmation identifies the official CGV site and its backup"
+    "confirmation identifies the official CGeV site and its backup"
 )
 assert_true(
     identical(

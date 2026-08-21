@@ -23,8 +23,8 @@ stopifnot(grepl("LASTZ is computationally intensive and may take several minutes
 stopifnot(grepl('headline = "Please be patient"', server_source, fixed = TRUE))
 stopifnot(grepl("auto_open = TRUE", server_source, fixed = TRUE))
 stopifnot(grepl("Report generation can take several minutes.", report_source, fixed = TRUE))
-stopifnot(grepl("This is one of CGV's most intensive processes.", report_source, fixed = TRUE))
+stopifnot(grepl("This is one of CGeV's most intensive processes.", report_source, fixed = TRUE))
 stopifnot(grepl("Optional and computationally intensive.", report_source, fixed = TRUE))
-stopifnot(grepl("keep CGV open and please wait", report_source, fixed = TRUE))
+stopifnot(grepl("keep CGeV open and please wait", report_source, fixed = TRUE))
 
 cat("Long-running task warning checks passed.\n")

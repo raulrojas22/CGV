@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Safe application-only deployment for CGV on Colors.
+# Safe CGV release deployment for Colors.
 #
-# This script preserves ShinyProxy, nginx, the socket proxy, their Compose file,
-# and persistent biological data. It builds a versioned CGV image, adds only
-# allow-listed runtime flags to the backed-up ShinyProxy config, and switches
-# the already-hardened stack to the new release.
+# This script preserves ShinyProxy, the socket proxy, the server-owned Compose
+# file, and persistent biological data. It builds a versioned CGV image and
+# prepares one canonical marked location in the backed-up server-owned nginx
+# config via candidate + nginx -t + atomic rename before switching releases.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -13,6 +13,7 @@ REMOTE_PATH="${REMOTE_PATH:-/home/rarojas/cgv}"
 APP_DIR="${REMOTE_PATH}/app"
 PUBLIC_HOSTNAME="${PUBLIC_HOSTNAME:-cgv.mobilomics.org}"
 COMPOSE_FILE="${APP_DIR}/docker-compose.shinyproxy.colors.yml"
+COLORS_NGINX_CONFIG="${APP_DIR}/deploy/nginx/cgv-shinyproxy-colors.conf"
 BACKGROUND_WORKER_NAME="cgv-background-report-worker"
 BACKGROUND_REPORT_MEMORY="${BACKGROUND_REPORT_MEMORY:-4g}"
 APP_LASTZ_GLOBAL_WORKERS="${APP_LASTZ_GLOBAL_WORKERS:-2}"
@@ -92,7 +93,7 @@ done
 [[ "$PUBLIC_HOSTNAME" =~ ^[A-Za-z0-9.-]+$ ]] || \
   die "PUBLIC_HOSTNAME no es válido"
 
-for command_name in curl git ssh rsync shasum; do
+for command_name in curl git ssh rsync shasum python3; do
   command -v "$command_name" >/dev/null 2>&1 || die "falta el comando local '${command_name}'"
 done
 
@@ -150,12 +151,13 @@ ssh -o BatchMode=yes -o ConnectTimeout=10 -o ControlMaster=yes \
   -o ControlPersist=60 -S "$SSH_SOCK" -fN "$REMOTE_TARGET"
 
 echo "[preflight] Auditando infraestructura segura en Colors..."
-rssh "command -v podman >/dev/null && command -v podman-compose >/dev/null"
+rssh "command -v podman >/dev/null && command -v podman-compose >/dev/null && command -v python3 >/dev/null"
 rssh "podman info >/dev/null"
-rssh "test -s '${COMPOSE_FILE}' && test -s '${APP_DIR}/shinyproxy/application.yml' && test -s '${APP_DIR}/.env'"
+rssh "test -s '${COMPOSE_FILE}' && test -s '${APP_DIR}/shinyproxy/application.yml' && test -s '${APP_DIR}/.env' && test -s '${COLORS_NGINX_CONFIG}'"
 rssh "grep -q 'docker-socket-proxy' '${COMPOSE_FILE}'"
 rssh "grep -q 'openanalytics/shinyproxy:3.2.4' '${COMPOSE_FILE}'"
 rssh "grep -q 'url: http://docker-socket-proxy:2375' '${APP_DIR}/shinyproxy/application.yml'"
+rssh "grep -q 'container-env-file: /opt/shinyproxy/env/cgv.env' '${APP_DIR}/shinyproxy/application.yml'"
 rssh "podman container exists cgv-docker-socket-proxy && podman container exists cgv-shinyproxy && podman container exists cgv-nginx"
 
 ACTUAL_SP_IMAGE="$(rssh "podman inspect cgv-shinyproxy --format '{{.ImageName}}'")"
@@ -166,6 +168,13 @@ PROXY_MOUNTS="$(rssh "podman inspect cgv-shinyproxy --format '{{range .Mounts}}{
 if grep -qx '/var/run/docker.sock' <<<"$PROXY_MOUNTS"; then
   die "ShinyProxy monta directamente el socket; se aborta antes de tocar producción"
 fi
+grep -qx '/opt/shinyproxy/env/cgv.env' <<<"$PROXY_MOUNTS" || \
+  die "ShinyProxy no monta .env como container-env-file; no se puede activar el namespace estático"
+
+NGINX_MOUNTS="$(rssh "podman inspect cgv-nginx --format '{{range .Mounts}}{{println .Destination}}{{end}}'")"
+grep -qx '/srv/cgv-cache' <<<"$NGINX_MOUNTS" || \
+  die "nginx no monta el cache persistente en /srv/cgv-cache"
+NGINX_RUNTIME_IMAGE="$(rssh "podman inspect cgv-nginx --format '{{.ImageName}}'")"
 
 SOCKET_STATE="$(rssh "podman inspect cgv-docker-socket-proxy --format '{{.State.Health.Status}}'")"
 [[ "$SOCKET_STATE" == "healthy" ]] || die "docker-socket-proxy no está saludable: ${SOCKET_STATE}"
@@ -238,12 +247,21 @@ else
   echo "[1/7] Pruebas omitidas explícitamente con --skip-tests."
 fi
 
+command -v Rscript >/dev/null 2>&1 || die "Rscript no está disponible para calcular el CSP del reporte"
+REPORT_SCRIPT_CSP_HASH="$(
+  cd "$SCRIPT_DIR"
+  Rscript -e "source('R/server_shared_analysis_domain.R'); cat(cgv_report_script_csp_hash())"
+)"
+[[ "$REPORT_SCRIPT_CSP_HASH" =~ ^sha256-[A-Za-z0-9+/]{43}=$ ]] || \
+  die "el hash CSP del reporte no tiene el formato sha256 esperado: ${REPORT_SCRIPT_CSP_HASH}"
+
 DEPLOY_UTC="$(date -u +%Y%m%dT%H%M%SZ)"
 NEW_IMAGE="${CGV_IMAGE:-localhost/cgv:release-${SOURCE_REV}-${DEPLOY_UTC}}"
 [[ "$NEW_IMAGE" == localhost/cgv:release-* ]] || \
   die "CGV_IMAGE debe usar una etiqueta versionada localhost/cgv:release-*"
 [[ "$NEW_IMAGE" != "$CURRENT_IMAGE" ]] || die "la nueva imagen coincide con la release activa"
 BACKUP_DIR="${REMOTE_PATH}/rollback/${DEPLOY_UTC}-pre-app-deploy"
+COLORS_NGINX_CANDIDATE="${COLORS_NGINX_CONFIG}.candidate-${DEPLOY_UTC}"
 
 echo ""
 echo "[2/7] Respaldando configuración y estado actual..."
@@ -315,6 +333,10 @@ rssh "chmod 600 '${REMOTE_EMAIL_ENV}' && test \"\$(stat -c '%a' '${REMOTE_EMAIL_
 # rollback_release().
 rssh "set -e
   config='${APP_DIR}/shinyproxy/application.yml'
+  sed -i -E 's#^  title:.*#  title: CGeV - Comparative Gene Viewer#' \"\$config\"
+  sed -i -E 's#^      display-name:.*#      display-name: CGeV - Comparative Gene Viewer#' \"\$config\"
+  sed -i -E 's#^        FEEDBACK_FROM_EMAIL:.*#        FEEDBACK_FROM_EMAIL: \"\${FEEDBACK_FROM_EMAIL:CGeV Feedback <feedback@cgvapp.com>}\"#' \"\$config\"
+  sed -i -E 's#^        REPORT_FROM_EMAIL:.*#        REPORT_FROM_EMAIL: \"\${REPORT_FROM_EMAIL:CGeV Reports <reports@cgvapp.com>}\"#' \"\$config\"
   if ! grep -q 'APP_BACKGROUND_REPORTS_ENABLED:' \"\$config\"; then
     staged=\"\${config}.background.\$\$\"
     awk '
@@ -357,6 +379,10 @@ rssh "set -e
   grep -q 'APP_PERF_RUN_LABEL: \"${PERF_RUN_LABEL}\"' \"\$config\"
   grep -q 'APP_BUILD_REVISION: \"${NEW_IMAGE}\"' \"\$config\"
   grep -q 'CGV_PUBLIC_BASE_URL: \"https://${PUBLIC_HOSTNAME}\"' \"\$config\"
+  grep -Fq 'title: CGeV - Comparative Gene Viewer' \"\$config\"
+  grep -Fq 'display-name: CGeV - Comparative Gene Viewer' \"\$config\"
+  grep -Fq 'FEEDBACK_FROM_EMAIL: \"\${FEEDBACK_FROM_EMAIL:CGeV Feedback <feedback@cgvapp.com>}\"' \"\$config\"
+  grep -Fq 'REPORT_FROM_EMAIL: \"\${REPORT_FROM_EMAIL:CGeV Reports <reports@cgvapp.com>}\"' \"\$config\"
 "
 
 rssh "set -e
@@ -408,6 +434,11 @@ rssh "cd '${APP_DIR}' && podman build --pull=never \
   --label org.opencontainers.image.created='${DEPLOY_UTC}' \
   -t '${NEW_IMAGE}' -f Dockerfile ."
 
+STATIC_IMAGE_ID="$(rssh "podman image inspect --format '{{.Id}}' '${NEW_IMAGE}'" | tr -d '\r\n')"
+STATIC_REVISION="${STATIC_IMAGE_ID#sha256:}"
+[[ "$STATIC_REVISION" =~ ^[a-f0-9]{64}$ ]] || \
+  die "Podman no devolvió un Id sha256 válido para ${NEW_IMAGE}: ${STATIC_IMAGE_ID}"
+
 LOCAL_HASHES="$(
   cd "$SCRIPT_DIR"
   shasum -a 256 \
@@ -434,6 +465,8 @@ rssh "set -e
   cd '${APP_DIR}'
   DOCKER_BIN=podman \
   CGV_IMAGE='${NEW_IMAGE}' \
+  CGV_PUBLISH_STATIC_ASSETS=1 \
+  CGV_STATIC_REVISION='${STATIC_REVISION}' \
   CGV_ANNOTATIONS_DIR='${APP_DIR}/annotations' \
   CGV_GENOMES_DIR='${APP_DIR}/genomes' \
   CGV_GO_ANNOTATIONS_DIR='${APP_DIR}/go_annotations' \
@@ -444,6 +477,36 @@ rssh "set -e
   ncbi_dir=\$(readlink -f '${REMOTE_PATH}/ncbi_downloads')
   mkdir -p \"\$cache_dir\" \"\$ncbi_dir\"
   podman unshare chown -R 10001:10001 \"\$cache_dir\" \"\$ncbi_dir\"
+  podman unshare chown -R 0:0 \"\$cache_dir/static_assets\"
+  test -s \"\$cache_dir/static_assets/manifests/${STATIC_REVISION}.sha256\"
+  test -d \"\$cache_dir/static_assets/releases/${STATIC_REVISION}\"
+"
+
+echo "  Preparando candidato nginx server-owned y validando sintaxis..."
+rssh "set -e
+  cd '${APP_DIR}'
+  python3 scripts/build_nginx_static_candidate.py \
+    --config '${COLORS_NGINX_CONFIG}' \
+    --snippet '${APP_DIR}/deploy/nginx/cgv-static-assets.location.conf' \
+    --output '${COLORS_NGINX_CANDIDATE}' \
+    --report-script-hash '${REPORT_SCRIPT_CSP_HASH}'
+  grep -q '^    # BEGIN CGV IMMUTABLE STATIC v1$' '${COLORS_NGINX_CANDIDATE}'
+  grep -q 'alias /srv/cgv-cache/static_assets/releases/;' '${COLORS_NGINX_CANDIDATE}'
+  grep -Fq '${REPORT_SCRIPT_CSP_HASH}' '${COLORS_NGINX_CANDIDATE}'
+  podman run --rm \
+    --name 'cgv-nginx-config-test-${DEPLOY_UTC}' \
+    --user 101:101 \
+    --read-only \
+    --network sp-net \
+    --security-opt no-new-privileges \
+    --cap-drop all \
+    --tmpfs /var/cache/nginx:rw,nosuid,nodev,noexec,size=32m \
+    --tmpfs /var/run:rw,nosuid,nodev,noexec,size=8m \
+    --tmpfs /tmp:rw,nosuid,nodev,noexec,size=8m \
+    --volume '${COLORS_NGINX_CANDIDATE}:/etc/nginx/conf.d/default.conf:ro' \
+    --volume '${APP_DIR}/cache:/srv/cgv-cache:ro' \
+    --entrypoint /usr/sbin/nginx \
+    '${NGINX_RUNTIME_IMAGE}' -t
 "
 
 teardown_stack_command="
@@ -555,6 +618,22 @@ PY
   "
 }
 
+verify_static_release() {
+  local expected_revision="$1"
+  rssh "set -e
+    cd '${APP_DIR}'
+    python3 scripts/verify_static_asset_http.py \
+      --base-url http://127.0.0.1:3838 \
+      --revision '${expected_revision}'
+    delegate=\$(podman ps --filter name=sp-container- --filter status=running --format '{{.Names}}' | head -1)
+    test -n \"\$delegate\"
+    podman inspect \"\$delegate\" --format '{{range .Config.Env}}{{println .}}{{end}}' | \
+      grep -qx 'APP_ASSET_VERSION=${expected_revision}'
+    podman inspect \"\$delegate\" --format '{{range .Config.Env}}{{println .}}{{end}}' | \
+      grep -qx 'APP_STATIC_BASE_URL=/cgv-static/${expected_revision}'
+  "
+}
+
 rollback_release() {
   echo "ROLLBACK: restaurando ${CURRENT_IMAGE}..." >&2
   if ! rssh "set -e
@@ -583,7 +662,27 @@ set +e
 rssh "set -e
   cd '${APP_DIR}'
   grep -q '^CGV_IMAGE=' .env
-  sed -i -E 's|^CGV_IMAGE=.*|CGV_IMAGE=${NEW_IMAGE}|' .env
+  test \"\$(grep -c '^CGV_IMAGE=' .env)\" = 1
+  test \"\$(grep -c '^APP_ASSET_VERSION=' .env || true)\" -le 1
+  test \"\$(grep -c '^APP_STATIC_BASE_URL=' .env || true)\" -le 1
+  env_candidate='.env.release-${DEPLOY_UTC}'
+  cp -p .env \"\$env_candidate\"
+  sed -i -E 's|^CGV_IMAGE=.*|CGV_IMAGE=${NEW_IMAGE}|' \"\$env_candidate\"
+  if grep -q '^APP_ASSET_VERSION=' \"\$env_candidate\"; then
+    sed -i -E 's|^APP_ASSET_VERSION=.*|APP_ASSET_VERSION=${STATIC_REVISION}|' \"\$env_candidate\"
+  else
+    printf '%s\n' 'APP_ASSET_VERSION=${STATIC_REVISION}' >> \"\$env_candidate\"
+  fi
+  if grep -q '^APP_STATIC_BASE_URL=' \"\$env_candidate\"; then
+    sed -i -E 's|^APP_STATIC_BASE_URL=.*|APP_STATIC_BASE_URL=/cgv-static/${STATIC_REVISION}|' \"\$env_candidate\"
+  else
+    printf '%s\n' 'APP_STATIC_BASE_URL=/cgv-static/${STATIC_REVISION}' >> \"\$env_candidate\"
+  fi
+  grep -qx 'APP_ASSET_VERSION=${STATIC_REVISION}' \"\$env_candidate\"
+  grep -qx 'APP_STATIC_BASE_URL=/cgv-static/${STATIC_REVISION}' \"\$env_candidate\"
+  test -s '${COLORS_NGINX_CANDIDATE}'
+  mv '${COLORS_NGINX_CANDIDATE}' '${COLORS_NGINX_CONFIG}'
+  mv \"\$env_candidate\" .env
   ${teardown_stack_command}
   CGV_IMAGE='${NEW_IMAGE}' SHINYPROXY_IMAGE='${SHINYPROXY_IMAGE}' \
     podman-compose -f docker-compose.shinyproxy.colors.yml up -d
@@ -595,7 +694,9 @@ if [[ "$CUTOVER_STATUS" -eq 0 ]]; then
 fi
 set -e
 
-if [[ "$CUTOVER_STATUS" -ne 0 ]] || ! wait_for_release "$NEW_IMAGE" 1; then
+if [[ "$CUTOVER_STATUS" -ne 0 ]] || \
+   ! wait_for_release "$NEW_IMAGE" 1 || \
+   ! verify_static_release "$STATIC_REVISION"; then
   echo "ERROR: la nueva release no superó la validación; se inicia rollback." >&2
   if rollback_release; then
     die "deploy revertido correctamente a ${CURRENT_IMAGE}"
@@ -646,6 +747,15 @@ if [[ ! "$PUBLIC_CODE" =~ ^[23][0-9][0-9]$ ]]; then
     die "deploy revertido correctamente a ${CURRENT_IMAGE}"
   fi
   die "falló la URL pública y también el rollback; usa ${BACKUP_DIR}"
+fi
+if ! python3 -B "${SCRIPT_DIR}/scripts/verify_static_asset_http.py" \
+  --base-url "https://${PUBLIC_HOSTNAME}" \
+  --revision "$STATIC_REVISION"; then
+  echo "ERROR: los assets inmutables fallaron por la URL pública; se inicia rollback." >&2
+  if rollback_release; then
+    die "deploy revertido correctamente a ${CURRENT_IMAGE}"
+  fi
+  die "falló la entrega estática pública y también el rollback; usa ${BACKUP_DIR}"
 fi
 
 echo ""

@@ -3,7 +3,7 @@
   "label": "Xenopus laevis",
   "speciesId": "xenopus_laevis_gcf_017654675_1_xenopus_laevis_v10_1_genomic",
   "version": "2026.09",
-  "description": "Xenopus laevis CGV Desktop dataset package.",
+  "description": "Xenopus laevis CGeV Desktop dataset package.",
   "downloadable": true,
   "sizeBytes": 795685145,
   "package": {

@@ -1,4 +1,4 @@
-name: CGV Desktop Linux x64
+name: CGeV Desktop Linux x64
 
 on:
   workflow_dispatch:
@@ -113,11 +113,11 @@ jobs:
       - name: Upload Linux installers
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: CGV-Desktop-Linux-x64-${{ steps.release.outputs.version }}
+          name: CGeV-Desktop-Linux-x64-${{ steps.release.outputs.version }}
           if-no-files-found: error
           retention-days: 14
           path: |
-            desktop/dist/CGV-Desktop-${{ steps.release.outputs.version }}-Linux-x86_64.AppImage
-            desktop/dist/CGV-Desktop-${{ steps.release.outputs.version }}-Linux-amd64.deb
+            desktop/dist/CGeV-Desktop-${{ steps.release.outputs.version }}-Linux-x86_64.AppImage
+            desktop/dist/CGeV-Desktop-${{ steps.release.outputs.version }}-Linux-amd64.deb
             desktop/dist/latest-linux.yml
             desktop/dist/SHA256SUMS-linux-x64.txt

@@ -1,5 +1,6 @@
 const { app, BrowserWindow, dialog, ipcMain, Menu, shell } = require("electron");
 const { autoUpdater } = require("electron-updater");
+const crypto = require("crypto");
 const fs = require("fs");
 const http = require("http");
 const https = require("https");
@@ -17,10 +18,26 @@ const {
   shouldInstallRuntimeLocally
 } = require("./runtime-platform");
 const { needsInitialStorageSelection, parseDesktopSettings } = require("./storage-settings");
+const { legacyUserDataPath } = require("./legacy-user-data");
 
-if (process.platform === "win32" && process.env.LOCALAPPDATA) {
-  app.setPath("userData", path.join(process.env.LOCALAPPDATA, "CGV Desktop"));
+const DESKTOP_APP_ID = "org.cgv.desktop";
+if (process.platform === "win32" && typeof app.setAppUserModelId === "function") {
+  app.setAppUserModelId(DESKTOP_APP_ID);
 }
+
+function configureLegacyUserData(electronApp = app) {
+  // A few unit tests evaluate selected main-process helpers with a minimal
+  // Electron stub. Real Electron always provides both methods.
+  if (typeof electronApp?.getPath !== "function" || typeof electronApp?.setPath !== "function") return false;
+  electronApp.setPath("userData", legacyUserDataPath({
+    platform: process.platform,
+    localAppData: process.env.LOCALAPPDATA,
+    appData: electronApp.getPath("appData")
+  }));
+  return true;
+}
+
+configureLegacyUserData();
 
 let mainWindow = null;
 let shinyProcess = null;
@@ -283,9 +300,9 @@ function configuredStorageRoot() {
 async function promptForStorageRoot() {
   const current = configuredStorageRoot();
   const result = await dialog.showOpenDialog(mainWindow || undefined, {
-    title: "Choose where CGV Desktop stores genomes and caches",
+    title: "Choose where CGeV Desktop stores genomes and caches",
     buttonLabel: "Use this folder",
-    defaultPath: current || path.join(app.getPath("home"), "CGV Desktop Data"),
+    defaultPath: current || path.join(app.getPath("home"), "CGeV Desktop Data"),
     properties: ["openDirectory", "createDirectory"]
   });
   if (result.canceled || !result.filePaths[0]) return null;
@@ -298,7 +315,7 @@ async function promptForStorageRoot() {
   } catch (error) {
     await dialog.showMessageBox(mainWindow || undefined, {
       type: "error",
-      title: "CGV Desktop cannot use this folder",
+      title: "CGeV Desktop cannot use this folder",
       message: "Choose a folder where your Windows account can create and update files.",
       detail: error.message
     });
@@ -318,7 +335,7 @@ async function ensureStorageConfigured() {
   if (selected) return true;
   sendStatus({
     phase: "storage-required",
-    message: "Choose a folder for genomes and caches before starting CGV Desktop."
+    message: "Choose a folder for genomes and caches before starting CGeV Desktop."
   });
   return false;
 }
@@ -528,7 +545,7 @@ function waitForShinyReady(url, childProcess, getRecentOutput, timeoutMs = 12000
       const detail = recentOutputMessage(getRecentOutput());
       finish(
         reject,
-        new Error(`R/Shiny stopped before CGV was ready (${code ?? signal}).${detail}`)
+        new Error(`R/Shiny stopped before CGeV was ready (${code ?? signal}).${detail}`)
       );
     });
 
@@ -592,11 +609,11 @@ function setupAutoUpdater() {
   });
 
   autoUpdater.on("update-available", (info) => {
-    sendUpdateStatus({ phase: "available", version: info.version, message: `CGV Desktop ${info.version} available. Downloading...` });
+    sendUpdateStatus({ phase: "available", version: info.version, message: `CGeV Desktop ${info.version} available. Downloading...` });
   });
 
   autoUpdater.on("update-not-available", () => {
-    sendUpdateStatus({ phase: "up-to-date", message: "CGV Desktop is up to date." });
+    sendUpdateStatus({ phase: "up-to-date", message: "CGeV Desktop is up to date." });
   });
 
   autoUpdater.on("download-progress", (progress) => {
@@ -604,7 +621,7 @@ function setupAutoUpdater() {
   });
 
   autoUpdater.on("update-downloaded", (info) => {
-    sendUpdateStatus({ phase: "downloaded", version: info.version, message: `CGV Desktop ${info.version} ready. Restart to apply the update.` });
+    sendUpdateStatus({ phase: "downloaded", version: info.version, message: `CGeV Desktop ${info.version} ready. Restart to apply the update.` });
   });
 
   autoUpdater.on("error", (error) => {
@@ -615,7 +632,7 @@ function setupAutoUpdater() {
 }
 
 function requiredRuntimeError(binaryName, hint) {
-  return new Error(`${binaryName} is required for CGV Desktop but was not found. ${hint}`);
+  return new Error(`${binaryName} is required for CGeV Desktop but was not found. ${hint}`);
 }
 
 function validateRuntime(rscript, binaries) {
@@ -637,8 +654,8 @@ function validateRuntime(rscript, binaries) {
 }
 
 async function startShiny() {
-  appendStartupLog(`\n--- CGV Desktop startup ${new Date().toISOString()} ---\n`);
-  sendStatus({ phase: "starting", message: "Preparing CGV Desktop..." });
+  appendStartupLog(`\n--- CGeV Desktop startup ${new Date().toISOString()} ---\n`);
+  sendStatus({ phase: "starting", message: "Preparing CGeV Desktop..." });
   const root = appRoot();
   const dataRoot = defaultDataRoot();
   const cacheRoot = defaultCacheRoot();
@@ -718,6 +735,7 @@ async function startShiny() {
     APP_ANALYTICS_PHASE3_DELAY_MS: process.env.APP_ANALYTICS_PHASE3_DELAY_MS || "0",
     APP_CACHE_WARM_EAGER: "1",
     CGV_RUNTIME: "desktop",
+    CGV_RELEASE_VERSION: app.getVersion(),
     CGV_DATA_ROOT: dataRoot,
     CGV_CACHE_DIR: cacheRoot,
     APP_ALIAS_DISK_CACHE_DIR: path.join(cacheRoot, "external_alias"),
@@ -736,14 +754,14 @@ async function startShiny() {
   if (tabix) env.APP_TABIX_BIN = tabix;
 
   shinyUrl = `http://127.0.0.1:${port}`;
-  logStartupLine("electron", `Starting CGV on ${shinyUrl}`);
+  logStartupLine("electron", `Starting CGeV on ${shinyUrl}`);
   logStartupLine("electron", `Rscript: ${rscript}`);
   logStartupLine("electron", `Runtime: ${runtimeRoot}`);
   logStartupLine("electron", `Data: ${dataRoot}`);
   logStartupLine("electron", `Cache: ${cacheRoot}`);
   sendStatus({
     phase: "starting",
-    message: "Preparing CGV Desktop..."
+    message: "Preparing CGeV Desktop..."
   });
 
   shinyProcess = spawn(rscript, [
@@ -794,8 +812,8 @@ async function startShiny() {
   });
 
   await waitForShinyReady(shinyUrl, shinyProcess, () => recentRLines);
-  logStartupLine("electron", `CGV is ready at ${shinyUrl}`);
-  sendStatus({ phase: "ready", message: "CGV is ready", url: shinyUrl, dataRoot, cacheRoot });
+  logStartupLine("electron", `CGeV is ready at ${shinyUrl}`);
+  sendStatus({ phase: "ready", message: "CGeV is ready", url: shinyUrl, dataRoot, cacheRoot });
   return shinyUrl;
 }
 
@@ -833,15 +851,87 @@ function readLocalCatalog() {
   }
 }
 
-function httpGetJson(url) {
+function catalogResponseUrlHash(url) {
+  return crypto.createHash("sha256").update(String(url || ""), "utf8").digest("hex");
+}
+
+function catalogResponseCachePath(url) {
+  return path.join(
+    defaultCacheRoot(),
+    "desktop-catalog-http",
+    `${catalogResponseUrlHash(url).slice(0, 32)}.json`
+  );
+}
+
+function normalizedHttpEtag(value) {
+  const etag = String(value || "").trim();
+  if (!etag || etag.length > 1024 || /[\r\n]/.test(etag)) return "";
+  return etag;
+}
+
+function readCatalogResponseCache(cachePath, url) {
+  if (!cachePath || !fs.existsSync(cachePath)) return null;
+  try {
+    const cached = JSON.parse(fs.readFileSync(cachePath, "utf8"));
+    if (!cached || cached.version !== 1 || cached.urlHash !== catalogResponseUrlHash(url)) return null;
+    if (!Object.prototype.hasOwnProperty.call(cached, "body")) return null;
+    return {
+      body: cached.body,
+      etag: normalizedHttpEtag(cached.etag)
+    };
+  } catch (_) {
+    return null;
+  }
+}
+
+function writeCatalogResponseCache(cachePath, url, etag, body) {
+  if (!cachePath) return false;
+  let temporaryPath = "";
+  try {
+    const cacheDir = path.dirname(cachePath);
+    temporaryPath = `${cachePath}.${process.pid}.${Date.now()}.${crypto.randomBytes(6).toString("hex")}.tmp`;
+    fs.mkdirSync(cacheDir, { recursive: true });
+    fs.writeFileSync(temporaryPath, `${JSON.stringify({
+      version: 1,
+      urlHash: catalogResponseUrlHash(url),
+      etag: normalizedHttpEtag(etag),
+      body
+    })}\n`, { encoding: "utf8", mode: 0o600 });
+    fs.renameSync(temporaryPath, cachePath);
+    return true;
+  } catch (_) {
+    return false;
+  } finally {
+    try {
+      if (temporaryPath && fs.existsSync(temporaryPath)) fs.unlinkSync(temporaryPath);
+    } catch (_) {}
+  }
+}
+
+function requestJsonWithEtag(url, etag, timeoutMs) {
   const client = url.startsWith("https:") ? https : http;
   return new Promise((resolve, reject) => {
-    const request = client.get(url, (response) => {
+    const headers = etag ? { "If-None-Match": etag } : {};
+    const request = client.get(url, { headers }, (response) => {
       if ([301, 302, 303, 307, 308].includes(response.statusCode) && response.headers.location) {
-        httpGetJson(response.headers.location).then(resolve, reject);
+        response.resume();
+        let redirectUrl;
+        try {
+          redirectUrl = new URL(response.headers.location, url).toString();
+        } catch (error) {
+          reject(error);
+          return;
+        }
+        requestJsonWithEtag(redirectUrl, etag, timeoutMs).then(resolve, reject);
+        return;
+      }
+      if (response.statusCode === 304 && etag) {
+        response.resume();
+        resolve({ notModified: true, etag });
         return;
       }
       if (response.statusCode !== 200) {
+        response.resume();
         reject(new Error(`Catalog request failed with HTTP ${response.statusCode}: ${url}`));
         return;
       }
@@ -852,16 +942,36 @@ function httpGetJson(url) {
       });
       response.on("end", () => {
         try {
-          resolve(JSON.parse(body));
+          resolve({
+            body: JSON.parse(body),
+            etag: normalizedHttpEtag(response.headers.etag),
+            notModified: false
+          });
         } catch (error) {
           reject(new Error(`Catalog JSON could not be parsed: ${error.message}`));
         }
       });
     });
     request.on("error", reject);
-    request.setTimeout(15000, () => {
+    request.setTimeout(timeoutMs, () => {
       request.destroy(new Error(`Catalog request timed out: ${url}`));
     });
+  });
+}
+
+function httpGetJson(url, options = {}) {
+  const cachePath = options.cachePath || "";
+  const cached = readCatalogResponseCache(cachePath, url);
+  const etag = cached && cached.etag ? cached.etag : "";
+  const timeoutMs = Number.isFinite(Number(options.timeoutMs)) && Number(options.timeoutMs) > 0
+    ? Number(options.timeoutMs)
+    : 15000;
+  // There is deliberately no TTL or stale-on-error path: every caller reaches
+  // the origin, and the persisted body is used only after a valid HTTP 304.
+  return requestJsonWithEtag(url, etag, timeoutMs).then((response) => {
+    if (response.notModified) return cached.body;
+    writeCatalogResponseCache(cachePath, url, response.etag, response.body);
+    return response.body;
   });
 }
 
@@ -944,7 +1054,9 @@ async function readMergedManifest() {
   const catalogUrl = process.env.CGV_DESKTOP_CATALOG_URL || baseManifest.catalogUrl || "";
   if (!catalogUrl) return baseWithLocal;
   try {
-    const remoteManifest = await httpGetJson(catalogUrl);
+    const remoteManifest = await httpGetJson(catalogUrl, {
+      cachePath: catalogResponseCachePath(catalogUrl)
+    });
     return mergeDatasetCatalogs(baseWithLocal, { ...remoteManifest, source: catalogUrl });
   } catch (error) {
     return {
@@ -1270,9 +1382,9 @@ async function startShinyAndLoad() {
 async function changeStorageRootAndRestart() {
   const confirmation = await dialog.showMessageBox(mainWindow || undefined, {
     type: "info",
-    title: "Change CGV Desktop data folder",
+    title: "Change CGeV Desktop data folder",
     message: "Existing genomes and caches will not be moved or deleted.",
-    detail: "CGV Desktop will restart and use the selected folder. Select the previous folder again to reuse its data.",
+    detail: "CGeV Desktop will restart and use the selected folder. Select the previous folder again to reuse its data.",
     buttons: ["Choose folder", "Cancel"],
     defaultId: 0,
     cancelId: 1
@@ -1353,7 +1465,7 @@ async function createWindow() {
     height: 900,
     minWidth: 1100,
     minHeight: 720,
-    title: "CGV Desktop",
+    title: "CGeV Desktop",
     icon: windowIconPath(),
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
@@ -1370,7 +1482,7 @@ async function createWindow() {
     exportDownloadSession = mainWindow.webContents.session;
     exportDownloadSession.on("will-download", (_event, item) => {
       item.setSaveDialogOptions({
-        title: "Save CGV export",
+        title: "Save CGeV export",
         defaultPath: item.getFilename()
       });
     });
@@ -1403,7 +1515,7 @@ ipcMain.handle("cgv:get-storage-settings", () => ({
 ipcMain.handle("cgv:choose-storage-root", async () => {
   const selected = await promptForStorageRoot();
   if (!selected) return { ok: false, canceled: true };
-  sendStatus({ phase: "starting", message: "Starting CGV Desktop..." });
+  sendStatus({ phase: "starting", message: "Starting CGeV Desktop..." });
   try {
     await startShinyAndLoad();
     return { ok: true, ...selected };
@@ -1464,7 +1576,7 @@ async function installDataset(datasetId, signal) {
     const manifest = await readMergedManifest();
     const dataset = (manifest.datasets || []).find((item) => item.id === datasetId);
     if (!dataset) throw new Error(`Unknown dataset: ${datasetId}`);
-    if (dataset.downloadable === false) throw new Error(`${dataset.label || dataset.id} is bundled with CGV Desktop and does not need downloading.`);
+    if (dataset.downloadable === false) throw new Error(`${dataset.label || dataset.id} is bundled with CGeV Desktop and does not need downloading.`);
 
     const dataRoot = defaultDataRoot();
     const cacheRoot = defaultCacheRoot();

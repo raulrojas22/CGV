@@ -1,6 +1,8 @@
-# CGV
+# CGeV
 
-**Comparative Gene Viewer** is an interactive R/Shiny web application for comparative gene visualization and functional analysis across species. It combines local indexed genomes and annotations with live queries to public resources so researchers can move from a gene symbol to structural, comparative, and functional context in a single interface.
+**Comparative Gene Viewer (CGeV)** is an interactive R/Shiny web application for comparative gene visualization and functional analysis across species. It combines local indexed genomes and annotations with live queries to public resources so researchers can move from a gene symbol to structural, comparative, and functional context in a single interface.
+
+> **Identity transition:** CGeV was previously displayed as CGV. The full project name, repositories, URLs, environment variables, data locations, and integration identifiers remain compatible.
 
 [![Website](https://img.shields.io/badge/Web-cgv.mobilomics.org-0f766e?style=flat-square)](https://cgv.mobilomics.org)
 [![Language](https://img.shields.io/badge/R-Shiny-276DC3?style=flat-square)](https://www.r-project.org/)
@@ -8,13 +10,13 @@
 
 ## Code signing policy
 
-Windows release signing follows the [CGV Desktop code signing policy](desktop/legal/CODE_SIGNING_POLICY.md). Free code signing is intended to be provided by [SignPath.io](https://about.signpath.io/), certificate by [SignPath Foundation](https://signpath.org/), once the project is accepted. See also the [privacy policy](desktop/legal/PRIVACY.md) and [third-party notices](desktop/legal/THIRD_PARTY_NOTICES.md).
+Windows release signing follows the [CGeV Desktop code signing policy](desktop/legal/CODE_SIGNING_POLICY.md). Free code signing is intended to be provided by [SignPath.io](https://about.signpath.io/), certificate by [SignPath Foundation](https://signpath.org/), once the project is accepted. See also the [privacy policy](desktop/legal/PRIVACY.md) and [third-party notices](desktop/legal/THIRD_PARTY_NOTICES.md).
 
-![CGV architecture](paper/figure1_panel_A_architecture.svg)
+![CGeV architecture](paper/figure1_panel_A_architecture.svg)
 
-## Why CGV
+## Why CGeV
 
-CGV was designed to reduce the fragmented workflow common in comparative genomics. Instead of switching between genome browsers, orthology resources, Gene Ontology portals, promoter utilities, and protein-network tools, users can explore these layers from one web application.
+CGeV was designed to reduce the fragmented workflow common in comparative genomics. Instead of switching between genome browsers, orthology resources, Gene Ontology portals, promoter utilities, and protein-network tools, users can explore these layers from one web application.
 
 Completed analyses can also be preserved as a portable, versioned
 reproducibility ZIP. Web deployments can publish the same snapshot as an
@@ -70,7 +72,7 @@ For the data-management policy used by the project, see [DATA_AVAILABILITY.md](D
 
 ## Data Strategy
 
-CGV is built around a code/data split:
+CGeV is built around a code/data split:
 
 - GitHub: source code, Docker files, scripts, registries, documentation
 - Zenodo or institutional repository: frozen release snapshots, software DOI, optional curated small example dataset
@@ -140,7 +142,7 @@ The main controls are `APP_LASTZ_CACHE_MAX_ENTRIES`, `APP_LASTZ_CACHE_MAX_MB`, `
 ### Background interactive reports
 
 Web users can choose **Email me** in Share analysis or **Email full report**
-beside the Multi-Gene and Cross-Species LASTZ/MultiPIP controls. CGV stores an
+beside the Multi-Gene and Cross-Species LASTZ/MultiPIP controls. CGeV stores an
 immutable work-session snapshot in the shared cache, and the serial
 `background-report-worker` restores it in an internal Shiny session. Google
 Chrome headless drives the existing complete capture pipeline, so the emailed secret
@@ -195,7 +197,7 @@ not session-private uploads.
 
 ## Citation
 
-If you use CGV in research, please cite the associated manuscript and the software release DOI once the archival record is published.
+If you use CGeV in research, please cite the associated manuscript and the software release DOI once the archival record is published.
 
 Planned repository metadata for publication:
 

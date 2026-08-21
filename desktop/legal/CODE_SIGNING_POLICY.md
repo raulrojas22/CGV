@@ -1,6 +1,6 @@
 # Code signing policy
 
-CGV Desktop Windows releases are built from the public CGV source repository by the Windows GitHub Actions workflow. A release may be submitted for signing only after its automated runtime, installer, startup, localhost, and process-cleanup checks pass. Signing requests require manual approval and must correspond to a tagged source revision.
+CGeV Desktop Windows releases are built from the public CGeV source repository by the Windows GitHub Actions workflow. A release may be submitted for signing only after its automated runtime, installer, startup, localhost, and process-cleanup checks pass. Signing requests require manual approval and must correspond to a tagged source revision.
 
 Free code signing provided by [SignPath.io](https://about.signpath.io/), certificate by [SignPath Foundation](https://signpath.org/).
 
@@ -11,6 +11,6 @@ Free code signing provided by [SignPath.io](https://about.signpath.io/), certifi
 
 Changes from contributors who do not have commit access must be reviewed before merging. Repository access and signing access require multi-factor authentication. The approver verifies the source revision, completed workflow, artifact metadata, and release intent before approving each signing request.
 
-The CGV signing identity is used only for CGV artifacts built from this repository. Bundled third-party binaries retain their upstream identity and are not represented as CGV-authored components.
+The CGeV signing identity is used only for CGeV artifacts built from this repository. Bundled third-party binaries retain their upstream identity and are not represented as CGeV-authored components.
 
 See the [privacy policy](PRIVACY.md) and [third-party notices](THIRD_PARTY_NOTICES.md).

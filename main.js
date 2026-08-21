@@ -270,11 +270,11 @@ function setupAutoUpdater() {
   });
 
   autoUpdater.on("update-available", (info) => {
-    sendUpdateStatus({ phase: "available", version: info.version, message: `CGV Desktop ${info.version} available. Downloading...` });
+    sendUpdateStatus({ phase: "available", version: info.version, message: `CGeV Desktop ${info.version} available. Downloading...` });
   });
 
   autoUpdater.on("update-not-available", () => {
-    sendUpdateStatus({ phase: "up-to-date", message: "CGV Desktop is up to date." });
+    sendUpdateStatus({ phase: "up-to-date", message: "CGeV Desktop is up to date." });
   });
 
   autoUpdater.on("download-progress", (progress) => {
@@ -282,7 +282,7 @@ function setupAutoUpdater() {
   });
 
   autoUpdater.on("update-downloaded", (info) => {
-    sendUpdateStatus({ phase: "downloaded", version: info.version, message: `CGV Desktop ${info.version} ready. Restart to apply the update.` });
+    sendUpdateStatus({ phase: "downloaded", version: info.version, message: `CGeV Desktop ${info.version} ready. Restart to apply the update.` });
   });
 
   autoUpdater.on("error", (error) => {
@@ -293,7 +293,7 @@ function setupAutoUpdater() {
 }
 
 function requiredRuntimeError(binaryName, hint) {
-  return new Error(`${binaryName} is required for CGV Desktop but was not found. ${hint}`);
+  return new Error(`${binaryName} is required for CGeV Desktop but was not found. ${hint}`);
 }
 
 function validateRuntime(rscript, binaries) {
@@ -314,7 +314,7 @@ function validateRuntime(rscript, binaries) {
 }
 
 async function startShiny() {
-  appendStartupLog(`\n--- CGV Desktop startup ${new Date().toISOString()} ---\n`);
+  appendStartupLog(`\n--- CGeV Desktop startup ${new Date().toISOString()} ---\n`);
   const root = appRoot();
   const dataRoot = defaultDataRoot();
   const cacheRoot = defaultCacheRoot();
@@ -361,13 +361,13 @@ async function startShiny() {
   if (tabix) env.APP_TABIX_BIN = tabix;
 
   shinyUrl = `http://127.0.0.1:${port}`;
-  logStartupLine("electron", `Starting CGV on ${shinyUrl}`);
+  logStartupLine("electron", `Starting CGeV on ${shinyUrl}`);
   logStartupLine("electron", `Rscript: ${rscript}`);
   logStartupLine("electron", `Data: ${dataRoot}`);
   logStartupLine("electron", `Cache: ${cacheRoot}`);
   sendStatus({
     phase: "starting",
-    message: "Preparing CGV Desktop..."
+    message: "Preparing CGeV Desktop..."
   });
 
   shinyProcess = spawn(rscript, [
@@ -405,7 +405,7 @@ async function startShiny() {
   });
 
   await waitForHttp(shinyUrl);
-  sendStatus({ phase: "ready", message: "CGV is ready", url: shinyUrl, dataRoot, cacheRoot });
+  sendStatus({ phase: "ready", message: "CGeV is ready", url: shinyUrl, dataRoot, cacheRoot });
   return shinyUrl;
 }
 
@@ -702,7 +702,7 @@ async function createWindow() {
     height: 900,
     minWidth: 1100,
     minHeight: 720,
-    title: "CGV Desktop",
+    title: "CGeV Desktop",
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
@@ -747,7 +747,7 @@ ipcMain.handle("cgv:download-dataset", async (_event, datasetId) => {
   const manifest = await readMergedManifest();
   const dataset = (manifest.datasets || []).find((item) => item.id === datasetId);
   if (!dataset) throw new Error(`Unknown dataset: ${datasetId}`);
-  if (dataset.downloadable === false) throw new Error(`${dataset.label || dataset.id} is bundled with CGV Desktop and does not need downloading.`);
+  if (dataset.downloadable === false) throw new Error(`${dataset.label || dataset.id} is bundled with CGeV Desktop and does not need downloading.`);
 
   const dataRoot = defaultDataRoot();
   const registry = readInstallRegistry(dataRoot);

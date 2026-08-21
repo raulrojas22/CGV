@@ -183,7 +183,7 @@
     var card = container && container.closest ? container.closest(".card, .plot-transcript-card, article") : null;
     var heading = card && card.querySelector ? card.querySelector("h2, h3, h4, .card-title, .plot-card-title") : null;
     var text = heading ? String(heading.textContent || "").replace(/\s+/g, " ").trim() : "";
-    if (!text) text = String(id || "CGV visualization").replace(/[_-]+/g, " ");
+    if (!text) text = String(id || "CGeV visualization").replace(/[_-]+/g, " ");
     return text.slice(0, 180);
   }
 

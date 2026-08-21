@@ -3,7 +3,7 @@
   "label": "Arabidopsis thaliana",
   "speciesId": "arabidopsis_thaliana_gcf_000001735_4_tair10_1_genomic",
   "version": "2026.09",
-  "description": "Arabidopsis thaliana CGV Desktop dataset package.",
+  "description": "Arabidopsis thaliana CGeV Desktop dataset package.",
   "downloadable": true,
   "sizeBytes": 116173186,
   "package": {

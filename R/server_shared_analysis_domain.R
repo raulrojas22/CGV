@@ -1,4 +1,4 @@
-# Portable CGV analysis bundles and static read-only reports.
+# Portable CGeV analysis bundles and static read-only reports.
 #
 # This domain deliberately depends only on base R plus jsonlite/digest.  It is
 # sourced into app_libraries so the Web and Desktop runtimes use the exact same
@@ -244,7 +244,7 @@ cgv_resolve_source_ref <- function(ref, base_dir = ".") {
 
 cgv_redact_session_snapshot <- function(snapshot, include_private = FALSE, base_dir = ".") {
     out <- snapshot %||% list()
-    if (!is.list(out)) stop("Invalid CGV session snapshot.")
+    if (!is.list(out)) stop("Invalid CGeV session snapshot.")
     out$schema_version <- cgv_session_schema_version
     out$privacy <- list(
         private_sequences_included = isTRUE(include_private),
@@ -441,7 +441,7 @@ cgv_analysis_reference_manifest <- function(plots, app_state, base_dir = ".") {
         }
         source_label <- switch(
             tolower(mode),
-            preloaded = "CGV preloaded reference",
+            preloaded = "CGeV preloaded reference",
             ncbi = "NCBI Datasets",
             upload = "Author upload",
             if (nzchar(mode)) mode else "Not recorded"
@@ -823,10 +823,10 @@ cgv_build_analysis_manifest <- function(snapshot,
         analysis_id = cgv_random_secret(16L),
         created_at = created,
         expires_at = format(Sys.time() + ttl * 86400, "%Y-%m-%dT%H:%M:%S%z"),
-        generator = list(name = "CGV", version = cgv_safe_scalar(app_version, "unknown")),
+        generator = list(name = "CGeV", version = cgv_safe_scalar(app_version, "unknown")),
         branding = list(
             name = "Comparative Gene Viewer",
-            short_name = "CGV",
+            short_name = "CGeV",
             logo_data_uri = cgv_local_asset_data_uri("favicon2.ico", base_dir),
             primary_color = "#2C3E50",
             accent_color = "#18BC9C"
@@ -983,7 +983,7 @@ cgv_report_js <- function() {
         "function array(x){return Array.isArray(x)?x:(x===null||x===undefined||x==='')?[]:[x]}",
         "function text(x){return String(x===null||x===undefined?'':x)}",
         "function section(id,visible){var n=document.getElementById(id);if(n)n.hidden=!visible;return n}",
-        "var genes=array(a.query&&a.query.genes);document.getElementById('report-title').textContent=(genes.length?'CGV analysis: '+genes.join(', '):'CGV interactive analysis');",
+        "var genes=array(a.query&&a.query.genes);document.getElementById('report-title').textContent=(genes.length?'CGeV analysis: '+genes.join(', '):'CGeV interactive analysis');",
         "document.getElementById('report-subtitle').textContent='Read-only snapshot created '+value(a.created_at);",
         "var logo=a.branding&&a.branding.logo_data_uri;if(logo){document.getElementById('report-logo').src=logo}else{document.getElementById('report-logo').hidden=true}",
         "var badges=document.getElementById('report-badges');var captureMode=text(a.capture&&a.capture.mode||'complete');[value(a.generator&&a.generator.version),array(a.workflows).map(function(w){return w==='multi_gene'?'Multi-Gene':w==='cross_species'?'Cross-Species':w}).join(' + '),(captureMode==='fast'?'Fast capture':'Complete capture'),'Expires '+value(a.expires_at)].forEach(function(x){add(badges,el('span','badge',x))});",
@@ -1009,7 +1009,7 @@ cgv_report_js <- function() {
         "function renderLocusCard(root,record,summary){var org=organismFor(record);var gene=record.gene||{};var metrics=record.metrics||{};var geneLabel=recordGene(record);var start=numberFrom(gene,['start','gene_start','tx_start','genomic_start','Gene_Start_bp']);if(!isFinite(start))start=numberFrom(metrics,['start','gene_start','tx_start','Gene_Start_bp']);if(!isFinite(start))start=numberFrom(summary,['Gene_Start_bp','Transcript_Start_bp','start']);var end=numberFrom(gene,['end','gene_end','tx_end','genomic_end','Gene_End_bp']);if(!isFinite(end))end=numberFrom(metrics,['end','gene_end','tx_end','Gene_End_bp']);if(!isFinite(end))end=numberFrom(summary,['Gene_End_bp','Transcript_End_bp','end']);var chrLen=numberFrom(gene,['chromosome_length','chr_length','seq_length']);if(!isFinite(chrLen))chrLen=numberFrom(metrics,['chromosome_length','chr_length']);var card=add(root,el('article','locus-card'));var top=add(card,el('div','locus-top'));var name=add(top,el('div','locus-name'));if(org.icon_data_uri){var img=add(name,el('img'));img.src=org.icon_data_uri;img.alt=''}add(name,el('span','',geneLabel||org.name||org.id||record.title||'Gene'));add(top,el('span','locus-chr',record.chromosome||summary.Chromosome||'Chromosome'));makeChromosomeMap(card,start,end,chrLen);add(card,el('div','locus-coords',isFinite(start)&&isFinite(end)?start.toLocaleString()+' – '+end.toLocaleString()+' bp':'Gene position in chromosome'))}",
         "function renderLoci(){var root=document.getElementById('locus-grid');var total=0;['multi_gene','cross_species'].forEach(function(context){var records=workflowRecords(context);var seen={};var unique=[];records.forEach(function(record){var key=[recordOrganism(record),text(record.chromosome),recordGene(record)].join('|').toLowerCase();if(seen[key])return;seen[key]=true;unique.push(record)});if(!unique.length)return;total+=unique.length;var content=createFlowGroup(root,context,unique.length,true);var grid=add(content,el('div','locus-grid'));var rows=summaryRowsFor(context);unique.forEach(function(record){var tx=recordTranscript(record);var summary=rows.filter(function(row){return !tx||text(row.Transcript||row.transcript)===tx})[0]||{};renderLocusCard(grid,record,summary)})});setSectionCount('section-locus',total);section('section-locus',total>0)}",
         "var analyticsTitles={arch:'Gene architecture',exon:'Transcript isoforms',seq:'Nucleotide composition',context:'Genomic context',exon_dist:'Exon length distribution',intron_dist:'Intron length distribution',scatter:'Gene and transcript lengths',heatmap:'Feature heatmap',radar:'Comparative feature profile',corr:'Feature correlation'}",
-        "function humanFigureTitle(figure,record){var group=text(figure.group);if(group==='structural'){var gene=text(figure.gene||recordGene(record)||'Gene');var tx=text(figure.transcript||recordTranscript(record));return gene+(tx?' · '+tx:'')}if(group==='synteny'){var comparison=text(figure.comparison_gene);return workflowLabel(figure.context)+' aligned synteny'+(comparison?' · '+comparison:' · '+workflowSummary(figure.context))}if(group==='analytics'){var id=text(figure.source_id||figure.id).toLowerCase().replace(/^(homo|ortho)_/,'').replace(/_chart_export.*$/,'');return analyticsTitles[id]||text(figure.title||figure.id).replace(/[_-]+/g,' ')}if(group==='alignment')return workflowLabel(figure.context)+' · '+text(figure.title||figure.id).replace(/[_-]+/g,' ');return text(figure.title||figure.id||'CGV visualization').replace(/[_-]+/g,' ')}",
+        "function humanFigureTitle(figure,record){var group=text(figure.group);if(group==='structural'){var gene=text(figure.gene||recordGene(record)||'Gene');var tx=text(figure.transcript||recordTranscript(record));return gene+(tx?' · '+tx:'')}if(group==='synteny'){var comparison=text(figure.comparison_gene);return workflowLabel(figure.context)+' aligned synteny'+(comparison?' · '+comparison:' · '+workflowSummary(figure.context))}if(group==='analytics'){var id=text(figure.source_id||figure.id).toLowerCase().replace(/^(homo|ortho)_/,'').replace(/_chart_export.*$/,'');return analyticsTitles[id]||text(figure.title||figure.id).replace(/[_-]+/g,' ')}if(group==='alignment')return workflowLabel(figure.context)+' · '+text(figure.title||figure.id).replace(/[_-]+/g,' ');return text(figure.title||figure.id||'CGeV visualization').replace(/[_-]+/g,' ')}",
         "function figureCard(figure,variant,record){var card=el('article','figure-card '+variant);card.dataset.transcript=text(figure.transcript||recordTranscript(record));var head=add(card,el('div','figure-card-header'));add(head,el('h3','',humanFigureTitle(figure,record)));add(head,el('span','figure-tag',text(figure.group||'view').replace(/_/g,' ')));var view=add(card,el('div','figure-view'));view.innerHTML=figure.svg||'';var tools=add(card,el('div','figure-tools'));var zoom=1;[['−',-.15],['＋',.15],['Reset',0]].forEach(function(def){var button=add(tools,el('button','',def[0]));button.type='button';button.addEventListener('click',function(){zoom=def[1]===0?1:Math.max(.35,Math.min(3,zoom+def[1]));var svg=view.querySelector('svg');if(svg){svg.style.width=(zoom*100)+'%';svg.style.maxWidth='none'}})});if(a.privacy&&a.privacy.public_downloads){var blob=new Blob([figure.svg||''],{type:'image/svg+xml'});var link=add(tools,el('a','','SVG'));link.href=URL.createObjectURL(blob);link.download=(figure.id||'figure')+'.svg'}return card}",
         "function renderStructural(root,list){var entries=list.map(function(figure){return {figure:figure,record:recordForFigure(figure)}});var contexts=uniqueValues(entries.map(function(entry){return normalizedContext(entry.figure.context)}));contexts.sort(function(left,right){return ['multi_gene','cross_species','analysis'].indexOf(left)-['multi_gene','cross_species','analysis'].indexOf(right)});contexts.forEach(function(context){var selected=entries.filter(function(entry){return normalizedContext(entry.figure.context)===context});var flow=createFlowGroup(root,context,selected.length,true);var grouped={};var order=[];selected.forEach(function(entry){var record=entry.record;var key=[text(entry.figure.gene||recordGene(record)||'Unassigned gene'),text(entry.figure.organism||recordOrganism(record)||'')].join('|').toLowerCase();if(!grouped[key]){grouped[key]=[];order.push(key)}grouped[key].push(entry)});order.forEach(function(key){var group=grouped[key];var first=group[0];var gene=text(first.figure.gene||recordGene(first.record)||'Gene');var organism=text(first.figure.organism||recordOrganism(first.record));var details=add(flow,el('details','analysis-group'));var summary=add(details,el('summary'));var main=add(summary,el('div','analysis-summary-main'));add(main,el('strong','',gene));add(main,el('span','analysis-summary-meta',(organism?organism+' · ':'')+group.length+' transcript'+(group.length===1?'':'s')));var content=add(details,el('div','analysis-content'));var cards=add(content,el('div','figure-list'));var cardNodes=[];group.forEach(function(entry,index){var card=figureCard(entry.figure,'figure-card-primary',entry.record);card.hidden=index!==0;cards.appendChild(card);cardNodes.push(card)});if(group.length>1){var filter=content.insertBefore(el('div','transcript-filter'),cards);add(filter,el('label','','View'));var selector=add(filter,el('select'));var primary=el('option','','Primary transcript · '+value(cardNodes[0].dataset.transcript));primary.value='__primary__';selector.appendChild(primary);var all=el('option','','All transcripts ('+group.length+')');all.value='__all__';selector.appendChild(all);uniqueValues(cardNodes.map(function(card){return card.dataset.transcript})).forEach(function(tx){var option=el('option','',tx);option.value=tx;selector.appendChild(option)});selector.addEventListener('change',function(){cardNodes.forEach(function(card,index){card.hidden=selector.value==='__all__'?false:selector.value==='__primary__'?index!==0:card.dataset.transcript!==selector.value})})}})})}",
         "function renderFigureGroup(group,rootId,sectionId,variant){var root=document.getElementById(rootId);var list=uniqueFigures(array(a.figures).filter(function(figure){return text(figure.group||'structural')===group}));if(group==='structural'){renderStructural(root,list)}else{var contexts=uniqueValues(list.map(function(figure){return normalizedContext(figure.context)}));contexts.sort(function(left,right){return ['multi_gene','cross_species','analysis','figure_studio'].indexOf(left)-['multi_gene','cross_species','analysis','figure_studio'].indexOf(right)});contexts.forEach(function(context){var figures=list.filter(function(figure){return normalizedContext(figure.context)===context});var comparisonGenes=uniqueValues(figures.map(function(figure){return text(figure.comparison_gene)}));var flowHeading=group==='synteny'&&context==='multi_gene'&&comparisonGenes.length?comparisonGenes.join(', '):workflowSummary(context);var flowSummary=group==='synteny'&&context==='multi_gene'?figures.length+' gene comparison'+(figures.length===1?'':'s'):figures.length+' captured view'+(figures.length===1?'':'s');var target=context==='analysis'||context==='figure_studio'?root:createFlowGroup(root,context,figures.length,true,flowHeading,flowSummary);var grid=add(target,el('div',group==='analytics'?'figure-grid':'figure-list'));figures.forEach(function(figure){grid.appendChild(figureCard(figure,variant,recordForFigure(figure)))})})}setSectionCount(sectionId,list.length);section(sectionId,list.length>0)}",
@@ -1026,7 +1026,7 @@ cgv_report_js <- function() {
 }
 
 cgv_report_script_csp_hash <- function() {
-    "sha256-VJ57di/IQ0e4GQS4gxb2N0MxDIJ1cTW0ycxWaMfXqog="
+    "sha256-EXkIJnQvs/u+7Sw8WFMz21f46Zk6qxolUQbZIaQ9yfg="
 }
 
 cgv_render_report_html <- function(analysis, validated = FALSE, json = NULL) {
@@ -1047,10 +1047,10 @@ cgv_render_report_html <- function(analysis, validated = FALSE, json = NULL) {
         "<meta name=\"robots\" content=\"noindex,nofollow,noarchive\">",
         "<meta name=\"referrer\" content=\"no-referrer\">",
         "<meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; img-src data: blob:; style-src 'unsafe-inline'; script-src '", cgv_report_script_csp_hash(), "'; connect-src 'none'; font-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'\">",
-        "<title>CGV interactive analysis</title><style>", cgv_report_css(), "</style></head><body>",
-        "<header class=\"report-hero\"><div class=\"hero-inner\"><div class=\"brand-lockup\"><img id=\"report-logo\" class=\"brand-logo\" alt=\"CGV\"><span>Comparative Gene Viewer</span></div><div class=\"hero-copy\"><div><h1 id=\"report-title\">CGV interactive analysis</h1><p id=\"report-subtitle\"></p><div id=\"report-badges\" class=\"badges\"></div></div></div></div></header>",
+        "<title>CGeV interactive analysis</title><style>", cgv_report_css(), "</style></head><body>",
+        "<header class=\"report-hero\"><div class=\"hero-inner\"><div class=\"brand-lockup\"><img id=\"report-logo\" class=\"brand-logo\" alt=\"CGeV\"><span>Comparative Gene Viewer</span></div><div class=\"hero-copy\"><div><h1 id=\"report-title\">CGeV interactive analysis</h1><p id=\"report-subtitle\"></p><div id=\"report-badges\" class=\"badges\"></div></div></div></div></header>",
         "<main><div class=\"privacy-note\"><span class=\"privacy-icon\">i</span><span>This is an immutable read-only snapshot. Anyone with this secret URL can view and copy information shown here.</span></div>",
-        "<section class=\"report-section\"><div class=\"section-heading\"><div class=\"section-title\"><span class=\"section-icon\">CGV</span><div><h2>Analysis overview</h2><p>Query, organisms and captured scope</p></div></div></div><div class=\"section-body\"><div id=\"overview-cards\" class=\"overview-grid\"></div><div id=\"organism-row\" class=\"organism-row\"></div></div></section>",
+        "<section class=\"report-section\"><div class=\"section-heading\"><div class=\"section-title\"><span class=\"section-icon\">CGeV</span><div><h2>Analysis overview</h2><p>Query, organisms and captured scope</p></div></div></div><div class=\"section-body\"><div id=\"overview-cards\" class=\"overview-grid\"></div><div id=\"organism-row\" class=\"organism-row\"></div></div></section>",
         "<details id=\"section-locus\" class=\"report-section\" hidden><summary class=\"section-heading\"><div class=\"section-title\"><span class=\"section-icon\">CHR</span><div><h2>Genomic location</h2><p>Chromosome context separated by analysis workflow</p></div></div><span class=\"section-count\"></span></summary><div class=\"section-body\"><div id=\"locus-grid\" class=\"flow-stack\"></div></div></details>",
         "<details id=\"section-structural\" class=\"report-section\" hidden><summary class=\"section-heading\"><div class=\"section-title\"><span class=\"section-icon\">DNA</span><div><h2>Gene structure</h2><p>Choose one transcript or reveal all transcripts within each gene</p></div></div><span class=\"section-count\"></span></summary><div class=\"section-body\"><div id=\"figures-structural\" class=\"flow-stack\"></div></div></details>",
         "<details id=\"section-synteny\" class=\"report-section\" hidden><summary class=\"section-heading\"><div class=\"section-title\"><span class=\"section-icon\">SYN</span><div><h2>Aligned synteny</h2><p>Comparisons identified and separated by analysis workflow</p></div></div><span class=\"section-count\"></span></summary><div class=\"section-body\"><div id=\"figures-synteny\" class=\"flow-stack\"></div></div></details>",
@@ -1063,7 +1063,7 @@ cgv_render_report_html <- function(analysis, validated = FALSE, json = NULL) {
         "<details class=\"report-details\"><summary>Methods and parameters</summary><div class=\"section-body\"><pre id=\"parameters\"></pre></div></details>",
         "<details class=\"report-details\"><summary>Provenance, aliases and unresolved results</summary><div class=\"section-body\"><pre id=\"provenance\"></pre></div></details>",
         "<details class=\"report-details\"><summary>Capture notes</summary><div class=\"section-body\"><pre id=\"missing\"></pre></div></details>",
-        "<p class=\"footer\">Generated by CGV. No live database requests or analysis jobs run from this report.</p></main>",
+        "<p class=\"footer\">Generated by CGeV. No live database requests or analysis jobs run from this report.</p></main>",
         "<script id=\"cgv-analysis-data\" type=\"application/json\">", json, "</script><script>", cgv_report_js(), "</script></body></html>"
     )
 }
@@ -1137,9 +1137,9 @@ cgv_bundle_readme <- function(analysis) {
         cgv_safe_scalar(item$name %||% item$id)
     }, character(1)), collapse = ", ")
     paste(c(
-        "# CGV reproducibility package",
+        "# CGeV reproducibility package",
         "",
-        sprintf("- CGV version: %s", cgv_safe_scalar(analysis$generator$version)),
+        sprintf("- CGeV version: %s", cgv_safe_scalar(analysis$generator$version)),
         sprintf("- Created: %s", cgv_safe_scalar(analysis$created_at)),
         sprintf("- Analysis schema: %s", cgv_safe_scalar(analysis$schema_version)),
         sprintf("- Genes: %s", if (nzchar(genes)) genes else "not recorded"),
@@ -1148,7 +1148,7 @@ cgv_bundle_readme <- function(analysis) {
         "## Contents",
         "",
         "- `analysis.json`: portable machine-readable manifest.",
-        "- `session/cgv_session.rds`: CGV schema-v2 session snapshot.",
+        "- `session/cgv_session.rds`: CGeV schema-v2 session snapshot.",
         "- `tables/`: summary data used by the report.",
         "- `sequences/`: included only when private sequence inclusion was explicitly enabled.",
         "- `alignments/`: completed LASTZ/MultiPIP tabular results.",
@@ -1610,7 +1610,7 @@ init_shared_analysis_domain <- function(input,
                     shiny::strong("Report queued for email delivery.")
                 ),
                 shiny::p(
-                    "CGV saved an immutable copy of this analysis. You can keep working or close this page; the queued report will not change."
+                    "CGeV saved an immutable copy of this analysis. You can keep working or close this page; the queued report will not change."
                 ),
                 shiny::p(class = "help-block", paste("Delivery:", result$email)),
                 shiny::p(class = "help-block", paste("Reference:", result$job_id))
@@ -1821,7 +1821,7 @@ init_shared_analysis_domain <- function(input,
             shiny::icon("envelope-circle-check"),
             shiny::div(
                 shiny::strong("Alignment report queued."),
-                shiny::p("You can close this page. CGV will email the complete interactive report when LASTZ and MultiPIP finish."),
+                shiny::p("You can close this page. CGeV will email the complete interactive report when LASTZ and MultiPIP finish."),
                 shiny::p(class = "help-block", paste("Delivery:", result$email)),
                 shiny::p(class = "help-block", paste("Reference:", result$job_id))
             )
@@ -1833,7 +1833,7 @@ init_shared_analysis_domain <- function(input,
         mode <- match.arg(mode)
         if (cgv_runtime_is_desktop()) {
             shiny::showNotification(
-                "Background email delivery is available in the CGV web version. The Desktop app keeps analysis data on this computer.",
+                "Background email delivery is available in the CGeV web version. The Desktop app keeps analysis data on this computer.",
                 type = "warning",
                 duration = 10
             )
@@ -1871,7 +1871,7 @@ init_shared_analysis_domain <- function(input,
                 shiny::div(
                     class = "cgv-share-intro",
                     shiny::p(
-                        "CGV will freeze the current ", shiny::strong(workflow_label),
+                        "CGeV will freeze the current ", shiny::strong(workflow_label),
                         " analysis, run LASTZ and MultiPIP in a separate worker, and create the full interactive report."
                     ),
                     shiny::p(
@@ -1888,7 +1888,7 @@ init_shared_analysis_domain <- function(input,
                 shiny::div(
                     class = "cgv-share-privacy-note",
                     shiny::icon("shield-halved"),
-                    shiny::span("The email contains a private secret link valid for 7 days. Background delivery supports preloaded CGV datasets only.")
+                    shiny::span("The email contains a private secret link valid for 7 days. Background delivery supports preloaded CGeV datasets only.")
                 ),
                 shiny::uiOutput("alignment_email_status_ui")
             ),
@@ -1951,7 +1951,7 @@ init_shared_analysis_domain <- function(input,
             email = cgv_safe_scalar(queued$email, email)
         )
         shiny::showNotification(
-            "Alignment report queued. You may close CGV; the interactive link will arrive by email.",
+            "Alignment report queued. You may close CGeV; the interactive link will arrive by email.",
             type = "message",
             duration = 10
         )
@@ -2030,7 +2030,7 @@ init_shared_analysis_domain <- function(input,
                     src = modal_logo_src,
                     `data-light-src` = light_logo_src,
                     `data-dark-src` = dark_logo_src,
-                    alt = "CGV logo",
+                    alt = "CGeV logo",
                     class = "cgv-share-modal-logo"
                 ),
                 shiny::div(
@@ -2065,7 +2065,7 @@ init_shared_analysis_domain <- function(input,
                         if (background_available) {
                             "Generate it in this session and keep the page open, or choose email delivery below to freeze the current analysis and continue working."
                         } else {
-                            "This is one of CGV's most intensive processes. Keep CGV and this window open, and please wait until it finishes."
+                            "This is one of CGeV's most intensive processes. Keep CGeV and this window open, and please wait until it finishes."
                         }
                     )
                 ),
@@ -2091,7 +2091,7 @@ init_shared_analysis_domain <- function(input,
                         ),
                         shiny::p(
                             class = "help-block",
-                            "CGV will freeze the current analysis, generate the complete interactive report in a separate worker, and email the secret link. Background delivery currently supports preloaded CGV datasets."
+                            "CGeV will freeze the current analysis, generate the complete interactive report in a separate worker, and email the secret link. Background delivery currently supports preloaded CGeV datasets."
                         )
                     )
                 ) else NULL,
@@ -2111,14 +2111,14 @@ init_shared_analysis_domain <- function(input,
                         condition = "input.share_capture_mode == 'complete'",
                         shiny::p(
                             class = "help-block",
-                            "CGV will generate views that have not been opened. Depending on the number of results, this can take several minutes."
+                            "CGeV will generate views that have not been opened. Depending on the number of results, this can take several minutes."
                         )
                     ),
                     shiny::conditionalPanel(
                         condition = "input.share_capture_mode == 'fast'",
                         shiny::p(
                             class = "help-block",
-                            "CGV will not activate hidden Analytics, structures, alignments or synteny views."
+                            "CGeV will not activate hidden Analytics, structures, alignments or synteny views."
                         )
                     )
                 ),
@@ -2180,7 +2180,7 @@ init_shared_analysis_domain <- function(input,
                             value = FALSE
                         ),
                         shiny::p(
-                            "Optional and computationally intensive. CGV will run the compatible selected Cross-Species comparison, which can add several minutes, and include the completed LASTZ and MultiPIP views."
+                            "Optional and computationally intensive. CGeV will run the compatible selected Cross-Species comparison, which can add several minutes, and include the completed LASTZ and MultiPIP views."
                         )
                         )
                         if (isTRUE(state$preview$multi_gene > 0L) &&
@@ -2338,7 +2338,7 @@ init_shared_analysis_domain <- function(input,
         pending$phase <- "lastz"
         state$pending <- pending
         report_perf_mark(pending, "lastz_phase_started")
-        state$busy_message <- "Running and capturing LASTZ and MultiPIP. This can take several minutes; keep CGV open and please wait…"
+        state$busy_message <- "Running and capturing LASTZ and MultiPIP. This can take several minutes; keep CGeV open and please wait…"
         arm_report_stage_timeout(
             pending$request_id,
             "lastz",
@@ -2489,7 +2489,7 @@ init_shared_analysis_domain <- function(input,
                 email = cgv_safe_scalar(queued$email, email)
             )
             shiny::showNotification(
-                "Report queued. You can keep working or close CGV; the interactive link will arrive by email.",
+                "Report queued. You can keep working or close CGeV; the interactive link will arrive by email.",
                 type = "message",
                 duration = 10
             )
@@ -2578,9 +2578,9 @@ init_shared_analysis_domain <- function(input,
         state$package_context <- NULL
         state$artifacts <- NULL
         state$busy_message <- if (complete_capture) {
-            "Preparing a complete report. This intensive process can take several minutes; keep CGV open and please wait…"
+            "Preparing a complete report. This intensive process can take several minutes; keep CGeV open and please wait…"
         } else {
-            "Building the report. This can take several minutes; keep CGV open and please wait…"
+            "Building the report. This can take several minutes; keep CGeV open and please wait…"
         }
         if (isTRUE(state$pending$run_lastz)) {
             start_lastz_phase(state$pending)

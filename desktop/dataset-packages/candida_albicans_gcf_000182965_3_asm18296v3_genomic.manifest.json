@@ -3,7 +3,7 @@
   "label": "Candida albicans",
   "speciesId": "candida_albicans_gcf_000182965_3_asm18296v3_genomic",
   "version": "2026.09",
-  "description": "Candida albicans CGV Desktop dataset package.",
+  "description": "Candida albicans CGeV Desktop dataset package.",
   "downloadable": true,
   "sizeBytes": 18227910,
   "package": {

@@ -7,9 +7,9 @@ const fs = require("node:fs");
 const vm = require("node:vm");
 
 const uiSource = fs.readFileSync("ui.R", "utf8");
-const guideStart = uiSource.indexOf('title = "CGV Guide"');
+const guideStart = uiSource.indexOf('title = "CGeV Guide"');
 const guideEnd = uiSource.indexOf('title = "Home"', guideStart);
-assert.ok(guideStart >= 0 && guideEnd > guideStart, "CGV Guide UI block must exist");
+assert.ok(guideStart >= 0 && guideEnd > guideStart, "CGeV Guide UI block must exist");
 const guideSource = uiSource.slice(guideStart, guideEnd);
 
 assert.match(guideSource, /preload = "none"/, "Guide video must not preload before activation");

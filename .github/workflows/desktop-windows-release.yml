@@ -1,4 +1,4 @@
-name: CGV Desktop Windows signed release
+name: CGeV Desktop Windows signed release
 
 on:
   workflow_dispatch:
@@ -55,7 +55,7 @@ jobs:
           }
           "version=$Version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "release_tag=v$Version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          "installer=CGV-Desktop-$Version-Windows-x64-Setup.exe" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "installer=CGeV-Desktop-$Version-Windows-x64-Setup.exe" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
       - name: Set up MinGW64 for native LASTZ
         id: msys2
@@ -179,7 +179,7 @@ jobs:
           $Tag = "${{ steps.release.outputs.release_tag }}"
           $Version = "${{ steps.release.outputs.version }}"
           $Notes = @"
-          CGV Desktop $Version for Windows x64.
+          CGeV Desktop $Version for Windows x64.
 
           Source revision: https://github.com/${{ github.repository }}/commit/${{ github.sha }}
           Source tag: https://github.com/${{ github.repository }}/tree/${{ github.ref_name }}
@@ -191,7 +191,7 @@ jobs:
 
           $ExistingDraft = gh release view $Tag --repo $env:RELEASE_REPOSITORY --json isDraft --jq '.isDraft' 2>$null
           if ($LASTEXITCODE -ne 0) {
-            gh release create $Tag --repo $env:RELEASE_REPOSITORY --draft --title "CGV Desktop $Version" --notes-file "$env:RUNNER_TEMP/release-notes.md"
+            gh release create $Tag --repo $env:RELEASE_REPOSITORY --draft --title "CGeV Desktop $Version" --notes-file "$env:RUNNER_TEMP/release-notes.md"
           } elseif ($ExistingDraft -ne "true") {
             throw "Release $Tag is already public; this workflow may update draft releases only."
           }
@@ -206,7 +206,7 @@ jobs:
         shell: powershell
         run: |
           @"
-          ## CGV Desktop Windows signing
+          ## CGeV Desktop Windows signing
 
           - Source: `${{ github.sha }}`
           - Version: `${{ steps.release.outputs.version }}`

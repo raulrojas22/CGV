@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
-# Registra una sola vez la URL pública estable desde la que CGV Web y
-# CGV Desktop leerán desktop-release.json.
+# Registra una sola vez la URL pública estable desde la que CGeV Web y
+# CGeV Desktop leerán desktop-release.json.
 #
 # Uso:
 #   ./scripts/configurar-url-oracle-desktop.sh \
@@ -66,6 +66,6 @@ mv "$TEMP_FILE" "$CONFIG_FILE"
 trap - EXIT
 
 printf '\nURL de publicación configurada:\n  %s\n\n' "$MANIFEST_URL"
-printf 'Despliega este cambio en CGV Web e inclúyelo en el próximo build de\n'
+printf 'Despliega este cambio en CGeV Web e inclúyelo en el próximo build de\n'
 printf 'Desktop. Conserva la misma URL base para las versiones futuras.\n\n'
 printf 'Siguiente paso:\n  ./scripts/preparar-publicacion-desktop.sh\n'
