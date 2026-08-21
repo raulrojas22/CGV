@@ -313,7 +313,7 @@ rssh "set -e
     podman inspect '${BACKGROUND_WORKER_NAME}' > '${BACKUP_DIR}/background-worker.inspect.json'
   fi
   podman ps -a --no-trunc > '${BACKUP_DIR}/podman-ps.txt'
-"
+" || die "no se pudo completar el respaldo previo al deploy"
 
 echo ""
 echo "[3/7] Sincronizando sólo el código de aplicación..."
@@ -357,7 +357,8 @@ chmod 600 "$EMAIL_ENV_STAGING"
 rsync -az --chmod=Fu=rw,Fgo= \
   -e "ssh -S $SSH_SOCK" \
   "$EMAIL_ENV_STAGING" "${REMOTE_TARGET}:${REMOTE_EMAIL_ENV}"
-rssh "chmod 600 '${REMOTE_EMAIL_ENV}' && test \"\$(stat -c '%a' '${REMOTE_EMAIL_ENV}')\" = 600"
+rssh "chmod 600 '${REMOTE_EMAIL_ENV}' && test \"\$(stat -c '%a' '${REMOTE_EMAIL_ENV}')\" = 600" || \
+  die "no se pudo asegurar el archivo privado del worker de reportes"
 
 echo "  Preparando candidatos server-owned con allow-list de assets..."
 rssh "set -e
@@ -369,7 +370,7 @@ rssh "set -e
     --compose-output '${COLORS_COMPOSE_CANDIDATE}'
   test -s '${COLORS_APPLICATION_CANDIDATE}'
   test -s '${COLORS_COMPOSE_CANDIDATE}'
-"
+" || die "no se pudieron generar los candidatos server-owned seguros"
 
 # Colors keeps its hardened ShinyProxy configuration on the server. Add only
 # the allow-listed flags required by background reports and manual performance
@@ -379,8 +380,6 @@ rssh "set -e
   config='${COLORS_APPLICATION_CANDIDATE}'
   sed -i -E 's#^  title:.*#  title: CGeV - Comparative Gene Viewer#' \"\$config\"
   sed -i -E 's#^      display-name:.*#      display-name: CGeV - Comparative Gene Viewer#' \"\$config\"
-  sed -i -E 's#^        FEEDBACK_FROM_EMAIL:.*#        FEEDBACK_FROM_EMAIL: \"\${FEEDBACK_FROM_EMAIL:CGeV Feedback <feedback@cgvapp.com>}\"#' \"\$config\"
-  sed -i -E 's#^        REPORT_FROM_EMAIL:.*#        REPORT_FROM_EMAIL: \"\${REPORT_FROM_EMAIL:CGeV Reports <reports@cgvapp.com>}\"#' \"\$config\"
   if ! grep -q 'APP_BACKGROUND_REPORTS_ENABLED:' \"\$config\"; then
     staged=\"\${config}.background.\$\$\"
     awk '
@@ -425,9 +424,7 @@ rssh "set -e
   grep -q 'CGV_PUBLIC_BASE_URL: \"https://${PUBLIC_HOSTNAME}\"' \"\$config\"
   grep -Fq 'title: CGeV - Comparative Gene Viewer' \"\$config\"
   grep -Fq 'display-name: CGeV - Comparative Gene Viewer' \"\$config\"
-  grep -Fq 'FEEDBACK_FROM_EMAIL: \"\${FEEDBACK_FROM_EMAIL:CGeV Feedback <feedback@cgvapp.com>}\"' \"\$config\"
-  grep -Fq 'REPORT_FROM_EMAIL: \"\${REPORT_FROM_EMAIL:CGeV Reports <reports@cgvapp.com>}\"' \"\$config\"
-"
+" || die "falló la preparación del application.yml server-owned"
 
 rssh "set -e
   config='${COLORS_APPLICATION_CANDIDATE}'
@@ -449,13 +446,13 @@ rssh "set -e
   grep -q 'APP_INLINE_FAST_SEQUENCE_PREFETCH: \"\${SP_INLINE_FAST_SEQUENCE_PREFETCH:${COLORS_INLINE_FAST_SEQUENCE_PREFETCH}}\"' \"\$config\"
   grep -q 'APP_HOMO_DEFER_SEQUENCE: \"\${SP_HOMO_DEFER_SEQUENCE:${COLORS_HOMO_DEFER_SEQUENCE}}\"' \"\$config\"
   grep -q 'APP_DEFER_FEATURE_GC: \"\${SP_DEFER_FEATURE_GC:${COLORS_DEFER_FEATURE_GC}}\"' \"\$config\"
-"
+" || die "falló la configuración de first-paint en application.yml"
 
 rssh "set -e
   config='${COLORS_APPLICATION_CANDIDATE}'
   sed -i -E 's|^        APP_LASTZ_GLOBAL_WORKERS:.*|        APP_LASTZ_GLOBAL_WORKERS: \"\${SP_LASTZ_GLOBAL_WORKERS:${APP_LASTZ_GLOBAL_WORKERS}}\"|' \"\$config\"
   grep -q 'APP_LASTZ_GLOBAL_WORKERS: \"\${SP_LASTZ_GLOBAL_WORKERS:${APP_LASTZ_GLOBAL_WORKERS}}\"' \"\$config\"
-"
+" || die "falló la configuración LASTZ en application.yml"
 
 rssh "set -e
   test \"\$(grep -c '^        APP_ASSET_VERSION: \"\${APP_ASSET_VERSION:}\"$' '${COLORS_APPLICATION_CANDIDATE}')\" = 1
@@ -467,7 +464,7 @@ rssh "set -e
   ! grep -q '/opt/shinyproxy/env/cgv.env' '${COLORS_COMPOSE_CANDIDATE}'
   cd '${APP_DIR}'
   podman-compose -f '${COLORS_COMPOSE_CANDIDATE}' config >/dev/null
-"
+" || die "los candidatos server-owned no superaron la validación final"
 
 echo ""
 echo "[4/7] Construyendo imagen inmutable ${NEW_IMAGE}..."
@@ -536,7 +533,7 @@ rssh "set -e
   podman unshare chown -R 0:0 \"\$cache_dir/static_assets\"
   test -s \"\$cache_dir/static_assets/manifests/${STATIC_REVISION}.sha256\"
   test -d \"\$cache_dir/static_assets/releases/${STATIC_REVISION}\"
-"
+" || die "falló el prewarm o la publicación del snapshot estático"
 
 echo "  Preparando candidato nginx server-owned y validando sintaxis..."
 rssh "set -e
@@ -563,7 +560,7 @@ rssh "set -e
     --volume '${APP_DIR}/cache:/srv/cgv-cache:ro' \
     --entrypoint /usr/sbin/nginx \
     '${NGINX_RUNTIME_IMAGE}' -t
-"
+" || die "el candidato nginx no superó la validación"
 
 teardown_stack_command="
   podman rm -f ${BACKGROUND_WORKER_NAME} >/dev/null 2>&1 || true
