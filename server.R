@@ -18087,11 +18087,17 @@ function(input, output, session) {
         process_orthologous_lookup_results <- function(results, phase_label = "local_lookup", report_not_found = TRUE) {
         phase_added_ids <- character(0L)
         phase_tx_lengths <- numeric(0)
-        for (res_pre in results) {
+        # Hold each successful split only until its blocks are transferred to
+        # the reactive plot maps below. Data frames remain shared by R's
+        # copy-on-write semantics, and each slot is released after that transfer.
+        phase_transcript_splits <- prepare_orthologous_transcript_splits_once(results)
+        for (res_idx in seq_along(results)) {
+            res_pre <- results[[res_idx]]
             if (is.null(res_pre) || !isTRUE(res_pre$found)) next
             data_pre <- res_pre$data
             if (!is.data.frame(data_pre) || nrow(data_pre) == 0L) next
-            transcript_blocks_pre <- tryCatch(split_gene_data_by_transcript(data_pre), error = function(e) list())
+            prepared_split <- phase_transcript_splits[[res_idx]]
+            transcript_blocks_pre <- if (is.list(prepared_split)) prepared_split$blocks else list()
             if (length(transcript_blocks_pre) == 0L) {
                 transcript_blocks_pre <- list(data_pre)
             }
@@ -18121,7 +18127,8 @@ function(input, output, session) {
                 )
             }
         }
-        for (res in results) {
+        for (res_idx in seq_along(results)) {
+            res <- results[[res_idx]]
             if (is.null(res)) next
             j <- suppressWarnings(as.integer(res$file_idx %||% NA_integer_))
             if (!is.finite(j) || is.na(j)) j <- 0L
@@ -18203,13 +18210,29 @@ function(input, output, session) {
                     signature_gene_key <- normalize_display_id(lookup$matched_gene_id %||% matched_annotation_name)
                     if (!nzchar(signature_gene_key)) signature_gene_key <- representative_name
                     split_t0 <- app_perf_now()
-                    transcript_blocks <- split_gene_data_by_transcript(data)
+                    prepared_split <- phase_transcript_splits[[res_idx]]
+                    if (is.list(prepared_split) && isTRUE(prepared_split$reusable)) {
+                        transcript_blocks <- prepared_split$blocks
+                        split_elapsed_ms <- suppressWarnings(as.numeric(prepared_split$elapsed_ms %||% NA_real_))
+                    } else {
+                        # Preserve the prior error path: a failed prepass retries
+                        # without a handler here, so a repeated split error still
+                        # propagates instead of being silently converted to data.
+                        transcript_blocks <- split_gene_data_by_transcript(data)
+                        split_elapsed_ms <- app_perf_elapsed_ms(split_t0)
+                    }
+                    # Drop the prepass wrapper as soon as this result owns the
+                    # shared blocks locally; later commits retain the same frames.
+                    phase_transcript_splits[res_idx] <- list(NULL)
                     if (length(transcript_blocks) == 0) transcript_blocks <- list(data)
                     canonical_block_idx_ortho <- tryCatch(
                         compute_canonical_block_idx(transcript_blocks),
                         error = function(e) 1L
                     )
-                    app_perf_mark_ms(perf_run, "split_transcripts_ms", app_perf_elapsed_ms(split_t0), "ORTHO")
+                    if (!is.finite(split_elapsed_ms) || is.na(split_elapsed_ms)) {
+                        split_elapsed_ms <- app_perf_elapsed_ms(split_t0)
+                    }
+                    app_perf_mark_ms(perf_run, "split_transcripts_ms", split_elapsed_ms, "ORTHO")
                     resolved_genome <- if (nzchar(forced_genome) && file.exists(forced_genome)) {
                         list(
                             path = forced_genome,

@@ -8445,6 +8445,45 @@ split_gene_data_by_transcript <- function(data_df) {
     out
 }
 
+prepare_orthologous_transcript_splits_once <- function(results, split_fun = split_gene_data_by_transcript) {
+    if (!is.function(split_fun)) {
+        stop("split_fun must be a function", call. = FALSE)
+    }
+
+    prepared <- vector("list", length(results))
+    if (length(results) == 0L) {
+        return(prepared)
+    }
+
+    for (result_idx in seq_along(results)) {
+        result <- results[[result_idx]]
+        if (is.null(result) || !isTRUE(result$found)) {
+            next
+        }
+        data <- result$data
+        if (!is.data.frame(data) || nrow(data) == 0L) {
+            next
+        }
+
+        split_t0 <- app_perf_now()
+        split_attempt <- tryCatch(
+            list(reusable = TRUE, blocks = split_fun(data)),
+            error = function(e) list(reusable = FALSE, blocks = list())
+        )
+        blocks <- split_attempt$blocks
+        if (length(blocks) == 0L) {
+            blocks <- list(data)
+        }
+        prepared[[result_idx]] <- list(
+            blocks = blocks,
+            reusable = isTRUE(split_attempt$reusable),
+            elapsed_ms = app_perf_elapsed_ms(split_t0)
+        )
+    }
+
+    prepared
+}
+
 # --- 5. BÚSQUEDA DE GENES (ACTUALIZADA: CONTROL PARALELO) ---
 
 order_external_alias_sources_for_speed <- function(sources) {
