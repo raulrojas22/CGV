@@ -23,6 +23,10 @@ COLORS_DEFER_FEATURE_GC="${COLORS_DEFER_FEATURE_GC:-0}"
 LOCAL_EMAIL_ENV="${SCRIPT_DIR}/.env.local"
 REMOTE_EMAIL_ENV="${APP_DIR}/.env.background-reports"
 EMAIL_ENV_STAGING=""
+COLORS_APPLICATION_CANDIDATE=""
+COLORS_COMPOSE_CANDIDATE=""
+COLORS_NGINX_CANDIDATE=""
+COLORS_ENV_CANDIDATE=""
 CGV_DEPS_IMAGE="${CGV_DEPS_IMAGE:-cgv-deps:1.0.0}"
 SHINYPROXY_IMAGE="${SHINYPROXY_IMAGE:-docker.io/openanalytics/shinyproxy:3.2.4@sha256:281dfddd3c8c54ea2dfa74390480d0f7769b53fd0bbef6d57f272574fd10fa3c}"
 SHINYPROXY_DIGEST="${SHINYPROXY_IMAGE##*@}"
@@ -125,7 +129,14 @@ if [[ -n "$DEPLOY_CHANGES" ]]; then
 fi
 
 cleanup() {
-  ssh -S "$SSH_SOCK" -O exit "$REMOTE_TARGET" >/dev/null 2>&1 || true
+  if [[ -S "$SSH_SOCK" ]]; then
+    if [[ -n "$COLORS_APPLICATION_CANDIDATE" && -n "$COLORS_COMPOSE_CANDIDATE" && -n "$COLORS_NGINX_CANDIDATE" && -n "$COLORS_ENV_CANDIDATE" ]]; then
+      ssh -o BatchMode=yes -S "$SSH_SOCK" "$REMOTE_TARGET" \
+        "rm -f '${COLORS_APPLICATION_CANDIDATE}' '${COLORS_COMPOSE_CANDIDATE}' '${COLORS_NGINX_CANDIDATE}' '${COLORS_ENV_CANDIDATE}'" \
+        >/dev/null 2>&1 || true
+    fi
+    ssh -S "$SSH_SOCK" -O exit "$REMOTE_TARGET" >/dev/null 2>&1 || true
+  fi
   rm -f "$SSH_SOCK"
   if [[ -n "$EMAIL_ENV_STAGING" ]]; then
     rm -f "$EMAIL_ENV_STAGING"
@@ -138,7 +149,7 @@ rssh() {
 }
 
 echo "============================================"
-echo "  CGV Colors — deploy seguro de aplicación"
+echo "  CGeV Colors — deploy seguro de aplicación"
 echo "  Modo:       ${MODE}"
 echo "  Fuente:     ${SOURCE_BRANCH}@${SOURCE_REV}"
 echo "  Destino:    ${REMOTE_TARGET}:${APP_DIR}"
@@ -151,30 +162,48 @@ ssh -o BatchMode=yes -o ConnectTimeout=10 -o ControlMaster=yes \
   -o ControlPersist=60 -S "$SSH_SOCK" -fN "$REMOTE_TARGET"
 
 echo "[preflight] Auditando infraestructura segura en Colors..."
-rssh "command -v podman >/dev/null && command -v podman-compose >/dev/null && command -v python3 >/dev/null"
-rssh "podman info >/dev/null"
-rssh "test -s '${COMPOSE_FILE}' && test -s '${APP_DIR}/shinyproxy/application.yml' && test -s '${APP_DIR}/.env' && test -s '${COLORS_NGINX_CONFIG}'"
-rssh "grep -q 'docker-socket-proxy' '${COMPOSE_FILE}'"
-rssh "grep -q 'openanalytics/shinyproxy:3.2.4' '${COMPOSE_FILE}'"
-rssh "grep -q 'url: http://docker-socket-proxy:2375' '${APP_DIR}/shinyproxy/application.yml'"
-rssh "grep -q 'container-env-file: /opt/shinyproxy/env/cgv.env' '${APP_DIR}/shinyproxy/application.yml'"
-rssh "podman container exists cgv-docker-socket-proxy && podman container exists cgv-shinyproxy && podman container exists cgv-nginx"
+rssh "command -v podman >/dev/null && command -v podman-compose >/dev/null && command -v python3 >/dev/null" || \
+  die "Colors no tiene disponibles podman, podman-compose o python3"
+rssh "podman info >/dev/null" || die "Podman no responde en Colors"
+rssh "test -s '${COMPOSE_FILE}' && test -s '${APP_DIR}/shinyproxy/application.yml' && test -s '${APP_DIR}/.env' && test -s '${COLORS_NGINX_CONFIG}'" || \
+  die "falta un archivo server-owned requerido (Compose, application.yml, .env o nginx)"
+rssh "grep -q 'docker-socket-proxy' '${COMPOSE_FILE}'" || \
+  die "Compose no declara docker-socket-proxy"
+rssh "grep -q 'openanalytics/shinyproxy:3.2.4' '${COMPOSE_FILE}'" || \
+  die "Compose no fija ShinyProxy 3.2.4"
+rssh "grep -q 'url: http://docker-socket-proxy:2375' '${APP_DIR}/shinyproxy/application.yml'" || \
+  die "application.yml no usa el socket proxy aislado"
+if rssh "grep -q '^[[:space:]]*container-env-file:' '${APP_DIR}/shinyproxy/application.yml'"; then
+  die "Colors no debe usar container-env-file: .env contiene secretos; se exige allow-list explícita"
+fi
+rssh "podman container exists cgv-docker-socket-proxy && podman container exists cgv-shinyproxy && podman container exists cgv-nginx" || \
+  die "faltan contenedores base de Colors"
 
-ACTUAL_SP_IMAGE="$(rssh "podman inspect cgv-shinyproxy --format '{{.ImageName}}'")"
+ACTUAL_SP_IMAGE="$(rssh "podman inspect cgv-shinyproxy --format '{{.ImageName}}'")" || \
+  die "no se pudo inspeccionar la imagen de ShinyProxy"
 [[ "$ACTUAL_SP_IMAGE" == "$SHINYPROXY_IMAGE" || "$ACTUAL_SP_IMAGE" == "$SHINYPROXY_RUNTIME_IMAGE" ]] || \
   die "Colors usa '${ACTUAL_SP_IMAGE}', no el ShinyProxy 3.2.4 fijado"
 
-PROXY_MOUNTS="$(rssh "podman inspect cgv-shinyproxy --format '{{range .Mounts}}{{println .Destination}}{{end}}'")"
+PROXY_MOUNTS="$(rssh "podman inspect cgv-shinyproxy --format '{{range .Mounts}}{{println .Destination}}{{end}}'")" || \
+  die "no se pudieron inspeccionar los mounts de ShinyProxy"
 if grep -qx '/var/run/docker.sock' <<<"$PROXY_MOUNTS"; then
   die "ShinyProxy monta directamente el socket; se aborta antes de tocar producción"
 fi
-grep -qx '/opt/shinyproxy/env/cgv.env' <<<"$PROXY_MOUNTS" || \
-  die "ShinyProxy no monta .env como container-env-file; no se puede activar el namespace estático"
+if grep -qx '/opt/shinyproxy/env/cgv.env' <<<"$PROXY_MOUNTS"; then
+  die "ShinyProxy monta .env completo; se aborta para no exponer secretos a sesiones públicas"
+fi
+PROXY_ENV="$(rssh "podman inspect cgv-shinyproxy --format '{{range .Config.Env}}{{println .}}{{end}}'")" || \
+  die "no se pudo inspeccionar el entorno de ShinyProxy"
+if grep -q '^FEEDBACK_RESEND_API_KEY=' <<<"$PROXY_ENV"; then
+  die "ShinyProxy recibió FEEDBACK_RESEND_API_KEY; el secreto debe limitarse al worker"
+fi
 
-NGINX_MOUNTS="$(rssh "podman inspect cgv-nginx --format '{{range .Mounts}}{{println .Destination}}{{end}}'")"
+NGINX_MOUNTS="$(rssh "podman inspect cgv-nginx --format '{{range .Mounts}}{{println .Destination}}{{end}}'")" || \
+  die "no se pudieron inspeccionar los mounts de nginx"
 grep -qx '/srv/cgv-cache' <<<"$NGINX_MOUNTS" || \
   die "nginx no monta el cache persistente en /srv/cgv-cache"
-NGINX_RUNTIME_IMAGE="$(rssh "podman inspect cgv-nginx --format '{{.ImageName}}'")"
+NGINX_RUNTIME_IMAGE="$(rssh "podman inspect cgv-nginx --format '{{.ImageName}}'")" || \
+  die "no se pudo inspeccionar la imagen de nginx"
 
 SOCKET_STATE="$(rssh "podman inspect cgv-docker-socket-proxy --format '{{.State.Health.Status}}'")"
 [[ "$SOCKET_STATE" == "healthy" ]] || die "docker-socket-proxy no está saludable: ${SOCKET_STATE}"
@@ -262,6 +291,9 @@ NEW_IMAGE="${CGV_IMAGE:-localhost/cgv:release-${SOURCE_REV}-${DEPLOY_UTC}}"
 [[ "$NEW_IMAGE" != "$CURRENT_IMAGE" ]] || die "la nueva imagen coincide con la release activa"
 BACKUP_DIR="${REMOTE_PATH}/rollback/${DEPLOY_UTC}-pre-app-deploy"
 COLORS_NGINX_CANDIDATE="${COLORS_NGINX_CONFIG}.candidate-${DEPLOY_UTC}"
+COLORS_APPLICATION_CANDIDATE="${APP_DIR}/shinyproxy/application.yml.candidate-${DEPLOY_UTC}"
+COLORS_COMPOSE_CANDIDATE="${COMPOSE_FILE}.candidate-${DEPLOY_UTC}"
+COLORS_ENV_CANDIDATE="${APP_DIR}/.env.release-${DEPLOY_UTC}"
 
 echo ""
 echo "[2/7] Respaldando configuración y estado actual..."
@@ -327,12 +359,24 @@ rsync -az --chmod=Fu=rw,Fgo= \
   "$EMAIL_ENV_STAGING" "${REMOTE_TARGET}:${REMOTE_EMAIL_ENV}"
 rssh "chmod 600 '${REMOTE_EMAIL_ENV}' && test \"\$(stat -c '%a' '${REMOTE_EMAIL_ENV}')\" = 600"
 
+echo "  Preparando candidatos server-owned con allow-list de assets..."
+rssh "set -e
+  cd '${APP_DIR}'
+  python3 -B scripts/build_colors_shinyproxy_candidates.py \
+    --application '${APP_DIR}/shinyproxy/application.yml' \
+    --application-output '${COLORS_APPLICATION_CANDIDATE}' \
+    --compose '${COMPOSE_FILE}' \
+    --compose-output '${COLORS_COMPOSE_CANDIDATE}'
+  test -s '${COLORS_APPLICATION_CANDIDATE}'
+  test -s '${COLORS_COMPOSE_CANDIDATE}'
+"
+
 # Colors keeps its hardened ShinyProxy configuration on the server. Add only
 # the allow-listed flags required by background reports and manual performance
 # capture; the complete file was backed up above and is restored verbatim by
 # rollback_release().
 rssh "set -e
-  config='${APP_DIR}/shinyproxy/application.yml'
+  config='${COLORS_APPLICATION_CANDIDATE}'
   sed -i -E 's#^  title:.*#  title: CGeV - Comparative Gene Viewer#' \"\$config\"
   sed -i -E 's#^      display-name:.*#      display-name: CGeV - Comparative Gene Viewer#' \"\$config\"
   sed -i -E 's#^        FEEDBACK_FROM_EMAIL:.*#        FEEDBACK_FROM_EMAIL: \"\${FEEDBACK_FROM_EMAIL:CGeV Feedback <feedback@cgvapp.com>}\"#' \"\$config\"
@@ -386,7 +430,7 @@ rssh "set -e
 "
 
 rssh "set -e
-  config='${APP_DIR}/shinyproxy/application.yml'
+  config='${COLORS_APPLICATION_CANDIDATE}'
   if grep -q '^        APP_INLINE_FAST_SEQUENCE_PREFETCH:' \"\$config\"; then
     sed -i -E 's|^        APP_INLINE_FAST_SEQUENCE_PREFETCH:.*|        APP_INLINE_FAST_SEQUENCE_PREFETCH: \"\${SP_INLINE_FAST_SEQUENCE_PREFETCH:${COLORS_INLINE_FAST_SEQUENCE_PREFETCH}}\"|' \"\$config\"
   else
@@ -408,9 +452,21 @@ rssh "set -e
 "
 
 rssh "set -e
-  config='${APP_DIR}/shinyproxy/application.yml'
+  config='${COLORS_APPLICATION_CANDIDATE}'
   sed -i -E 's|^        APP_LASTZ_GLOBAL_WORKERS:.*|        APP_LASTZ_GLOBAL_WORKERS: \"\${SP_LASTZ_GLOBAL_WORKERS:${APP_LASTZ_GLOBAL_WORKERS}}\"|' \"\$config\"
   grep -q 'APP_LASTZ_GLOBAL_WORKERS: \"\${SP_LASTZ_GLOBAL_WORKERS:${APP_LASTZ_GLOBAL_WORKERS}}\"' \"\$config\"
+"
+
+rssh "set -e
+  test \"\$(grep -c '^        APP_ASSET_VERSION: \"\${APP_ASSET_VERSION:}\"$' '${COLORS_APPLICATION_CANDIDATE}')\" = 1
+  test \"\$(grep -c '^        APP_STATIC_BASE_URL: \"\${APP_STATIC_BASE_URL:}\"$' '${COLORS_APPLICATION_CANDIDATE}')\" = 1
+  test \"\$(grep -c '^      APP_ASSET_VERSION: \"\${APP_ASSET_VERSION:-}\"$' '${COLORS_COMPOSE_CANDIDATE}')\" = 1
+  test \"\$(grep -c '^      APP_STATIC_BASE_URL: \"\${APP_STATIC_BASE_URL:-}\"$' '${COLORS_COMPOSE_CANDIDATE}')\" = 1
+  ! grep -q '^[[:space:]]*container-env-file:' '${COLORS_APPLICATION_CANDIDATE}'
+  ! grep -q '^[[:space:]]*env_file:' '${COLORS_COMPOSE_CANDIDATE}'
+  ! grep -q '/opt/shinyproxy/env/cgv.env' '${COLORS_COMPOSE_CANDIDATE}'
+  cd '${APP_DIR}'
+  podman-compose -f '${COLORS_COMPOSE_CANDIDATE}' config >/dev/null
 "
 
 echo ""
@@ -631,6 +687,11 @@ verify_static_release() {
       grep -qx 'APP_ASSET_VERSION=${expected_revision}'
     podman inspect \"\$delegate\" --format '{{range .Config.Env}}{{println .}}{{end}}' | \
       grep -qx 'APP_STATIC_BASE_URL=/cgv-static/${expected_revision}'
+    if podman inspect \"\$delegate\" --format '{{range .Config.Env}}{{println .}}{{end}}' | \
+         grep -q '^FEEDBACK_RESEND_API_KEY='; then
+      echo 'la sesión pública recibió FEEDBACK_RESEND_API_KEY' >&2
+      exit 1
+    fi
   "
 }
 
@@ -665,7 +726,7 @@ rssh "set -e
   test \"\$(grep -c '^CGV_IMAGE=' .env)\" = 1
   test \"\$(grep -c '^APP_ASSET_VERSION=' .env || true)\" -le 1
   test \"\$(grep -c '^APP_STATIC_BASE_URL=' .env || true)\" -le 1
-  env_candidate='.env.release-${DEPLOY_UTC}'
+  env_candidate='${COLORS_ENV_CANDIDATE}'
   cp -p .env \"\$env_candidate\"
   sed -i -E 's|^CGV_IMAGE=.*|CGV_IMAGE=${NEW_IMAGE}|' \"\$env_candidate\"
   if grep -q '^APP_ASSET_VERSION=' \"\$env_candidate\"; then
@@ -680,7 +741,12 @@ rssh "set -e
   fi
   grep -qx 'APP_ASSET_VERSION=${STATIC_REVISION}' \"\$env_candidate\"
   grep -qx 'APP_STATIC_BASE_URL=/cgv-static/${STATIC_REVISION}' \"\$env_candidate\"
+  test -s '${COLORS_APPLICATION_CANDIDATE}'
+  test -s '${COLORS_COMPOSE_CANDIDATE}'
   test -s '${COLORS_NGINX_CANDIDATE}'
+  podman-compose --env-file \"\$env_candidate\" -f '${COLORS_COMPOSE_CANDIDATE}' config >/dev/null
+  mv '${COLORS_APPLICATION_CANDIDATE}' '${APP_DIR}/shinyproxy/application.yml'
+  mv '${COLORS_COMPOSE_CANDIDATE}' '${COMPOSE_FILE}'
   mv '${COLORS_NGINX_CANDIDATE}' '${COLORS_NGINX_CONFIG}'
   mv \"\$env_candidate\" .env
   ${teardown_stack_command}
@@ -711,6 +777,11 @@ rssh "set -e
   fail_guard() { echo \"FINAL_GUARD_FAILED: \$1\" >&2; exit 1; }
   test \"\$(podman inspect cgv-shinyproxy --format '{{.ImageName}}')\" = '${SHINYPROXY_RUNTIME_IMAGE}' || fail_guard shinyproxy-image
   if podman inspect cgv-shinyproxy --format '{{range .Mounts}}{{println .Destination}}{{end}}' | grep -qx '/var/run/docker.sock'; then fail_guard direct-docker-socket; fi
+  if podman inspect cgv-shinyproxy --format '{{range .Mounts}}{{println .Destination}}{{end}}' | grep -qx '/opt/shinyproxy/env/cgv.env'; then fail_guard full-env-mount; fi
+  broker_env=\$(podman inspect cgv-shinyproxy --format '{{range .Config.Env}}{{println .}}{{end}}')
+  printf '%s\n' \"\$broker_env\" | grep -qx 'APP_ASSET_VERSION=${STATIC_REVISION}' || fail_guard broker-asset-version
+  printf '%s\n' \"\$broker_env\" | grep -qx 'APP_STATIC_BASE_URL=/cgv-static/${STATIC_REVISION}' || fail_guard broker-static-base
+  if printf '%s\n' \"\$broker_env\" | grep -q '^FEEDBACK_RESEND_API_KEY='; then fail_guard broker-feedback-secret; fi
   test \"\$(podman network inspect sp-control --format '{{.Internal}}')\" = true || fail_guard sp-control-not-internal
   legacy=\$(podman ps --filter ancestor=localhost/cgv:1.0.0 -q | wc -l | tr -d ' ')
   test \"\$legacy\" = 0 || fail_guard legacy-cgv-container
