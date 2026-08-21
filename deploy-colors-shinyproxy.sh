@@ -466,6 +466,33 @@ rssh "set -e
   podman-compose -f '${COLORS_COMPOSE_CANDIDATE}' config >/dev/null
 " || die "los candidatos server-owned no superaron la validación final"
 
+echo "  Preparando candidato nginx server-owned y validando sintaxis..."
+rssh "set -e
+  cd '${APP_DIR}'
+  python3 scripts/build_nginx_static_candidate.py \
+    --config '${COLORS_NGINX_CONFIG}' \
+    --snippet '${APP_DIR}/deploy/nginx/cgv-static-assets.location.conf' \
+    --output '${COLORS_NGINX_CANDIDATE}' \
+    --report-script-hash '${REPORT_SCRIPT_CSP_HASH}'
+  grep -q '^    # BEGIN CGV IMMUTABLE STATIC v1$' '${COLORS_NGINX_CANDIDATE}'
+  grep -q 'alias /srv/cgv-cache/static_assets/releases/;' '${COLORS_NGINX_CANDIDATE}'
+  grep -Fq '${REPORT_SCRIPT_CSP_HASH}' '${COLORS_NGINX_CANDIDATE}'
+  podman run --rm \
+    --name 'cgv-nginx-config-test-${DEPLOY_UTC}' \
+    --user 101:101 \
+    --read-only \
+    --network sp-net \
+    --security-opt no-new-privileges \
+    --cap-drop all \
+    --tmpfs /var/cache/nginx:rw,nosuid,nodev,noexec,size=32m,mode=1777 \
+    --tmpfs /run:rw,nosuid,nodev,noexec,size=8m,mode=1777 \
+    --tmpfs /tmp:rw,nosuid,nodev,noexec,size=8m \
+    --volume '${COLORS_NGINX_CANDIDATE}:/etc/nginx/conf.d/default.conf:ro' \
+    --volume '${APP_DIR}/cache:/srv/cgv-cache:ro' \
+    --entrypoint /usr/sbin/nginx \
+    '${NGINX_RUNTIME_IMAGE}' -t
+" || die "el candidato nginx no superó la validación"
+
 echo ""
 echo "[4/7] Construyendo imagen inmutable ${NEW_IMAGE}..."
 DEPS_HAVE_REPORT_RUNTIME=0
@@ -534,33 +561,6 @@ rssh "set -e
   test -s \"\$cache_dir/static_assets/manifests/${STATIC_REVISION}.sha256\"
   test -d \"\$cache_dir/static_assets/releases/${STATIC_REVISION}\"
 " || die "falló el prewarm o la publicación del snapshot estático"
-
-echo "  Preparando candidato nginx server-owned y validando sintaxis..."
-rssh "set -e
-  cd '${APP_DIR}'
-  python3 scripts/build_nginx_static_candidate.py \
-    --config '${COLORS_NGINX_CONFIG}' \
-    --snippet '${APP_DIR}/deploy/nginx/cgv-static-assets.location.conf' \
-    --output '${COLORS_NGINX_CANDIDATE}' \
-    --report-script-hash '${REPORT_SCRIPT_CSP_HASH}'
-  grep -q '^    # BEGIN CGV IMMUTABLE STATIC v1$' '${COLORS_NGINX_CANDIDATE}'
-  grep -q 'alias /srv/cgv-cache/static_assets/releases/;' '${COLORS_NGINX_CANDIDATE}'
-  grep -Fq '${REPORT_SCRIPT_CSP_HASH}' '${COLORS_NGINX_CANDIDATE}'
-  podman run --rm \
-    --name 'cgv-nginx-config-test-${DEPLOY_UTC}' \
-    --user 101:101 \
-    --read-only \
-    --network sp-net \
-    --security-opt no-new-privileges \
-    --cap-drop all \
-    --tmpfs /var/cache/nginx:rw,nosuid,nodev,noexec,size=32m \
-    --tmpfs /var/run:rw,nosuid,nodev,noexec,size=8m \
-    --tmpfs /tmp:rw,nosuid,nodev,noexec,size=8m \
-    --volume '${COLORS_NGINX_CANDIDATE}:/etc/nginx/conf.d/default.conf:ro' \
-    --volume '${APP_DIR}/cache:/srv/cgv-cache:ro' \
-    --entrypoint /usr/sbin/nginx \
-    '${NGINX_RUNTIME_IMAGE}' -t
-" || die "el candidato nginx no superó la validación"
 
 teardown_stack_command="
   podman rm -f ${BACKGROUND_WORKER_NAME} >/dev/null 2>&1 || true
