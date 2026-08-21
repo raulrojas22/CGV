@@ -59,6 +59,13 @@ required <- c(
   "COLORS_ENV_CANDIDATE",
   "rm -f '${COLORS_APPLICATION_CANDIDATE}' '${COLORS_COMPOSE_CANDIDATE}' '${COLORS_NGINX_CANDIDATE}' '${COLORS_ENV_CANDIDATE}'",
   "Colors no debe usar container-env-file",
+  "no se pudieron generar los candidatos server-owned seguros",
+  "falló la preparación del application.yml server-owned",
+  "falló la configuración de first-paint en application.yml",
+  "los candidatos server-owned no superaron la validación final",
+  "no se pudo completar el respaldo previo al deploy",
+  "falló el prewarm o la publicación del snapshot estático",
+  "el candidato nginx no superó la validación",
   "broker-feedback-secret",
   "la sesión pública recibió FEEDBACK_RESEND_API_KEY",
   "/srv/cgv-cache",
@@ -71,9 +78,7 @@ required <- c(
   "REPORT_SCRIPT_CSP_HASH",
   "--report-script-hash '${REPORT_SCRIPT_CSP_HASH}'",
   "title: CGeV - Comparative Gene Viewer",
-  "display-name: CGeV - Comparative Gene Viewer",
-  "CGeV Feedback <feedback@cgvapp.com>",
-  "CGeV Reports <reports@cgvapp.com>"
+  "display-name: CGeV - Comparative Gene Viewer"
 )
 assert(all(vapply(required, grepl, logical(1), x = deploy, fixed = TRUE)),
        "One or more Colors static-delivery guards are missing.")
@@ -84,5 +89,9 @@ assert(!grepl("sed .*docker-compose.shinyproxy.colors", deploy, perl = TRUE),
        "The application deploy must not edit the server-owned Colors compose file in place.")
 assert(!grepl(":/opt/shinyproxy/env/cgv.env", deploy, fixed = TRUE),
        "Colors must never mount the full .env file into ShinyProxy.")
+assert(!grepl("FEEDBACK_FROM_EMAIL:", deploy, fixed = TRUE),
+       "Public app sessions must not receive feedback sender configuration.")
+assert(!grepl("REPORT_FROM_EMAIL:", deploy, fixed = TRUE),
+       "Public app sessions must not receive report sender configuration.")
 
 message("Colors ShinyProxy immutable-static deployment contract is guarded.")
