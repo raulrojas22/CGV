@@ -30,7 +30,7 @@ for (const kind of ["mac-arm64", "mac-x64", "linux-appimage", "linux-deb", "wind
 assert.ok(!/\b(?:signed|unsigned|SignPath)\b/i.test(uiCode), "Public download UI must use neutral Windows wording");
 
 const preparationScript = read("scripts/preparar-publicacion-desktop.sh");
-assert.ok(preparationScript.includes('"windows-x64|CGV-Desktop-$VERSION-Windows-x64-Setup.exe"'));
+assert.ok(preparationScript.includes('"windows-x64|CGeV-Desktop-$VERSION-Windows-x64-Setup.exe"'));
 assert.ok(!preparationScript.includes("--include-windows-signed"));
 
 for (const script of [

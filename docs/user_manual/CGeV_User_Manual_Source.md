@@ -1,4 +1,4 @@
-# CGV User Manual
+# CGeV User Manual
 
 ## Comparative Gene Viewer
 
@@ -8,7 +8,7 @@ Version {{MANUAL_VERSION}}
 
 Revision: {{REVISION_DISPLAY}}
 
-CGV brings gene search, transcript visualization, comparative alignment, functional context, analytics, and publication export into one workspace. This manual describes the complete user-facing workflow in CGV Web and CGV Desktop.
+Comparative Gene Viewer (CGeV) brings gene search, transcript visualization, comparative alignment, functional context, analytics, and publication export into one workspace. This manual describes the complete user-facing workflow in CGeV Web and CGeV Desktop.
 
 ---PAGE---
 
@@ -16,13 +16,13 @@ CGV brings gene search, transcript visualization, comparative alignment, functio
 
 ## Purpose
 
-This manual is written for researchers, students, instructors, and technical users who want to use CGV without first learning its implementation details. It explains what each major control does, when to use it, how to interpret the result, and how to preserve or export the analysis.
+This manual is written for researchers, students, instructors, and technical users who want to use CGeV without first learning its implementation details. It explains what each major control does, when to use it, how to interpret the result, and how to preserve or export the analysis.
 
-The procedures apply to both CGV Web and CGV Desktop unless a section is marked **Desktop only**. The scientific interface is shared by both editions. Desktop adds a private local runtime, persistent local data storage, an organism catalog, and operating-system integration.
+The procedures apply to both CGeV Web and CGeV Desktop unless a section is marked **Desktop only**. The scientific interface is shared by both editions. Desktop adds a private local runtime, persistent local data storage, an organism catalog, and operating-system integration.
 
 ## Product scope
 
-CGV is designed for gene-centered structural and comparative analysis. It is especially useful for:
+CGeV is designed for gene-centered structural and comparative analysis. It is especially useful for:
 
 - comparing several annotated genes within one organism;
 - comparing one gene across several organisms;
@@ -31,15 +31,15 @@ CGV is designed for gene-centered structural and comparative analysis. It is esp
 - examining local sequence conservation with aligned synteny, LASTZ blocks, and MultiPIP;
 - reviewing gene metrics, sequence composition, Gene Ontology annotations, functional summaries, literature, and protein interaction context;
 - exporting figures, tables, sequences, and reproducible work sessions;
-- sharing immutable interactive read-only reports by secret URL in CGV Web or self-contained HTML in CGV Desktop.
+- sharing immutable interactive read-only reports by secret URL in CGeV Web or self-contained HTML in CGeV Desktop.
 
-CGV is not a replacement for differential-expression analysis, variant calling, genome assembly, whole-genome browsing, phylogenetic inference, population-genetic analysis, protein 3D prediction, or clinical interpretation.
+CGeV is not a replacement for differential-expression analysis, variant calling, genome assembly, whole-genome browsing, phylogenetic inference, population-genetic analysis, protein 3D prediction, or clinical interpretation.
 
-> IMPORTANT: CGV displays and analyzes the annotations and assemblies supplied by the selected data source. A missing feature can reflect the source annotation rather than the biological absence of that feature.
+> IMPORTANT: CGeV displays and analyzes the annotations and assemblies supplied by the selected data source. A missing feature can reflect the source annotation rather than the biological absence of that feature.
 
 ## Conventions
 
-- **Bold text** identifies labels that appear in the CGV interface.
+- **Bold text** identifies labels that appear in the CGeV interface.
 - `Monospace text` identifies file types, file names, identifiers, or literal values.
 - Numbered steps are actions to perform in order.
 - A note explains behavior that affects interpretation or reproducibility.
@@ -52,9 +52,9 @@ CGV is not a replacement for differential-expression analysis, variant calling, 
 
 ---PAGE---
 
-# 1. CGV at a glance
+# 1. CGeV at a glance
 
-CGV follows a consistent analysis path regardless of the data source or search mode.
+CGeV follows a consistent analysis path regardless of the data source or search mode.
 
 [[WORKFLOW_DIAGRAM]]
 
@@ -109,13 +109,13 @@ The sidebar is the primary navigation and search surface.
 | **Home** | Product overview, workflow orientation, scope, troubleshooting, and FAQ |
 | **Multi-Gene Search** | Configure one organism and one or more gene queries |
 | **Cross-Species Gene Search** | Configure several organisms and one shared gene query |
-| **Figure Studio** | Assemble available CGV charts into a multi-panel publication figure |
-| **CGV Guide** | Follow the video-based step-by-step learning routes |
+| **Figure Studio** | Assemble available CGeV charts into a multi-panel publication figure |
+| **CGeV Guide** | Follow the video-based step-by-step learning routes |
 | **Settings** | Configure appearance, deletion confirmation, quick actions, alias sources, organisms, and sessions |
 | **Feedback** | Submit a bug report or feature suggestion |
-| **CGV Desktop** | Review desktop capabilities and obtain the appropriate installer |
+| **CGeV Desktop** | Review desktop capabilities and obtain the appropriate installer |
 
-Select the triangle control in the CGV brand area to collapse or expand the sidebar. The collapsed sidebar keeps the main navigation accessible and provides a compact gene-search panel.
+Select the triangle control in the CGeV brand area to collapse or expand the sidebar. The collapsed sidebar keeps the main navigation accessible and provides a compact gene-search panel.
 
 ## 2.2 Workflow configuration panels
 
@@ -155,7 +155,7 @@ To build a Multi-Gene batch:
 5. Remove an individual chip if necessary, or use **Clear** to reset the batch.
 6. Select **Generate visualization**.
 
-CGV keeps unique entries and limits a single submitted batch to 24 genes for a stable interactive session. If a larger list is supplied, the first 24 unique genes are used.
+CGeV keeps unique entries and limits a single submitted batch to 24 genes for a stable interactive session. If a larger list is supplied, the first 24 unique genes are used.
 
 ## 2.4 Notification history and progress
 
@@ -165,7 +165,7 @@ Long operations display a working state. The interface remains usable while back
 
 LASTZ and MultiPIP runs, including automatic reference scoring, open the status
 popup automatically with a patience notice, current progress, and elapsed time.
-Keep CGV open until the run finishes. The transient working popup closes when
+Keep CGeV open until the run finishes. The transient working popup closes when
 the active run ends, and the completion or failure notice remains available in
 notification history.
 
@@ -176,7 +176,7 @@ After data are loaded, the context header identifies:
 - the active search type;
 - selected organisms;
 - the current gene or gene batch;
-- whether CGV is in visualization or alignment mode;
+- whether CGeV is in visualization or alignment mode;
 - the active visual detail level.
 
 The header provides **Visualize mode** and **Alignment mode**. Under Visualize mode, choose **Compact** or **Detailed**. Alignment choices depend on the workflow and loaded data.
@@ -206,9 +206,9 @@ Zoom changes the horizontal display scale of the interactive plot cards without 
 
 ## 2.7 Share analysis
 
-The unobtrusive **Share** action in the active result header appears after CGV
-has at least one result. In CGV Web it creates an expiring secret read-only URL.
-In CGV Desktop the same action prepares a self-contained interactive HTML file
+The unobtrusive **Share** action in the active result header appears after CGeV
+has at least one result. In CGeV Web it creates an expiring secret read-only URL.
+In CGeV Desktop the same action prepares a self-contained interactive HTML file
 and reproducibility ZIP without uploading the analysis. See Sections 11.10 and
 11.11 for privacy, contents, and reproducibility details.
 
@@ -229,11 +229,11 @@ This control is useful on long result pages. It does not replace the full workfl
 
 ## 3.1 Preloaded references
 
-Preloaded references combine an indexed annotation with a matching genome assembly. They provide the fastest route to all CGV capabilities, including feature tooltips, sequence composition, FASTA export, promoter extraction, and local alignment.
+Preloaded references combine an indexed annotation with a matching genome assembly. They provide the fastest route to all CGeV capabilities, including feature tooltips, sequence composition, FASTA export, promoter extraction, and local alignment.
 
-In CGV Web, the server determines which references are available. In CGV Desktop, references installed from the organism catalog appear in the same **Preloaded organism** selectors.
+In CGeV Web, the server determines which references are available. In CGeV Desktop, references installed from the organism catalog appear in the same **Preloaded organism** selectors.
 
-Select the information icon beside an organism selection to review assembly metadata and statistics. Where organism imagery is available, CGV can also display licensed organism photographs with their source attribution.
+Select the information icon beside an organism selection to review assembly metadata and statistics. Where organism imagery is available, CGeV can also display licensed organism photographs with their source attribution.
 
 ## 3.2 NCBI Search
 
@@ -244,7 +244,7 @@ Use NCBI Search when the required assembly is not in the preloaded set.
 3. Select the search icon.
 4. Review matching assemblies and inspect the available accession, assembly name, level, and statistics.
 5. Select the intended assembly.
-6. Allow CGV to download and prepare the annotation, genome, assembly report, and assembly statistics.
+6. Allow CGeV to download and prepare the annotation, genome, assembly report, and assembly statistics.
 7. Continue with the gene search after the source status reports readiness.
 
 For Cross-Species Search, repeat the NCBI search to build the organism queue.
@@ -276,9 +276,9 @@ For Multi-Gene Search, upload one annotation and one matching genome. Optional f
 
 ### Multi-organism upload
 
-For Cross-Species Search, upload one annotation and one genome per organism. CGV pairs them by shared sequence identifiers and file-name evidence. Use clear, matching names and ensure chromosome or contig identifiers agree between each annotation and genome.
+For Cross-Species Search, upload one annotation and one genome per organism. CGeV pairs them by shared sequence identifiers and file-name evidence. Use clear, matching names and ensure chromosome or contig identifiers agree between each annotation and genome.
 
-If CGV cannot establish a confident pairing, rename the files more clearly or verify that the genome build and sequence identifiers match.
+If CGeV cannot establish a confident pairing, rename the files more clearly or verify that the genome build and sequence identifiers match.
 
 ## 3.4 Mixed sources
 
@@ -311,9 +311,9 @@ Before reporting a result, record:
 - gene query and resolved local identifier;
 - transcript identifier;
 - whether an external alias was used;
-- CGV search mode and visualization mode;
+- CGeV search mode and visualization mode;
 - alignment settings, when applicable;
-- export date and CGV version.
+- export date and CGeV version.
 
 ---PAGE---
 
@@ -347,7 +347,7 @@ Changing organism after results exist prompts for confirmation because the curre
 3. Select the exact record when it appears.
 4. Select **Generate visualization** or press Enter.
 
-CGV first searches the local annotation and local alias index. If the query is not an exact local match, it can offer partial-name suggestions or consult the external alias sources enabled in **Settings**.
+CGeV first searches the local annotation and local alias index. If the query is not an exact local match, it can offer partial-name suggestions or consult the external alias sources enabled in **Settings**.
 
 ## 4.4 Enter a gene batch
 
@@ -367,7 +367,7 @@ The search processes the batch in sequence and preserves successful plots. On co
 
 ## 4.5 Resolve suggestions and ambiguous aliases
 
-When no exact match exists, CGV can show similar local gene names. Multi-Gene Search allows one or more suggestions to be selected and plotted.
+When no exact match exists, CGeV can show similar local gene names. Multi-Gene Search allows one or more suggestions to be selected and plotted.
 
 When an alias maps to several records, the **Several Alias Matches** dialog displays:
 
@@ -485,7 +485,7 @@ The organism selector allows multiple entries. In Desktop, only installed refere
 2. Select an autocomplete suggestion when available.
 3. Select **Generate visualization**.
 
-CGV checks each organism independently. A direct local match is used first. If no local match is found, enabled alias services can resolve alternate nomenclature in the background.
+CGeV checks each organism independently. A direct local match is used first. If no local match is found, enabled alias services can resolve alternate nomenclature in the background.
 
 The context header marks organism states such as:
 
@@ -495,7 +495,7 @@ The context header marks organism states such as:
 - no match in the current annotation.
 
 Select **About results** in the Cross-Species context header to review the
-comparison scope. CGV displays the selected gene when the same name or a
+comparison scope. CGeV displays the selected gene when the same name or a
 resolved alias is available in at least two selected organisms. Additional
 family members found only within one organism are not added to this result; use
 Multi-Gene Search to explore those genes within that organism.
@@ -514,7 +514,7 @@ Use the notification history and organism status pills to distinguish these case
 
 ## 5.5 Resolve suggestions
 
-If no exact cross-species match is available, CGV can suggest similar genes shared by the selected annotations. Select one exact suggestion to rerun the comparison. Cross-species results require a usable match in at least two organisms.
+If no exact cross-species match is available, CGeV can suggest similar genes shared by the selected annotations. Select one exact suggestion to rerun the comparison. Cross-species results require a usable match in at least two organisms.
 
 If nomenclature differs strongly across species, select the external-alias option and review the resulting evidence badges.
 
@@ -556,7 +556,7 @@ Controls include:
 - minimum local identity;
 - **Run local alignments**.
 
-After the run, CGV evaluates the selected reference using the same alignments already displayed: supported organisms, reference-window coverage, weighted identity, and reduced block count. It does not run an all-against-all reference search.
+After the run, CGeV evaluates the selected reference using the same alignments already displayed: supported organisms, reference-window coverage, weighted identity, and reduced block count. It does not run an all-against-all reference search.
 
 The full genomic window is used, including introns and selected flanking sequence. Conserved blocks outside the transcribed region can therefore represent non-coding regulatory context, but they require independent biological validation.
 
@@ -577,7 +577,7 @@ Use the view to identify conserved intervals that recur across several organisms
 
 ## 5.10 Reference selection
 
-Choose a biologically meaningful, well-annotated reference with a complete genome sequence. Run the selected reference once and inspect the resulting support metrics before interpreting the visualization. The choice affects projection and visual order, so record it with exported results. CGV deliberately avoids testing every organism as a candidate reference because that all-against-all sweep scales quadratically and can consume substantial CPU.
+Choose a biologically meaningful, well-annotated reference with a complete genome sequence. Run the selected reference once and inspect the resulting support metrics before interpreting the visualization. The choice affects projection and visual order, so record it with exported results. CGeV deliberately avoids testing every organism as a candidate reference because that all-against-all sweep scales quadratically and can consume substantial CPU.
 
 ## 5.11 Sort cross-species cards
 
@@ -615,7 +615,7 @@ Header controls include:
 | **Download FASTA** | Opens the Gene, Transcript, CDS, and Introns sequence menu |
 | Close icon | Removes the current card after confirmation when enabled |
 
-External links open outside the CGV application. In Desktop they open in the default system browser.
+External links open outside the CGeV application. In Desktop they open in the default system browser.
 
 [[SCREENSHOT_RESULT_CARD]]
 
@@ -684,7 +684,7 @@ The dashed promoter-side connector is interactive.
 3. Choose a value from 100 to 5,000 bp in 10 bp increments. The default is 1,000 bp.
 4. Select **Download promoter region**.
 
-CGV extracts the strand-aware upstream interval and downloads it as FASTA. Coordinates are clipped to the sequence boundary when necessary.
+CGeV extracts the strand-aware upstream interval and downloads it as FASTA. Coordinates are clipped to the sequence boundary when necessary.
 
 > NOTE: "Promoter region" in this tool means a configurable upstream sequence window. It does not assert experimentally validated promoter activity.
 
@@ -737,7 +737,7 @@ Each chart has an information control and SVG export.
 
 ## 6.10 Removing results
 
-Use the close icon on a card to remove only that result. Use **Clear visualizations** in the sidebar to remove all active cards. When **Confirm before deleting** is enabled, CGV asks before destructive workspace actions.
+Use the close icon on a card to remove only that result. Use **Clear visualizations** in the sidebar to remove all active cards. When **Confirm before deleting** is enabled, CGeV asks before destructive workspace actions.
 
 Removing a card changes the summary table, analytics set, and Figure Studio availability. Export or save the session first if the result may be needed again.
 
@@ -757,7 +757,7 @@ Removing a card changes the summary table, analytics set, and Figure Studio avai
 
 ## 7.2 Aligned-synteny mapping events
 
-CGV uses visual event categories read from each upper track to the next lower
+CGeV uses visual event categories read from each upper track to the next lower
 track:
 
 - **1:1 direct (blue, solid)** - one upper block corresponds preferentially to
@@ -787,7 +787,7 @@ The ribbon tooltip is the authoritative source for the event label, identity, an
 
 **Full exon (+ UTRs)** includes exon geometry and untranslated extent. Use it for transcript-architecture questions and UTR differences.
 
-When a transcript lacks CDS, CGV can fall back to exon geometry so the track remains interpretable. Report such tracks separately from complete protein-coding comparisons.
+When a transcript lacks CDS, CGeV can fall back to exon geometry so the track remains interpretable. Report such tracks separately from complete protein-coding comparisons.
 
 ## 7.4 Identity thresholds
 
@@ -825,11 +825,11 @@ Track order is a presentation choice unless the view explicitly recalculates adj
 
 ## 7.7 Local alignment execution
 
-Select **Run local alignments** after changing reference, window, or other parameters. CGV reports the run state and raw hit count in the view footer.
+Select **Run local alignments** after changing reference, window, or other parameters. CGeV reports the run state and raw hit count in the view footer.
 
 Because LASTZ is computationally intensive, the notification popup opens
 automatically during LASTZ Blocks, MultiPIP, and reference-scoring runs. It
-shows progress and elapsed time. Keep CGV open and wait for the completion
+shows progress and elapsed time. Keep CGeV open and wait for the completion
 message before changing the source or closing Desktop.
 
 If the local engine reports unavailable sequence:
@@ -839,7 +839,7 @@ If the local engine reports unavailable sequence:
 - verify that the selected coordinates exist;
 - reduce the organism set to isolate the problematic source.
 
-If CGV reports a safety timeout or a locus window that is too large, select a
+If CGeV reports a safety timeout or a locus window that is too large, select a
 smaller alignment window and retry. Completed results remain available even
 when another query track fails.
 
@@ -851,7 +851,7 @@ Aligned-synteny, LASTZ, and MultiPIP cards provide **Download sequences**. The e
 
 Alignment views provide evidence of structural or local sequence similarity. They do not, by themselves, establish orthology, conserved regulation, functional equivalence, evolutionary direction, or statistical significance.
 
-Combine CGV results with curated orthology, phylogenetic analysis, experimental evidence, and source-specific annotation review where those conclusions are required.
+Combine CGeV results with curated orthology, phylogenetic analysis, experimental evidence, and source-specific annotation review where those conclusions are required.
 
 ---PAGE---
 
@@ -989,7 +989,7 @@ Do not replace N/A with zero unless the biological and computational meaning sup
 
 Select **Function** on a result card.
 
-CGV first uses descriptions, notes, or products in the local annotation. When a local summary is unavailable and a resolvable NCBI Gene record exists, it retrieves and caches the NCBI Gene summary.
+CGeV first uses descriptions, notes, or products in the local annotation. When a local summary is unavailable and a resolvable NCBI Gene record exists, it retrieves and caches the NCBI Gene summary.
 
 The dialog identifies:
 
@@ -1010,7 +1010,7 @@ Select **Network** to open an interactive protein-protein interaction network.
 Visual roles are:
 
 - red - target gene;
-- orange - genes already displayed in CGV;
+- orange - genes already displayed in CGeV;
 - gray - additional STRING interactors.
 
 Edge thickness reflects STRING combined confidence. Hover nodes and edges for details. Drag nodes, pan, use wheel zoom, navigation controls, keyboard controls, or double-click to refit the network.
@@ -1023,7 +1023,7 @@ Select **SVG** to export the current network.
 
 Select **GO** to search GO annotations for the current gene and organism.
 
-CGV groups results into:
+CGeV groups results into:
 
 - Biological Process;
 - Molecular Function;
@@ -1035,7 +1035,7 @@ GO terms describe curated or inferred annotations from the source. Check evidenc
 
 ## 9.4 Scientific Literature
 
-Select **Literature** on a canonical gene card. CGV searches Europe PMC using the gene, known synonyms, organism, and organism aliases.
+Select **Literature** on a canonical gene card. CGeV searches Europe PMC using the gene, known synonyms, organism, and organism aliases.
 
 The literature window supports:
 
@@ -1048,13 +1048,13 @@ Review the search context before treating the result list as exhaustive. Gene sy
 
 ## 9.5 External database links
 
-CGV builds organism-aware links:
+CGeV builds organism-aware links:
 
 - NCBI uses a GeneID when available, otherwise a symbol-and-organism search;
 - Ensembl selects the main, plant, fungal, protist, metazoan, or bacterial portal from organism context;
 - UniProt combines gene symbol, protein product, and organism context.
 
-The external site is responsible for the record shown after the link opens. Confirm that its assembly, species, and identifier match the CGV card.
+The external site is responsible for the record shown after the link opens. Confirm that its assembly, species, and identifier match the CGeV card.
 
 ## 9.6 Assembly details
 
@@ -1093,7 +1093,7 @@ This evidence is especially important when comparing species whose official nome
 
 ## 10.1 Purpose
 
-Figure Studio assembles independent CGV visualizations into a publication-ready multi-panel figure. It uses the SVG source of existing results and analytics, so the final composition remains vector-based when exported as SVG.
+Figure Studio assembles independent CGeV visualizations into a publication-ready multi-panel figure. It uses the SVG source of existing results and analytics, so the final composition remains vector-based when exported as SVG.
 
 Open **Figure Studio** after generating the result charts that the figure requires.
 
@@ -1179,7 +1179,7 @@ Drag a panel to reorder it, or use **Earlier** and **Later**. Panel width is con
 - **Undo** reverses the most recent studio edit.
 - **Redo** reapplies the reversed edit.
 - **New figure** resets title, subtitle, layout, style, and panels after confirmation.
-- **Clear** removes every panel but leaves the underlying CGV search results intact.
+- **Clear** removes every panel but leaves the underlying CGeV search results intact.
 - **Back to results** returns to the scientific result page.
 
 ## 10.8 Preview
@@ -1204,7 +1204,7 @@ Keep the SVG even when a journal requests PNG or another raster format. It prese
 
 ## 10.10 Save the studio draft
 
-The Figure Studio draft is temporary until the CGV work session is exported. Saving a session records:
+The Figure Studio draft is temporary until the CGeV work session is exported. Saving a session records:
 
 - figure title and subtitle;
 - column count;
@@ -1212,7 +1212,7 @@ The Figure Studio draft is temporary until the CGV work session is exported. Sav
 - panel order, size, and labels;
 - source references.
 
-When the session is restored, CGV reconnects panels to their source results. If a source is missing, regenerate or restore that result and refresh the panel.
+When the session is restored, CGeV reconnects panels to their source results. If a source is missing, regenerate or restore that result and refresh the panel.
 
 ---PAGE---
 
@@ -1290,32 +1290,32 @@ Restoring replaces current visualizations.
 ## 11.10 Reproducible export set
 
 Select the unobtrusive **Share** action in the active result header after
-generating at least one result. CGV prepares a versioned reproducibility
+generating at least one result. CGeV prepares a versioned reproducibility
 package. After the report is ready, select **Generate / download ZIP** to create
 the archive containing:
 
-- `analysis.json`, with CGV version, workflows, queries, organisms, source
+- `analysis.json`, with CGeV version, workflows, queries, organisms, source
   provenance (assembly/annotation accession, version, source, and SHA-256
   checksum), alias decisions, parameters, unresolved organisms, and completed
   alignment metadata;
 - a human-readable `README.md` and `CHECKSUMS.sha256`;
-- a portable schema-v2 CGV session;
+- a portable schema-v2 CGeV session;
 - available summary CSV, completed LASTZ/MultiPIP TSV, and captured SVG files;
 - FASTA only when private sequence inclusion is explicitly enabled.
 
-Complete reference genomes are not copied into the package. CGV records their
+Complete reference genomes are not copied into the package. CGeV records their
 assembly and annotation provenance instead. When private sequences are
 excluded, restored visualizations remain available but sequence-dependent
 downloads may be disabled.
 
 The captured SVG set follows the selected report detail mode described below.
-In CGV Web, enabling reader downloads publishes the ZIP with the secret report;
+In CGeV Web, enabling reader downloads publishes the ZIP with the secret report;
 when that option is off, the author can still generate a private local copy
 from the Share dialog.
 
 ## 11.11 Read-only interactive reports
 
-On CGV Web, the header **Share** action also creates an immutable secret URL. Before
+On CGeV Web, the header **Share** action also creates an immutable secret URL. Before
 publishing, choose:
 
 - **Complete** or **Fast** report detail;
@@ -1323,7 +1323,7 @@ publishing, choose:
   **Cross-Species**, or both;
 - whether to include private or uploaded sequence content;
 - whether readers may download the reproducibility ZIP;
-- whether CGV should run the compatible current Cross-Species LASTZ and
+- whether CGeV should run the compatible current Cross-Species LASTZ and
   MultiPIP comparisons before capturing both alignment views;
 - an expiry of 7, 14, or 30 days. The default is 7 days.
 
@@ -1346,7 +1346,7 @@ capture failures.
 The report gives the gene structure full page width and presents chromosome
 position as a compact location aid. It contains aligned synteny when available,
 completed LASTZ/MultiPIP results, external results used in the analysis, and
-Figure Studio when available. In Complete mode, CGV derives the complete
+Figure Studio when available. In Complete mode, CGeV derives the complete
 analytics chart set and summary tables during publication even when the author
 never opened those panels. Readers can use tooltips, zoom, filters, table
 sorting, and collapsible sections. The report cannot run new searches, modify
@@ -1359,19 +1359,19 @@ large analyses navigable. Gene-structure results are grouped by gene and
 organism; each group initially shows its primary transcript and provides a
 selector for one specific transcript or all captured isoforms.
 
-For Multi-Gene results, CGV captures one aligned-synteny view for every loaded
+For Multi-Gene results, CGeV captures one aligned-synteny view for every loaded
 gene that has more than one transcript. Each view is labelled with that gene
 instead of with the complete search list. Report preparation temporarily
-renders uncached views behind the Share dialog. CGV freezes a visual copy of
+renders uncached views behind the Share dialog. CGeV freezes a visual copy of
 the current application beneath the modal during this process, so the visible
 workspace does not turn blank or expose intermediate mode changes.
 
-Report generation is one of CGV's most intensive processes and can take several
+Report generation is one of CGeV's most intensive processes and can take several
 minutes, especially in Complete mode or when LASTZ/MultiPIP is requested. Keep
-CGV and the Share dialog open until the final link or local-file message
+CGeV and the Share dialog open until the final link or local-file message
 appears. The dialog reports the current preparation stage.
 
-If the browser cannot capture an expected element, CGV lists it before
+If the browser cannot capture an expected element, CGeV lists it before
 publication. The author must either cancel or explicitly continue with that
 element excluded; capture failures are never omitted silently.
 
@@ -1380,7 +1380,7 @@ indexed, but it must still be treated as a secret. Reports created in the
 current browser appear under **Settings > Shared analysis reports**, where they
 can be copied or revoked.
 
-CGV Desktop does not upload analyses. It exports the same interactive report as
+CGeV Desktop does not upload analyses. It exports the same interactive report as
 a self-contained HTML file plus the reproducibility ZIP. Select **Build files**,
 then save **Download HTML** and **Generate / download ZIP** separately through
 the operating-system save dialogs.
@@ -1408,7 +1408,7 @@ Enable **Colorblind Palette** to apply an accessible feature and chart color sch
 
 ## 12.3 Confirm before deleting
 
-When enabled, CGV asks before removing cards, clearing visualizations, or replacing destructive workspace state. Disable it only when rapid iterative clearing is more important than protection from accidental loss.
+When enabled, CGeV asks before removing cards, clearing visualizations, or replacing destructive workspace state. Disable it only when rapid iterative clearing is more important than protection from accidental loss.
 
 ## 12.4 Quick navigation button
 
@@ -1416,7 +1416,7 @@ Enable this setting to display the floating search, display-mode, and zoom contr
 
 ## 12.5 External alias lookup
 
-Select which services CGV may use when the local annotation does not contain the entered gene name:
+Select which services CGeV may use when the local annotation does not contain the entered gene name:
 
 - MyGene;
 - NCBI Gene;
@@ -1443,24 +1443,24 @@ Installed references appear in the preloaded selectors.
 
 ## 12.7 Work sessions
 
-Use **Export current session (.rds)** and **Restore session** as described in Section 11. Session files are CGV workspace snapshots, not interchangeable biological data formats.
+Use **Export current session (.rds)** and **Restore session** as described in Section 11. Session files are CGeV workspace snapshots, not interchangeable biological data formats.
 
 ## 12.8 Shared analysis reports - Web
 
 This section lists secret reports created in the current browser. Use it to
 open or copy a report URL, or to revoke the report before its scheduled expiry.
 
-The list itself is stored only in the browser and does not require a CGV
+The list itself is stored only in the browser and does not require a CGeV
 account. Clearing browser storage can remove the local receipt without
 revoking the published report; the secret link still expires automatically.
 
 ---PAGE---
 
-# 13. CGV Desktop
+# 13. CGeV Desktop
 
 ## 13.1 What Desktop adds
 
-CGV Desktop packages the complete scientific interface with a local application runtime. It provides:
+CGeV Desktop packages the complete scientific interface with a local application runtime. It provides:
 
 - a private localhost session inside the desktop window;
 - bundled R and analysis tools;
@@ -1469,11 +1469,11 @@ CGV Desktop packages the complete scientific interface with a local application 
 - user-selected storage;
 - local diagnostics;
 - desktop update handling;
-- the same search, analytics, Figure Studio, and export features as CGV Web;
+- the same search, analytics, Figure Studio, and export features as CGeV Web;
 - self-contained interactive HTML reports and reproducibility ZIPs saved only
   to a location chosen by the user.
 
-CGV Desktop does not require a separate R, Docker, WSL, or command-line installation for normal use.
+CGeV Desktop does not require a separate R, Docker, WSL, or command-line installation for normal use.
 
 ## 13.2 Supported installers
 
@@ -1487,10 +1487,10 @@ Allow at least 2 GB for the application, plus storage for every organism install
 
 ## 13.3 First launch
 
-1. Open CGV Desktop.
-2. On the first packaged Windows launch, choose a writable folder for genomes and caches when prompted. On macOS and Linux, CGV initializes its application-managed data location.
+1. Open CGeV Desktop.
+2. On the first packaged Windows launch, choose a writable folder for genomes and caches when prompted. On macOS and Linux, CGeV initializes its application-managed data location.
 3. Allow the local runtime to initialize.
-4. Wait for the main CGV interface.
+4. Wait for the main CGeV interface.
 5. Open **Settings** and install at least one organism.
 
 The selected storage folder contains:
@@ -1523,13 +1523,13 @@ Use **Verify** for an installed catalog entry. If a newer package is available, 
 
 ## 13.6 Remove local organisms
 
-Select **Remove organisms** to open the installed-organism list. Choose one, several, or **Select all installed organisms**, then confirm **Remove selected**. CGV removes only the selected catalog datasets and their associated local files and caches from the active desktop profile. This is a destructive data-management action. Export sessions and verify the storage path before confirming.
+Select **Remove organisms** to open the installed-organism list. Choose one, several, or **Select all installed organisms**, then confirm **Remove selected**. CGeV removes only the selected catalog datasets and their associated local files and caches from the active desktop profile. This is a destructive data-management action. Export sessions and verify the storage path before confirming.
 
 ## 13.7 Change the data folder
 
 On Windows, use **File > Change data folder...**.
 
-CGV restarts and uses the newly selected folder. Existing genomes and caches are not moved or deleted. Select the previous folder again to reuse its content, or move the data manually while CGV is closed.
+CGeV restarts and uses the newly selected folder. Existing genomes and caches are not moved or deleted. Select the previous folder again to reuse its content, or move the data manually while CGeV is closed.
 
 The Windows **File** menu also provides:
 
@@ -1539,7 +1539,7 @@ The Windows **File** menu also provides:
 
 ## 13.8 Automatic updates
 
-Direct Windows releases check for updates, download them in the background, and install them when CGV restarts or quits as indicated by the update notification. Dataset updates remain separate from application updates and are managed in the organism catalog.
+Direct Windows releases check for updates, download them in the background, and install them when CGeV restarts or quits as indicated by the update notification. Dataset updates remain separate from application updates and are managed in the organism catalog.
 
 ## 13.9 Diagnostics log
 
@@ -1575,9 +1575,9 @@ Removing the desktop application preserves the user-selected storage folder and 
 
 ---PAGE---
 
-# 14. CGV Guide
+# 14. CGeV Guide
 
-CGV Guide complements this manual with short visual demonstrations.
+CGeV Guide complements this manual with short visual demonstrations.
 
 ## 14.1 Guide routes
 
@@ -1632,7 +1632,7 @@ all downloaded organisms.
 2. Select a numbered step.
 3. Open a substep when available.
 4. Watch the short demonstration.
-5. Use the route action to open the corresponding CGV workflow.
+5. Use the route action to open the corresponding CGeV workflow.
 6. Return to the Guide whenever a control sequence is unfamiliar.
 
 The Guide is designed for procedural learning. Use this manual for complete option reference, interpretation guidance, and troubleshooting.
@@ -1730,7 +1730,7 @@ For Cross-Species Search, remember that at least two organism matches are requir
 - Increase the minimum segment or block length.
 - Avoid running multiple large NCBI downloads simultaneously.
 - In Desktop, allow the first run to build reusable caches.
-- Keep CGV open while the automatic status popup shows LASTZ or MultiPIP as
+- Keep CGeV open while the automatic status popup shows LASTZ or MultiPIP as
   active.
 - If a safety timeout or oversized-window message appears, reduce the alignment
   window before retrying.
@@ -1753,9 +1753,9 @@ For Cross-Species Search, remember that at least two organism matches are requir
 
 ## 15.13 A session does not restore as expected
 
-- Confirm the file is a CGV `.rds` work session.
+- Confirm the file is a CGeV `.rds` work session.
 - Confirm the file is accessible and not truncated.
-- Restore into the same or a compatible CGV version.
+- Restore into the same or a compatible CGeV version.
 - Keep original upload data available for operations that need fresh source access.
 - Reinstall missing Desktop organisms.
 - Regenerate any Figure Studio source marked unavailable.
@@ -1766,7 +1766,7 @@ For Cross-Species Search, remember that at least two organism matches are requir
 2. Confirm the storage folder is writable.
 3. Open the diagnostics log.
 4. Confirm free disk space.
-5. Restart CGV Desktop.
+5. Restart CGeV Desktop.
 6. On macOS, approve the application in **System Settings > Privacy & Security** when required.
 7. On Linux, confirm AppImage execution permission or use the DEB package.
 8. On Windows, use the signed per-user installer and review security prompts.
@@ -1777,7 +1777,7 @@ For Cross-Species Search, remember that at least two organism matches are requir
 - Refresh the catalog.
 - Confirm the state is installed.
 - Select **Verify**.
-- Restart CGV Desktop if the selector was already open during installation.
+- Restart CGeV Desktop if the selector was already open during installation.
 - Confirm the data path belongs to the active profile.
 
 ## 15.16 Feedback and support
@@ -1794,16 +1794,16 @@ A useful bug report includes:
 - gene query;
 - view and alignment settings;
 - browser or operating system;
-- CGV Desktop log excerpt when applicable.
+- CGeV Desktop log excerpt when applicable.
 
 Full name, a valid reply email, a short title, and a detailed description are
-required. CGV also records the active application section, submission time, and
+required. CGeV also records the active application section, submission time, and
 page context. The email address is used only for this submission and follow-up.
 
-After successful delivery, CGV clears the submitted detail fields and displays
+After successful delivery, CGeV clears the submitted detail fields and displays
 a confirmation notice. When confirmation email is enabled, a copy with the
 submission reference is sent to the reporter; failure of that copy does not
-discard feedback already delivered to the CGV inbox.
+discard feedback already delivered to the CGeV inbox.
 
 If Desktop reports that the message was saved locally but cannot be sent, use
 the Feedback page at `cgv.mobilomics.org`, use `cgvapp.com` while the official
@@ -1832,7 +1832,7 @@ The curated registry contains the following 25 organism references. Availability
 | Assembly report | NCBI-style text |
 | Assembly statistics | NCBI-style text |
 | GO annotations | GAF, gzip-compressed GAF |
-| Work session | CGV RDS |
+| Work session | CGeV RDS |
 
 ## B.2 Output formats
 
@@ -1847,11 +1847,11 @@ The curated registry contains the following 25 organism references. Availability
 | Gene, transcript, CDS, introns | FASTA | One card |
 | Promoter window | FASTA | One selected promoter interval |
 | Alignment sequence set | FASTA | Active alignment view |
-| Work session | RDS | Complete CGV workspace |
+| Work session | RDS | Complete CGeV workspace |
 
 ## B.3 Annotation expectations
 
-CGV works best when the annotation contains:
+CGeV works best when the annotation contains:
 
 - gene features;
 - transcript or mRNA features;
@@ -1895,7 +1895,7 @@ Fallback logic supports several transcript and non-coding RNA feature names, but
 
 **Assembly** - A specific version of an organism's reference genome sequence.
 
-**Canonical transcript** - The primary transcript representative selected for a gene in the current annotation and CGV context.
+**Canonical transcript** - The primary transcript representative selected for a gene in the current annotation and CGeV context.
 
 **CDS** - Coding sequence translated into protein.
 
@@ -1911,23 +1911,23 @@ Fallback logic supports several transcript and non-coding RNA feature names, but
 
 **Intron** - The interval between consecutive annotated exons in a transcript model.
 
-**LASTZ** - A local sequence-alignment program used by CGV for block and conservation views.
+**LASTZ** - A local sequence-alignment program used by CGeV for block and conservation views.
 
 **MultiPIP** - A reference-centered display of local conservation segments across several query tracks.
 
-**Orthology** - An evolutionary relationship between genes separated by speciation. CGV provides comparative evidence but does not by itself establish orthology.
+**Orthology** - An evolutionary relationship between genes separated by speciation. CGeV provides comparative evidence but does not by itself establish orthology.
 
-**Preloaded organism** - A reference whose annotation, genome, and registry metadata are ready for selection in the current CGV environment.
+**Preloaded organism** - A reference whose annotation, genome, and registry metadata are ready for selection in the current CGeV environment.
 
-**Promoter window** - In CGV, a user-defined upstream sequence interval from 100 to 5,000 bp.
+**Promoter window** - In CGeV, a user-defined upstream sequence interval from 100 to 5,000 bp.
 
-**Synteny** - Conserved genomic or feature order. CGV's aligned-synteny view focuses on gene and transcript structural correspondence.
+**Synteny** - Conserved genomic or feature order. CGeV's aligned-synteny view focuses on gene and transcript structural correspondence.
 
 **Transcript isoform** - One annotated transcript model among several associated with the same gene.
 
 **UTR** - Untranslated region of a transcript.
 
-**Work session** - A CGV RDS snapshot containing plots, settings, source context, and Figure Studio state.
+**Work session** - A CGeV RDS snapshot containing plots, settings, source context, and Figure Studio state.
 
 ---PAGE---
 
@@ -1986,9 +1986,9 @@ Fallback logic supports several transcript and non-coding RNA feature names, but
 
 # Document control
 
-**Title:** CGV User Manual - Comparative Gene Viewer
+**Title:** CGeV User Manual - Comparative Gene Viewer
 
-**Coverage:** CGV Web and CGV Desktop
+**Coverage:** CGeV Web and CGeV Desktop
 
 **Product version:** {{PRODUCT_VERSION}}
 
@@ -1998,4 +1998,4 @@ Fallback logic supports several transcript and non-coding RNA feature names, but
 
 **Source repository:** https://github.com/raulrojas22/CGV
 
-This manual describes the complete user-facing behavior represented by CGV version {{PRODUCT_VERSION}}, including the desktop data catalog, aligned-synteny tools, LASTZ and MultiPIP views, Figure Studio, interactive read-only reports, reproducibility exports, and session management.
+This manual describes the complete user-facing behavior represented by CGeV version {{PRODUCT_VERSION}}, including the desktop data catalog, aligned-synteny tools, LASTZ and MultiPIP views, Figure Studio, interactive read-only reports, reproducibility exports, and session management.

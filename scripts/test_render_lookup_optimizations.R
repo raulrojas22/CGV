@@ -59,8 +59,10 @@ assert_true(
     "Cross-species organism preparation must support lightweight local handle warming."
 )
 assert_true(
-    grepl('later::later\\(function\\(\\) \\{\\s*tryCatch\\(warm_gene_plot_renderer_once\\(\\)', server_txt, perl = TRUE),
-    "The renderer prewarm flag must schedule an actual session prewarm."
+    grepl('session$onFlushed(function() {', server_txt, fixed = TRUE) &&
+        grepl('APP_GENE_PLOT_RENDERER_PREWARM_DELAY_MS', server_txt, fixed = TRUE) &&
+        grepl('tryCatch(warm_gene_plot_renderer_once(), error = function(e) NULL)', server_txt, fixed = TRUE),
+    "The renderer warm-up must run after the first flush with a configurable delay."
 )
 assert_true(
     grepl("load_gff_autocomplete_cache\\(p, base_dir = \"\\.\"\\)", autocomplete_txt, perl = TRUE),

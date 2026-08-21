@@ -17,11 +17,11 @@ module.exports = {
     identityName: requiredEnvironment("WINDOWS_STORE_IDENTITY_NAME"),
     publisher: requiredEnvironment("WINDOWS_STORE_PUBLISHER"),
     publisherDisplayName: requiredEnvironment("WINDOWS_STORE_PUBLISHER_DISPLAY_NAME"),
-    displayName: "CGV Desktop",
+    displayName: "CGeV Desktop",
     backgroundColor: "transparent",
     languages: ["en-US", "es-CL"],
     showNameOnTiles: true,
-    artifactName: "CGV-Desktop-${version}-Windows-${arch}-Store.${ext}"
+    artifactName: "CGeV-Desktop-${version}-Windows-${arch}-Store.${ext}"
   },
   publish: null
 };

@@ -7,7 +7,7 @@
       "label": "Arabidopsis thaliana",
       "speciesId": "arabidopsis_thaliana_gcf_000001735_4_tair10_1_genomic",
       "version": "2026.09",
-      "description": "Arabidopsis thaliana — download and install for CGV Desktop.",
+      "description": "Arabidopsis thaliana — download and install for CGeV Desktop.",
       "downloadable": true,
       "sizeBytes": 116173186,
       "package": {
@@ -22,7 +22,7 @@
       "label": "Botrytis cinerea B05.10",
       "speciesId": "botrytis_cinerea_b05_10_gcf_000143535_2_asm14353v4_genomic",
       "version": "2026.09",
-      "description": "Botrytis cinerea B05.10 — download and install for CGV Desktop.",
+      "description": "Botrytis cinerea B05.10 — download and install for CGeV Desktop.",
       "downloadable": true,
       "sizeBytes": 20420169,
       "package": {
@@ -37,7 +37,7 @@
       "label": "Caenorhabditis elegans",
       "speciesId": "caenorhabditis_elegans_gcf_000002985_6_wbcel235_genomic",
       "version": "2026.09",
-      "description": "Caenorhabditis elegans — download and install for CGV Desktop.",
+      "description": "Caenorhabditis elegans — download and install for CGeV Desktop.",
       "downloadable": true,
       "sizeBytes": 74736428,
       "package": {
@@ -52,7 +52,7 @@
       "label": "Candida albicans",
       "speciesId": "candida_albicans_gcf_000182965_3_asm18296v3_genomic",
       "version": "2026.09",
-      "description": "Candida albicans — download and install for CGV Desktop.",
+      "description": "Candida albicans — download and install for CGeV Desktop.",
       "downloadable": true,
       "sizeBytes": 18227910,
       "package": {
@@ -67,7 +67,7 @@
       "label": "Canis lupus familiaris",
       "speciesId": "canis_lupus_familiaris_gcf_011100685_1_uu_cfam_gsd_1_0_genomic",
       "version": "2026.09",
-      "description": "Canis lupus familiaris — download and install for CGV Desktop.",
+      "description": "Canis lupus familiaris — download and install for CGeV Desktop.",
       "downloadable": true,
       "sizeBytes": 731551625,
       "package": {
@@ -82,7 +82,7 @@
       "label": "Danio rerio",
       "speciesId": "danio_rerio_gcf_049306965_1_grcz12tu_genomic",
       "version": "2026.09",
-      "description": "Danio rerio — download and install for CGV Desktop.",
+      "description": "Danio rerio — download and install for CGeV Desktop.",
       "downloadable": true,
       "sizeBytes": 477934731,
       "package": {
@@ -97,7 +97,7 @@
       "label": "Desmodus rotundus",
       "speciesId": "desmodus_rotundus_gcf_022682495_2_hldesrot8a_1_genomic",
       "version": "2026.09",
-      "description": "Desmodus rotundus — download and install for CGV Desktop.",
+      "description": "Desmodus rotundus — download and install for CGeV Desktop.",
       "downloadable": true,
       "sizeBytes": 571993323,
       "package": {
@@ -112,7 +112,7 @@
       "label": "Drosophila melanogaster",
       "speciesId": "drosophila_melanogaster_gcf_000001215_4_release_6_plus_iso1_mt_genomic",
       "version": "2026.09",
-      "description": "Drosophila melanogaster — download and install for CGV Desktop.",
+      "description": "Drosophila melanogaster — download and install for CGeV Desktop.",
       "downloadable": true,
       "sizeBytes": 61809668,
       "package": {
@@ -127,7 +127,7 @@
       "label": "Equus caballus",
       "speciesId": "equus_caballus_gcf_041296265_1_tb_t2t_genomic",
       "version": "2026.09",
-      "description": "Equus caballus — download and install for CGV Desktop.",
+      "description": "Equus caballus — download and install for CGeV Desktop.",
       "downloadable": true,
       "sizeBytes": 742354096,
       "package": {
@@ -142,7 +142,7 @@
       "label": "Fragaria vesca subsp. vesca",
       "speciesId": "fragaria_vesca_subsp_vesca_gcf_000184155_1_fraveshawaii_1_0_genomic",
       "version": "2026.09",
-      "description": "Fragaria vesca subsp. vesca — download and install for CGV Desktop.",
+      "description": "Fragaria vesca subsp. vesca — download and install for CGeV Desktop.",
       "downloadable": true,
       "sizeBytes": 59541267,
       "package": {
@@ -157,7 +157,7 @@
       "label": "Homo sapiens",
       "speciesId": "homo_sapiens_gcf_000001405_40_grch38_p14_genomic",
       "version": "2026.09",
-      "description": "Homo sapiens — download and install for CGV Desktop.",
+      "description": "Homo sapiens — download and install for CGeV Desktop.",
       "downloadable": true,
       "sizeBytes": 955461959,
       "package": {
@@ -172,7 +172,7 @@
       "label": "Malus domestica",
       "speciesId": "malus_domestica_gcf_042453785_1_gdt2t_hap1_genomic",
       "version": "2026.09",
-      "description": "Malus domestica — download and install for CGV Desktop.",
+      "description": "Malus domestica — download and install for CGeV Desktop.",
       "downloadable": true,
       "sizeBytes": 208240761,
       "package": {
@@ -187,7 +187,7 @@
       "label": "Mus musculus",
       "speciesId": "mus_musculus_gcf_000001635_27_grcm39_genomic",
       "version": "2026.09",
-      "description": "Mus musculus — download and install for CGV Desktop.",
+      "description": "Mus musculus — download and install for CGeV Desktop.",
       "downloadable": true,
       "sizeBytes": 837610801,
       "package": {
@@ -202,7 +202,7 @@
       "label": "Neurospora crassa",
       "speciesId": "neurospora_crassa_gcf_000182925_2_nc12_genomic",
       "version": "2026.09",
-      "description": "Neurospora crassa — download and install for CGV Desktop.",
+      "description": "Neurospora crassa — download and install for CGeV Desktop.",
       "downloadable": true,
       "sizeBytes": 18867847,
       "package": {
@@ -217,7 +217,7 @@
       "label": "Oryza sativa Indica Group",
       "speciesId": "oryza_sativa_indica_group_oryza_indica_asm465v1_62",
       "version": "2026.09",
-      "description": "Oryza sativa Indica Group — download and install for CGV Desktop.",
+      "description": "Oryza sativa Indica Group — download and install for CGeV Desktop.",
       "downloadable": true,
       "sizeBytes": 114547063,
       "package": {
@@ -232,7 +232,7 @@
       "label": "Oryza sativa ssp. japonica",
       "speciesId": "oryza_sativa_ssp_japonica_gcf_034140825_1_asm3414082v1_genomic",
       "version": "2026.09",
-      "description": "Oryza sativa ssp. japonica — download and install for CGV Desktop.",
+      "description": "Oryza sativa ssp. japonica — download and install for CGeV Desktop.",
       "downloadable": true,
       "sizeBytes": 141319598,
       "package": {
@@ -247,7 +247,7 @@
       "label": "Pan troglodytes",
       "speciesId": "pan_troglodytes_gcf_028858775_2_nhgri_mpantro3_v2_0_pri_genomic",
       "version": "2026.09",
-      "description": "Pan troglodytes — download and install for CGV Desktop.",
+      "description": "Pan troglodytes — download and install for CGeV Desktop.",
       "downloadable": true,
       "sizeBytes": 861215645,
       "package": {
@@ -262,7 +262,7 @@
       "label": "Phaseolus vulgaris",
       "speciesId": "phaseolus_vulgaris_gcf_000499845_2_p_vulgaris_v2_0_genomic",
       "version": "2026.09",
-      "description": "Phaseolus vulgaris — download and install for CGV Desktop.",
+      "description": "Phaseolus vulgaris — download and install for CGeV Desktop.",
       "downloadable": true,
       "sizeBytes": 166166983,
       "package": {
@@ -277,7 +277,7 @@
       "label": "Saccharomyces cerevisiae",
       "speciesId": "saccharomyces_cerevisiae_gcf_000146045_2_r64_genomic",
       "version": "2026.09",
-      "description": "Saccharomyces cerevisiae — download and install for CGV Desktop.",
+      "description": "Saccharomyces cerevisiae — download and install for CGeV Desktop.",
       "downloadable": true,
       "sizeBytes": 13862732,
       "package": {
@@ -292,7 +292,7 @@
       "label": "Solanum lycopersicum",
       "speciesId": "solanum_lycopersicum_gcf_036512215_1_slm_r2_1_genomic",
       "version": "2026.09",
-      "description": "Solanum lycopersicum — download and install for CGV Desktop.",
+      "description": "Solanum lycopersicum — download and install for CGeV Desktop.",
       "downloadable": true,
       "sizeBytes": 239843133,
       "package": {
@@ -307,7 +307,7 @@
       "label": "Sus scrofa",
       "speciesId": "sus_scrofa_gcf_000003025_6_sscrofa11_1_genomic",
       "version": "2026.09",
-      "description": "Sus scrofa — download and install for CGV Desktop.",
+      "description": "Sus scrofa — download and install for CGeV Desktop.",
       "downloadable": true,
       "sizeBytes": 705971685,
       "package": {
@@ -322,7 +322,7 @@
       "label": "Brachypodium distachyon",
       "speciesId": "brachypodium_distachyon_gcf_000005505_3_brachypodium_distachyon_v3_0_genomic",
       "version": "2026.09",
-      "description": "Brachypodium distachyon — download and install for CGV Desktop.",
+      "description": "Brachypodium distachyon — download and install for CGeV Desktop.",
       "downloadable": true,
       "sizeBytes": 101514209,
       "package": {
@@ -337,7 +337,7 @@
       "label": "Vitis vinifera",
       "speciesId": "vitis_vinifera_gcf_030704535_1_asm3070453v1_genomic",
       "version": "2026.09",
-      "description": "Vitis vinifera — download and install for CGV Desktop.",
+      "description": "Vitis vinifera — download and install for CGeV Desktop.",
       "downloadable": true,
       "sizeBytes": 157667445,
       "package": {
@@ -352,7 +352,7 @@
       "label": "Xenopus laevis",
       "speciesId": "xenopus_laevis_gcf_017654675_1_xenopus_laevis_v10_1_genomic",
       "version": "2026.09",
-      "description": "Xenopus laevis — download and install for CGV Desktop.",
+      "description": "Xenopus laevis — download and install for CGeV Desktop.",
       "downloadable": true,
       "sizeBytes": 795685145,
       "package": {
@@ -367,7 +367,7 @@
       "label": "Zea mays",
       "speciesId": "zea_mays_gcf_902167145_1_zm_b73_reference_nam_5_0_genomic",
       "version": "2026.09",
-      "description": "Zea mays — download and install for CGV Desktop.",
+      "description": "Zea mays — download and install for CGeV Desktop.",
       "downloadable": true,
       "sizeBytes": 602897948,
       "package": {

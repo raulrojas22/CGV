@@ -3,7 +3,7 @@
   "label": "Sus scrofa",
   "speciesId": "sus_scrofa_gcf_000003025_6_sscrofa11_1_genomic",
   "version": "2026.09",
-  "description": "Sus scrofa CGV Desktop dataset package.",
+  "description": "Sus scrofa CGeV Desktop dataset package.",
   "downloadable": true,
   "sizeBytes": 705971685,
   "package": {

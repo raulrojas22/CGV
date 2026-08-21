@@ -29,7 +29,7 @@
 
     var state = {
         version: 2,
-        title: "CGV comparative analysis",
+        title: "CGeV comparative analysis",
         subtitle: "",
         columns: 2,
         profile: "color",
@@ -241,8 +241,8 @@
                 context: context,
                 sourceId: String((panel && panel.sourceId) || ""),
                 sourceKind: String((panel && panel.sourceKind) || "chart"),
-                sourceLabel: String((panel && panel.sourceLabel) || "CGV visualization"),
-                title: String((panel && panel.title) || "CGV visualization").slice(0, 120),
+                sourceLabel: String((panel && panel.sourceLabel) || "CGeV visualization"),
+                title: String((panel && panel.title) || "CGeV visualization").slice(0, 120),
                 scientificNames: normalizeScientificNames(panel && panel.scientificNames),
                 span: safeInt(panel && panel.span, 1, 1, 3),
                 height: height,
@@ -253,7 +253,7 @@
         if (!panels.some(function (panel) { return panel.id === selectedId; })) selectedId = null;
         var normalizedTitle = Object.prototype.hasOwnProperty.call(next, "title")
             ? String(next.title == null ? "" : next.title).trim().slice(0, 140)
-            : "CGV comparative analysis";
+            : "CGeV comparative analysis";
         return {
             version: 2,
             title: normalizedTitle,
@@ -345,7 +345,7 @@
             futureStack = [];
             runtimeSvg = Object.create(null);
             setState(parsed || {}, { skipPersist: false, skipHydrate: false });
-            toast("Figure Studio draft restored with the CGV work session.");
+            toast("Figure Studio draft restored with the CGeV work session.");
         } catch (err) {
             toast("The saved Figure Studio draft could not be restored.");
         }
@@ -637,8 +637,8 @@
             context: context,
             sourceId: String(opts.sourceId || ""),
             sourceKind: String(opts.sourceKind || "chart"),
-            sourceLabel: String(opts.sourceLabel || "CGV visualization"),
-            title: String(opts.title || "CGV visualization").slice(0, 120),
+            sourceLabel: String(opts.sourceLabel || "CGeV visualization"),
+            title: String(opts.title || "CGeV visualization").slice(0, 120),
             scientificNames: normalizeScientificNames(opts.scientificNames),
             span: Math.min(state.columns, safeInt(opts.span, defaultSpan, 1, 3)),
             height: validHeightMode(opts.height) ? opts.height : "auto",
@@ -1342,7 +1342,7 @@
         if (!svg) {
             preview.innerHTML = "";
             var unavailable = make("div", "figure-panel-unavailable");
-            unavailable.innerHTML = '<i class="fa fa-exclamation-circle" aria-hidden="true"></i><strong>Source unavailable</strong><span>Restore or generate the original CGV result, then refresh this panel.</span>';
+            unavailable.innerHTML = '<i class="fa fa-exclamation-circle" aria-hidden="true"></i><strong>Source unavailable</strong><span>Restore or generate the original CGeV result, then refresh this panel.</span>';
             preview.appendChild(unavailable);
             return;
         }
@@ -1590,7 +1590,7 @@
         var panel = selectedPanel();
         if (!panel) return;
         saveHistory();
-        if (property === "title") panel.title = String(value || "CGV visualization").slice(0, 120);
+        if (property === "title") panel.title = String(value || "CGeV visualization").slice(0, 120);
         else if (property === "span") panel.span = safeInt(value, 1, 1, state.columns);
         else if (property === "height" && validHeightMode(value)) panel.height = value;
         else if (property === "showTitle") panel.showTitle = !!value;
@@ -1600,7 +1600,7 @@
 
     function clearFigure(requireConfirmation) {
         if (!state.panels.length) return;
-        if (requireConfirmation && !window.confirm("Clear every Figure Studio panel? Your CGV search results will not be removed.")) return;
+        if (requireConfirmation && !window.confirm("Clear every Figure Studio panel? Your CGeV search results will not be removed.")) return;
         saveHistory();
         state.panels = [];
         state.selectedId = null;
@@ -1608,16 +1608,16 @@
         runtimeLoading = Object.create(null);
         renderAll();
         persistSoon();
-        toast("Figure Studio canvas cleared. CGV results were preserved.");
+        toast("Figure Studio canvas cleared. CGeV results were preserved.");
     }
 
     function newFigure() {
-        if (state.panels.length && !window.confirm("Start a new figure? Existing CGV search results will remain available.")) return;
+        if (state.panels.length && !window.confirm("Start a new figure? Existing CGeV search results will remain available.")) return;
         saveHistory();
         var context = state.context;
         var lastTarget = state.lastResultsTarget;
         state = sanitizeState({
-            title: "CGV comparative analysis",
+            title: "CGeV comparative analysis",
             subtitle: "",
             columns: 2,
             profile: "color",
@@ -1747,7 +1747,7 @@
     function buildCompositeSvg() {
         if (!state.panels.length) throw new Error("Add at least one chart panel before exporting.");
         var missing = state.panels.filter(function (panel) { return !runtimeSvg[panel.id]; });
-        if (missing.length) throw new Error("One or more panel sources are unavailable. Restore or regenerate those CGV results first.");
+        if (missing.length) throw new Error("One or more panel sources are unavailable. Restore or regenerate those CGeV results first.");
 
         var pageWidth = 1800;
         var marginX = 70;
@@ -1769,7 +1769,7 @@
         root.setAttribute("width", String(pageWidth));
         root.setAttribute("height", String(pageHeight));
         root.setAttribute("role", "img");
-        root.setAttribute("aria-label", state.title || "CGV publication figure");
+        root.setAttribute("aria-label", state.title || "CGeV publication figure");
 
         var studioPage = document.querySelector(".figure-studio-page");
         var studioVersion = String(
@@ -1777,7 +1777,7 @@
         ).trim();
         var metadata = document.createElementNS(SVG_NS, "metadata");
         metadata.textContent = JSON.stringify({
-            generator: "CGV Figure Studio " + studioVersion,
+            generator: "CGeV Figure Studio " + studioVersion,
             createdAt: new Date().toISOString(),
             profile: state.profile,
             subtitle: state.subtitle,

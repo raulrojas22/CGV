@@ -5,13 +5,13 @@
   </parameters>
   <zip-file>
     <pe-file
-      path="CGV-Desktop-${version}-Windows-x64-Setup.exe"
-      product-name="CGV Desktop"
+      path="CGeV-Desktop-${version}-Windows-x64-Setup.exe"
+      product-name="CGeV Desktop"
       product-version="${version}"
       file-version="${version}"
       company-name="Raul Rojas">
       <authenticode-sign
-        description="CGV Desktop"
+        description="CGeV Desktop"
         description-url="https://cgv.mobilomics.org" />
     </pe-file>
   </zip-file>

@@ -1,5 +1,5 @@
 CGV_FEEDBACK_DEFAULT_TO_EMAIL <- "cgvviewer@gmail.com"
-CGV_FEEDBACK_DEFAULT_FROM_EMAIL <- "CGV Feedback <feedback@cgvapp.com>"
+CGV_FEEDBACK_DEFAULT_FROM_EMAIL <- "CGeV Feedback <feedback@cgvapp.com>"
 CGV_FEEDBACK_DEFAULT_PUBLIC_URL <- "https://cgv.mobilomics.org"
 CGV_FEEDBACK_DEFAULT_BACKUP_URL <- "https://cgvapp.com"
 CGV_FEEDBACK_DEFAULT_LOGO_PATH <- file.path("www", "cgv-email-logo.png")
@@ -148,11 +148,11 @@ feedback_email_shell <- function(content, preheader = "") {
         '<tr><td style="padding:22px 28px;border-bottom:1px solid #e6edf3;">',
         '<table role="presentation" cellspacing="0" cellpadding="0" border="0"><tr>',
         '<td style="padding-right:14px;vertical-align:middle;">',
-        '<img src="cid:cgv-logo" width="64" height="48" alt="CGV" ',
+        '<img src="cid:cgv-logo" width="64" height="48" alt="CGeV" ',
         'style="display:block;width:64px;height:48px;border:0;">',
         '</td><td style="vertical-align:middle;">',
         '<div style="font-family:Georgia,Times New Roman,serif;font-size:25px;line-height:28px;',
-        'font-weight:700;letter-spacing:.02em;color:#314c70;">CGV</div>',
+        'font-weight:700;letter-spacing:.02em;color:#314c70;">CGeV</div>',
         '<div style="font-size:12px;line-height:18px;color:#6c8196;">Comparative Gene Viewer</div>',
         '</td></tr></table></td></tr>',
         '<tr><td style="padding:30px 28px 26px;">',
@@ -255,7 +255,7 @@ feedback_admin_email_html <- function(payload) {
 
     feedback_email_shell(
         content,
-        preheader = paste("New CGV feedback from", reporter_name)
+        preheader = paste("New CGeV feedback from", reporter_name)
     )
 }
 
@@ -277,8 +277,8 @@ feedback_receipt_text <- function(payload, config = feedback_delivery_config()) 
             feedback_normalize_text(details$secondary)
         } else NULL,
         "",
-        "Your message is now in the CGV inbox. We will use this email address only to follow up.",
-        paste0("CGV: ", config$public_url %||% CGV_FEEDBACK_DEFAULT_PUBLIC_URL),
+        "Your message is now in the CGeV inbox. We will use this email address only to follow up.",
+        paste0("CGeV: ", config$public_url %||% CGV_FEEDBACK_DEFAULT_PUBLIC_URL),
         if (
             nzchar(config$backup_url %||% "") &&
             !identical(config$backup_url, config$public_url)
@@ -300,7 +300,7 @@ feedback_receipt_email_html <- function(payload, config = feedback_delivery_conf
             '<div style="margin-top:12px;font-size:12px;line-height:19px;color:#7b8c9d;">',
             'If the official server is temporarily unavailable, use the ',
             '<a href="', backup_url, '" style="color:#314c70;text-decoration:underline;">',
-            'CGV backup site</a>.</div>'
+            'CGeV backup site</a>.</div>'
         )
     } else {
         ""
@@ -311,7 +311,7 @@ feedback_receipt_email_html <- function(payload, config = feedback_delivery_conf
         'We received your feedback</h1>',
         '<div style="font-size:14px;line-height:22px;color:#536b81;">',
         'Hi ', feedback_html_escape(feedback_first_name(payload$full_name %||% payload$name)),
-        ', thank you for helping us improve CGV. This email is your copy of the submission.',
+        ', thank you for helping us improve CGeV. This email is your copy of the submission.',
         '</div>',
         '<div style="margin-top:22px;padding:18px;background:#edf8f6;border:1px solid #ccebe5;',
         'border-radius:10px;">',
@@ -328,7 +328,7 @@ feedback_receipt_email_html <- function(payload, config = feedback_delivery_conf
         '<div style="font-size:13px;line-height:20px;font-weight:700;color:#314c70;">',
         'What happens next</div>',
         '<div style="margin-top:10px;font-size:13px;line-height:21px;color:#536b81;">',
-        '<strong style="color:#18a98e;">1.</strong> Your message is stored in the CGV inbox.<br>',
+        '<strong style="color:#18a98e;">1.</strong> Your message is stored in the CGeV inbox.<br>',
         '<strong style="color:#18a98e;">2.</strong> Bug reports that block analysis are reviewed first.<br>',
         '<strong style="color:#18a98e;">3.</strong> If follow-up is needed, we will reply to this email address.',
         '</div></div>',
@@ -336,7 +336,7 @@ feedback_receipt_email_html <- function(payload, config = feedback_delivery_conf
         '<a href="', public_url,
         '" style="display:inline-block;padding:11px 17px;border-radius:8px;background:#18a98e;',
         'color:#ffffff;font-size:13px;line-height:18px;font-weight:700;text-decoration:none;">',
-        'Visit official CGV</a></div>',
+        'Visit official CGeV</a></div>',
         backup_link,
         '<div style="margin-top:18px;font-size:12px;line-height:19px;color:#7b8c9d;">',
         'You can reply to this confirmation if you want to add more context. ',
@@ -345,7 +345,7 @@ feedback_receipt_email_html <- function(payload, config = feedback_delivery_conf
 
     feedback_email_shell(
         content,
-        preheader = "CGV received your feedback. This is your confirmation copy."
+        preheader = "CGeV received your feedback. This is your confirmation copy."
     )
 }
 
@@ -382,7 +382,7 @@ feedback_email_body <- function(
         to = list(if (is_receipt) reporter_email else feedback_normalize_header_text(config$to_email)),
         reply_to = list(if (is_receipt) feedback_normalize_header_text(config$to_email) else reporter_email),
         subject = if (is_receipt) {
-            "We received your CGV feedback"
+            "We received your CGeV feedback"
         } else {
             feedback_normalize_header_text(payload$subject %||% "")
         },

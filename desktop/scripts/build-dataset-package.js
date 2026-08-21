@@ -280,7 +280,7 @@ const datasetMeta = {
   organism: row.organism,
   taxid: row.taxid,
   version,
-  description: `${row.label} CGV Desktop dataset package.`,
+  description: `${row.label} CGeV Desktop dataset package.`,
   packageFile: zipName
 };
 fs.writeFileSync(path.join(stageRoot, "dataset.json"), `${JSON.stringify(datasetMeta, null, 2)}\n`);

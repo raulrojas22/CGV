@@ -3,7 +3,7 @@
   "label": "Mus musculus",
   "speciesId": "mus_musculus_gcf_000001635_27_grcm39_genomic",
   "version": "2026.09",
-  "description": "Mus musculus CGV Desktop dataset package.",
+  "description": "Mus musculus CGeV Desktop dataset package.",
   "downloadable": true,
   "sizeBytes": 837610801,
   "package": {

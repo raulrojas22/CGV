@@ -3,7 +3,7 @@
   "label": "Phaseolus vulgaris",
   "speciesId": "phaseolus_vulgaris_gcf_000499845_2_p_vulgaris_v2_0_genomic",
   "version": "2026.09",
-  "description": "Phaseolus vulgaris CGV Desktop dataset package.",
+  "description": "Phaseolus vulgaris CGeV Desktop dataset package.",
   "downloadable": true,
   "sizeBytes": 166166983,
   "package": {

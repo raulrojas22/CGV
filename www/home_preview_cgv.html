@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light dark">
   <meta name="description" content="Comparative Gene Viewer brings gene structure, transcript comparison, cross-species alignment, analytics, and publication-ready figure assembly into one visual workspace.">
-  <title>CGV | Comparative Gene Viewer</title>
+  <title>CGeV | Comparative Gene Viewer</title>
   <script>document.documentElement.classList.add("js");</script>
   <style>
     :root {
@@ -2719,7 +2719,7 @@
       }
     }
 
-    /* Authentic CGV surfaces
+    /* Authentic CGeV surfaces
        These components reuse the visual grammar of the application itself:
        dark result headers, genomic rulers, pink exons, orange CDS, pale
        synteny ribbons, MultiPIP identity marks, and LASTZ local blocks. */
@@ -3535,7 +3535,7 @@
       color: #6650b7;
     }
 
-    /* Compact and Detailed use the same coordinates and features as CGV. */
+    /* Compact and Detailed use the same coordinates and features as CGeV. */
     .cgv-visual-mode-stack {
       display: grid;
       gap: 13px;
@@ -5979,10 +5979,10 @@
 </head>
 <body>
   <div class="cgv-shell">
-    <nav class="cgv-home-nav" aria-label="CGV home navigation">
-      <a class="cgv-nav-brand" href="#overview" aria-label="Back to CGV overview">
+    <nav class="cgv-home-nav" aria-label="CGeV home navigation">
+      <a class="cgv-nav-brand" href="#overview" aria-label="Back to CGeV overview">
         <img src="favicon2.ico" alt="">
-        <strong>CGV</strong>
+        <strong>CGeV</strong>
         <span>Comparative Gene Viewer</span>
       </a>
       <div class="cgv-nav-links">
@@ -5999,7 +5999,7 @@
       <section class="cgv-hero" id="overview" aria-labelledby="cgv-home-title">
         <div class="cgv-hero-grid">
           <div class="cgv-hero-copy">
-            <span class="cgv-product-label">Comparative Gene Viewer · v1.1</span>
+            <span class="cgv-product-label">Comparative Gene Viewer (CGeV) · v1.1</span>
             <h1 id="cgv-home-title">Gene structure, <span>made visible.</span></h1>
             <p class="cgv-hero-lead">Explore transcript architecture, compare genes within one organism, trace conservation across species, and turn your results into publication-ready figures — in one visual workspace.</p>
             <div class="cgv-hero-actions">
@@ -6008,21 +6008,21 @@
             </div>
             <div class="cgv-hero-learning" aria-label="Learning resources">
               <button type="button" data-cgv-nav="guide">Open the guided workflow</button>
-              <a href="docs/CGV_User_Manual.pdf" target="_blank" rel="noopener noreferrer" data-cgv-manual-link>Read the User Manual</a>
+              <a href="docs/CGeV_User_Manual.pdf" target="_blank" rel="noopener noreferrer" data-cgv-manual-link>Read the User Manual</a>
               <span data-cgv-manual-version>Current edition</span>
             </div>
           </div>
 
-          <div class="cgv-hero-demo-wrap" aria-label="Preview of CGV structure, alignment, and figure composition">
+          <div class="cgv-hero-demo-wrap" aria-label="Preview of CGeV structure, alignment, and figure composition">
             <div class="cgv-demo" data-auto-carousel="hero" data-auto-delay="4000">
               <div class="cgv-demo-header">
                 <span class="cgv-demo-dot"></span>
                 <span class="cgv-demo-dot"></span>
                 <span class="cgv-demo-dot"></span>
-                <span class="cgv-demo-title">CGV · live result workspace</span>
+                <span class="cgv-demo-title">CGeV · live result workspace</span>
                 <span class="cgv-demo-status">ready</span>
               </div>
-              <div class="cgv-demo-tabs" role="tablist" aria-label="CGV preview modes">
+              <div class="cgv-demo-tabs" role="tablist" aria-label="CGeV preview modes">
                 <button class="cgv-demo-tab is-active" type="button" role="tab" aria-selected="true" data-demo-mode="structure">Structure</button>
                 <button class="cgv-demo-tab" type="button" role="tab" aria-selected="false" data-demo-mode="alignment">Alignment</button>
                 <button class="cgv-demo-tab" type="button" role="tab" aria-selected="false" data-demo-mode="figure">Figure Studio</button>
@@ -6047,7 +6047,7 @@
                       <span class="cgv-auth-actions"><span>Function</span><span>Ensembl</span><span>SVG</span><span>Sequence</span></span>
                     </div>
                     <div class="cgv-auth-card-body">
-                      <svg class="cgv-live-gene-svg" viewBox="0 0 1203 100" role="img" aria-label="CGV compact AMY2A gene structure">
+                      <svg class="cgv-live-gene-svg" viewBox="0 0 1203 100" role="img" aria-label="CGeV compact AMY2A gene structure">
                         <g class="live-ruler" style="--d:60ms">
                           <line class="ruler" x1="23" x2="184" y1="42" y2="42"></line>
                           <line class="tick" x1="23" x2="23" y1="26" y2="42"></line><line class="tick" x1="92" x2="92" y1="26" y2="42"></line><line class="tick" x1="129" x2="129" y1="26" y2="42"></line><line class="tick" x1="163" x2="163" y1="26" y2="42"></line><line class="tick" x1="184" x2="184" y1="26" y2="42"></line>
@@ -6118,7 +6118,7 @@
                     <span class="cgv-gene-chip">TP53 · translated CDS</span>
                   </div>
                   <div class="cgv-hero-synteny">
-                    <svg viewBox="0 0 680 310" role="img" aria-label="CGV aligned synteny preview">
+                    <svg viewBox="0 0 680 310" role="img" aria-label="CGeV aligned synteny preview">
                       <rect width="680" height="310" fill="#f7f9fb"></rect>
                       <text x="86" y="58">Danio rerio</text><text x="86" y="78">tp53 (+)</text>
                       <text x="86" y="127">Mus musculus</text><text x="86" y="147">Trp53 (+)</text>
@@ -6165,7 +6165,7 @@
                     </div>
                     <div class="cgv-hero-figure-canvas">
                       <div class="cgv-hero-figure-page">
-                        <div class="cgv-hero-figure-title">CGV comparative analysis</div>
+                        <div class="cgv-hero-figure-title">CGeV comparative analysis</div>
                         <div class="cgv-hero-figure-track" data-label="A">
                           <b>Oryza sativa ssp. japonica · HKT1;1 · Chr 4</b>
                           <div class="cgv-hero-figure-gene" style="--row:0">
@@ -6199,7 +6199,7 @@
             </div>
           </div>
         </div>
-        <div class="cgv-hero-metrics" aria-label="CGV capabilities at a glance">
+        <div class="cgv-hero-metrics" aria-label="CGeV capabilities at a glance">
           <div class="cgv-hero-metric"><strong>25</strong><span>Preloaded references</span></div>
           <div class="cgv-hero-metric"><strong>2</strong><span>Search workflows</span></div>
           <div class="cgv-hero-metric"><strong>3</strong><span>Alignment strategies</span></div>
@@ -6212,7 +6212,7 @@
           <span class="cgv-kicker">Choose a starting point</span>
           <div>
             <h2 id="paths-title">Two questions. Two focused workflows.</h2>
-            <p>CGV keeps the choice simple: compare several genes inside one organism, or follow one gene across organisms. Both paths share the same search intelligence, visual language, analytics, exports, and saved sessions.</p>
+            <p>CGeV keeps the choice simple: compare several genes inside one organism, or follow one gene across organisms. Both paths share the same search intelligence, visual language, analytics, exports, and saved sessions.</p>
           </div>
         </div>
         <div class="cgv-path-grid">
@@ -6245,9 +6245,9 @@
           <div class="cgv-search-intelligence-copy">
             <small>One search layer · both workflows</small>
             <strong>Search intelligence is shared.</strong>
-            <p>CGV resolves names before drawing: exact symbols, aliases, stable identifiers, coordinates and match roles all remain visible.</p>
+            <p>CGeV resolves names before drawing: exact symbols, aliases, stable identifiers, coordinates and match roles all remain visible.</p>
           </div>
-          <div class="cgv-search-map" aria-label="CGV search resolution flow">
+          <div class="cgv-search-map" aria-label="CGeV search resolution flow">
             <span class="cgv-search-arrow"></span>
             <div class="cgv-search-node">
               <small>Input</small>
@@ -6283,7 +6283,7 @@
           </div>
         </div>
         <div class="cgv-workflow-lab" data-workflow-lab data-auto-carousel="workflow" data-auto-delay="4300">
-          <div class="cgv-workflow-tabs" role="tablist" aria-label="Connected CGV workflow">
+          <div class="cgv-workflow-tabs" role="tablist" aria-label="Connected CGeV workflow">
             <button class="cgv-workflow-tab is-active" type="button" role="tab" aria-selected="true" data-workflow-step="source"><small>01</small><strong>Choose data</strong></button>
             <button class="cgv-workflow-tab" type="button" role="tab" aria-selected="false" data-workflow-step="search"><small>02</small><strong>Search genes</strong></button>
             <button class="cgv-workflow-tab" type="button" role="tab" aria-selected="false" data-workflow-step="structure"><small>03</small><strong>Inspect structure</strong></button>
@@ -6338,7 +6338,7 @@
             <article class="cgv-workflow-panel" role="tabpanel" data-workflow-panel="structure" hidden>
               <div class="cgv-workflow-panel-copy">
                 <span>Visualize mode</span>
-                <h3>The result is already the same gene card used in CGV.</h3>
+                <h3>The result is already the same gene card used in CGeV.</h3>
                 <p>Ruler, flanking context, strand, transcript line, exon geometry, metrics and actions remain connected.</p>
               </div>
               <div class="cgv-workflow-card-wrap">
@@ -6350,7 +6350,7 @@
                     <span class="cgv-auth-actions"><span>Function</span><span>Ensembl</span><span>SVG</span><span>Sequence</span></span>
                   </div>
                   <div class="cgv-auth-card-body">
-                    <svg class="cgv-live-gene-svg" viewBox="0 0 1203 132" role="img" aria-label="CGV HKT1;5 gene card structure with coordinates, overlap, and neighboring genes">
+                    <svg class="cgv-live-gene-svg" viewBox="0 0 1203 132" role="img" aria-label="CGeV HKT1;5 gene card structure with coordinates, overlap, and neighboring genes">
                       <g class="live-ruler" style="--d:50ms">
                         <line class="ruler" x1="24" x2="184" y1="47" y2="47"></line><line class="ruler" x1="1011" x2="1179" y1="47" y2="47"></line>
                         <line class="tick" x1="24" x2="24" y1="28" y2="47"></line><line class="tick" x1="92" x2="92" y1="28" y2="47"></line><line class="tick" x1="129" x2="129" y1="28" y2="47"></line><line class="tick" x1="163" x2="163" y1="28" y2="47"></line><line class="tick" x1="184" x2="184" y1="28" y2="47"></line>
@@ -6447,7 +6447,7 @@
                   <article><i>CSV</i><strong>Tables &amp; FASTA</strong><span>Gene metrics, coordinates, transcript/CDS, introns and promoter sequences.</span></article>
                   <article><i>RDS</i><strong>Complete session</strong><span>Selected data, filters, comparisons and Figure Studio drafts in one reusable workspace.</span></article>
                   <article><i>ZIP</i><strong>Batch export</strong><span>Download structure plots and charts together with stable names.</span></article>
-                  <article><i>FS</i><strong>Figure Studio</strong><span>Arrange existing CGV visuals into a labeled multi-panel canvas.</span></article>
+                  <article><i>FS</i><strong>Figure Studio</strong><span>Arrange existing CGeV visuals into a labeled multi-panel canvas.</span></article>
                   <article><i>HTML</i><strong>Interactive report</strong><span>Share an expiring secret read-only URL on Web, or save a self-contained local HTML report on Desktop.</span></article>
                 </div>
               </div>
@@ -6466,7 +6466,7 @@
         </div>
         <div class="cgv-capability-grid cgv-capability-live-grid">
           <div class="cgv-capability-live-intro">
-            <h3>Compact and Detailed are the real CGV views.</h3>
+            <h3>Compact and Detailed are the real CGeV views.</h3>
             <p>The coordinate system does not jump between modes. Detailed simply reveals the CDS/feature layer beneath the same transcript geometry.</p>
           </div>
           <div class="cgv-visual-mode-stack">
@@ -6476,7 +6476,7 @@
                 <em>Exon / transcript structure</em>
               </div>
               <div class="cgv-live-view-viewport">
-                <svg class="cgv-live-gene-svg" viewBox="0 0 1203 96" role="img" aria-label="CGV compact visualize mode for AMY2A with genomic coordinates and neighboring genes">
+                <svg class="cgv-live-gene-svg" viewBox="0 0 1203 96" role="img" aria-label="CGeV compact visualize mode for AMY2A with genomic coordinates and neighboring genes">
                   <g class="live-ruler" style="--d:80ms">
                     <line class="ruler" x1="23" x2="184" y1="36" y2="36"></line>
                     <line class="tick" x1="23" x2="23" y1="20" y2="36"></line><line class="tick" x1="92" x2="92" y1="20" y2="36"></line><line class="tick" x1="129" x2="129" y1="20" y2="36"></line><line class="tick" x1="163" x2="163" y1="20" y2="36"></line><line class="tick" x1="184" x2="184" y1="20" y2="36"></line>
@@ -6515,7 +6515,7 @@
                 <em>Exon + CDS / feature</em>
               </div>
               <div class="cgv-live-view-viewport">
-                <svg class="cgv-live-gene-svg" viewBox="0 0 1203 134" role="img" aria-label="CGV detailed visualize mode for AMY2A with genomic coordinates and neighboring genes">
+                <svg class="cgv-live-gene-svg" viewBox="0 0 1203 134" role="img" aria-label="CGeV detailed visualize mode for AMY2A with genomic coordinates and neighboring genes">
                   <g class="live-ruler" style="--d:100ms">
                     <line class="ruler" x1="23" x2="184" y1="62" y2="62"></line>
                     <line class="tick" x1="23" x2="23" y1="43" y2="62"></line><line class="tick" x1="92" x2="92" y1="43" y2="62"></line><line class="tick" x1="129" x2="129" y1="43" y2="62"></line><line class="tick" x1="163" x2="163" y1="43" y2="62"></line><line class="tick" x1="184" x2="184" y1="43" y2="62"></line>
@@ -6555,8 +6555,8 @@
             <p>Switch between the three actual cross-species representations. Every panel is vector markup and replays its biological layers when selected.</p>
           </div>
           <div class="cgv-alignment-live" data-alignment-lab data-auto-carousel="alignment" data-auto-delay="4800">
-            <div class="cgv-alignment-live-top"><span>CGV alignment workspace · TP53</span><em>reference-centered</em><em>5 species</em><em>translated CDS</em></div>
-            <div class="cgv-alignment-live-tabs" role="tablist" aria-label="CGV alignment views">
+            <div class="cgv-alignment-live-top"><span>CGeV alignment workspace · TP53</span><em>reference-centered</em><em>5 species</em><em>translated CDS</em></div>
+            <div class="cgv-alignment-live-tabs" role="tablist" aria-label="CGeV alignment views">
               <button class="cgv-alignment-live-tab is-active" type="button" role="tab" aria-selected="true" data-alignment-mode="synteny">01 · Synteny</button>
               <button class="cgv-alignment-live-tab" type="button" role="tab" aria-selected="false" data-alignment-mode="multipip">02 · MultiPIP</button>
               <button class="cgv-alignment-live-tab" type="button" role="tab" aria-selected="false" data-alignment-mode="lastz">03 · LASTZ Blocks</button>
@@ -6577,7 +6577,7 @@
                   <strong>Conservation, exon splits, fusions and losses</strong>
                 </aside>
                 <div class="cgv-alignment-live-frame">
-                  <svg class="cgv-real-synteny" viewBox="0 0 1040 500" role="img" aria-label="CGV aligned synteny view">
+                  <svg class="cgv-real-synteny" viewBox="0 0 1040 500" role="img" aria-label="CGeV aligned synteny view">
                     <rect width="1040" height="500" fill="#f7f9fb"></rect>
                     <text class="real-top-label" x="120" y="32">5'</text><text class="real-top-label" x="990" y="32">3'</text><text class="real-bottom-label" x="488" y="486">Aligned transcript space (5' → 3')</text>
                     <g class="real-species-labels"><text x="92" y="78">Danio rerio</text><text x="92" y="97">tp53 (+)</text><text x="92" y="177">Mus musculus</text><text x="92" y="196">Trp53 (+)</text><text x="92" y="276">Canis lupus familiaris</text><text x="92" y="295">TP53 (+)</text><text x="92" y="375">Homo sapiens</text><text x="92" y="394">TP53 (-)</text><text x="92" y="474">Pan troglodytes</text><text x="92" y="493">TP53 (-)</text></g>
@@ -6613,7 +6613,7 @@
                   <strong>Finding conserved and divergent sequence regions</strong>
                 </aside>
                 <div class="cgv-alignment-live-frame">
-                  <svg class="cgv-real-multipip" viewBox="0 0 1040 450" role="img" aria-label="CGV MultiPIP identity view">
+                  <svg class="cgv-real-multipip" viewBox="0 0 1040 450" role="img" aria-label="CGeV MultiPIP identity view">
                     <rect width="1040" height="450" fill="#f7f9fb"></rect><text class="real-title" x="505" y="20">TP53 (-)</text>
                     <g class="real-species-labels"><text x="95" y="99">Danio rerio</text><text x="95" y="118">tp53 (+)</text><text x="95" y="191">Equus caballus</text><text x="95" y="210">TP53 (-)</text><text x="95" y="283">Homo sapiens</text><text x="95" y="302">TP53 (-)</text><text x="95" y="375">Pan troglodytes</text><text x="95" y="394">TP53 (-)</text></g>
                     <g class="pip-shading"><rect class="pink" x="145" y="45" width="8" height="370" style="--s:0"></rect><rect x="705" y="45" width="6" height="370" style="--s:1"></rect><rect x="720" y="45" width="6" height="370" style="--s:2"></rect><rect x="742" y="45" width="16" height="370" style="--s:3"></rect><rect x="790" y="45" width="13" height="370" style="--s:4"></rect><rect x="808" y="45" width="9" height="370" style="--s:5"></rect><rect x="830" y="45" width="7" height="370" style="--s:6"></rect><rect x="854" y="45" width="10" height="370" style="--s:7"></rect><rect x="883" y="45" width="7" height="370" style="--s:8"></rect><rect x="912" y="45" width="7" height="370" style="--s:9"></rect><rect class="pink" x="962" y="45" width="62" height="370" style="--s:10"></rect></g>
@@ -6643,7 +6643,7 @@
                   <strong>Partial, fragmented or rearranged matches</strong>
                 </aside>
                 <div class="cgv-alignment-live-frame">
-                  <svg class="cgv-real-lastz" viewBox="0 0 1040 420" role="img" aria-label="CGV LASTZ local alignment blocks">
+                  <svg class="cgv-real-lastz" viewBox="0 0 1040 420" role="img" aria-label="CGeV LASTZ local alignment blocks">
                     <rect width="1040" height="420" fill="#f7f9fb"></rect><line class="dash-bound" x1="165" x2="165" y1="8" y2="390"></line><line class="dash-bound" x1="955" x2="955" y1="8" y2="390"></line><text class="real-title" x="510" y="52">TP53 (-)</text>
                     <g class="real-species-labels"><text x="98" y="88">Canis lupus familiaris</text><text x="98" y="145">Danio rerio</text><text x="98" y="164">tp53 (+)</text><text x="98" y="222">Equus caballus</text><text x="98" y="241">TP53 (-)</text><text x="98" y="299">Homo sapiens</text><text x="98" y="318">TP53 (-)</text><text x="98" y="376">Pan troglodytes</text><text x="98" y="395">TP53 (-)</text></g>
                     <g class="lastz-lines"><line x1="140" x2="980" y1="82" y2="82" style="--i:0"></line><line x1="140" x2="980" y1="137" y2="137" style="--i:1"></line><line x1="140" x2="980" y1="214" y2="214" style="--i:2"></line><line x1="140" x2="980" y1="291" y2="291" style="--i:3"></line><line x1="140" x2="980" y1="368" y2="368" style="--i:4"></line></g>
@@ -6665,7 +6665,7 @@
           <span class="cgv-kicker">Understand the result</span>
           <div>
             <h2 id="results-title">Move from a gene model to the evidence around it.</h2>
-            <p>CGV returns several result layers. Each answers a different question, while keeping the selected gene, transcript, organism, and visual settings connected.</p>
+            <p>CGeV returns several result layers. Each answers a different question, while keeping the selected gene, transcript, organism, and visual settings connected.</p>
           </div>
         </div>
         <div class="cgv-results-live">
@@ -6677,7 +6677,7 @@
               <span class="cgv-auth-actions"><span>Function</span><span>Ensembl</span><span>SVG</span><span>Sequence</span></span>
             </div>
             <div class="cgv-auth-card-body">
-              <svg class="cgv-live-gene-svg" viewBox="0 0 1203 132" role="img" aria-label="CGV HKT1;5 result card with coordinates, overlap, and neighboring genes">
+              <svg class="cgv-live-gene-svg" viewBox="0 0 1203 132" role="img" aria-label="CGeV HKT1;5 result card with coordinates, overlap, and neighboring genes">
                 <g class="live-ruler" style="--d:60ms">
                   <line class="ruler" x1="24" x2="184" y1="47" y2="47"></line><line class="ruler" x1="1011" x2="1179" y1="47" y2="47"></line>
                   <line class="tick" x1="24" x2="24" y1="28" y2="47"></line><line class="tick" x1="92" x2="92" y1="28" y2="47"></line><line class="tick" x1="129" x2="129" y1="28" y2="47"></line><line class="tick" x1="163" x2="163" y1="28" y2="47"></line><line class="tick" x1="184" x2="184" y1="28" y2="47"></line><line class="tick" x1="1011" x2="1011" y1="28" y2="47"></line><line class="tick" x1="1034" x2="1034" y1="28" y2="47"></line><line class="tick" x1="1068" x2="1068" y1="28" y2="47"></line><line class="tick" x1="1113" x2="1113" y1="28" y2="47"></line><line class="tick" x1="1179" x2="1179" y1="28" y2="47"></line>
@@ -6735,7 +6735,7 @@
             <div class="cgv-analytics-live-stage">
               <article class="cgv-analytics-live-panel is-active" role="tabpanel" data-result-panel="architecture">
                 <div class="cgv-chart-description"><strong>Gene architecture</strong>Stacked CDS, UTR and intronic base pairs preserve the same gene set used in the structural view.</div>
-                <svg class="cgv-analytics-chart" viewBox="0 0 760 330" role="img" aria-label="CGV gene architecture analytics chart">
+                <svg class="cgv-analytics-chart" viewBox="0 0 760 330" role="img" aria-label="CGeV gene architecture analytics chart">
                   <rect width="760" height="330" fill="#ffffff"></rect><text x="380" y="28" text-anchor="middle" style="font-size:14px;fill:#263d50">Gene Architecture</text><text x="380" y="49" text-anchor="middle">Base pair composition: CDS | UTR | Introns</text>
                   <g class="grid"><line x1="118" x2="118" y1="70" y2="265"></line><line x1="250" x2="250" y1="70" y2="265"></line><line x1="382" x2="382" y1="70" y2="265"></line><line x1="514" x2="514" y1="70" y2="265"></line><line x1="646" x2="646" y1="70" y2="265"></line><line x1="84" x2="700" y1="92" y2="92"></line><line x1="84" x2="700" y1="143" y2="143"></line><line x1="84" x2="700" y1="194" y2="194"></line><line x1="84" x2="700" y1="245" y2="245"></line></g>
                   <g><text x="28" y="96">HKT1;1</text><text x="28" y="147">HKT1;3</text><text x="28" y="198">HKT1;4</text><text x="28" y="249">HKT1;5</text><text x="112" y="286">0</text><text x="244" y="286">1K</text><text x="376" y="286">2K</text><text x="508" y="286">3K</text><text x="640" y="286">4K</text></g>
@@ -6751,7 +6751,7 @@
 
               <article class="cgv-analytics-live-panel" role="tabpanel" data-result-panel="heatmap" hidden>
                 <div class="cgv-chart-description"><strong>Similarity heatmap</strong>Pairwise structural or sequence similarity makes clusters and outliers visible without losing the exact values.</div>
-                <svg class="cgv-analytics-chart" viewBox="0 0 760 330" role="img" aria-label="CGV pairwise similarity heatmap">
+                <svg class="cgv-analytics-chart" viewBox="0 0 760 330" role="img" aria-label="CGeV pairwise similarity heatmap">
                   <rect width="760" height="330" fill="#ffffff"></rect><text x="380" y="28" text-anchor="middle" style="font-size:14px;fill:#263d50">Pairwise Structure Similarity</text><text x="380" y="49" text-anchor="middle">Normalized score · 0–1</text>
                   <g fill="#50677b"><text x="172" y="82">HKT1;1</text><text x="272" y="82">HKT1;3</text><text x="372" y="82">HKT1;4</text><text x="472" y="82">HKT1;5</text><text x="572" y="82">HKT2;1</text><text x="75" y="122">HKT1;1</text><text x="75" y="172">HKT1;3</text><text x="75" y="222">HKT1;4</text><text x="75" y="272">HKT1;5</text></g>
                   <g stroke="#ffffff" stroke-width="3">
@@ -6766,7 +6766,7 @@
 
               <article class="cgv-analytics-live-panel" role="tabpanel" data-result-panel="composition" hidden>
                 <div class="cgv-chart-description"><strong>Sequence composition</strong>Nucleotide proportions and GC content can be compared across genes or focused on one transcript.</div>
-                <svg class="cgv-analytics-chart" viewBox="0 0 760 330" role="img" aria-label="CGV nucleotide composition chart">
+                <svg class="cgv-analytics-chart" viewBox="0 0 760 330" role="img" aria-label="CGeV nucleotide composition chart">
                   <rect width="760" height="330" fill="#ffffff"></rect><text x="380" y="28" text-anchor="middle" style="font-size:14px;fill:#263d50">Nucleotide Composition</text><text x="380" y="49" text-anchor="middle">A · T · C · G percentage per gene</text>
                   <g class="grid"><line x1="130" x2="650" y1="82" y2="82"></line><line x1="130" x2="650" y1="132" y2="132"></line><line x1="130" x2="650" y1="182" y2="182"></line><line x1="130" x2="650" y1="232" y2="232"></line><line x1="130" x2="650" y1="282" y2="282"></line></g>
                   <g><text x="54" y="107">HKT1;1</text><text x="54" y="157">HKT1;3</text><text x="54" y="207">HKT1;4</text><text x="54" y="257">HKT1;5</text></g>
@@ -6789,9 +6789,9 @@
           <div class="cgv-studio-copy">
             <span class="cgv-kicker">Figure Studio</span>
             <h2 id="studio-title">Turn analysis panels into one coherent figure.</h2>
-            <p>Figure Studio uses the visual results already generated in CGV. Arrange them on a shared canvas, refine the composition, and keep vector quality when exporting to SVG.</p>
+            <p>Figure Studio uses the visual results already generated in CGeV. Arrange them on a shared canvas, refine the composition, and keep vector quality when exporting to SVG.</p>
             <div class="cgv-studio-points">
-              <span>Build multi-panel layouts from available CGV plots</span>
+              <span>Build multi-panel layouts from available CGeV plots</span>
               <span>Reorder, resize, label, and style panels</span>
               <span>Export SVG or PNG, preserve drafts in sessions, and include the composition in interactive reports</span>
             </div>
@@ -6843,7 +6843,7 @@
             </div>
           </div>
         </div>
-        <div class="cgv-export-strip" aria-label="CGV export formats">
+        <div class="cgv-export-strip" aria-label="CGeV export formats">
           <div class="cgv-export-item"><strong>SVG / PNG</strong><span>Individual or composed figures</span></div>
           <div class="cgv-export-item"><strong>ZIP</strong><span>Batch chart and structure exports</span></div>
           <div class="cgv-export-item"><strong>CSV</strong><span>Sortable summary data</span></div>
@@ -6857,7 +6857,7 @@
           <span class="cgv-kicker">Data &amp; Desktop</span>
           <div>
             <h2 id="data-title">Start quickly, then bring your own reference when needed.</h2>
-            <p>CGV ships with indexed reference assemblies and annotations across animals, plants, and fungi. Custom matched genome and annotation files can join the same workflow.</p>
+            <p>CGeV ships with indexed reference assemblies and annotations across animals, plants, and fungi. Custom matched genome and annotation files can join the same workflow.</p>
           </div>
         </div>
         <div class="cgv-reference-layout">
@@ -6886,7 +6886,7 @@
             <div class="cgv-custom-data"><strong>Custom data:</strong> upload a genome in .fa, .fasta, .fna, .fa.gz, or .2bit format with a matching .gff3 or .gtf annotation.</div>
           </article>
           <article class="cgv-desktop-panel">
-            <span class="cgv-kicker">CGV Desktop</span>
+            <span class="cgv-kicker">CGeV Desktop</span>
             <h3>The complete workspace, running locally.</h3>
             <p>Use the same search, alignment, analytics, Figure Studio, report, export, and session workflows with an application-managed local runtime.</p>
             <div class="cgv-desktop-os" aria-label="Desktop operating systems">
@@ -6903,7 +6903,7 @@
                 Linux
               </span>
             </div>
-            <div class="cgv-desktop-flow" aria-label="CGV Desktop local workflow">
+            <div class="cgv-desktop-flow" aria-label="CGeV Desktop local workflow">
               <span>Install reference</span><span>Private runtime</span><span>Analyze locally</span><span>Save session</span>
             </div>
             <div class="cgv-desktop-list">
@@ -6913,17 +6913,17 @@
               <span>Self-contained interactive HTML reports and reproducibility ZIPs saved locally</span>
               <span>Persistent datasets, indexes, caches, Figure Studio drafts, and sessions</span>
             </div>
-            <button class="cgv-button" type="button" data-cgv-nav="desktop-app">Explore CGV Desktop</button>
+            <button class="cgv-button" type="button" data-cgv-nav="desktop-app">Explore CGeV Desktop</button>
           </article>
         </div>
       </section>
 
       <section class="cgv-section cgv-reveal" aria-labelledby="purpose-title">
         <div class="cgv-section-head">
-          <span class="cgv-kicker">Why CGV exists</span>
+          <span class="cgv-kicker">Why CGeV exists</span>
           <div>
             <h2 id="purpose-title">A focused bridge between locus browsing and scripted analysis.</h2>
-            <p>CGV is deliberately gene-centered. It brings structural inspection, guided comparison, analytics, and reusable output together without pretending to replace every genomics tool.</p>
+            <p>CGeV is deliberately gene-centered. It brings structural inspection, guided comparison, analytics, and reusable output together without pretending to replace every genomics tool.</p>
           </div>
         </div>
         <div class="cgv-purpose-grid">
@@ -6951,10 +6951,10 @@
                 <i>Search</i><i>Inspect</i><i>Align</i><i>Plot</i>
               </div>
               <em>→</em>
-              <div class="cgv-purpose-connected"><b>CGV</b><small>one connected context</small></div>
+              <div class="cgv-purpose-connected"><b>CGeV</b><small>one connected context</small></div>
             </div>
             <h3>The workflow gap</h3>
-            <p>Search, inspection, alignment, analytics and export often live in unrelated tools. CGV keeps their context connected.</p>
+            <p>Search, inspection, alignment, analytics and export often live in unrelated tools. CGeV keeps their context connected.</p>
           </article>
           <article class="cgv-purpose">
             <span>03</span>
@@ -6989,10 +6989,10 @@
             </ul>
           </article>
         </div>
-        <div class="cgv-comparison-wrap" role="region" aria-label="CGV scope comparison" tabindex="0">
+        <div class="cgv-comparison-wrap" role="region" aria-label="CGeV scope comparison" tabindex="0">
           <table class="cgv-comparison">
             <thead>
-              <tr><th>Capability</th><th class="is-cgv">CGV</th><th>Ensembl / UCSC</th><th>JBrowse2 / Apollo</th><th>IsoformSwitchAnalyzeR / FLAIR</th><th>gggenomes / gggenes</th></tr>
+              <tr><th>Capability</th><th class="is-cgv">CGeV</th><th>Ensembl / UCSC</th><th>JBrowse2 / Apollo</th><th>IsoformSwitchAnalyzeR / FLAIR</th><th>gggenomes / gggenes</th></tr>
             </thead>
             <tbody>
               <tr><td>Cross-species gene structure comparison</td><td class="is-cgv">✓</td><td><span class="cgv-compare-partial">~</span> locus</td><td><span class="cgv-compare-partial">~</span> manual</td><td class="cgv-compare-no">×</td><td><span class="cgv-compare-partial">~</span> static</td></tr>
@@ -7018,7 +7018,7 @@
         <div class="cgv-support-grid">
           <aside class="cgv-tips">
             <h3>Reliable results</h3>
-            <div class="cgv-tips-visual" aria-label="Reliable CGV result checklist">
+            <div class="cgv-tips-visual" aria-label="Reliable CGeV result checklist">
               <span data-icon="FA">Genome</span><span data-icon="GFF">Annotation</span><span data-icon="ID">Gene</span><span data-icon="✓">Result</span>
             </div>
             <div class="cgv-tip"><strong>Match genome and annotation</strong><p>Coordinates only line up when the FASTA / 2bit and GFF3 / GTF describe the same assembly.</p></div>
@@ -7029,7 +7029,7 @@
           <div class="cgv-faq">
             <h3>Frequently asked</h3>
             <details>
-              <summary>What is CGV best used for?</summary>
+              <summary>What is CGeV best used for?</summary>
               <p>Gene-centered structural exploration: exon and intron organization, CDS and UTR structure, transcript variants, sequence metrics, genomic context, and cross-species conservation in one guided workspace.</p>
             </details>
             <details>
@@ -7049,8 +7049,8 @@
               <p>Export individual or composed figures, ZIP batches, CSV tables, FASTA sequences, or a complete .rds session. On Web, Share creates an expiring secret read-only report URL; on Desktop it saves the same interactive report as a local self-contained HTML file with its reproducibility ZIP.</p>
             </details>
             <details>
-              <summary>How is CGV different from a genome browser?</summary>
-              <p>Genome browsers prioritize locus navigation. CGV is narrower and more guided: side-by-side gene structure comparison, transcript and species alignment, analytics, figure composition, and reusable exports.</p>
+              <summary>How is CGeV different from a genome browser?</summary>
+              <p>Genome browsers prioritize locus navigation. CGeV is narrower and more guided: side-by-side gene structure comparison, transcript and species alignment, analytics, figure composition, and reusable exports.</p>
             </details>
           </div>
         </div>
@@ -7060,16 +7060,16 @@
             <p>Choose a guided route, the versioned manual, or the complete local workspace.</p>
             <div class="cgv-resource-visual" aria-hidden="true"><i style="--x:8%"></i><i style="--x:46%"></i><i style="--x:84%"></i></div>
           </div>
-          <button class="cgv-resource-link" type="button" data-cgv-nav="guide"><span>Interactive</span><i class="cgv-resource-link-icon" aria-hidden="true">↳</i><strong>CGV Guide</strong></button>
-          <a class="cgv-resource-link" href="docs/CGV_User_Manual.pdf" target="_blank" rel="noopener noreferrer" data-cgv-manual-link><span data-cgv-manual-version>Current edition</span><i class="cgv-resource-link-icon" aria-hidden="true">PDF</i><strong>User Manual</strong></a>
-          <button class="cgv-resource-link" type="button" data-cgv-nav="desktop-app"><span>Local workspace</span><i class="cgv-resource-link-icon" aria-hidden="true">⌘</i><strong>CGV Desktop</strong></button>
+          <button class="cgv-resource-link" type="button" data-cgv-nav="guide"><span>Interactive</span><i class="cgv-resource-link-icon" aria-hidden="true">↳</i><strong>CGeV Guide</strong></button>
+          <a class="cgv-resource-link" href="docs/CGeV_User_Manual.pdf" target="_blank" rel="noopener noreferrer" data-cgv-manual-link><span data-cgv-manual-version>Current edition</span><i class="cgv-resource-link-icon" aria-hidden="true">PDF</i><strong>User Manual</strong></a>
+          <button class="cgv-resource-link" type="button" data-cgv-nav="desktop-app"><span>Local workspace</span><i class="cgv-resource-link-icon" aria-hidden="true">⌘</i><strong>CGeV Desktop</strong></button>
         </div>
       </section>
 
       <section class="cgv-final-cta cgv-reveal" aria-labelledby="final-title">
         <div>
           <h2 id="final-title">Start with the biological question, not the interface.</h2>
-          <p>Compare genes within one organism or trace one gene across species. CGV will keep the rest of the workflow connected.</p>
+          <p>Compare genes within one organism or trace one gene across species. CGeV will keep the rest of the workflow connected.</p>
         </div>
         <div class="cgv-final-actions">
           <button class="cgv-button" type="button" data-cgv-nav="homologous">Multi-Gene Search</button>

@@ -25,7 +25,7 @@ function removeDesktopProfileDatasets() {
       try {
         fs.rmSync(target, { recursive: true, force: true });
       } catch (error) {
-        throw new Error(`Could not clear ${target}: ${error.message}. Quit CGV Desktop and retry the build.`);
+        throw new Error(`Could not clear ${target}: ${error.message}. Quit CGeV Desktop and retry the build.`);
       }
     }
   }

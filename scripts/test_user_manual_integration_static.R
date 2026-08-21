@@ -6,7 +6,7 @@ ui_text <- read_text("ui.R")
 home_text <- read_text(file.path("www", "home_preview_cgv.html"))
 guide_css <- read_text(file.path("www", "css", "cgv_guide.css"))
 compiled_css <- read_text(file.path("www", "css", "cgv_compiled.css"))
-manual_source <- read_text(file.path("docs", "user_manual", "CGV_User_Manual_Source.md"))
+manual_source <- read_text(file.path("docs", "user_manual", "CGeV_User_Manual_Source.md"))
 desktop_downloads <- read_text(file.path("R", "ui_desktop_downloads.R"))
 desktop_package <- read_text(file.path("desktop", "package.json"))
 deploy_text <- read_text("deploy-nas.sh")
@@ -21,28 +21,31 @@ desktop_guide_videos <- c(
   "guide-desktop-downloads-06-remove-installed-organisms.mp4"
 )
 
-latest_pdf <- file.path("www", "docs", "CGV_User_Manual.pdf")
+latest_pdf <- file.path("www", "docs", "CGeV_User_Manual.pdf")
+legacy_pdf <- file.path("www", "docs", "CGV_User_Manual.pdf")
 archive_pdf <- file.path(
   "www",
   "docs",
   "archive",
-  sprintf("CGV_User_Manual_Web_and_Desktop_v%s.pdf", metadata$manual_version)
+  sprintf("CGeV_User_Manual_Web_and_Desktop_v%s.pdf", metadata$manual_version)
 )
 authoring_pdf <- file.path(
   "output",
   "pdf",
-  sprintf("CGV_User_Manual_Web_and_Desktop_v%s.pdf", metadata$manual_version)
+  sprintf("CGeV_User_Manual_Web_and_Desktop_v%s.pdf", metadata$manual_version)
 )
 
 stopifnot(
   file.exists(latest_pdf),
   file.exists(archive_pdf),
   file.exists(authoring_pdf),
+  file.exists(legacy_pdf),
   identical(
-    unname(tools::md5sum(c(latest_pdf, archive_pdf, authoring_pdf))),
-    rep(unname(tools::md5sum(latest_pdf)), 3)
+    unname(tools::md5sum(c(latest_pdf, legacy_pdf, archive_pdf, authoring_pdf))),
+    rep(unname(tools::md5sum(latest_pdf)), 4)
   ),
-  identical(metadata$latest_url, "docs/CGV_User_Manual.pdf"),
+  identical(metadata$latest_url, "docs/CGeV_User_Manual.pdf"),
+  identical(metadata$legacy_url, "docs/CGV_User_Manual.pdf"),
   grepl("cgv_manual_path", ui_text, fixed = TRUE),
   grepl("guide-manual-card", ui_text, fixed = TRUE),
   grepl("feedback-manual-prompt", ui_text, fixed = TRUE),
@@ -76,7 +79,7 @@ stopifnot(
   !grepl("guide-cross-04-inspect-visualization.mp4", deploy_text, fixed = TRUE),
   grepl("delete routeData['desktop-downloads'];", ui_text, fixed = TRUE),
   grepl("Use Share to create an expiring secret read-only URL", ui_text, fixed = TRUE),
-  grepl("CGV Desktop does not upload the analysis", ui_text, fixed = TRUE),
+  grepl("CGeV Desktop does not upload the analysis", ui_text, fixed = TRUE),
   grepl("Local interactive reports", desktop_downloads, fixed = TRUE),
   grepl("## 2.7 Share analysis", manual_source, fixed = TRUE),
   grepl("## 6.5 Genomic context scale, neighbors, and overlaps", manual_source, fixed = TRUE),
@@ -85,7 +88,7 @@ stopifnot(
   grepl("Select all installed organisms", manual_source, fixed = TRUE),
   grepl("submission reference is sent to the reporter", manual_source, fixed = TRUE),
   grepl("automatic status popup shows LASTZ or MultiPIP", manual_source, fixed = TRUE),
-  grepl("CGV freezes a visual copy", manual_source, fixed = TRUE),
+  grepl("CGeV freezes a visual copy", manual_source, fixed = TRUE),
   grepl("**Figure Studio** covers:", manual_source, fixed = TRUE),
   grepl(".feedback-manual-prompt", compiled_css, fixed = TRUE),
   grepl('"www/**"', desktop_package, fixed = TRUE),
@@ -98,4 +101,4 @@ stopifnot(
   "www/ctv_backup/" %in% dockerignore
 )
 
-message("CGV user manual publishing and UI integration checks passed.")
+message("CGeV user manual publishing and UI integration checks passed.")

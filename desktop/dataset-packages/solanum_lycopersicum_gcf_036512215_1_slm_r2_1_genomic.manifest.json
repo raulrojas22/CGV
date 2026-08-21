@@ -3,7 +3,7 @@
   "label": "Solanum lycopersicum",
   "speciesId": "solanum_lycopersicum_gcf_036512215_1_slm_r2_1_genomic",
   "version": "2026.09",
-  "description": "Solanum lycopersicum CGV Desktop dataset package.",
+  "description": "Solanum lycopersicum CGeV Desktop dataset package.",
   "downloadable": true,
   "sizeBytes": 239843133,
   "package": {

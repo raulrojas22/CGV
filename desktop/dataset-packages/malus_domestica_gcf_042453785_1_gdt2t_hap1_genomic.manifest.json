@@ -3,7 +3,7 @@
   "label": "Malus domestica",
   "speciesId": "malus_domestica_gcf_042453785_1_gdt2t_hap1_genomic",
   "version": "2026.09",
-  "description": "Malus domestica CGV Desktop dataset package.",
+  "description": "Malus domestica CGeV Desktop dataset package.",
   "downloadable": true,
   "sizeBytes": 208240761,
   "package": {

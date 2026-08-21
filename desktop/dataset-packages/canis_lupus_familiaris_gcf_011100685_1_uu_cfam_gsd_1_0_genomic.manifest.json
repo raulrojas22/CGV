@@ -3,7 +3,7 @@
   "label": "Canis lupus familiaris",
   "speciesId": "canis_lupus_familiaris_gcf_011100685_1_uu_cfam_gsd_1_0_genomic",
   "version": "2026.09",
-  "description": "Canis lupus familiaris CGV Desktop dataset package.",
+  "description": "Canis lupus familiaris CGeV Desktop dataset package.",
   "downloadable": true,
   "sizeBytes": 731551625,
   "package": {

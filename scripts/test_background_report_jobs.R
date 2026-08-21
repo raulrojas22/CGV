@@ -84,7 +84,7 @@ assert(identical(ready$result$url, report_result$url), "published URL is persist
 
 config <- list(
     api_key = "test-key",
-    from_email = "CGV Reports <reports@cgvapp.com>",
+    from_email = "CGeV Reports <reports@cgvapp.com>",
     reply_to = "cgvviewer@gmail.com",
     logo_path = "",
     public_url = "https://cgv.example"
@@ -103,7 +103,7 @@ missing_key_config$api_key <- ""
 assert(identical(cgv_report_delivery_preflight(missing_key_config)$state, "not_configured"), "missing report API key fails preflight")
 html <- cgv_report_email_html(ready, success = TRUE, config = config)
 assert(grepl(report_result$url, html, fixed = TRUE), "result email contains the secret report URL")
-assert(grepl("interactive CGV report", html, fixed = TRUE), "result email uses branded interactive-report copy")
+assert(grepl("interactive CGeV report", html, fixed = TRUE), "result email uses branded interactive-report copy")
 
 alignment_ready <- ready
 alignment_ready$options <- list(
@@ -114,15 +114,15 @@ alignment_ready$options <- list(
     run_lastz = TRUE
 )
 alignment_html <- cgv_report_email_html(alignment_ready, success = TRUE, config = config)
-assert(grepl("complete CGV alignment report", alignment_html, fixed = TRUE), "alignment delivery has purpose-specific branded copy")
+assert(grepl("complete CGeV alignment report", alignment_html, fixed = TRUE), "alignment delivery has purpose-specific branded copy")
 assert(grepl("Cross-Species", alignment_html, fixed = TRUE), "alignment delivery identifies its workflow")
 assert(grepl("LASTZ blocks and MultiPIP", alignment_html, fixed = TRUE), "alignment delivery identifies both completed alignment views")
-assert(identical(cgv_report_email_subject(alignment_ready), "Your CGV alignment report is ready"), "alignment delivery uses a clear subject")
+assert(identical(cgv_report_email_subject(alignment_ready), "Your CGeV alignment report is ready"), "alignment delivery uses a clear subject")
 
 empty_env <- function(name, unset = "") unset
 default_report_config <- cgv_report_delivery_config(getenv = empty_env)
-assert(identical(default_report_config$from_email, "CGV Reports <reports@cgvapp.com>"), "reports use the verified cgvapp.com sender by default")
-assert(identical(default_report_config$reply_to, "cgvviewer@gmail.com"), "report replies return to the CGV Gmail inbox")
+assert(identical(default_report_config$from_email, "CGeV Reports <reports@cgvapp.com>"), "reports use the verified cgvapp.com sender by default")
+assert(identical(default_report_config$reply_to, "cgvviewer@gmail.com"), "report replies return to the CGeV Gmail inbox")
 
 completed <- cgv_update_background_report(queued$id, state = "completed", delivery = delivery, base_dir = test_root)
 assert(identical(completed$state, "completed"), "delivered report enters completed state")
@@ -135,7 +135,7 @@ private_error <- tryCatch({
     cgv_enqueue_background_report(private_snapshot, "scientist@example.org", base_dir = test_root)
     ""
 }, error = function(e) conditionMessage(e))
-assert(grepl("preloaded CGV data", private_error, fixed = TRUE), "private uploads are rejected before queueing")
+assert(grepl("preloaded CGeV data", private_error, fixed = TRUE), "private uploads are rejected before queueing")
 
 domain_text <- paste(readLines(file.path("R", "server_shared_analysis_domain.R"), warn = FALSE), collapse = "\n")
 worker_text <- paste(readLines(file.path("scripts", "background_report_worker.R"), warn = FALSE), collapse = "\n")

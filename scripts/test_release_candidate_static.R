@@ -5,6 +5,7 @@ read_text <- function(path) {
 }
 
 release_version <- "1.1.0"
+desktop_release_version <- "1.2.0"
 manual_version <- "1.1"
 
 global_txt <- read_text("global.R")
@@ -41,13 +42,13 @@ release_checklist <- sprintf("RELEASE_CHECKLIST_v%s.md", release_version)
 desktop_scripts <- desktop_package$scripts
 
 stopifnot(
-  grepl(sprintf('cgv_release_version <- "%s"', release_version), global_txt, fixed = TRUE),
+  grepl(sprintf('cgv_release_version <- Sys.getenv("CGV_RELEASE_VERSION", unset = "%s")', release_version), global_txt, fixed = TRUE),
   grepl("`data-figure-studio-version` = cgv_release_version", ui_txt, fixed = TRUE),
   grepl('paste0("v", cgv_release_version)', ui_txt, fixed = TRUE),
-  identical(desktop_package$version, release_version),
-  identical(desktop_lock$version, release_version),
+  identical(desktop_package$version, desktop_release_version),
+  identical(desktop_lock$version, desktop_release_version),
   grepl(
-    sprintf('"packages"[[:space:]]*:[[:space:]]*\\{[[:space:]]*""[[:space:]]*:[[:space:]]*\\{[[:space:]]*"name"[[:space:]]*:[[:space:]]*"cgv-desktop",[[:space:]]*"version"[[:space:]]*:[[:space:]]*"%s"', release_version),
+    sprintf('"packages"[[:space:]]*:[[:space:]]*\\{[[:space:]]*""[[:space:]]*:[[:space:]]*\\{[[:space:]]*"name"[[:space:]]*:[[:space:]]*"cgv-desktop",[[:space:]]*"version"[[:space:]]*:[[:space:]]*"%s"', desktop_release_version),
     desktop_lock_txt,
     perl = TRUE
   ),
@@ -129,8 +130,8 @@ stopifnot(
     function(command) grepl("--publish never", command, fixed = TRUE),
     logical(1)
   )),
-  grepl('generator: "CGV Figure Studio " + studioVersion', studio_js, fixed = TRUE),
+  grepl('generator: "CGeV Figure Studio " + studioVersion', studio_js, fixed = TRUE),
   !grepl("\\bbeta\\b", paste(ui_txt, studio_js, studio_css), ignore.case = TRUE, perl = TRUE)
 )
 
-message(sprintf("CGV v%s release-candidate metadata is consistent.", release_version))
+message(sprintf("CGeV Web v%s and Desktop v%s release metadata are consistent.", release_version, desktop_release_version))

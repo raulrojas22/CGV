@@ -105,7 +105,7 @@
 
   function mapOracleManifest(manifest, manifestUrl) {
     if (!manifest || Number(manifest.schemaVersion) !== 1 || !String(manifest.version || "").trim()) {
-      throw new Error("Invalid CGV Desktop release manifest");
+      throw new Error("Invalid CGeV Desktop release manifest");
     }
     var assets = {};
     var manifestAssets = manifest.assets && typeof manifest.assets === "object" ? manifest.assets : {};
@@ -126,7 +126,7 @@
     var source = manifest.source && typeof manifest.source === "object" ? manifest.source : {};
     return {
       release: {
-        name: String(manifest.product || "CGV Desktop") + " " + String(manifest.version),
+        name: String(manifest.product || "CGeV Desktop") + " " + String(manifest.version),
         tag_name: "desktop-v" + String(manifest.version),
         published_at: manifest.publishedAt || "",
         body: notes.join("\n")
@@ -286,8 +286,8 @@
     var primary = root.querySelector("#cgv-download-primary-action");
     if (context.isDesktop) {
       if (contextIcon) contextIcon.className = "fas fa-laptop";
-      setText(root, "[data-cgv-runtime-label]", "CGV Desktop" + (context.appVersion ? " " + context.appVersion : ""));
-      setText(root, "[data-cgv-hero-copy]", "You are already using the private local CGV workspace on " + platformLabel(context) + ". Continue here, open CGV Web, or download an installer for another operating system.");
+      setText(root, "[data-cgv-runtime-label]", "CGeV Desktop" + (context.appVersion ? " " + context.appVersion : ""));
+      setText(root, "[data-cgv-hero-copy]", "You are already using the private local CGeV workspace on " + platformLabel(context) + ". Continue here, open CGeV Web, or download an installer for another operating system.");
       if (primary) {
         primary.href = root.getAttribute("data-cgv-web-url") || "https://cgv.mobilomics.org";
         primary.target = "_blank";
@@ -295,11 +295,11 @@
         var icon = primary.querySelector("i");
         if (icon) icon.className = "fas fa-arrow-up-right-from-square";
       }
-      setText(root, "[data-cgv-primary-label]", "Open CGV Web");
-      setText(root, "[data-cgv-web-title]", "Need the hosted CGV workspace?");
-      setText(root, "[data-cgv-web-copy]", "Use CGV Web when you want server-managed references, or share the browser version with collaborators who do not have Desktop installed.");
+      setText(root, "[data-cgv-primary-label]", "Open CGeV Web");
+      setText(root, "[data-cgv-web-title]", "Need the hosted CGeV workspace?");
+      setText(root, "[data-cgv-web-copy]", "Use CGeV Web when you want server-managed references, or share the browser version with collaborators who do not have Desktop installed.");
     } else {
-      setText(root, "[data-cgv-runtime-label]", "CGV Web · " + platformLabel(context) + " detected");
+      setText(root, "[data-cgv-runtime-label]", "CGeV Web · " + platformLabel(context) + " detected");
     }
   }
 

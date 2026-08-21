@@ -2,7 +2,7 @@
 #
 # regenerar-instalables.sh
 #
-# Limpia INSTALABLES-FINALES/ y regenera TODOS los instalables de CGV Desktop:
+# Limpia INSTALABLES-FINALES/ y regenera TODOS los instalables de CGeV Desktop:
 #   🍎 Mac arm64 + x64        (compilación local)
 #   🐧 Linux AppImage + DEB   (GitHub Actions)
 #   🪟 Windows Setup.exe      (GitHub Actions; firmado si SignPath ya está configurado)
@@ -20,6 +20,7 @@
 #
 # Omitir partes (opcional):
 #   SKIP_MAC=1 SKIP_LINUX=1 SKIP_WINDOWS=1 SKIP_SIGN=1 ./regenerar-instalables.sh
+#   CREATE_RELEASE_DRAFT=1 ./regenerar-instalables.sh  # publica Windows en un draft
 #
 # NOTA: para una versión NUEVA, primero cambia "version" en desktop/package.json,
 #       commitea y haz push. El script crea y sube el tag desktop-vX.Y.Z solo.
@@ -122,19 +123,7 @@ if [ "${SKIP_WINDOWS:-0}" != "1" ]; then
       git push origin "$TAG" --quiet 2>/dev/null || true
       ok "Tag $TAG ya existía y apunta a este commit."
     else
-      warn "El tag $TAG ya existe pero apunta a un commit anterior (el build viejo de esta misma versión)."
-      warn "Para regenerar la MISMA versión $VERSION con el código nuevo, hay que mover el tag al commit actual."
-      read -r -p "¿Mover el tag $TAG al commit actual? [y/N] " ans
-      case "${ans:-}" in
-        y|Y)
-          git push origin --delete "$TAG" --quiet
-          git tag -d "$TAG" >/dev/null
-          git tag "$TAG"
-          git push origin "$TAG"
-          ok "Tag $TAG movido al commit actual."
-          ;;
-        *) die "Abortado. Alternativa: sube la versión en desktop/package.json para crear un tag nuevo." ;;
-      esac
+      die "El tag inmutable $TAG ya apunta a otro commit. Incrementa desktop/package.json y crea una versión nueva."
     fi
   else
     git tag "$TAG"
@@ -142,7 +131,10 @@ if [ "${SKIP_WINDOWS:-0}" != "1" ]; then
     ok "Tag $TAG creado y subido."
   fi
   WINDOWS_PREVIOUS_RUN_ID=$(latest_workflow_run_id desktop-windows-release.yml)
-  gh workflow run desktop-windows-release.yml --repo "$REPO" --ref "$TAG"
+  DRAFT_INPUT=false
+  [ "${CREATE_RELEASE_DRAFT:-0}" = "1" ] && DRAFT_INPUT=true
+  gh workflow run desktop-windows-release.yml --repo "$REPO" --ref "$TAG" \
+    -f create_release_draft="$DRAFT_INPUT"
   WINDOWS_RUN_ID=$(wait_for_run_id desktop-windows-release.yml "$HEAD_SHA" "$WINDOWS_PREVIOUS_RUN_ID") \
     || die "No apareció el run de Windows en GitHub."
   ok "Run Windows: https://github.com/$REPO/actions/runs/$WINDOWS_RUN_ID"
@@ -163,7 +155,7 @@ if [ "${SKIP_MAC:-0}" != "1" ]; then
   fi
   for arch in arm64 x64; do
     for ext in dmg zip; do
-      src="$DESKTOP_DIR/dist/CGV-Desktop-$VERSION-macOS-$arch.$ext"
+      src="$DESKTOP_DIR/dist/CGeV-Desktop-$VERSION-macOS-$arch.$ext"
       if [ -f "$src" ]; then
         cp "$src" "$FINAL_DIR/"
         ok "Copiado $(basename "$src")"
@@ -180,7 +172,7 @@ if [ -n "$LINUX_RUN_ID" ]; then
   say "5. Esperando build de Linux"
   if gh run watch "$LINUX_RUN_ID" --repo "$REPO" --exit-status --interval 30; then
     gh run download "$LINUX_RUN_ID" --repo "$REPO" \
-      --name "CGV-Desktop-Linux-x64-$VERSION" --dir "$FINAL_DIR"
+      --name "CGeV-Desktop-Linux-x64-$VERSION" --dir "$FINAL_DIR"
     gh run view "$LINUX_RUN_ID" --repo "$REPO" --log > "$LOGS_DIR/build-linux-$VERSION.log" 2>/dev/null || true
     ok "Linux descargado (AppImage + DEB)."
   else
@@ -223,7 +215,7 @@ if [ "${SKIP_SIGN:-0}" != "1" ]; then
   say "7. Generando checksums y firmas GPG (pedirá tu frase de contraseña)"
   cd "$FINAL_DIR"
   shopt -s nullglob
-  INSTALLABLES=(CGV-Desktop-*.dmg CGV-Desktop-*.zip CGV-Desktop-*.AppImage CGV-Desktop-*.deb CGV-Desktop-*.exe)
+  INSTALLABLES=(CGeV-Desktop-*.dmg CGeV-Desktop-*.zip CGeV-Desktop-*.AppImage CGeV-Desktop-*.deb CGeV-Desktop-*.exe)
   if [ "${#INSTALLABLES[@]}" -eq 0 ]; then
     warn "No hay instalables para firmar."
   else

@@ -123,7 +123,7 @@ const manifest = {
   generatedAt: new Date().toISOString(),
   speciesId,
   label: row.label,
-  description: "Bundled offline demo data for first-run CGV Desktop validation."
+  description: "Bundled offline demo data for first-run CGeV Desktop validation."
 };
 fs.writeFileSync(path.join(outRoot, "data-manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
 

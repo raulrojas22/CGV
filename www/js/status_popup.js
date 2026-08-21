@@ -368,7 +368,7 @@
   function beginGlobalActivity(context, headline, detail) {
     if (!window.cgvActivity) return;
     window.cgvActivity.begin(activitySource(context), {
-      headline: txt(headline || context || 'CGV is working'),
+      headline: txt(headline || context || 'CGeV is working'),
       detail: txt(detail || 'Processing data…'),
       priority: 60,
       delay: 140

@@ -60,7 +60,7 @@ load_project_env_file <- function(path) {
 load_project_env_file(".Renviron")
 load_project_env_file(".env")
 
-cgv_release_version <- "1.1.0"
+cgv_release_version <- Sys.getenv("CGV_RELEASE_VERSION", unset = "1.1.0")
 
 compute_app_asset_version <- function() {
     env_version <- trimws(Sys.getenv("APP_ASSET_VERSION", unset = ""))
@@ -95,6 +95,53 @@ compute_app_asset_version <- function() {
 
 app_asset_version <- compute_app_asset_version()
 
+# ShinyProxy gives every spawned session a different URL prefix.  When nginx
+# publishes the exact /app/www tree for an immutable image, opt selected CGV
+# assets into that stable, cross-session namespace.  The strict release check
+# deliberately makes this a no-op for Desktop, direct Shiny, and partially
+# configured deployments.
+compute_app_static_base_url <- function(
+    asset_version = app_asset_version,
+    candidate = Sys.getenv("APP_STATIC_BASE_URL", unset = "")
+) {
+    candidate <- trimws(candidate)
+    expected <- sprintf("/cgv-static/%s", asset_version)
+    if (
+        grepl("^/cgv-static/[a-f0-9]{64}$", candidate) &&
+        identical(candidate, expected)
+    ) {
+        candidate
+    } else {
+        ""
+    }
+}
+
+app_static_base_url <- compute_app_static_base_url()
+
+static_asset_path <- function(path) {
+    path_txt <- as.character(path %||% "")
+    if (!length(path_txt) || is.na(path_txt[[1L]])) {
+        return("")
+    }
+    path_txt <- path_txt[[1L]]
+    if (!nzchar(path_txt) || !nzchar(app_static_base_url)) {
+        return(path_txt)
+    }
+
+    unsafe_path <- startsWith(path_txt, "/") ||
+        grepl("^[A-Za-z][A-Za-z0-9+.-]*:", path_txt) ||
+        grepl("\\\\", path_txt, perl = TRUE) ||
+        grepl("%2[eEfF]|%5[cC]", path_txt, perl = TRUE) ||
+        grepl("[\r\n]", path_txt, perl = TRUE) ||
+        grepl("(^|[/\\\\])[.][.]([/\\\\]|$)", path_txt, perl = TRUE) ||
+        grepl("[/\\\\]$", path_txt, perl = TRUE)
+    if (unsafe_path) {
+        return(path_txt)
+    }
+
+    paste0(app_static_base_url, "/", path_txt)
+}
+
 # Expose the current build identifier through a tiny static JSON resource.
 # The browser version probe only needs this value; fetching and parsing the
 # complete Shiny page adds avoidable network, HTML parsing, and UI construction
@@ -126,6 +173,7 @@ versioned_asset_path <- function(path) {
     if (!nzchar(path_txt)) {
         return("")
     }
+    path_txt <- static_asset_path(path_txt)
     sep <- if (grepl("?", path_txt, fixed = TRUE)) "&" else "?"
     paste0(path_txt, sep, "av=", app_asset_version)
 }

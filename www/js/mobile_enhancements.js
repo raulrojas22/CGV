@@ -1,5 +1,5 @@
 /**
- * Mobile Enhancements for CGV App
+ * Mobile Enhancements for CGeV App
  * All mobile-specific JavaScript behaviour.
  * Every listener/observer is gated behind matchMedia or touch detection
  * so desktop is completely unaffected.
