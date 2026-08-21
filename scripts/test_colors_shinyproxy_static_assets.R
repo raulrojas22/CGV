@@ -15,6 +15,7 @@ publish_pos <- regexpr("CGV_PUBLISH_STATIC_ASSETS=1", deploy, fixed = TRUE)[1]
 candidate_pos <- regexpr("build_nginx_static_candidate.py", deploy, fixed = TRUE)[1]
 broker_candidate_pos <- regexpr("build_colors_shinyproxy_candidates.py", deploy, fixed = TRUE)[1]
 nginx_test_pos <- regexpr("--entrypoint /usr/sbin/nginx", deploy, fixed = TRUE)[1]
+compose_syntax_pos <- regexpr("podman-compose -f '${COLORS_COMPOSE_CANDIDATE}' config", deploy, fixed = TRUE)[1]
 compose_validate_pos <- regexpr("podman-compose --env-file", deploy, fixed = TRUE)[1]
 application_move_pos <- regexpr("mv '${COLORS_APPLICATION_CANDIDATE}' '${APP_DIR}/shinyproxy/application.yml'", deploy, fixed = TRUE)[1]
 compose_move_pos <- regexpr("mv '${COLORS_COMPOSE_CANDIDATE}' '${COMPOSE_FILE}'", deploy, fixed = TRUE)[1]
@@ -33,12 +34,15 @@ cutover_teardown_pos <- if (cutover_teardown_relative > 0) {
 
 assert(all(c(build_pos, digest_pos, publish_pos, candidate_pos, nginx_test_pos,
              broker_candidate_pos, compose_validate_pos, application_move_pos,
-             compose_move_pos, nginx_move_pos, cutover_teardown_pos) > 0),
+             compose_syntax_pos, compose_move_pos, nginx_move_pos,
+             cutover_teardown_pos) > 0),
        "Colors immutable-static deployment sequence is incomplete.")
 assert(build_pos < digest_pos && digest_pos < publish_pos,
        "Colors must derive the exact image Id after build and before publication.")
-assert(publish_pos < candidate_pos && candidate_pos < nginx_test_pos,
-       "The static snapshot and candidate must exist before nginx -t.")
+assert(broker_candidate_pos < compose_syntax_pos && compose_syntax_pos < candidate_pos &&
+         candidate_pos < nginx_test_pos &&
+         nginx_test_pos < build_pos,
+       "Server-owned candidates and nginx -t must complete before the expensive image build.")
 assert(nginx_test_pos < nginx_move_pos,
        "The server-owned nginx candidate must pass nginx -t before atomic replacement.")
 assert(broker_candidate_pos < compose_validate_pos &&
@@ -77,6 +81,8 @@ required <- c(
   "APP_STATIC_BASE_URL=/cgv-static/${expected_revision}",
   "REPORT_SCRIPT_CSP_HASH",
   "--report-script-hash '${REPORT_SCRIPT_CSP_HASH}'",
+  "--tmpfs /var/cache/nginx:rw,nosuid,nodev,noexec,size=32m,mode=1777",
+  "--tmpfs /run:rw,nosuid,nodev,noexec,size=8m,mode=1777",
   "title: CGeV - Comparative Gene Viewer",
   "display-name: CGeV - Comparative Gene Viewer"
 )
@@ -93,5 +99,7 @@ assert(!grepl("FEEDBACK_FROM_EMAIL:", deploy, fixed = TRUE),
        "Public app sessions must not receive feedback sender configuration.")
 assert(!grepl("REPORT_FROM_EMAIL:", deploy, fixed = TRUE),
        "Public app sessions must not receive report sender configuration.")
+assert(!grepl("--tmpfs /var/run:", deploy, fixed = TRUE),
+       "The nginx syntax check must mount /run, where nginx.pid is created.")
 
 message("Colors ShinyProxy immutable-static deployment contract is guarded.")

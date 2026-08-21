@@ -43,25 +43,103 @@ else:
 
 tracked_nginx = NGINX_PATH.read_text(encoding="utf-8")
 assert MODULE.build_candidate(tracked_nginx, snippet) == tracked_nginx
+oldest_hash = "sha256-hzu6tHcnWHA4k15V7TSOwQ9voERkwOk5iJWRIHKmwTE="
 old_hash = "sha256-VJ57di/IQ0e4GQS4gxb2N0MxDIJ1cTW0ycxWaMfXqog="
-new_hash = "sha256-EXkIJnQvs/u+7Sw8WFMz21f46Zk6qxolUQbZIaQ9yfg="
-csp_config = (
-    "add_header Content-Security-Policy \"default-src 'none'; "
-    f"script-src '{old_hash}'; connect-src 'none'\" always;\n"
+expected_hash = "sha256-EXkIJnQvs/u+7Sw8WFMz21f46Zk6qxolUQbZIaQ9yfg="
+foreign_hash = "sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU="
+report_script_src = f"script-src '{oldest_hash}' '{old_hash}'"
+report_csp_header = (
+    "        add_header Content-Security-Policy \"default-src 'none'; "
+    f"{report_script_src}; connect-src 'none'\" always;\n"
 )
-updated_csp = MODULE.update_report_script_hash(csp_config, new_hash)
-assert new_hash in updated_csp and old_hash not in updated_csp
-for invalid_config, invalid_hash in (
-    ("server {}\n", new_hash),
-    (csp_config + csp_config, new_hash),
-    (csp_config, "sha256-invalid"),
-):
+report_config = (
+    "server {\n"
+    "    listen 8080;\n"
+    "\n"
+    "    location = /unrelated {\n"
+    "        add_header Content-Security-Policy \"default-src 'none'; "
+    f"script-src '{foreign_hash}'\" always;\n"
+    "    }\n"
+    "\n"
+    '    location ~ "^/share/([a-f0-9]{64})(?:/index[.]html|/?)$" {\n'
+    "        alias /srv/cgv-cache/shared_reports/$1/index.html;\n"
+    f"{report_csp_header}"
+    "    }\n"
+    "\n"
+    "    location / {\n"
+    "        return 204;\n"
+    "    }\n"
+    "}\n"
+)
+updated_csp = MODULE.update_report_script_hash(report_config, expected_hash)
+expected_csp = report_config.replace(
+    report_script_src,
+    f"{report_script_src} '{expected_hash}'",
+    1,
+)
+assert updated_csp == expected_csp
+assert oldest_hash in updated_csp and old_hash in updated_csp
+assert updated_csp.count(expected_hash) == 1
+assert f"script-src '{foreign_hash}'" in updated_csp
+assert MODULE.update_report_script_hash(updated_csp, expected_hash) == updated_csp
+assert MODULE.update_report_script_hash(tracked_nginx, expected_hash) == tracked_nginx
+
+
+def rejected(config: str, expected_error: str, hash_value: str = expected_hash) -> None:
     try:
-        MODULE.update_report_script_hash(invalid_config, invalid_hash)
-    except ValueError:
-        pass
+        MODULE.update_report_script_hash(config, hash_value)
+    except ValueError as error:
+        assert expected_error in str(error), (expected_error, str(error))
     else:
-        raise AssertionError("an invalid shared-report CSP update was accepted")
+        raise AssertionError(f"an invalid shared-report CSP was accepted: {expected_error}")
+
+
+rejected("server {}\n", "index alias")
+rejected(report_config + report_config, "index alias")
+rejected(report_config, "complete sha256 CSP token", "sha256-invalid")
+rejected(
+    report_config.replace(report_script_src, f"{report_script_src}; script-src '{foreign_hash}'"),
+    "exactly one script-src",
+)
+rejected(
+    report_config.replace(report_script_src, "script-src 'unsafe-inline'"),
+    "only quoted sha256 hashes",
+)
+rejected(
+    report_config.replace(report_script_src, "script-src 'self'"),
+    "only quoted sha256 hashes",
+)
+rejected(
+    report_config.replace(report_script_src, f"script-src '{old_hash}' https://example.org"),
+    "only quoted sha256 hashes",
+)
+rejected(
+    report_config.replace(report_script_src, f"script-src '{old_hash}' '{old_hash}'"),
+    "duplicate sha256 hashes",
+)
+rejected(
+    report_config.replace(report_csp_header, report_csp_header + report_csp_header, 1),
+    "exactly one CSP header",
+)
+rejected(
+    report_config.replace(report_csp_header, "", 1),
+    "exactly one CSP header",
+)
+rejected(
+    report_config.replace(
+        report_csp_header,
+        "        if ($request_method = GET) {\n"
+        + report_csp_header.replace("        ", "            ", 1)
+        + "        }\n",
+        1,
+    ),
+    "not directly inside",
+)
+rejected(
+    report_config.replace(report_script_src, "default-src 'none'"),
+    "exactly one script-src",
+)
+rejected(report_config[:-2], "unmatched opening brace")
 for required in (
     "alias /srv/cgv-cache/static_assets/releases/;",
     "limit_except GET HEAD { deny all; }",
@@ -95,7 +173,7 @@ with tempfile.TemporaryDirectory(prefix="cgv-nginx-candidate-") as temp_dir:
 
     csp_config_path = temp / "server-with-csp.conf"
     csp_output = temp / "server-with-csp.conf.candidate"
-    csp_config_path.write_text(base.replace("server {\n", "server {\n    " + csp_config), encoding="utf-8")
+    csp_config_path.write_text(report_config, encoding="utf-8")
     subprocess.run(
         [
             sys.executable,
@@ -108,11 +186,11 @@ with tempfile.TemporaryDirectory(prefix="cgv-nginx-candidate-") as temp_dir:
             "--output",
             str(csp_output),
             "--report-script-hash",
-            new_hash,
+            expected_hash,
         ],
         check=True,
     )
     csp_candidate = csp_output.read_text(encoding="utf-8")
-    assert new_hash in csp_candidate and old_hash not in csp_candidate
+    assert csp_candidate == MODULE.build_candidate(expected_csp, snippet)
 
 print("nginx static candidate: OK")
