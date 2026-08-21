@@ -89,7 +89,8 @@ app_perf_log_file <- function() {
         "APP_SEQ_EXTRACT_CACHE_MAX_MB", "APP_SPLICED_SEQ_CACHE_MAX_MB",
         "APP_ALIAS_SQLITE_CACHE_MB", "APP_ALIAS_SQLITE_MAX_CONNECTIONS",
         "APP_GIRAFE_COMPACT_SVG", "APP_GIRAFE_SVG_DECIMALS",
-        "APP_ORTHO_RENDER_CHUNK_SIZE", "APP_ORTHO_AUTO_RENDER_MORE"
+        "APP_ORTHO_RENDER_CHUNK_SIZE", "APP_ORTHO_AUTO_RENDER_MORE",
+        "APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY"
     )
     meta_values <- Sys.getenv(meta_keys, unset = "")
     meta_lines <- sprintf("# meta %s=%s", meta_keys, gsub("[\r\n]+", " ", meta_values))
@@ -182,6 +183,10 @@ app_env_flag <- function(name, default = FALSE) {
     default_raw <- if (isTRUE(default)) "1" else "0"
     raw <- tolower(trimws(as.character(Sys.getenv(as.character(name %||% ""), default_raw) %||% default_raw)))
     !raw %in% c("", "0", "false", "no", "off")
+}
+
+cross_species_requires_verified_orthology <- function() {
+    app_env_flag("APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY", FALSE)
 }
 
 app_env_int <- function(name, default = 0L, min_value = NULL, max_value = NULL) {
@@ -8919,6 +8924,75 @@ validate_cross_species_orthology_results <- function(results, fetch_fun = NULL, 
         evidence = evidence,
         message = sprintf("Verified one-to-one orthology across %d organisms.", length(approved))
     )
+}
+
+select_cross_species_results_by_orthology_policy <- function(
+        results,
+        require_verified = cross_species_requires_verified_orthology(),
+        fetch_fun = NULL,
+        base_dir = ".") {
+    if (isTRUE(require_verified)) {
+        validated <- validate_cross_species_orthology_results(
+            results,
+            fetch_fun = fetch_fun,
+            base_dir = base_dir
+        )
+        validated$verification_required <- TRUE
+        return(validated)
+    }
+
+    found_positions <- which(vapply(results, function(result) {
+        isTRUE((result %||% list())$found)
+    }, logical(1)))
+    list(
+        status = if (length(found_positions) > 0L) "local_matches" else "no_local_matches",
+        approved_positions = found_positions,
+        rejected_positions = setdiff(seq_along(results), found_positions),
+        identities = list(),
+        evidence = list(),
+        verification_required = FALSE,
+        message = if (length(found_positions) > 0L) {
+            sprintf("Accepted unambiguous local matches in %d organism(s).", length(found_positions))
+        } else {
+            "No unambiguous local matches were found."
+        }
+    )
+}
+
+apply_cross_species_reference_anchor <- function(lookup_jobs, reference_anchor) {
+    jobs <- lookup_jobs %||% list()
+    anchor <- reference_anchor %||% list()
+    scalar_text <- function(value) {
+        values <- trimws(as.character(value %||% ""))
+        if (length(values) == 0L || is.na(values[[1L]])) "" else values[[1L]]
+    }
+    local_gene_id <- scalar_text(anchor$local_gene_id)
+    if (!nzchar(local_gene_id) || length(jobs) == 0L) {
+        return(list(jobs = jobs, reference_idx = integer(0), applied = FALSE))
+    }
+
+    anchor_org_id <- scalar_text(anchor$organism_id)
+    reference_idx <- which(vapply(jobs, function(job) {
+        det <- (job %||% list())$det %||% list()
+        job_org_id <- scalar_text(det$species_id %||% det$preloaded_id)
+        nzchar(anchor_org_id) && identical(job_org_id, anchor_org_id)
+    }, logical(1)))
+    if (length(reference_idx) == 0L) {
+        anchor_org <- tolower(scalar_text(anchor$organism_name))
+        reference_idx <- which(vapply(jobs, function(job) {
+            det <- (job %||% list())$det %||% list()
+            job_org <- tolower(scalar_text(det$organism))
+            nzchar(anchor_org) && identical(job_org, anchor_org)
+        }, logical(1)))
+    }
+    if (length(reference_idx) != 1L) {
+        return(list(jobs = jobs, reference_idx = integer(0), applied = FALSE))
+    }
+
+    idx <- reference_idx[[1L]]
+    jobs[[idx]]$gene_name <- local_gene_id
+    jobs[[idx]]$allow_partial_suggestions <- FALSE
+    list(jobs = jobs, reference_idx = as.integer(idx), applied = TRUE)
 }
 
 run_lookup_pipeline_pure <- function(file_path, input_gene, det_info = NULL, diagnostics = FALSE,

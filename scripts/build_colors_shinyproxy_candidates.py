@@ -2,8 +2,8 @@
 """Build fail-closed candidates for the server-owned Colors YAML files.
 
 The server files intentionally remain the source of truth.  This helper only
-adds or normalizes the two public static-asset variables required by a release;
-it never reads an env file and it refuses legacy env-file mounts that could
+adds or normalizes a small non-secret allowlist required by the public app; it
+never reads an env file and it refuses legacy env-file mounts that could
 silently override those variables.
 """
 
@@ -21,10 +21,12 @@ from typing import Iterable
 APP_VALUES = (
     ("APP_ASSET_VERSION", '"${APP_ASSET_VERSION:}"'),
     ("APP_STATIC_BASE_URL", '"${APP_STATIC_BASE_URL:}"'),
+    ("APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY", '"${APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY:0}"'),
 )
 COMPOSE_VALUES = (
     ("APP_ASSET_VERSION", '"${APP_ASSET_VERSION:-}"'),
     ("APP_STATIC_BASE_URL", '"${APP_STATIC_BASE_URL:-}"'),
+    ("APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY", '"${APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY:-0}"'),
 )
 ENV_FILE_MOUNT_RE = re.compile(r"(?<![A-Za-z0-9_.])\.env(?![A-Za-z0-9_.-])")
 

@@ -444,6 +444,11 @@ normalize_ensembl_species_name <- function(organism = NULL, ensembl_species = NU
     org <- tolower(trimws(as.character(organism %||% "")))
     if (length(org) == 0L || is.na(org[1]) || !nzchar(org[1])) return("")
     org <- org[1]
+    # Ensembl uses the domestic dog trinomial as its canonical species slug.
+    # The generic binomial fallback below would incorrectly produce canis_lupus.
+    if (grepl("^canis\\s+lupus\\s+familiaris(?:\\s|$)", org, perl = TRUE)) {
+        return("canis_lupus_familiaris")
+    }
     org <- sub("\\s+(ssp\\.|subsp\\.|var\\.|strain|cultivar|cv\\.).*$", "", org, perl = TRUE)
     tokens <- strsplit(gsub("[^a-z0-9]+", " ", org), " +", perl = TRUE)[[1]]
     tokens <- tokens[nzchar(tokens)]

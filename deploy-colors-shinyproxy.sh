@@ -247,6 +247,43 @@ echo "  Imagen CGV activa: ${CURRENT_IMAGE}"
 echo "  HTTP interno: proxy=${PROXY_CODE}, nginx=${NGINX_CODE}"
 
 if [[ "$MODE" == "check" ]]; then
+  ACTIVE_IMAGE_REVISION="$(
+    rssh "podman image inspect '${CURRENT_IMAGE}' --format '{{ index .Labels \"org.opencontainers.image.revision\" }}'" 2>/dev/null || true
+  )"
+  if [[ "$ACTIVE_IMAGE_REVISION" != "$SOURCE_REV" ]]; then
+    die "Colors saludable pero no ejecuta el commit local ${SOURCE_REV}; la imagen activa ${CURRENT_IMAGE} declara ${ACTIVE_IMAGE_REVISION:-sin-label}. Despliega el commit confirmado antes de aceptar CHECK OK"
+  fi
+
+  CHECK_DELEGATE="$(
+    rssh "set -e
+      for i in \$(seq 1 15); do
+        for candidate in \$(podman ps --filter name=sp-container- --filter status=running --format '{{.Names}}' 2>/dev/null || true); do
+          candidate_image=\$(podman inspect \"\$candidate\" --format '{{.ImageName}}' 2>/dev/null || true)
+          if [ \"\$candidate_image\" = '${CURRENT_IMAGE}' ]; then
+            printf '%s\n' \"\$candidate\"
+            exit 0
+          fi
+        done
+        sleep 1
+      done
+      exit 1
+    " || true
+  )"
+  [[ -n "$CHECK_DELEGATE" ]] || \
+    die "Colors ejecuta ${CURRENT_IMAGE}, pero no hay una sesión pública activa de esa release"
+
+  BROKER_POLICY="$(sed -n 's/^APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY=//p' <<<"$PROXY_ENV")"
+  DELEGATE_POLICY="$(
+    rssh "podman inspect '${CHECK_DELEGATE}' --format '{{range .Config.Env}}{{println .}}{{end}}'" |
+      sed -n 's/^APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY=//p'
+  )"
+  [[ "$BROKER_POLICY" == "0" || "$BROKER_POLICY" == "1" ]] || \
+    die "la release activa no declara una política ortológica válida en ShinyProxy"
+  [[ "$DELEGATE_POLICY" == "0" || "$DELEGATE_POLICY" == "1" ]] || \
+    die "la sesión pública ${CHECK_DELEGATE} no recibió una política ortológica válida"
+  [[ "$DELEGATE_POLICY" == "$BROKER_POLICY" ]] || \
+    die "la política ortológica de la sesión (${DELEGATE_POLICY}) no coincide con ShinyProxy (${BROKER_POLICY})"
+
   WORKER_STATE="$(rssh "podman inspect '${BACKGROUND_WORKER_NAME}' --format '{{.State.Status}}' 2>/dev/null || true")"
   WORKER_IMAGE="$(rssh "podman inspect '${BACKGROUND_WORKER_NAME}' --format '{{.ImageName}}' 2>/dev/null || true")"
   [[ "$WORKER_STATE" == "running" ]] || die "el worker de reportes no está activo: ${WORKER_STATE:-ausente}"
@@ -255,6 +292,8 @@ if [[ "$MODE" == "check" ]]; then
     die "el worker no completó el preflight headless; los reportes por correo fallarán"
   rssh "podman exec '${BACKGROUND_WORKER_NAME}' grep -q '^browser=Chrome/' /app/cache/background_reports/worker.ready" || \
     die "el worker no registró un arranque headless correcto en su marcador"
+  echo "  Commit:     ${ACTIVE_IMAGE_REVISION}, coincide con la fuente local"
+  echo "  Sesión:     ${CHECK_DELEGATE}, policy=${BROKER_POLICY}"
   echo "  Worker:     ${WORKER_STATE}, preflight headless OK"
   echo ""
   echo "CHECK OK: no se realizaron cambios en Colors."
@@ -270,6 +309,8 @@ if [[ "$SKIP_TESTS" == "0" ]]; then
     Rscript -e "invisible(parse(file='global.R')); invisible(parse(file='ui.R')); invisible(parse(file='server.R'))"
     Rscript -e "if (!requireNamespace('testthat', quietly=TRUE)) stop('testthat no está instalado'); testthat::test_dir('tests/testthat', reporter='summary')"
     Rscript scripts/test_background_report_jobs.R
+    Rscript scripts/test_colors_shinyproxy_static_assets.R
+    python3 -B scripts/test_colors_shinyproxy_candidates.py
   )
 else
   echo ""
@@ -457,8 +498,19 @@ rssh "set -e
 rssh "set -e
   test \"\$(grep -c '^        APP_ASSET_VERSION: \"\${APP_ASSET_VERSION:}\"$' '${COLORS_APPLICATION_CANDIDATE}')\" = 1
   test \"\$(grep -c '^        APP_STATIC_BASE_URL: \"\${APP_STATIC_BASE_URL:}\"$' '${COLORS_APPLICATION_CANDIDATE}')\" = 1
+  test \"\$(grep -c '^        APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY: \"\${APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY:0}\"$' '${COLORS_APPLICATION_CANDIDATE}')\" = 1
   test \"\$(grep -c '^      APP_ASSET_VERSION: \"\${APP_ASSET_VERSION:-}\"$' '${COLORS_COMPOSE_CANDIDATE}')\" = 1
   test \"\$(grep -c '^      APP_STATIC_BASE_URL: \"\${APP_STATIC_BASE_URL:-}\"$' '${COLORS_COMPOSE_CANDIDATE}')\" = 1
+  test \"\$(grep -c '^      APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY: \"\${APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY:-0}\"$' '${COLORS_COMPOSE_CANDIDATE}')\" = 1
+  policy_count=\$(grep -c '^APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY=' '${APP_DIR}/.env' || true)
+  if [ \"\$policy_count\" -gt 1 ]; then
+    echo 'POLICY_GUARD_FAILED: env-duplicate-orthology-policy' >&2
+    exit 1
+  fi
+  if [ \"\$policy_count\" = 1 ] && ! grep -Eq '^APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY=[01]$' '${APP_DIR}/.env'; then
+    echo 'POLICY_GUARD_FAILED: env-invalid-orthology-policy' >&2
+    exit 1
+  fi
   ! grep -q '^[[:space:]]*container-env-file:' '${COLORS_APPLICATION_CANDIDATE}'
   ! grep -q '^[[:space:]]*env_file:' '${COLORS_COMPOSE_CANDIDATE}'
   ! grep -q '/opt/shinyproxy/env/cgv.env' '${COLORS_COMPOSE_CANDIDATE}'
@@ -628,7 +680,14 @@ wait_for_release() {
   rssh "set -e
     for i in \$(seq 1 120); do
       socket_state=\$(podman inspect cgv-docker-socket-proxy --format '{{.State.Health.Status}}' 2>/dev/null || true)
-      running=\$(podman ps --filter ancestor='${expected_image}' -q | wc -l | tr -d ' ')
+      delegate=''
+      for candidate in \$(podman ps --filter name=sp-container- --filter status=running --format '{{.Names}}' 2>/dev/null || true); do
+        candidate_image=\$(podman inspect \"\$candidate\" --format '{{.ImageName}}' 2>/dev/null || true)
+        if [ \"\$candidate_image\" = '${expected_image}' ]; then
+          delegate=\"\$candidate\"
+          break
+        fi
+      done
       worker_state=\$(podman inspect '${BACKGROUND_WORKER_NAME}' --format '{{.State.Status}}' 2>/dev/null || true)
       worker_image=\$(podman inspect '${BACKGROUND_WORKER_NAME}' --format '{{.ImageName}}' 2>/dev/null || true)
       codes=\$(python3 - <<'PY'
@@ -658,12 +717,13 @@ PY
           worker_ok=1
         fi
       fi
-      if [ \"\$socket_state\" = healthy ] && [ \"\$worker_ok\" = 1 ] && printf '%s' \"\$proxy_code\" | grep -Eq '^[23][0-9][0-9]$' && printf '%s' \"\$nginx_code\" | grep -Eq '^[23][0-9][0-9]$' && [ \"\$running\" -ge 1 ]; then
-        echo \"ready: socket=\$socket_state proxy=\$proxy_code nginx=\$nginx_code app_instances=\$running worker=\${worker_state:-not-required} wait=\${i}s\"
+      if [ \"\$socket_state\" = healthy ] && [ \"\$worker_ok\" = 1 ] && printf '%s' \"\$proxy_code\" | grep -Eq '^[23][0-9][0-9]$' && printf '%s' \"\$nginx_code\" | grep -Eq '^[23][0-9][0-9]$' && [ -n \"\$delegate\" ]; then
+        echo \"ready: socket=\$socket_state proxy=\$proxy_code nginx=\$nginx_code delegate=\$delegate worker=\${worker_state:-not-required} wait=\${i}s\"
         exit 0
       fi
       sleep 1
     done
+    echo \"READINESS_GUARD_FAILED: expected_image=${expected_image} delegate=\${delegate:-missing} socket=\${socket_state:-missing} proxy=\${proxy_code:-000} nginx=\${nginx_code:-000} worker=\${worker_state:-missing} worker_ok=\${worker_ok:-0}\" >&2
     podman ps -a --format '{{.Names}}|{{.Image}}|{{.Status}}|{{.Ports}}' >&2
     podman logs --tail 120 cgv-shinyproxy >&2 || true
     podman logs --tail 120 '${BACKGROUND_WORKER_NAME}' >&2 || true
@@ -673,17 +733,52 @@ PY
 
 verify_static_release() {
   local expected_revision="$1"
+  local expected_image="$2"
   rssh "set -e
     cd '${APP_DIR}'
     python3 scripts/verify_static_asset_http.py \
       --base-url http://127.0.0.1:3838 \
       --revision '${expected_revision}'
-    delegate=\$(podman ps --filter name=sp-container- --filter status=running --format '{{.Names}}' | head -1)
-    test -n \"\$delegate\"
-    podman inspect \"\$delegate\" --format '{{range .Config.Env}}{{println .}}{{end}}' | \
-      grep -qx 'APP_ASSET_VERSION=${expected_revision}'
-    podman inspect \"\$delegate\" --format '{{range .Config.Env}}{{println .}}{{end}}' | \
-      grep -qx 'APP_STATIC_BASE_URL=/cgv-static/${expected_revision}'
+    delegate=''
+    for i in \$(seq 1 15); do
+      for candidate in \$(podman ps --filter name=sp-container- --filter status=running --format '{{.Names}}' 2>/dev/null || true); do
+        candidate_image=\$(podman inspect \"\$candidate\" --format '{{.ImageName}}' 2>/dev/null || true)
+        if [ \"\$candidate_image\" = '${expected_image}' ]; then
+          delegate=\"\$candidate\"
+          break
+        fi
+      done
+      [ -n \"\$delegate\" ] && break
+      sleep 1
+    done
+    if [ -z \"\$delegate\" ]; then
+      echo 'STATIC_GUARD_FAILED: delegate-missing expected_image=${expected_image}' >&2
+      exit 1
+    fi
+    if ! podman inspect \"\$delegate\" --format '{{range .Config.Env}}{{println .}}{{end}}' | \
+         grep -qx 'APP_ASSET_VERSION=${expected_revision}'; then
+      echo 'STATIC_GUARD_FAILED: delegate-asset-version' >&2
+      exit 1
+    fi
+    if ! podman inspect \"\$delegate\" --format '{{range .Config.Env}}{{println .}}{{end}}' | \
+         grep -qx 'APP_STATIC_BASE_URL=/cgv-static/${expected_revision}'; then
+      echo 'STATIC_GUARD_FAILED: delegate-static-base' >&2
+      exit 1
+    fi
+    broker_policy=\$(podman inspect cgv-shinyproxy --format '{{range .Config.Env}}{{println .}}{{end}}' | sed -n 's/^APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY=//p')
+    delegate_policy=\$(podman inspect \"\$delegate\" --format '{{range .Config.Env}}{{println .}}{{end}}' | sed -n 's/^APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY=//p')
+    case \"\$broker_policy\" in
+      0|1) ;;
+      *) echo 'STATIC_GUARD_FAILED: broker-orthology-policy' >&2; exit 1 ;;
+    esac
+    case \"\$delegate_policy\" in
+      0|1) ;;
+      *) echo 'STATIC_GUARD_FAILED: delegate-orthology-policy' >&2; exit 1 ;;
+    esac
+    if [ \"\$delegate_policy\" != \"\$broker_policy\" ]; then
+      echo 'STATIC_GUARD_FAILED: orthology-policy-mismatch' >&2
+      exit 1
+    fi
     if podman inspect \"\$delegate\" --format '{{range .Config.Env}}{{println .}}{{end}}' | \
          grep -q '^FEEDBACK_RESEND_API_KEY='; then
       echo 'la sesión pública recibió FEEDBACK_RESEND_API_KEY' >&2
@@ -723,6 +818,15 @@ rssh "set -e
   test \"\$(grep -c '^CGV_IMAGE=' .env)\" = 1
   test \"\$(grep -c '^APP_ASSET_VERSION=' .env || true)\" -le 1
   test \"\$(grep -c '^APP_STATIC_BASE_URL=' .env || true)\" -le 1
+  policy_count=\$(grep -c '^APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY=' .env || true)
+  if [ \"\$policy_count\" -gt 1 ]; then
+    echo 'POLICY_GUARD_FAILED: env-duplicate-orthology-policy' >&2
+    exit 1
+  fi
+  if [ \"\$policy_count\" = 1 ] && ! grep -Eq '^APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY=[01]$' .env; then
+    echo 'POLICY_GUARD_FAILED: env-invalid-orthology-policy' >&2
+    exit 1
+  fi
   env_candidate='${COLORS_ENV_CANDIDATE}'
   cp -p .env \"\$env_candidate\"
   sed -i -E 's|^CGV_IMAGE=.*|CGV_IMAGE=${NEW_IMAGE}|' \"\$env_candidate\"
@@ -757,10 +861,17 @@ if [[ "$CUTOVER_STATUS" -eq 0 ]]; then
 fi
 set -e
 
-if [[ "$CUTOVER_STATUS" -ne 0 ]] || \
-   ! wait_for_release "$NEW_IMAGE" 1 || \
-   ! verify_static_release "$STATIC_REVISION"; then
-  echo "ERROR: la nueva release no superó la validación; se inicia rollback." >&2
+VALIDATION_GUARD=""
+if [[ "$CUTOVER_STATUS" -ne 0 ]]; then
+  VALIDATION_GUARD="cutover"
+elif ! wait_for_release "$NEW_IMAGE" 1; then
+  VALIDATION_GUARD="release-readiness"
+elif ! verify_static_release "$STATIC_REVISION" "$NEW_IMAGE"; then
+  VALIDATION_GUARD="static-release"
+fi
+
+if [[ -n "$VALIDATION_GUARD" ]]; then
+  echo "ERROR: la nueva release no superó la guarda ${VALIDATION_GUARD}; se inicia rollback." >&2
   if rollback_release; then
     die "deploy revertido correctamente a ${CURRENT_IMAGE}"
   fi
@@ -778,6 +889,8 @@ rssh "set -e
   broker_env=\$(podman inspect cgv-shinyproxy --format '{{range .Config.Env}}{{println .}}{{end}}')
   printf '%s\n' \"\$broker_env\" | grep -qx 'APP_ASSET_VERSION=${STATIC_REVISION}' || fail_guard broker-asset-version
   printf '%s\n' \"\$broker_env\" | grep -qx 'APP_STATIC_BASE_URL=/cgv-static/${STATIC_REVISION}' || fail_guard broker-static-base
+  broker_policy=\$(printf '%s\n' \"\$broker_env\" | sed -n 's/^APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY=//p')
+  case \"\$broker_policy\" in 0|1) ;; *) fail_guard broker-orthology-policy ;; esac
   if printf '%s\n' \"\$broker_env\" | grep -q '^FEEDBACK_RESEND_API_KEY='; then fail_guard broker-feedback-secret; fi
   test \"\$(podman network inspect sp-control --format '{{.Internal}}')\" = true || fail_guard sp-control-not-internal
   legacy=\$(podman ps --filter ancestor=localhost/cgv:1.0.0 -q | wc -l | tr -d ' ')
@@ -788,6 +901,15 @@ rssh "set -e
   podman logs --tail 80 '${BACKGROUND_WORKER_NAME}' 2>&1 | grep -q '\[background-report-worker\] ready' || fail_guard worker-ready-log
   podman exec '${BACKGROUND_WORKER_NAME}' test -s /app/cache/background_reports/worker.ready || fail_guard worker-ready-marker
   podman exec '${BACKGROUND_WORKER_NAME}' grep -q '^browser=Chrome/' /app/cache/background_reports/worker.ready || fail_guard worker-browser-marker
+  delegate=''
+  for candidate in \$(podman ps --filter name=sp-container- --filter status=running --format '{{.Names}}' 2>/dev/null || true); do
+    candidate_image=\$(podman inspect \"\$candidate\" --format '{{.ImageName}}' 2>/dev/null || true)
+    if [ \"\$candidate_image\" = '${NEW_IMAGE}' ]; then delegate=\"\$candidate\"; break; fi
+  done
+  test -n \"\$delegate\" || fail_guard delegate-missing
+  delegate_policy=\$(podman inspect \"\$delegate\" --format '{{range .Config.Env}}{{println .}}{{end}}' | sed -n 's/^APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY=//p')
+  case \"\$delegate_policy\" in 0|1) ;; *) fail_guard delegate-orthology-policy ;; esac
+  test \"\$delegate_policy\" = \"\$broker_policy\" || fail_guard orthology-policy-mismatch
   podman ps --format '{{.Names}}|{{.Image}}|{{.Status}}|{{.Networks}}'
 "
 FINAL_STATUS=$?
