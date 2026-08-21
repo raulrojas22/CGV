@@ -84,6 +84,14 @@ one_to_one_payload <- list(data = list(list(
 )))
 parsed <- parse_ensembl_homology_response(one_to_one_payload)
 assert_true(nrow(parsed) == 1L && identical(parsed$homology_type, "ortholog_one2one"), "Ensembl homology payload parsing failed.")
+assert_true(
+    identical(normalize_ensembl_species_name(organism = "Canis lupus familiaris"), "canis_lupus_familiaris"),
+    "The domestic dog must use Ensembl's canonical trinomial species slug."
+)
+assert_true(
+    identical(normalize_ensembl_species_name(organism = "Oryza sativa ssp. japonica"), "oryza_sativa"),
+    "Subspecies qualifiers must retain the existing binomial Ensembl fallback."
+)
 
 good <- evaluate_ensembl_orthology_pair(
     "AT5G17990", "Zm00001eb403640", "zea_mays",
@@ -122,12 +130,97 @@ assert_true(identical(rejected$status, "no_verified_pair") && length(rejected$ap
 assert_true(identical(accepted$status, "verified") && identical(accepted$approved_positions, c(1L, 2L)),
             "A verified one-to-one pair must pass the cross-species gate.")
 
+flag_name <- "APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY"
+previous_flag <- Sys.getenv(flag_name, unset = NA_character_)
+Sys.unsetenv(flag_name)
+
+tp53_organisms <- c("Homo sapiens", "Canis lupus familiaris", "Equus caballus", "Pan troglodytes")
+tp53_results <- lapply(seq_along(tp53_organisms), function(idx) {
+    make_result(
+        file_idx = idx,
+        file_path = sprintf("fixture-tp53-%d.gff3", idx),
+        file_label = tp53_organisms[[idx]],
+        species_id = gsub("[^a-z0-9]+", "_", tolower(tp53_organisms[[idx]])),
+        organism = tp53_organisms[[idx]],
+        taxid = c(9606, 9615, 9796, 9598)[[idx]],
+        local_gene_id = "gene-TP53",
+        local_symbol = "TP53"
+    )
+})
+tp53_jobs <- lapply(seq_along(tp53_organisms), function(idx) {
+    list(
+        gene_name = "TP53",
+        allow_partial_suggestions = FALSE,
+        det = list(
+            species_id = gsub("[^a-z0-9]+", "_", tolower(tp53_organisms[[idx]])),
+            organism = tp53_organisms[[idx]]
+        )
+    )
+})
+anchored_tp53 <- apply_cross_species_reference_anchor(
+    tp53_jobs,
+    list(
+        local_gene_id = "gene-TP53-dog-selected",
+        organism_id = "canis_lupus_familiaris",
+        organism_name = "Canis lupus familiaris"
+    )
+)
+assert_true(isTRUE(anchored_tp53$applied) && identical(anchored_tp53$reference_idx, 2L),
+            "The selected local reference locus must map to exactly its source organism.")
+assert_true(
+    identical(
+        vapply(anchored_tp53$jobs, function(job) as.character(job$gene_name), character(1)),
+        c("TP53", "gene-TP53-dog-selected", "TP53", "TP53")
+    ),
+    "Local ambiguity resolution must override only the anchored organism and preserve the original query elsewhere."
+)
+default_fetch_calls <- 0L
+default_tp53 <- select_cross_species_results_by_orthology_policy(
+    tp53_results,
+    fetch_fun = function(...) {
+        default_fetch_calls <<- default_fetch_calls + 1L
+        stop("Default local-match policy must not contact Ensembl.", call. = FALSE)
+    }
+)
+assert_true(!isTRUE(cross_species_requires_verified_orthology()), "Verified orthology must be opt-in by default.")
+assert_true(
+    identical(default_tp53$status, "local_matches") && identical(default_tp53$approved_positions, 1:4),
+    "Default Cross-Species policy must accept all four unambiguous local TP53 matches."
+)
+assert_true(default_fetch_calls == 0L, "Default local-match policy unexpectedly called the Ensembl fixture.")
+
+Sys.setenv(APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY = "1")
+strict_fetch_calls <- 0L
+strict_trp1 <- select_cross_species_results_by_orthology_policy(
+    list(arab_result, maize_wrong_result),
+    fetch_fun = function(...) {
+        strict_fetch_calls <<- strict_fetch_calls + 1L
+        fixture_fetch(...)
+    }
+)
+assert_true(isTRUE(cross_species_requires_verified_orthology()), "Strict orthology flag was not enabled.")
+assert_true(
+    identical(strict_trp1$status, "no_verified_pair") && length(strict_trp1$approved_positions) == 0L,
+    "Strict mode must continue blocking the TRP1 same-name/different-locus fixture."
+)
+assert_true(strict_fetch_calls == 1L, "Strict mode must consult the Ensembl fixture exactly once for this pair.")
+
+if (is.na(previous_flag)) {
+    Sys.unsetenv(flag_name)
+} else {
+    do.call(Sys.setenv, stats::setNames(list(previous_flag), flag_name))
+}
+
 server_text <- paste(readLines("server.R", warn = FALSE), collapse = "\n")
 for (token in c(
     "pendingOrthoReferenceAnchor",
+    "apply_cross_species_reference_anchor",
     "expand_reference_result_with_one_to_one_orthologs",
+    "select_cross_species_results_by_orthology_policy",
+    "cross_species_requires_verified_orthology",
     "Verifying locus-level orthology with Ensembl Compara",
-    "Shared aliases or symbols alone are not accepted as biological equivalence"
+    "Shared aliases or symbols alone are not accepted as biological equivalence",
+    "Using unambiguous matches from each local annotation"
 )) {
     assert_true(grepl(token, server_text, fixed = TRUE), paste("Missing server orthology-gate integration:", token))
 }

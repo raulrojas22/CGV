@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -58,11 +59,13 @@ expected_application = APPLICATION.replace(
     "      display-name: Preserved display\n"
     "      container-env:\n"
     '        APP_ASSET_VERSION: "${APP_ASSET_VERSION:}"\n'
-    '        APP_STATIC_BASE_URL: "${APP_STATIC_BASE_URL:}"\n',
+    '        APP_STATIC_BASE_URL: "${APP_STATIC_BASE_URL:}"\n'
+    '        APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY: "${APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY:0}"\n',
 )
 assert application_candidate == expected_application
 assert '        APP_ASSET_VERSION: "${APP_ASSET_VERSION:}"\n' in application_candidate
 assert '        APP_STATIC_BASE_URL: "${APP_STATIC_BASE_URL:}"\n' in application_candidate
+assert '        APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY: "${APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY:0}"\n' in application_candidate
 assert '        KEEP_APPLICATION: "unchanged"\n' in application_candidate
 assert '        KEEP_OTHER: "yes"\n' in application_candidate
 assert MODULE.build_application_candidate(application_candidate) == application_candidate
@@ -73,30 +76,63 @@ expected_compose = COMPOSE.replace(
     "    environment:\n"
     '      APP_ASSET_VERSION: "${APP_ASSET_VERSION:-}"\n'
     '      APP_STATIC_BASE_URL: "${APP_STATIC_BASE_URL:-}"\n'
+    '      APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY: "${APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY:-0}"\n'
     "      KEEP_COMPOSE",
     1,
 )
 assert compose_candidate == expected_compose
 assert '      APP_ASSET_VERSION: "${APP_ASSET_VERSION:-}"\n' in compose_candidate
 assert '      APP_STATIC_BASE_URL: "${APP_STATIC_BASE_URL:-}"\n' in compose_candidate
+assert '      APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY: "${APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY:-0}"\n' in compose_candidate
 assert '      KEEP_COMPOSE: "unchanged"\n' in compose_candidate
 assert '      APP_ASSET_VERSION: "worker-value-is-unrelated"\n' in compose_candidate
 assert MODULE.build_compose_candidate(compose_candidate) == compose_candidate
 
 existing_application = application_candidate.replace(
     'APP_ASSET_VERSION: "${APP_ASSET_VERSION:}"', 'APP_ASSET_VERSION: "old"'
-).replace('APP_STATIC_BASE_URL: "${APP_STATIC_BASE_URL:}"', "APP_STATIC_BASE_URL: old")
+).replace(
+    'APP_STATIC_BASE_URL: "${APP_STATIC_BASE_URL:}"', "APP_STATIC_BASE_URL: old"
+).replace(
+    'APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY: "${APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY:0}"',
+    'APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY: "1"',
+)
 assert MODULE.build_application_candidate(existing_application) == application_candidate
 
 existing_compose = compose_candidate.replace(
     'APP_ASSET_VERSION: "${APP_ASSET_VERSION:-}"', 'APP_ASSET_VERSION: "old"', 1
-).replace('APP_STATIC_BASE_URL: "${APP_STATIC_BASE_URL:-}"', "APP_STATIC_BASE_URL: old", 1)
+).replace(
+    'APP_STATIC_BASE_URL: "${APP_STATIC_BASE_URL:-}"', "APP_STATIC_BASE_URL: old", 1
+).replace(
+    'APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY: "${APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY:-0}"',
+    'APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY: "1"',
+    1,
+)
 assert MODULE.build_compose_candidate(existing_compose) == compose_candidate
 
 crlf_application = APPLICATION.replace("\n", "\r\n")
 crlf_candidate = MODULE.build_application_candidate(crlf_application)
 assert "\n" not in crlf_candidate.replace("\r\n", "")
 assert 'APP_ASSET_VERSION: "${APP_ASSET_VERSION:}"\r\n' in crlf_candidate
+assert 'APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY: "${APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY:0}"\r\n' in crlf_candidate
+
+compose_default_env = os.environ.copy()
+compose_default_env.pop("APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY", None)
+default_value = subprocess.run(
+    ["bash", "-c", 'printf %s "${APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY:-0}"'],
+    check=True,
+    env=compose_default_env,
+    stdout=subprocess.PIPE,
+    text=True,
+).stdout
+override_value = subprocess.run(
+    ["bash", "-c", 'printf %s "${APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY:-0}"'],
+    check=True,
+    env={**compose_default_env, "APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY": "1"},
+    stdout=subprocess.PIPE,
+    text=True,
+).stdout
+assert default_value == "0"
+assert override_value == "1"
 
 
 def rejected(builder, text: str, expected: str) -> None:
@@ -139,6 +175,14 @@ rejected(
         '        APP_ASSET_VERSION: "duplicate"\n        KEEP_APPLICATION: "unchanged"\n',
     ),
     "duplicate APP_ASSET_VERSION",
+)
+rejected(
+    MODULE.build_application_candidate,
+    application_candidate.replace(
+        '        KEEP_APPLICATION: "unchanged"\n',
+        '        APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY: "1"\n        KEEP_APPLICATION: "unchanged"\n',
+    ),
+    "duplicate APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY",
 )
 rejected(
     MODULE.build_application_candidate,
@@ -246,6 +290,14 @@ rejected(
         '      APP_STATIC_BASE_URL: "duplicate"\n      KEEP_COMPOSE: "unchanged"\n',
     ),
     "duplicate APP_STATIC_BASE_URL",
+)
+rejected(
+    MODULE.build_compose_candidate,
+    compose_candidate.replace(
+        '      KEEP_COMPOSE: "unchanged"\n',
+        '      APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY: "1"\n      KEEP_COMPOSE: "unchanged"\n',
+    ),
+    "duplicate APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY",
 )
 rejected(
     MODULE.build_compose_candidate,

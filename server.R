@@ -3554,8 +3554,10 @@ function(input, output, session) {
                         class = "partial-gene-suggestion-footnote",
                         if (identical(mode, "homologous")) {
                             "Select one or more suggested genes to plot, or search external databases for alternate nomenclature of the original query."
-                        } else {
+                        } else if (isTRUE(cross_species_requires_verified_orthology())) {
                             "Choose a candidate term. For Cross-Species searches, matching names or aliases only identify candidate loci; CGeV will plot only loci supported by explicit one-to-one orthology evidence."
+                        } else {
+                            "Choose a candidate term. Cross-Species resolves that term independently in each organism's local annotation; matching names or aliases do not by themselves prove one-to-one orthology."
                         }
                     )
                 ),
@@ -3786,8 +3788,10 @@ function(input, output, session) {
                         tags$strong(paste0(query_txt, ".")),
                         if (identical(mode, "homologous")) {
                             " Select one or more genes CGeV should plot."
-                        } else {
+                        } else if (isTRUE(cross_species_requires_verified_orthology())) {
                             " Select the reference locus CGeV should evaluate for orthology."
+                        } else {
+                            " Select the local locus CGeV should use for this organism."
                         }
                     ),
                     div(
@@ -14566,11 +14570,19 @@ function(input, output, session) {
                 tags$ul(class = "app-confirmation-modal-list", item_nodes),
                 tags$p(
                     class = "app-confirmation-modal-question",
-                    tags$strong(if (identical(mode_txt, "orthologous")) "Use this as an orthology candidate?" else "Plot using the shown local locus/loci?")
+                    tags$strong(if (identical(mode_txt, "orthologous") && isTRUE(cross_species_requires_verified_orthology())) {
+                        "Use this as an orthology candidate?"
+                    } else {
+                        "Plot using the shown local locus/loci?"
+                    })
                 )
             ),
             confirm_input_id = "confirm_partial_gene_external_alias_btn",
-            confirm_label = if (identical(mode_txt, "orthologous")) "Validate candidate" else "Plot confirmed alias",
+            confirm_label = if (identical(mode_txt, "orthologous") && isTRUE(cross_species_requires_verified_orthology())) {
+                "Validate candidate"
+            } else {
+                "Plot confirmed alias"
+            },
             confirm_icon = "check"
         )
     }
@@ -17465,6 +17477,12 @@ function(input, output, session) {
 		        ortho_timing_search_start <<- Sys.time()
 		        message(sprintf("[ORTHO_TIMING] === SEARCH START at %s ===", format(ortho_timing_search_start, "%H:%M:%OS3")))
 		        perf_run <- app_perf_new_run("ORTHO_SEARCH")
+		        orthology_verification_required <- isTRUE(cross_species_requires_verified_orthology())
+		        app_perf_mark(
+		            perf_run,
+		            sprintf("orthology policy=%s", if (orthology_verification_required) "verified_compara" else "local_matches"),
+		            "ORTHO"
+		        )
 		        orthoExternalRescueState$id <- paste0("cancel_", as.integer(Sys.time()), "_", sample.int(1000000L, 1))
 	        reset_ortho_organism_lookup_status()
 	        ortho_async_search <- FALSE
@@ -18022,6 +18040,7 @@ function(input, output, session) {
 
         expand_reference_result_with_one_to_one_orthologs <- function(reference_result) {
             if (is.null(reference_result) || !isTRUE(reference_result$found)) return(list(reference_result))
+            if (!isTRUE(orthology_verification_required)) return(list(reference_result))
             identity <- orthology_identity_from_lookup_result(reference_result)
             reference_ids <- as.character(identity$ensembl_gene_ids %||% character(0))
             reference_species <- as.character(identity$species %||% "")
@@ -18547,10 +18566,17 @@ function(input, output, session) {
                     lookup = ambiguous_lookup,
                     context = "Cross-Species Gene Search"
                 )
-                final_msg <- sprintf(
-                    "'%s' maps to more than one local locus. Choose an explicit reference locus; a shared name is not orthology evidence, so nothing was plotted.",
-                    gene_name
-                )
+                final_msg <- if (isTRUE(orthology_verification_required)) {
+                    sprintf(
+                        "'%s' maps to more than one local locus. Choose an explicit reference locus; a shared name is not orthology evidence, so nothing was plotted.",
+                        gene_name
+                    )
+                } else {
+                    sprintf(
+                        "'%s' maps to more than one local locus. Choose an explicit local locus before plotting.",
+                        gene_name
+                    )
+                }
                 searchStatusOrthologous(final_msg)
                 emit_popup_status("Cross-Species Gene Search", final_msg, tone = "warning", clear = TRUE)
                 app_perf_mark(perf_run, "blocked: ambiguous reference locus", "ORTHO")
@@ -18583,7 +18609,7 @@ function(input, output, session) {
                 }
             }
 
-            if (length(local_found_positions) < 2L) {
+            if (isTRUE(orthology_verification_required) && length(local_found_positions) < 2L) {
                 final_msg <- sprintf(
                     "Gene '%s' has fewer than 2 unambiguous local loci. Cross-Species Gene Search requires at least 2 loci plus explicit orthology evidence; nothing was plotted.",
                     gene_name
@@ -18597,10 +18623,17 @@ function(input, output, session) {
             set_popup_loading(
                 TRUE,
                 context = "Cross-Species Gene Search",
-                text = "\u2022 Verifying locus-level orthology with Ensembl Compara..."
+                text = if (isTRUE(orthology_verification_required)) {
+                    "\u2022 Verifying locus-level orthology with Ensembl Compara..."
+                } else {
+                    "\u2022 Using unambiguous matches from each local annotation..."
+                }
             )
-            orthology_validation <- tryCatch(
-                validate_cross_species_orthology_results(lookup_results),
+            orthology_selection <- tryCatch(
+                select_cross_species_results_by_orthology_policy(
+                    lookup_results,
+                    require_verified = orthology_verification_required
+                ),
                 error = function(e) list(
                     status = "evidence_unavailable",
                     approved_positions = integer(0),
@@ -18608,51 +18641,59 @@ function(input, output, session) {
                     message = conditionMessage(e)
                 )
             )
-            approved_positions <- suppressWarnings(as.integer(orthology_validation$approved_positions %||% integer(0)))
+            approved_positions <- suppressWarnings(as.integer(orthology_selection$approved_positions %||% integer(0)))
             approved_positions <- approved_positions[is.finite(approved_positions) & approved_positions >= 1L & approved_positions <= length(lookup_results)]
-            if (!identical(as.character(orthology_validation$status %||% ""), "verified") || length(approved_positions) < 2L) {
-                reason <- as.character(orthology_validation$message %||% "No verified one-to-one ortholog group was found.")
-                reason <- gsub("[\r\n]+", " ", reason)
-                final_msg <- sprintf(
-                    "Gene '%s' was not plotted: %s Shared aliases or symbols alone are not accepted as biological equivalence.",
-                    gene_name,
-                    reason
-                )
-                searchStatusOrthologous(final_msg)
-                emit_popup_status("Cross-Species Gene Search", final_msg, tone = "warning", clear = TRUE)
-                app_perf_mark(perf_run, sprintf("blocked: orthology status=%s", as.character(orthology_validation$status %||% "unknown")), "ORTHO")
-                return(invisible(NULL))
-            }
+            if (isTRUE(orthology_verification_required)) {
+                if (!identical(as.character(orthology_selection$status %||% ""), "verified") || length(approved_positions) < 2L) {
+                    reason <- as.character(orthology_selection$message %||% "No verified one-to-one ortholog group was found.")
+                    reason <- gsub("[\r\n]+", " ", reason)
+                    final_msg <- sprintf(
+                        "Gene '%s' was not plotted: %s Shared aliases or symbols alone are not accepted as biological equivalence.",
+                        gene_name,
+                        reason
+                    )
+                    searchStatusOrthologous(final_msg)
+                    emit_popup_status("Cross-Species Gene Search", final_msg, tone = "warning", clear = TRUE)
+                    app_perf_mark(perf_run, sprintf("blocked: orthology status=%s", as.character(orthology_selection$status %||% "unknown")), "ORTHO")
+                    return(invisible(NULL))
+                }
 
-            rejected_positions <- setdiff(local_found_positions, approved_positions)
-            if (length(rejected_positions) > 0L) {
-                rejected_labels <- vapply(rejected_positions, function(pos) {
+                rejected_positions <- setdiff(local_found_positions, approved_positions)
+                if (length(rejected_positions) > 0L) {
+                    rejected_labels <- vapply(rejected_positions, function(pos) {
+                        as.character((lookup_results[[pos]] %||% list())$file_label %||% file_names[pos] %||% sprintf("organism %d", pos))
+                    }, character(1))
+                    append_status(
+                        searchStatusOrthologous,
+                        sprintf(
+                            "Excluded non-verified same-name loci: %s.",
+                            paste(rejected_labels, collapse = ", ")
+                        )
+                    )
+                    for (pos in rejected_positions) {
+                        idx <- suppressWarnings(as.integer((lookup_results[[pos]] %||% list())$file_idx %||% pos))
+                        set_ortho_organism_lookup_status(file_idx = idx, status = "not_found")
+                    }
+                }
+                verified_labels <- vapply(approved_positions, function(pos) {
                     as.character((lookup_results[[pos]] %||% list())$file_label %||% file_names[pos] %||% sprintf("organism %d", pos))
                 }, character(1))
-                append_status(
-                    searchStatusOrthologous,
-                    sprintf(
-                        "Excluded non-verified same-name loci: %s.",
-                        paste(rejected_labels, collapse = ", ")
-                    )
+                target_preview <<- summarize_label_list(
+                    verified_labels,
+                    max_items = 3L,
+                    fallback = sprintf("%d verified organism(s)", length(approved_positions))
                 )
-                for (pos in rejected_positions) {
-                    idx <- suppressWarnings(as.integer((lookup_results[[pos]] %||% list())$file_idx %||% pos))
-                    set_ortho_organism_lookup_status(file_idx = idx, status = "not_found")
-                }
+                lookup_results <- lookup_results[approved_positions]
+                no_match_positions <- integer(0)
+                local_found_positions <- seq_along(lookup_results)
+                shown_immediate_partial_suggestions <- FALSE
+            } else {
+                app_perf_mark(
+                    perf_run,
+                    sprintf("local-match policy accepted=%d", as.integer(length(approved_positions))),
+                    "ORTHO"
+                )
             }
-            verified_labels <- vapply(approved_positions, function(pos) {
-                as.character((lookup_results[[pos]] %||% list())$file_label %||% file_names[pos] %||% sprintf("organism %d", pos))
-            }, character(1))
-            target_preview <<- summarize_label_list(
-                verified_labels,
-                max_items = 3L,
-                fallback = sprintf("%d verified organism(s)", length(approved_positions))
-            )
-            lookup_results <- lookup_results[approved_positions]
-            no_match_positions <- integer(0)
-            local_found_positions <- seq_along(lookup_results)
-            shown_immediate_partial_suggestions <- FALSE
 
             rescue_jobs <- list()
             rescue_needed <- isTRUE(ortho_external_alias_enabled) &&
@@ -19076,24 +19117,12 @@ function(input, output, session) {
         })
         reference_anchor <- pendingOrthoReferenceAnchor()
         pendingOrthoReferenceAnchor(NULL)
-        if (is.list(reference_anchor) && nzchar(trimws(as.character(reference_anchor$local_gene_id %||% "")))) {
-            anchor_org_id <- trimws(as.character(reference_anchor$organism_id %||% ""))
-            reference_idx <- which(vapply(lookup_jobs, function(job) {
-                job_det <- job$det %||% list()
-                job_org_id <- trimws(as.character(job_det$species_id %||% job_det$preloaded_id %||% ""))
-                nzchar(anchor_org_id) && identical(job_org_id, anchor_org_id)
-            }, logical(1)))
-            if (length(reference_idx) == 0L) {
-                anchor_org <- tolower(trimws(as.character(reference_anchor$organism_name %||% "")))
-                reference_idx <- which(vapply(lookup_jobs, function(job) {
-                    job_det <- job$det %||% list()
-                    identical(tolower(trimws(as.character(job_det$organism %||% ""))), anchor_org)
-                }, logical(1)))
-            }
-            if (length(reference_idx) == 1L) {
+        anchor_resolution <- apply_cross_species_reference_anchor(local_lookup_jobs, reference_anchor)
+        local_lookup_jobs <- anchor_resolution$jobs
+        if (isTRUE(anchor_resolution$applied)) {
+            reference_idx <- anchor_resolution$reference_idx
+            if (isTRUE(orthology_verification_required)) {
                 ref_job <- local_lookup_jobs[[reference_idx[[1L]]]]
-                ref_job$gene_name <- trimws(as.character(reference_anchor$local_gene_id %||% ""))
-                ref_job$allow_partial_suggestions <- FALSE
                 reference_results <- run_orthologous_lookup_jobs(
                     list(ref_job),
                     phase_label = "reference_locus_lookup",
@@ -19106,7 +19135,19 @@ function(input, output, session) {
                 }
                 finish_orthologous_local_phase(expanded_results, lookup_stage_t0, already_processed = FALSE)
                 return(invisible(NULL))
+            } else {
+                append_status(
+                    searchStatusOrthologous,
+                    sprintf(
+                        "Using selected local locus '%s' for %s; other organisms keep the original query '%s'.",
+                        as.character(reference_anchor$local_gene_id %||% ""),
+                        as.character(reference_anchor$organism_name %||% sprintf("organism %d", reference_idx[[1L]])),
+                        gene_name
+                    )
+                )
             }
+        } else if (is.list(reference_anchor) &&
+            nzchar(trimws(as.character(reference_anchor$local_gene_id %||% "")))) {
             append_status(searchStatusOrthologous, "The selected reference locus could not be mapped back to exactly one selected organism.")
         }
         local_progressive_enabled <- {
@@ -19187,7 +19228,9 @@ function(input, output, session) {
                 progressive_ambiguous <- any(vapply(final_results, function(result) {
                     identical(as.character((((result %||% list())$lookup %||% list())$lookup_stage %||% "")), "alias_index_ambiguous")
                 }, logical(1)))
-                if (length(progressive_found) == 1L && !isTRUE(progressive_ambiguous)) {
+                if (isTRUE(orthology_verification_required) &&
+                    length(progressive_found) == 1L &&
+                    !isTRUE(progressive_ambiguous)) {
                     final_results <- expand_reference_result_with_one_to_one_orthologs(final_results[[progressive_found[[1L]]]])
                 }
                 finish_orthologous_local_phase(final_results, lookup_stage_t0, already_processed = FALSE)
@@ -19229,7 +19272,9 @@ function(input, output, session) {
         local_ambiguous <- any(vapply(lookup_results, function(result) {
             identical(as.character((((result %||% list())$lookup %||% list())$lookup_stage %||% "")), "alias_index_ambiguous")
         }, logical(1)))
-        if (length(local_found) == 1L && !isTRUE(local_ambiguous)) {
+        if (isTRUE(orthology_verification_required) &&
+            length(local_found) == 1L &&
+            !isTRUE(local_ambiguous)) {
             lookup_results <- expand_reference_result_with_one_to_one_orthologs(lookup_results[[local_found[[1L]]]])
         }
         finish_orthologous_local_phase(lookup_results, lookup_stage_t0, already_processed = FALSE)
@@ -29330,7 +29375,11 @@ function(input, output, session) {
                                 span("Comparison scope")
                             ),
                             tags$p(
-                                "Cross-Species first resolves local loci, then shows only a group supported by explicit one-to-one Ensembl Compara orthology in at least two selected organisms. Matching names or aliases alone are never treated as biological equivalence."
+                                if (isTRUE(cross_species_requires_verified_orthology())) {
+                                    "Cross-Species first resolves local loci, then shows only a group supported by explicit one-to-one Ensembl Compara orthology in at least two selected organisms. Matching names or aliases alone are never treated as biological equivalence."
+                                } else {
+                                    "Cross-Species compares unambiguous loci matched independently in each organism's local annotation. By default, these local matches are not a claim of verified one-to-one orthology."
+                                }
                             ),
                             tags$p(
                                 class = "summary-cross-species-scope-takeaway",
