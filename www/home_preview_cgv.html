@@ -5981,7 +5981,7 @@
   <div class="cgv-shell">
     <nav class="cgv-home-nav" aria-label="CGeV home navigation">
       <a class="cgv-nav-brand" href="#overview" aria-label="Back to CGeV overview">
-        <img src="favicon2.ico" alt="">
+        <img src="icons/home/favicon-light@2x.png" data-cgv-theme-logo="true" data-light-src="icons/home/favicon-light@2x.png" data-dark-src="icons/home/favicon-dark@2x.png" alt="" width="31" height="31" loading="eager" decoding="async">
         <strong>CGeV</strong>
         <span>Comparative Gene Viewer</span>
       </a>
@@ -6259,10 +6259,10 @@
               <strong>TP53 · exact locus</strong>
               <span>Alias-aware recovery · coordinates · match role</span>
               <div class="cgv-search-db-row">
-                <span><img src="icons/databases/mygene.ico" alt="">MyGene</span>
-                <span><img src="icons/databases/ncbi.ico" alt="">NCBI</span>
-                <span><img src="icons/databases/uniprot.ico" alt="">UniProt</span>
-                <span><img src="icons/databases/ensembl.ico" alt="">Ensembl</span>
+                <span><img src="icons/home/database-mygene@2x.png" alt="" width="14" height="14" loading="lazy" decoding="async">MyGene</span>
+                <span><img src="icons/home/database-ncbi@2x.png" alt="" width="14" height="14" loading="lazy" decoding="async">NCBI</span>
+                <span><img src="icons/home/database-uniprot@2x.png" alt="" width="14" height="14" loading="lazy" decoding="async">UniProt</span>
+                <span><img src="icons/home/database-ensembl@2x.png" alt="" width="14" height="14" loading="lazy" decoding="async">Ensembl</span>
               </div>
             </div>
             <div class="cgv-search-node">
@@ -6307,12 +6307,12 @@
                 <div class="cgv-app-window-bar"><i></i><i></i><i></i>Organism &amp; data source</div>
                 <div class="cgv-source-tabs"><span>Preloaded</span><span>NCBI</span><span>Upload</span></div>
                 <div class="cgv-species-selector">
-                  <div class="cgv-species-choice is-selected"><i><img src="icons/Homo sapiens.ico" alt=""></i><b>Homo sapiens</b><em>GRCh38 · GCF_000001405.40</em></div>
-                  <div class="cgv-species-choice"><i><img src="icons/Mus musculus.ico" alt=""></i><b>Mus musculus</b><em>GRCm39 · GCF_000001635.27</em></div>
-                  <div class="cgv-species-choice"><i><img src="icons/Danio rerio.ico" alt=""></i><b>Danio rerio</b><em>GRCz12 · GCF_000002035.7</em></div>
-                  <div class="cgv-species-choice"><i><img src="icons/Arabidopsis thaliana.ico" alt=""></i><b>Arabidopsis thaliana</b><em>TAIR10.1 · GCF_000001735.4</em></div>
-                  <div class="cgv-species-choice"><i><img src="icons/Oryza sativa japonica.ico" alt=""></i><b>Oryza sativa japonica</b><em>IRGSP-1.0 · GCF_001433935.1</em></div>
-                  <div class="cgv-species-choice"><i><img src="icons/Saccharomyces cerevisiae.ico" alt=""></i><b>Saccharomyces cerevisiae</b><em>R64 · GCF_000146045.2</em></div>
+                  <div class="cgv-species-choice is-selected"><i><img src="icons/home/species-homo-sapiens@2x.png" alt="" width="24" height="24" loading="lazy" decoding="async"></i><b>Homo sapiens</b><em>GRCh38 · GCF_000001405.40</em></div>
+                  <div class="cgv-species-choice"><i><img src="icons/home/species-mus-musculus@2x.png" alt="" width="24" height="24" loading="lazy" decoding="async"></i><b>Mus musculus</b><em>GRCm39 · GCF_000001635.27</em></div>
+                  <div class="cgv-species-choice"><i><img src="icons/home/species-danio-rerio@2x.png" alt="" width="24" height="24" loading="lazy" decoding="async"></i><b>Danio rerio</b><em>GRCz12 · GCF_000002035.7</em></div>
+                  <div class="cgv-species-choice"><i><img src="icons/home/species-arabidopsis-thaliana@2x.png" alt="" width="24" height="24" loading="lazy" decoding="async"></i><b>Arabidopsis thaliana</b><em>TAIR10.1 · GCF_000001735.4</em></div>
+                  <div class="cgv-species-choice"><i><img src="icons/home/species-oryza-sativa-japonica@2x.png" alt="" width="24" height="24" loading="lazy" decoding="async"></i><b>Oryza sativa japonica</b><em>IRGSP-1.0 · GCF_001433935.1</em></div>
+                  <div class="cgv-species-choice"><i><img src="icons/home/species-saccharomyces-cerevisiae@2x.png" alt="" width="24" height="24" loading="lazy" decoding="async"></i><b>Saccharomyces cerevisiae</b><em>R64 · GCF_000146045.2</em></div>
                 </div>
               </div>
             </article>
@@ -7079,7 +7079,7 @@
     </main>
 
     <footer class="cgv-footer">
-      <img src="favicon2.ico" alt="">
+      <img src="icons/home/favicon-light@2x.png" data-cgv-theme-logo="true" data-light-src="icons/home/favicon-light@2x.png" data-dark-src="icons/home/favicon-dark@2x.png" alt="" width="29" height="24" loading="lazy" decoding="async">
       <span>Comparative Gene Viewer</span>
       <span>Gene structure · alignment · analytics · figures</span>
     </footer>
@@ -7116,9 +7116,9 @@
       function applyTheme(theme) {
         theme = theme === "dark" ? "dark" : "light";
         document.documentElement.setAttribute("data-app-theme", theme);
-        var logos = document.querySelectorAll('img[src="favicon2.ico"], img[src="favicon.ico"]');
+        var logos = document.querySelectorAll('img[data-cgv-theme-logo="true"]');
         logos.forEach(function (logo) {
-          logo.src = theme === "dark" ? "favicon.ico" : "favicon2.ico";
+          logo.src = theme === "dark" ? logo.getAttribute("data-dark-src") : logo.getAttribute("data-light-src");
         });
         if (isDesktopRuntime()) {
           try { localStorage.setItem('cgv-theme', theme); } catch (err) {}
