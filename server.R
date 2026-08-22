@@ -412,6 +412,7 @@ function(input, output, session) {
         list(
             run = NULL,
             expected = character(0),
+            gate_expected = character(0),
             ready = character(0),
             painted = character(0),
             first_logged = FALSE,
@@ -442,31 +443,83 @@ function(input, output, session) {
         tracker_rv(tr)
         if (is.list(run)) {
             app_perf_mark(run, "timing_start", context)
-            if (isTRUE(app_perf_enabled())) {
-                browser_context <- if (grepl("^HOMO", context)) "homologous" else if (grepl("^ORTHO", context)) "orthologous" else ""
+            browser_context <- if (grepl("^HOMO", context)) "homologous" else if (grepl("^ORTHO", context)) "orthologous" else ""
+            functional_first_paint <- identical(browser_context, "orthologous") &&
+                isTRUE(get0("orthoAutoRenderMore", envir = environment(), inherits = TRUE, ifnotfound = FALSE))
+            if (isTRUE(app_perf_enabled()) || isTRUE(functional_first_paint)) {
                 session$sendCustomMessage("cgv_plot_timing_start", list(
                     run_id = as.character(run$id %||% ""),
-                    context = browser_context
+                    context = browser_context,
+                    first_paint_only = !isTRUE(app_perf_enabled()) && isTRUE(functional_first_paint)
                 ))
             }
         }
         invisible(NULL)
     }
 
-    set_plot_timing_expected <- function(tracker_rv, ids, context = "APP_TIMING") {
+    initial_plot_timing_ids <- function(
+        ids,
+        initial_visible_count,
+        plot_meta = NULL,
+        primary_only = FALSE
+    ) {
+        ids_chr <- unique(as.character(ids %||% character(0)))
+        ids_chr <- ids_chr[nzchar(ids_chr)]
+        if (isTRUE(primary_only) && is.list(plot_meta) && length(ids_chr) > 0L) {
+            ids_chr <- Filter(function(plot_id) {
+                meta <- tryCatch(plot_meta[[plot_id]], error = function(e) NULL)
+                !identical((meta %||% list())$is_canonical, FALSE)
+            }, ids_chr)
+        }
+        visible_n <- suppressWarnings(as.integer(initial_visible_count %||% 1L))
+        if (!is.finite(visible_n) || is.na(visible_n) || visible_n < 1L) {
+            visible_n <- 1L
+        }
+        if (length(ids_chr) <= visible_n) ids_chr else ids_chr[seq_len(visible_n)]
+    }
+
+    set_plot_timing_expected <- function(
+        tracker_rv,
+        ids,
+        context = "APP_TIMING",
+        gate_expected_ids = ids,
+        gate_candidate_ids = ids
+    ) {
         tr <- tracker_rv()
         ids_chr <- unique(as.character(ids %||% character(0)))
         ids_chr <- ids_chr[nzchar(ids_chr)]
+        gate_ids_chr <- unique(as.character(gate_expected_ids %||% character(0)))
+        gate_ids_chr <- gate_ids_chr[nzchar(gate_ids_chr)]
         tr$expected <- ids_chr
+        tr$gate_expected <- gate_ids_chr
         run <- tr$run
         if (is.list(run)) {
-            if (isTRUE(app_perf_enabled())) {
-                browser_context <- if (grepl("^HOMO", context)) "homologous" else if (grepl("^ORTHO", context)) "orthologous" else ""
+            browser_context <- if (grepl("^HOMO", context)) "homologous" else if (grepl("^ORTHO", context)) "orthologous" else ""
+            functional_first_paint <- identical(browser_context, "orthologous") &&
+                isTRUE(get0("orthoAutoRenderMore", envir = environment(), inherits = TRUE, ifnotfound = FALSE))
+            functional_gate_active <- FALSE
+            gate_candidates <- unique(as.character(gate_candidate_ids %||% character(0)))
+            gate_candidates <- gate_candidates[nzchar(gate_candidates)]
+            visible_expected_is_new <- length(gate_ids_chr) > 0L && gate_ids_chr[[1L]] %in% gate_candidates
+            if (isTRUE(functional_first_paint) && isTRUE(visible_expected_is_new)) {
+                activate_gate <- get0(
+                    "activate_ortho_first_paint_gate",
+                    envir = environment(),
+                    inherits = TRUE,
+                    ifnotfound = NULL
+                )
+                if (is.function(activate_gate)) {
+                    functional_gate_active <- isTRUE(activate_gate(as.character(run$id %||% "")))
+                }
+            }
+            if (isTRUE(app_perf_enabled()) || isTRUE(functional_gate_active)) {
                 output_prefix <- if (identical(browser_context, "homologous")) "plot_homo_" else if (identical(browser_context, "orthologous")) "plot_ortho_" else "plot_"
+                browser_expected_ids <- if (isTRUE(app_perf_enabled())) ids_chr else gate_ids_chr
                 session$sendCustomMessage("cgv_plot_timing_expect", list(
                     run_id = as.character(run$id %||% ""),
                     context = browser_context,
-                    output_ids = paste0(output_prefix, ids_chr, "-plot")
+                    output_ids = paste0(output_prefix, browser_expected_ids, "-plot"),
+                    first_paint_only = !isTRUE(app_perf_enabled()) && isTRUE(functional_gate_active)
                 ))
             }
             app_perf_mark(run, sprintf("expected_plots=%d", as.integer(length(ids_chr))), context)
@@ -556,6 +609,7 @@ function(input, output, session) {
             return(invisible(NULL))
         }
         tr$expected <- setdiff(as.character(tr$expected %||% character(0)), pid)
+        tr$gate_expected <- setdiff(as.character(tr$gate_expected %||% character(0)), pid)
         tr$ready <- setdiff(as.character(tr$ready %||% character(0)), pid)
         tr$painted <- setdiff(as.character(tr$painted %||% character(0)), pid)
         tracker_rv(tr)
@@ -990,29 +1044,45 @@ function(input, output, session) {
         if (!is.finite(delay_val) || delay_val < 0) {
             delay_val <- 1.5
         }
-        session$onFlushed(function() {
-            later::later(function() {
-                warm_perf <- app_perf_new_run("STRING_PREWARM")
-                app_perf_mark(warm_perf, "launch", "STRING_PREWARM")
-                tryCatch({
-                    lastz_future_promise({
-                        TRUE
-                    }, seed = TRUE) %...>% (function(ok) {
-                        app_perf_mark(warm_perf, "ready", "STRING_PREWARM")
-                        invisible(ok)
-                    }) %...!% (function(e) {
-                        app_perf_mark(warm_perf, sprintf("error=%s", as.character(e$message %||% "unknown")), "STRING_PREWARM")
-                        invisible(NULL)
-                    })
-                }, error = function(e) {
-                    app_perf_mark(warm_perf, sprintf("launch_error=%s", as.character(e$message %||% "unknown")), "STRING_PREWARM")
+        warm_perf <- app_perf_new_run("STRING_PREWARM")
+        launch_string_worker_prewarm <- NULL
+        launch_string_worker_prewarm <- function() {
+            session_closed <- tryCatch(
+                is.function(session$isClosed) && isTRUE(session$isClosed()),
+                error = function(e) FALSE
+            )
+            if (isTRUE(session_closed)) {
+                return(invisible(FALSE))
+            }
+            if (isTRUE(secondary_work_should_yield())) {
+                app_perf_mark(warm_perf, "yield: user search active", "STRING_PREWARM")
+                later::later(launch_string_worker_prewarm, delay = secondary_work_retry_delay_sec)
+                return(invisible(FALSE))
+            }
+            app_perf_mark(warm_perf, "launch", "STRING_PREWARM")
+            tryCatch({
+                lastz_future_promise({
+                    TRUE
+                }, seed = TRUE) %...>% (function(ok) {
+                    app_perf_mark(warm_perf, "ready", "STRING_PREWARM")
+                    invisible(ok)
+                }) %...!% (function(e) {
+                    app_perf_mark(warm_perf, sprintf("error=%s", as.character(e$message %||% "unknown")), "STRING_PREWARM")
                     invisible(NULL)
                 })
-            }, delay = delay_val)
+            }, error = function(e) {
+                app_perf_mark(warm_perf, sprintf("launch_error=%s", as.character(e$message %||% "unknown")), "STRING_PREWARM")
+                invisible(NULL)
+            })
+        }
+        session$onFlushed(function() {
+            later::later(
+                launch_string_worker_prewarm,
+                delay = max(delay_val, secondary_work_initial_delay_sec)
+            )
         }, once = TRUE)
         invisible(TRUE)
     }
-    schedule_string_worker_prewarm()
     orthoExternalRescueState <- new.env(parent = emptyenv())
     orthoExternalRescueState$id <- ""
     cancel_orthologous_background_rescue <- function(reason = "user_action") {
@@ -1136,9 +1206,49 @@ function(input, output, session) {
     get_search_run_mode_state <- stateHelpersDomain$get_search_run_mode_state
     begin_search_run <- stateHelpersDomain$begin_search_run
     finish_search_run <- stateHelpersDomain$finish_search_run
+    secondary_work_initial_delay_sec <- app_env_int(
+        "APP_SECONDARY_WORK_INITIAL_DELAY_MS",
+        2500L,
+        min_value = 250L,
+        max_value = 30000L
+    ) / 1000
+    secondary_work_retry_delay_sec <- app_env_int(
+        "APP_SECONDARY_WORK_RETRY_MS",
+        750L,
+        min_value = 100L,
+        max_value = 10000L
+    ) / 1000
+    secondary_work_should_yield <- function() {
+        search_state <- tryCatch(isolate(searchRunState()), error = function(e) list())
+        search_active <- is.list(search_state) && length(search_state) > 0L && any(vapply(
+            search_state,
+            function(mode_state) isTRUE((mode_state %||% list())$active),
+            logical(1)
+        ))
+        if (isTRUE(search_active)) {
+            return(TRUE)
+        }
+        # Async lookup can finish before ggiraph paints the first primary card.
+        # Resolve the gate lazily because its reactiveVal is declared below.
+        first_paint_gate_rv <- get0(
+            "orthoFirstPaintGate",
+            envir = environment(),
+            inherits = TRUE,
+            ifnotfound = NULL
+        )
+        if (!is.function(first_paint_gate_rv)) {
+            return(FALSE)
+        }
+        gate <- tryCatch(isolate(first_paint_gate_rv()), error = function(e) list())
+        isTRUE((gate %||% list())$enabled) && !isTRUE((gate %||% list())$released)
+    }
+    schedule_string_worker_prewarm()
     begin_session_source_restore <- stateHelpersDomain$begin_session_source_restore
     consume_session_source_restore <- stateHelpersDomain$consume_session_source_restore
     finish_session_source_restore <- stateHelpersDomain$finish_session_source_restore
+    new_ortho_first_paint_gate_state <- stateHelpersDomain$new_ortho_first_paint_gate
+    arm_ortho_first_paint_gate_state <- stateHelpersDomain$arm_ortho_first_paint_gate
+    release_ortho_first_paint_gate_state <- stateHelpersDomain$release_ortho_first_paint_gate
     analyticsPhase2DelayMs <- min(4000L, max(0L, parse_positive_int_env("APP_ANALYTICS_PHASE2_DELAY_MS", 900L)))
     analyticsPhase3DelayMs <- min(8000L, max(analyticsPhase2DelayMs + 250L, parse_positive_int_env("APP_ANALYTICS_PHASE3_DELAY_MS", 2200L)))
     orthoPlotsReadyGate <- reactive({
@@ -1155,18 +1265,44 @@ function(input, output, session) {
     homoFooterOutputsBound <- reactiveVal(character())
     homoDownloadOutputsBound <- reactiveVal(character())
     orthoRenderChunkSize <- max(1L, min(8L, parse_positive_int_env("APP_ORTHO_RENDER_CHUNK_SIZE", 6L)))
-    orthoInitialVisibleCount <- max(1L, min(orthoRenderChunkSize, parse_positive_int_env("APP_ORTHO_INITIAL_VISIBLE", 2L)))
     orthoAutoRenderMore <- {
         raw <- tolower(trimws(as.character(Sys.getenv("APP_ORTHO_AUTO_RENDER_MORE", "1") %||% "1")))
         !raw %in% c("", "0", "false", "no", "off")
     }
+    configuredOrthoInitialVisibleCount <- max(
+        1L,
+        min(orthoRenderChunkSize, parse_positive_int_env("APP_ORTHO_INITIAL_VISIBLE", 2L))
+    )
+    # Automatic rendering is intentionally one-card-first: additional cards are
+    # released only after the browser acknowledges that primary SVG's paint.
+    orthoInitialVisibleCount <- if (isTRUE(orthoAutoRenderMore)) 1L else configuredOrthoInitialVisibleCount
     orthoAutoRenderDelay <- {
         raw <- suppressWarnings(as.numeric(Sys.getenv("APP_ORTHO_AUTO_RENDER_DELAY_MS", "30")))
         if (!is.finite(raw) || is.na(raw)) raw <- 30
         min(750, max(0, raw)) / 1000
     }
+    orthoFirstPaintTimeout <- min(
+        120000L,
+        max(5000L, parse_positive_int_env("APP_ORTHO_FIRST_PAINT_TIMEOUT_MS", 30000L))
+    ) / 1000
+    orthoFirstPaintActivationTimeout <- max(90, min(300, 3 * orthoFirstPaintTimeout))
     orthoVisibleCount <- reactiveVal(orthoInitialVisibleCount)
     orthoAutoRenderQueued <- reactiveVal(FALSE)
+    orthoAutoRenderGeneration <- 0L
+    bump_ortho_auto_render_generation <- function() {
+        next_generation <- suppressWarnings(as.integer(orthoAutoRenderGeneration %||% 0L))
+        if (!is.finite(next_generation) || is.na(next_generation) || next_generation < 0L ||
+            next_generation >= .Machine$integer.max) {
+            next_generation <- 0L
+        }
+        orthoAutoRenderGeneration <<- as.integer(next_generation + 1L)
+        orthoAutoRenderGeneration
+    }
+    cancel_ortho_auto_render_queue <- function() {
+        bump_ortho_auto_render_generation()
+        orthoAutoRenderQueued(FALSE)
+        invisible(NULL)
+    }
     orthoRenderedPlotIds <- reactiveVal(character())
     orthoInsertedCardIds <- reactiveVal(character())
     orthoFooterOutputsBound <- reactiveVal(character())
@@ -1174,6 +1310,134 @@ function(input, output, session) {
     orthoDownloadOutputsBound <- reactiveVal(character())
     homoPlotTimingTracker <- reactiveVal(empty_plot_timing_tracker())
     orthoPlotTimingTracker <- reactiveVal(empty_plot_timing_tracker())
+    orthoFirstPaintGate <- reactiveVal(new_ortho_first_paint_gate_state(enabled = FALSE))
+
+    reset_ortho_first_paint_gate <- function(run) {
+        run_id <- trimws(as.character((run %||% list())$id %||% ""))
+        previous <- isolate(orthoFirstPaintGate())
+        next_gate <- new_ortho_first_paint_gate_state(
+            run_id = run_id,
+            enabled = FALSE,
+            previous_token = previous$token %||% 0L
+        )
+        next_gate$release_reason <- "awaiting_expected_plot"
+        orthoFirstPaintGate(next_gate)
+        invisible(next_gate)
+    }
+
+    activate_ortho_first_paint_gate <- function(run_id) {
+        current <- isolate(orthoFirstPaintGate())
+        run_key <- trimws(as.character(run_id %||% ""))
+        if (!isTRUE(orthoAutoRenderMore) || !nzchar(run_key) ||
+            !identical(run_key, trimws(as.character(current$run_id %||% "")))) {
+            return(invisible(FALSE))
+        }
+        visual_mode <- tolower(trimws(as.character(isolate(input$ortho_visual_mode) %||% "compact")))
+        if (visual_mode %in% c("aligned", "pip", "pip_blocks", "pip_multipip")) {
+            return(invisible(FALSE))
+        }
+        primary_count <- length(isolate(primaryPlotIdsOrthologous() %||% character(0)))
+        current_visible <- suppressWarnings(as.integer(isolate(orthoVisibleCount()) %||% orthoInitialVisibleCount))
+        if (!is.finite(current_visible) || is.na(current_visible) || current_visible < 1L) {
+            current_visible <- orthoInitialVisibleCount
+        }
+        if (primary_count <= current_visible) {
+            return(invisible(FALSE))
+        }
+        activated <- FALSE
+        if (!isTRUE(current$enabled)) {
+            current <- new_ortho_first_paint_gate_state(
+                run_id = run_key,
+                enabled = TRUE,
+                previous_token = current$token %||% 0L
+            )
+            orthoFirstPaintGate(current)
+            activated <- TRUE
+            activation_token <- current$token
+            if (requireNamespace("later", quietly = TRUE)) {
+                later::later(function() {
+                    isolate({
+                        latest <- orthoFirstPaintGate()
+                        same_gate <- identical(as.character(latest$run_id %||% ""), run_key) &&
+                            identical(as.integer(latest$token %||% 0L), as.integer(activation_token %||% 0L))
+                        if (isTRUE(same_gate) && isTRUE(latest$enabled) && !isTRUE(latest$released)) {
+                            release_ortho_first_paint_gate(run_key, reason = "activation_timeout")
+                        }
+                    })
+                }, delay = orthoFirstPaintActivationTimeout)
+            }
+        }
+        if (isTRUE(current$released)) {
+            return(invisible(activated))
+        }
+        invisible(TRUE)
+    }
+
+    release_ortho_first_paint_gate <- function(run_id, reason, output_id = "") {
+        current <- isolate(orthoFirstPaintGate())
+        transition <- release_ortho_first_paint_gate_state(
+            current,
+            run_id = run_id,
+            reason = reason,
+            output_id = output_id
+        )
+        if (!isTRUE(transition$changed)) {
+            return(invisible(FALSE))
+        }
+        orthoFirstPaintGate(transition$state)
+        tracker_run <- isolate(orthoPlotTimingTracker())$run
+        if (is.list(tracker_run) && identical(as.character(tracker_run$id %||% ""), as.character(run_id %||% ""))) {
+            app_perf_mark(
+                tracker_run,
+                sprintf(
+                    "first paint gate released reason=%s output=%s",
+                    as.character(reason %||% "unknown"),
+                    as.character(output_id %||% "")
+                ),
+                "ORTHO_UI"
+            )
+        }
+        if (!isTRUE(app_perf_enabled()) && !identical(as.character(reason %||% ""), "browser_paint")) {
+            try(
+                session$sendCustomMessage("cgv_plot_timing_stop", list(run_id = as.character(run_id %||% ""))),
+                silent = TRUE
+            )
+        }
+        invisible(TRUE)
+    }
+
+    arm_ortho_first_paint_timeout <- function(run_id) {
+        current <- isolate(orthoFirstPaintGate())
+        transition <- arm_ortho_first_paint_gate_state(current, run_id = run_id)
+        if (!isTRUE(transition$changed)) {
+            return(invisible(FALSE))
+        }
+        orthoFirstPaintGate(transition$state)
+        gate_token <- transition$state$token
+        tracker_run <- isolate(orthoPlotTimingTracker())$run
+        if (is.list(tracker_run) && identical(as.character(tracker_run$id %||% ""), as.character(run_id %||% ""))) {
+            app_perf_mark(
+                tracker_run,
+                sprintf("first paint gate armed timeout_ms=%d", as.integer(1000 * orthoFirstPaintTimeout)),
+                "ORTHO_UI"
+            )
+        }
+        if (!requireNamespace("later", quietly = TRUE)) {
+            release_ortho_first_paint_gate(run_id, reason = "timer_unavailable")
+            return(invisible(TRUE))
+        }
+        later::later(function() {
+            isolate({
+                latest <- orthoFirstPaintGate()
+                same_gate <- identical(as.character(latest$run_id %||% ""), as.character(run_id %||% "")) &&
+                    identical(as.integer(latest$token %||% 0L), as.integer(gate_token %||% 0L))
+                if (isTRUE(same_gate) && isTRUE(latest$armed) && !isTRUE(latest$released)) {
+                    release_ortho_first_paint_gate(run_id, reason = "timeout")
+                }
+            })
+        }, delay = orthoFirstPaintTimeout)
+        invisible(TRUE)
+    }
 
     handle_browser_plot_paint <- function(tracker_rv, payload, context = "APP_TIMING") {
         tr <- tracker_rv()
@@ -1229,9 +1493,58 @@ function(input, output, session) {
         if (identical(run_id, as.character(homo_run))) {
             handle_browser_plot_paint(homoPlotTimingTracker, payload, "HOMO_TIMING")
         } else if (identical(run_id, as.character(ortho_run))) {
-            handle_browser_plot_paint(orthoPlotTimingTracker, payload, "ORTHO_TIMING")
+            handled <- handle_browser_plot_paint(orthoPlotTimingTracker, payload, "ORTHO_TIMING")
+            expected_outputs <- paste0(
+                "plot_ortho_",
+                as.character(orthoPlotTimingTracker()$gate_expected %||% character(0)),
+                "-plot"
+            )
+            output_id <- trimws(as.character(payload$output_id %||% ""))
+            if (isTRUE(handled) && output_id %in% expected_outputs) {
+                release_ortho_first_paint_gate(
+                    run_id,
+                    reason = "browser_paint",
+                    output_id = output_id
+                )
+            }
         }
     }, ignoreInit = TRUE, ignoreNULL = TRUE)
+    observeEvent(input$ortho_visual_mode, {
+        visual_mode <- tolower(trimws(as.character(input$ortho_visual_mode %||% "compact")))
+        if (!visual_mode %in% c("aligned", "pip", "pip_blocks", "pip_multipip")) {
+            return(invisible(NULL))
+        }
+        gate_now <- isolate(orthoFirstPaintGate())
+        if (isTRUE(gate_now$enabled) && !isTRUE(gate_now$released)) {
+            release_ortho_first_paint_gate(
+                as.character(gate_now$run_id %||% ""),
+                reason = "non_card_visual_mode"
+            )
+        }
+        invisible(NULL)
+    }, ignoreInit = TRUE, ignoreNULL = TRUE)
+    observe({
+        gate_now <- orthoFirstPaintGate()
+        if (!isTRUE(gate_now$enabled) || isTRUE(gate_now$released)) {
+            return(invisible(NULL))
+        }
+        gate_target <- head(
+            as.character(orthoPlotTimingTracker()$gate_expected %||% character(0)),
+            1L
+        )
+        visible_target <- head(
+            as.character(primaryPlotIdsOrthologous() %||% character(0)),
+            1L
+        )
+        if (length(gate_target) == 0L || length(visible_target) == 0L ||
+            !identical(gate_target[[1L]], visible_target[[1L]])) {
+            release_ortho_first_paint_gate(
+                as.character(gate_now$run_id %||% ""),
+                reason = "visible_target_changed"
+            )
+        }
+        invisible(NULL)
+    })
     genePlotRendererWarmed <- reactiveVal(FALSE)
     orthoAlignedRenderCache <- reactiveVal(list(key = "", plot_obj = NULL))
     orthoAlignedTrackCache <- new.env(parent = emptyenv())
@@ -4905,6 +5218,11 @@ function(input, output, session) {
                     return(invisible(FALSE))
                 }
             }
+            if (isTRUE(secondary_work_should_yield())) {
+                app_perf_mark(warm_perf, "yield: user search active", "CACHE_BG")
+                later::later(run_next, delay = secondary_work_retry_delay_sec)
+                return(invisible(FALSE))
+            }
             if (next_idx > length(ann)) {
                 app_perf_mark(warm_perf, "done", "CACHE_BG")
                 return(invisible(TRUE))
@@ -4917,6 +5235,11 @@ function(input, output, session) {
             app_perf_mark(warm_perf, sprintf("warm %d/%d %s", as.integer(i), as.integer(length(ann)), basename(ann_i)), "CACHE_BG")
 
             finish_this_warm <- function() {
+                if (isTRUE(secondary_work_should_yield())) {
+                    app_perf_mark(warm_perf, "followup yield: user search active", "CACHE_BG")
+                    later::later(finish_this_warm, delay = secondary_work_retry_delay_sec)
+                    return(invisible(FALSE))
+                }
                 tryCatch(
                     {
                         if (nzchar(rp_i) && file.exists(rp_i)) {
@@ -4945,35 +5268,56 @@ function(input, output, session) {
 
             if (!isTRUE(annotation_is_warmed(ann_i)) && requireNamespace("promises", quietly = TRUE)) {
                 local_ann <- ann_i
+                complete_annotation_future <- NULL
+                complete_annotation_future <- function(idx = NULL, err = NULL) {
+                    if (isTRUE(secondary_work_should_yield())) {
+                        app_perf_mark(warm_perf, "annotation callback yield: user search active", "CACHE_BG")
+                        later::later(
+                            function() complete_annotation_future(idx = idx, err = err),
+                            delay = secondary_work_retry_delay_sec
+                        )
+                        return(invisible(FALSE))
+                    }
+                    if (!is.null(err)) {
+                        app_perf_mark(warm_perf, sprintf("annotation future warm error: %s", as.character(err$message %||% "unknown")), "CACHE_BG")
+                        tryCatch(warm_annotation_cache(local_ann, status_rv = NULL, context_label = NULL), error = function(e) NULL)
+                        finish_this_warm()
+                        return(invisible(FALSE))
+                    }
+                    if (!is.null(idx) && is.list(idx) && !is.null(idx$genes_df)) {
+                        tryCatch(
+                            cache_env_set(
+                                .gff_gene_light_index_cache,
+                                gff_cache_key(local_ann),
+                                idx,
+                                max_size = annotation_memory_cache_limits$gene_light_max_entries,
+                                max_bytes = annotation_memory_cache_limits$gene_light_max_bytes
+                            ),
+                            error = function(e) NULL
+                        )
+                        tryCatch(save_gff_index_to_disk(local_ann, idx, cache_kind = "gene_light", base_dir = "."), error = function(e) NULL)
+                        tryCatch(get_genes_table_from_annotation(local_ann), error = function(e) NULL)
+                        tryCatch(get_genes_chr_index_from_annotation(local_ann), error = function(e) NULL)
+                        tryCatch(get_chromosome_name_map(local_ann), error = function(e) NULL)
+                        if (isTRUE(app_env_flag("APP_TABIX_PROBE_ON_WARM", FALSE))) {
+                            tryCatch(warm_annotation_tabix_probe(local_ann, idx), error = function(e) NULL)
+                        }
+                        mark_annotation_warmed(local_ann)
+                    }
+                    app_perf_mark(warm_perf, sprintf("annotation future warmed rows=%d", as.integer(nrow((idx %||% list())$genes_df %||% data.frame()))), "CACHE_BG")
+                    finish_this_warm()
+                    invisible(TRUE)
+                }
                 tryCatch(
                     {
                         promises::future_promise({
                             build_gff_gene_light_index(local_ann)
                         }, seed = FALSE) %...>% (function(idx) {
-                            if (!is.null(idx) && is.list(idx) && !is.null(idx$genes_df)) {
-                                tryCatch(
-                                    cache_env_set(
-                                        .gff_gene_light_index_cache,
-                                        gff_cache_key(local_ann),
-                                        idx,
-                                        max_size = annotation_memory_cache_limits$gene_light_max_entries,
-                                        max_bytes = annotation_memory_cache_limits$gene_light_max_bytes
-                                    ),
-                                    error = function(e) NULL
-                                )
-                                tryCatch(save_gff_index_to_disk(local_ann, idx, cache_kind = "gene_light", base_dir = "."), error = function(e) NULL)
-                                tryCatch(get_genes_table_from_annotation(local_ann), error = function(e) NULL)
-                                tryCatch(get_genes_chr_index_from_annotation(local_ann), error = function(e) NULL)
-                                tryCatch(get_chromosome_name_map(local_ann), error = function(e) NULL)
-                                tryCatch(warm_annotation_tabix_probe(local_ann, idx), error = function(e) NULL)
-                                mark_annotation_warmed(local_ann)
-                            }
-                            app_perf_mark(warm_perf, sprintf("annotation future warmed rows=%d", as.integer(nrow((idx %||% list())$genes_df %||% data.frame()))), "CACHE_BG")
-                            finish_this_warm()
+                            complete_annotation_future(idx = idx)
+                            invisible(idx)
                         }) %...!% (function(err) {
-                            app_perf_mark(warm_perf, sprintf("annotation future warm error: %s", as.character(err$message %||% "unknown")), "CACHE_BG")
-                            tryCatch(warm_annotation_cache(ann_i, status_rv = NULL, context_label = NULL), error = function(e) NULL)
-                            finish_this_warm()
+                            complete_annotation_future(err = err)
+                            invisible(NULL)
                         })
                         return(invisible(TRUE))
                     },
@@ -4991,7 +5335,7 @@ function(input, output, session) {
             invisible(TRUE)
         }
 
-        later::later(run_next, delay = delay_val)
+        later::later(run_next, delay = max(delay_val, secondary_work_initial_delay_sec))
         invisible(TRUE)
     }
 
@@ -5041,6 +5385,11 @@ function(input, output, session) {
                     return(invisible(FALSE))
                 }
             }
+            if (isTRUE(secondary_work_should_yield())) {
+                app_perf_mark(warm_perf, "yield: user search active", "LOOKUP_WORKER_WARM")
+                later::later(launch, delay = secondary_work_retry_delay_sec)
+                return(invisible(FALSE))
+            }
             promises <- lapply(seq_len(worker_count), function(worker_idx) {
                 ann_local <- ann
                 promises::future_promise({
@@ -5084,7 +5433,7 @@ function(input, output, session) {
             invisible(TRUE)
         }
 
-        later::later(launch, delay = delay_val)
+        later::later(launch, delay = max(delay_val, secondary_work_initial_delay_sec))
         invisible(TRUE)
     }
 
@@ -5170,6 +5519,11 @@ function(input, output, session) {
                 followup_running <<- FALSE
                 return(invisible(FALSE))
             }
+            if (isTRUE(secondary_work_should_yield())) {
+                app_perf_mark(prep_perf, "followup yield: user search active", "ORG_FAST")
+                later::later(run_followup_queue, delay = secondary_work_retry_delay_sec)
+                return(invisible(FALSE))
+            }
             if (length(followup_queue) == 0L) {
                 followup_running <<- FALSE
                 app_perf_mark(prep_perf, "followup done", "ORG_FAST")
@@ -5185,7 +5539,10 @@ function(input, output, session) {
             sid_i <- as.character(item$species_id %||% "")
             app_perf_mark(prep_perf, sprintf("followup %s/%d", ifelse(is.finite(i), as.character(i), "?"), length(ann)), "ORG_FAST")
 
-            if (isTRUE(app_env_flag("APP_TABIX_PROBE_ON_WARM", TRUE)) &&
+            # Tabix opens can take several seconds on networked storage and
+            # block Shiny's event loop. Keep this optional warm-up off by
+            # default; real lookups still open the existing index on demand.
+            if (isTRUE(app_env_flag("APP_TABIX_PROBE_ON_WARM", FALSE)) &&
                 nzchar(ann_i) && file.exists(ann_i)) {
                 component_t0 <- app_perf_now()
                 tryCatch(warm_annotation_tabix_probe(ann_i), error = function(e) NULL)
@@ -5253,10 +5610,10 @@ function(input, output, session) {
                 # or delay delivery of the ready state to the browser.
                 tryCatch(
                     session$onFlushed(function() {
-                        later::later(start_followup_queue, delay = 0.02)
+                        later::later(start_followup_queue, delay = secondary_work_initial_delay_sec)
                     }, once = TRUE),
                     error = function(e) {
-                        later::later(start_followup_queue, delay = 0.05)
+                        later::later(start_followup_queue, delay = secondary_work_initial_delay_sec)
                     }
                 )
             } else {
@@ -5330,11 +5687,9 @@ function(input, output, session) {
         next_idx <- 1L
         run_next <- NULL
         run_next <- function() {
-            search_state <- tryCatch(isolate(searchRunState()), error = function(e) list())
-            search_busy <- any(vapply(search_state, function(x) isTRUE((x %||% list())$active), logical(1)))
             prep_busy <- !isTRUE(isolate(searchPreparationReadyHomo())) ||
                 !isTRUE(isolate(searchPreparationReadyOrtho()))
-            if (isTRUE(search_busy || prep_busy)) {
+            if (isTRUE(secondary_work_should_yield()) || isTRUE(prep_busy)) {
                 later::later(run_next, delay = 2)
                 return(invisible(FALSE))
             }
@@ -5394,7 +5749,8 @@ function(input, output, session) {
     }
     warm_gene_plot_renderer_once <- function() {
         if (isTRUE(genePlotRendererWarmed()) ||
-            !isTRUE(app_env_flag("APP_GENE_PLOT_RENDERER_PREWARM", TRUE))) {
+            !isTRUE(app_env_flag("APP_GENE_PLOT_RENDERER_PREWARM", TRUE)) ||
+            isTRUE(secondary_work_should_yield())) {
             return(invisible(FALSE))
         }
         genePlotRendererWarmed(TRUE)
@@ -5437,16 +5793,27 @@ function(input, output, session) {
             min_value = 0L,
             max_value = 30000L
         )
+        run_renderer_prewarm <- NULL
+        run_renderer_prewarm <- function() {
+            session_closed <- tryCatch(
+                is.function(session$isClosed) && isTRUE(session$isClosed()),
+                error = function(e) FALSE
+            )
+            if (isTRUE(session_closed)) {
+                return(invisible(FALSE))
+            }
+            if (isTRUE(secondary_work_should_yield())) {
+                app_perf_mark(NULL, "renderer_prewarm_yield=user_search_active", "PLOT_WARM")
+                later::later(run_renderer_prewarm, delay = secondary_work_retry_delay_sec)
+                return(invisible(FALSE))
+            }
+            tryCatch(warm_gene_plot_renderer_once(), error = function(e) NULL)
+        }
         session$onFlushed(function() {
-            later::later(function() {
-                session_closed <- tryCatch(
-                    is.function(session$isClosed) && isTRUE(session$isClosed()),
-                    error = function(e) FALSE
-                )
-                if (!session_closed) {
-                    tryCatch(warm_gene_plot_renderer_once(), error = function(e) NULL)
-                }
-            }, delay = renderer_prewarm_delay_ms / 1000)
+            later::later(
+                run_renderer_prewarm,
+                delay = max(renderer_prewarm_delay_ms / 1000, secondary_work_initial_delay_sec)
+            )
         }, once = TRUE)
     }
     sanitize_girafe_tooltip_text <- function(x) {
@@ -17395,7 +17762,11 @@ function(input, output, session) {
                             app_perf_mark_ms(perf_run, "reactive_state_commit_ms", app_perf_elapsed_ms(commit_homo_t0), "HOMO")
                         }
                         app_perf_mark(perf_run, sprintf("loop done added=%d duplicates=%d", as.integer(added_count), as.integer(duplicate_count)), "HOMO")
-                        set_plot_timing_expected(homoPlotTimingTracker, added_plot_ids, context = "HOMO_TIMING")
+                        set_plot_timing_expected(
+                            homoPlotTimingTracker,
+                            added_plot_ids,
+                            context = "HOMO_TIMING"
+                        )
                         if (length(metrics_plot_ids) > 0L) {
                             schedule_plot_metrics_payload_build(
                                 context = "homo",
@@ -17486,7 +17857,7 @@ function(input, output, session) {
 		        orthoExternalRescueState$id <- paste0("cancel_", as.integer(Sys.time()), "_", sample.int(1000000L, 1))
 	        reset_ortho_organism_lookup_status()
 	        ortho_async_search <- FALSE
-	        orthoAutoRenderQueued(FALSE)
+	        cancel_ortho_auto_render_queue()
 	        # Guard: only reset if value differs to avoid premature renderUI invalidation
         if (!identical(as.integer(orthoVisibleCount()), as.integer(orthoInitialVisibleCount))) {
             orthoVisibleCount(orthoInitialVisibleCount)
@@ -17812,6 +18183,7 @@ function(input, output, session) {
             return(invisible(NULL))
         }
         start_plot_timing_tracker(orthoPlotTimingTracker, perf_run, context = "ORTHO_TIMING")
+        reset_ortho_first_paint_gate(perf_run)
         app_perf_mark(perf_run, "click search", "ORTHO")
         lookup_status_rows <- data.frame(
             key = paste0("file:", seq_along(files)),
@@ -18512,7 +18884,22 @@ function(input, output, session) {
                 activePlotIdsOrthologous(c(isolate(activePlotIdsOrthologous()), local_new_ids))
                 app_perf_mark(perf_run, "reactive commit done", "ORTHO")
                 app_perf_mark_ms(perf_run, "reactive_state_commit_ms", app_perf_elapsed_ms(commit_t0), "ORTHO")
-                set_plot_timing_expected(orthoPlotTimingTracker, added_plot_ids, context = "ORTHO_TIMING")
+                set_plot_timing_expected(
+                    orthoPlotTimingTracker,
+                    added_plot_ids,
+                    context = "ORTHO_TIMING",
+                    gate_expected_ids = initial_plot_timing_ids(
+                        if (length(added_plot_ids) > 0L) {
+                            isolate(as.character(primaryPlotIdsOrthologous() %||% character(0)))
+                        } else {
+                            character(0)
+                        },
+                        orthoInitialVisibleCount,
+                        plot_meta = isolate(plotGeneMetaOrthologous()),
+                        primary_only = TRUE
+                    ),
+                    gate_candidate_ids = added_plot_ids
+                )
                 if (length(pending_metric_jobs) > 0L) {
                     for (job in pending_metric_jobs) {
                         schedule_plot_metrics_payload_build(
@@ -18751,7 +19138,22 @@ function(input, output, session) {
                     as.integer(local_phase_summary$added %||% 0L),
                     paste(as.character(local_phase_summary$ids %||% character(0)), collapse = ",")))
             }
-            set_plot_timing_expected(orthoPlotTimingTracker, added_plot_ids, context = "ORTHO_TIMING")
+            set_plot_timing_expected(
+                orthoPlotTimingTracker,
+                added_plot_ids,
+                context = "ORTHO_TIMING",
+                gate_expected_ids = initial_plot_timing_ids(
+                    if (length(added_plot_ids) > 0L) {
+                        isolate(as.character(primaryPlotIdsOrthologous() %||% character(0)))
+                    } else {
+                        character(0)
+                    },
+                    orthoInitialVisibleCount,
+                    plot_meta = isolate(plotGeneMetaOrthologous()),
+                    primary_only = TRUE
+                ),
+                gate_candidate_ids = added_plot_ids
+            )
 
             if (isTRUE(rescue_needed)) {
             rescue_request_id <- paste0("ortho_rescue_", as.integer(Sys.time()), "_", sample.int(1000000L, 1))
@@ -18820,6 +19222,21 @@ function(input, output, session) {
                         sprintf("external alias rescue render rebinding ids=%s", paste(rescue_new_ids, collapse = ",")),
                         "ORTHO_UI"
                     )
+                    gate_now <- isolate(orthoFirstPaintGate())
+                    if (isTRUE(orthoAutoRenderMore)) {
+                        gate_locked <- isTRUE(gate_now$enabled) && !isTRUE(gate_now$released)
+                        app_perf_mark(
+                            perf_run,
+                            sprintf(
+                                "external alias rescue render %s ids=%s",
+                                if (gate_locked) "deferred until first paint" else "delegated to progressive scheduler",
+                                paste(rescue_new_ids, collapse = ",")
+                            ),
+                            "ORTHO_UI"
+                        )
+                        cancel_ortho_auto_render_queue()
+                        return(invisible(NULL))
+                    }
                     isolate({
                         ids_all <- as.character(primaryPlotIdsOrthologous() %||% character(0))
                         ids_all <- ids_all[nzchar(ids_all)]
@@ -18834,7 +19251,7 @@ function(input, output, session) {
                             next_n <- min(length(ids_all), as.integer(next_n))
                             if (is.finite(next_n) && !is.na(next_n) && next_n > current_n) {
                                 orthoVisibleCount(as.integer(next_n))
-                                orthoAutoRenderQueued(FALSE)
+                                cancel_ortho_auto_render_queue()
                                 app_perf_mark(
                                     perf_run,
                                     sprintf(
@@ -23908,7 +24325,7 @@ function(input, output, session) {
                 if (!identical(as.integer(orthoVisibleCount()), as.integer(orthoInitialVisibleCount))) {
                     orthoVisibleCount(orthoInitialVisibleCount)
                 }
-                orthoAutoRenderQueued(FALSE)
+                cancel_ortho_auto_render_queue()
                 if (length(ready_keep) > 0L) {
                     orthoRenderedPlotIds(character(0))
                 }
@@ -23919,7 +24336,7 @@ function(input, output, session) {
                 if (!identical(as.integer(orthoVisibleCount()), ids_n)) {
                     orthoVisibleCount(ids_n)
                 }
-                orthoAutoRenderQueued(FALSE)
+                cancel_ortho_auto_render_queue()
             }
             invisible(NULL)
         },
@@ -23929,6 +24346,14 @@ function(input, output, session) {
 	    observe({
 	        if (!isTRUE(orthoAutoRenderMore) || isTRUE(orthoAutoRenderQueued())) {
 	            return(invisible(NULL))
+	        }
+	        pending_gate <- orthoFirstPaintGate()
+	        if (identical(as.character(pending_gate$release_reason %||% ""), "awaiting_expected_plot")) {
+	            search_state <- searchRunState()
+	            ortho_search_active <- isTRUE((search_state$orthologous %||% list())$active)
+	            if (isTRUE(ortho_search_active)) {
+	                return(invisible(NULL))
+	            }
 	        }
 	        ids <- primaryPlotIdsOrthologous()
 	        ids_n <- length(ids)
@@ -23940,6 +24365,13 @@ function(input, output, session) {
             current_n <- orthoInitialVisibleCount
         }
         if (current_n >= ids_n) {
+            gate_now <- orthoFirstPaintGate()
+            if (isTRUE(gate_now$enabled) && !isTRUE(gate_now$released)) {
+                release_ortho_first_paint_gate(
+                    as.character(gate_now$run_id %||% ""),
+                    reason = "no_secondary_results"
+                )
+            }
             return(invisible(NULL))
         }
         visible_ids <- if (current_n > 0L) as.character(ids[seq_len(current_n)]) else character(0)
@@ -23951,6 +24383,20 @@ function(input, output, session) {
             is.null(meta) || !isFALSE(meta$is_canonical)
         }, visible_ids)
         ready_now <- as.character(orthoRenderedPlotIds() %||% character(0))
+        first_paint_gate <- orthoFirstPaintGate()
+        if (isTRUE(first_paint_gate$enabled) && !isTRUE(first_paint_gate$released)) {
+            timing_tracker <- orthoPlotTimingTracker()
+            timing_run_id <- as.character((timing_tracker$run %||% list())$id %||% "")
+            expected_ready_ids <- intersect(
+                as.character(timing_tracker$gate_expected %||% character(0)),
+                ready_now
+            )
+            if (identical(timing_run_id, as.character(first_paint_gate$run_id %||% "")) &&
+                length(expected_ready_ids) > 0L) {
+                arm_ortho_first_paint_timeout(as.character(first_paint_gate$run_id %||% ""))
+            }
+            return(invisible(NULL))
+        }
         if (length(canonical_visible_ids) == 0L || !all(canonical_visible_ids %in% ready_now)) {
             return(invisible(NULL))
         }
@@ -23958,6 +24404,9 @@ function(input, output, session) {
         if (next_n <= current_n) {
             return(invisible(NULL))
         }
+        scheduled_ids <- as.character(ids)
+        scheduled_gate_token <- as.integer((orthoFirstPaintGate() %||% list())$token %||% 0L)
+        scheduled_generation <- bump_ortho_auto_render_generation()
         orthoAutoRenderQueued(TRUE)
         app_perf_mark(
             app_perf_new_run("ORTHO_UI"),
@@ -23967,8 +24416,30 @@ function(input, output, session) {
         if (requireNamespace("later", quietly = TRUE)) {
             later::later(function() {
                 isolate({
-                    orthoVisibleCount(as.integer(next_n))
-                    orthoAutoRenderQueued(FALSE)
+                    latest_gate <- orthoFirstPaintGate()
+                    same_gate <- identical(
+                        as.integer(latest_gate$token %||% 0L),
+                        as.integer(scheduled_gate_token %||% 0L)
+                    )
+                    same_ids <- identical(
+                        as.character(primaryPlotIdsOrthologous() %||% character(0)),
+                        scheduled_ids
+                    )
+                    same_generation <- identical(
+                        as.integer(orthoAutoRenderGeneration %||% 0L),
+                        as.integer(scheduled_generation %||% 0L)
+                    )
+                    if (isTRUE(same_gate) && isTRUE(same_generation)) {
+                        if (isTRUE(same_ids) &&
+                            !(isTRUE(latest_gate$enabled) && !isTRUE(latest_gate$released))) {
+                            visible_now <- suppressWarnings(as.integer(orthoVisibleCount() %||% current_n))
+                            if (!is.finite(visible_now) || is.na(visible_now) || visible_now < 1L) {
+                                visible_now <- current_n
+                            }
+                            orthoVisibleCount(as.integer(min(length(scheduled_ids), max(visible_now, next_n))))
+                        }
+                        orthoAutoRenderQueued(FALSE)
+                    }
                 })
             }, delay = orthoAutoRenderDelay)
         } else {
@@ -24859,7 +25330,7 @@ function(input, output, session) {
 	                                    df$track_idx <- rep(as.numeric(i), n_rows)
 	                                    geom_mode_i <- as.character(norm_track$geometry_mode %||% if (aligned_mode %in% c("protein", "cds")) "cds" else "exon")
 	                                    df$aligned_geometry_mode <- rep(geom_mode_i, n_rows)
-	                                    track_geometry_modes[i] <<- geom_mode_i
+	                                    track_geometry_modes[i] <- geom_mode_i
 	                                    half <- 0.18
 	                                    df$ymin_feat <- i - half
 	                                    df$ymax_feat <- i + half
@@ -24962,31 +25433,32 @@ function(input, output, session) {
                         }
                     }
 
-                    # Pass 2: compute uncached pairs in parallel via furrr
+                    # Pass 2: compute uncached pairs in-process.  Sending this mapper
+                    # through future/furrr recursively exports the sequence helpers and
+                    # their warm cache environments (multi-GiB in production) before any
+                    # pair is evaluated.  The former error fallback already used this
+                    # exact ordered lapply path, so make it the primary path and avoid the
+                    # failed export without changing correspondence results or caching.
                     if (length(uncached_indices) > 0L) {
                         fn_corr <- compute_protein_guided_correspondence
                         local_aligned_mode <- aligned_mode
-                        computed_list <- tryCatch(
-                            {
-                                if (!requireNamespace("furrr", quietly = TRUE)) stop("furrr not available")
-                                furrr::future_map(uncached_indices, function(k) {
-                                    task <- uncached_tasks[[k]]
-                                    tryCatch(
-                                        fn_corr(task$df1, task$df2, task$df1e, task$df2e, mode = local_aligned_mode),
-                                        error = function(e) NULL
-                                    )
-                                }, .options = furrr::furrr_options(seed = FALSE, packages = c("pwalign", "Biostrings")))
-                            },
-                            error = function(e) {
-                                app_perf_mark(aligned_perf, sprintf("parallel_corr_fallback msg=%s", as.character(e$message %||% "unknown")), "ORTHO_ALIGNED")
-                                lapply(uncached_indices, function(k) {
-                                    task <- uncached_tasks[[k]]
-                                    tryCatch(
-                                        fn_corr(task$df1, task$df2, task$df1e, task$df2e, mode = local_aligned_mode),
-                                        error = function(e) NULL
-                                    )
-                                })
-                            }
+                        corr_compute_t0 <- as.numeric(proc.time()[["elapsed"]])
+                        computed_list <- lapply(uncached_indices, function(k) {
+                            task <- uncached_tasks[[k]]
+                            tryCatch(
+                                fn_corr(task$df1, task$df2, task$df1e, task$df2e, mode = local_aligned_mode),
+                                error = function(e) NULL
+                            )
+                        })
+                        corr_compute_ms <- (as.numeric(proc.time()[["elapsed"]]) - corr_compute_t0) * 1000
+                        app_perf_mark(
+                            aligned_perf,
+                            sprintf(
+                                "aligned_corr_compute_ms=%.1f pairs=%d schedule=in_process",
+                                corr_compute_ms,
+                                as.integer(length(uncached_indices))
+                            ),
+                            "ORTHO_ALIGNED"
                         )
                         for (j in seq_along(uncached_indices)) {
                             k <- uncached_indices[j]

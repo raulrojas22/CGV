@@ -8,11 +8,23 @@ assert <- function(condition, message) {
 }
 
 deploy <- read_text("deploy-colors-shinyproxy.sh")
+deploy_guide <- read_text("COLORS_SHINYPROXY_DEPLOY.md")
+perf_workflow <- read_text("FLUJO_LOGS_RENDIMIENTO.md")
 
 check_pos <- regexpr('if [[ "$MODE" == "check" ]]; then', deploy, fixed = TRUE)[1]
 tests_pos <- regexpr('if [[ "$SKIP_TESTS" == "0" ]]; then', deploy, fixed = TRUE)[1]
 assert(check_pos > 0 && tests_pos > check_pos,
        "Colors check-mode guard block is missing or out of order.")
+tests_end_pos <- regexpr(
+  'command -v Rscript >/dev/null 2>&1 || die "Rscript no está disponible para calcular el CSP del reporte"',
+  deploy,
+  fixed = TRUE
+)[1]
+assert(tests_end_pos > tests_pos, "Colors local test block has no detectable end.")
+tests_text <- substr(deploy, tests_pos, tests_end_pos - 1L)
+assert(grepl('command -v node >/dev/null 2>&1 || die "node no está disponible para ejecutar las pruebas JavaScript"', tests_text, fixed = TRUE) &&
+         grepl("node tests/js/test_plot_paint_gate.js", tests_text, fixed = TRUE),
+       "Colors deploy must require Node and execute the first-paint JavaScript regression in [1/7].")
 check_text <- substr(deploy, check_pos, tests_pos - 1L)
 check_revision_pos <- regexpr(
   'if [[ "$ACTIVE_IMAGE_REVISION" != "$SOURCE_REV" ]]; then',
@@ -21,11 +33,16 @@ check_revision_pos <- regexpr(
 )[1]
 check_delegate_pos <- regexpr('CHECK_DELEGATE="$(', check_text, fixed = TRUE)[1]
 check_policy_pos <- regexpr('BROKER_POLICY="$(', check_text, fixed = TRUE)[1]
+check_application_perf_pos <- regexpr('APPLICATION_PERF_TIMING="$(', check_text, fixed = TRUE)[1]
+check_delegate_perf_pos <- regexpr('DELEGATE_PERF_TIMING="$(', check_text, fixed = TRUE)[1]
 check_success_pos <- regexpr("CHECK OK:", check_text, fixed = TRUE)[1]
-assert(all(c(check_revision_pos, check_delegate_pos, check_policy_pos, check_success_pos) > 0) &&
+assert(all(c(check_revision_pos, check_delegate_pos, check_policy_pos,
+             check_application_perf_pos, check_delegate_perf_pos, check_success_pos) > 0) &&
          check_revision_pos < check_delegate_pos &&
          check_delegate_pos < check_policy_pos &&
-         check_policy_pos < check_success_pos,
+         check_policy_pos < check_application_perf_pos &&
+         check_application_perf_pos < check_delegate_perf_pos &&
+         check_delegate_perf_pos < check_success_pos,
        "Colors check must reject revision drift before delegate and policy validation.")
 assert(grepl(
   "podman image inspect '${CURRENT_IMAGE}' --format '{{ index .Labels \\\"org.opencontainers.image.revision\\\" }}'",
@@ -41,6 +58,13 @@ assert(grepl('[[ "$BROKER_POLICY" == "0" || "$BROKER_POLICY" == "1" ]]', check_t
          grepl('[[ "$DELEGATE_POLICY" == "0" || "$DELEGATE_POLICY" == "1" ]]', check_text, fixed = TRUE) &&
          grepl('[[ "$DELEGATE_POLICY" == "$BROKER_POLICY" ]]', check_text, fixed = TRUE),
        "Colors check must require valid and identical broker/delegate orthology policy.")
+assert(grepl('[[ "$APPLICATION_PERF_TIMING" == "0" || "$APPLICATION_PERF_TIMING" == "1" ]]', check_text, fixed = TRUE) &&
+         grepl('[[ "$DELEGATE_PERF_TIMING" == "0" || "$DELEGATE_PERF_TIMING" == "1" ]]', check_text, fixed = TRUE) &&
+         grepl('[[ "$DELEGATE_PERF_TIMING" == "$APPLICATION_PERF_TIMING" ]]', check_text, fixed = TRUE),
+       "Colors check must report valid telemetry agreed by application.yml and the delegate.")
+assert(!grepl("BROKER_PERF_TIMING", check_text, fixed = TRUE) &&
+         !grepl("COLORS_PERF_TIMING", check_text, fixed = TRUE),
+       "Colors check must inspect effective telemetry without assuming broker env or the local deploy default.")
 
 wait_pos <- regexpr("wait_for_release() {", deploy, fixed = TRUE)[1]
 verify_pos <- regexpr("verify_static_release() {", deploy, fixed = TRUE)[1]
@@ -65,6 +89,12 @@ assert(grepl("for i in \\$(seq 1 15)", verify_text, fixed = TRUE) &&
        "Static verification must coalesce delegate startup and report a missing delegate explicitly.")
 assert(grepl('verify_static_release "$STATIC_REVISION" "$NEW_IMAGE"', deploy, fixed = TRUE),
        "Static verification must select a delegate from the new image only.")
+assert(grepl("application_perf=\\$(sed -n", verify_text, fixed = TRUE) &&
+         grepl("STATIC_GUARD_FAILED: application-perf-timing", verify_text, fixed = TRUE) &&
+         grepl("STATIC_GUARD_FAILED: delegate-perf-timing", verify_text, fixed = TRUE) &&
+         grepl("STATIC_GUARD_FAILED: perf-timing-mismatch", verify_text, fixed = TRUE) &&
+         !grepl("broker_perf=", verify_text, fixed = TRUE),
+       "Static verification must compare effective delegate telemetry with active application.yml, not broker env.")
 
 select_expected_delegate <- function(container_names, container_images, expected_image) {
   matches <- container_names[
@@ -128,6 +158,24 @@ assert(broker_candidate_pos < compose_validate_pos &&
        "ShinyProxy candidates must be built and validated before atomic replacement.")
 assert(application_move_pos < cutover_teardown_pos && compose_move_pos < cutover_teardown_pos,
        "Server-owned ShinyProxy candidates must move immediately before cutover.")
+
+assert(grepl('COLORS_PERF_TIMING="${COLORS_PERF_TIMING:-0}"', deploy, fixed = TRUE),
+       "Colors performance telemetry must default off.")
+assert(grepl('[[ "$COLORS_PERF_TIMING" == "0" || "$COLORS_PERF_TIMING" == "1" ]]', deploy, fixed = TRUE),
+       "Colors performance telemetry must reject values other than 0 or 1.")
+assert(grepl('APP_PERF_TIMING: \\"${COLORS_PERF_TIMING}\\"', deploy, fixed = TRUE),
+       "The server-owned application candidate must receive the selected telemetry mode.")
+assert(!grepl('APP_PERF_TIMING: \\"1\\"', deploy, fixed = TRUE),
+       "Colors deploy must not force performance telemetry on.")
+assert(grepl('Captura:    desactivada', deploy, fixed = TRUE) &&
+         grepl('Captura:    activa (${PERF_RUN_LABEL})', deploy, fixed = TRUE) &&
+         grepl('Captura:    auditando release activa', deploy, fixed = TRUE),
+       "The banner must distinguish normal operation, controlled capture, and check mode.")
+assert(grepl("COLORS_PERF_TIMING=1 PERF_RUN_LABEL=despues_colors_01", perf_workflow, fixed = TRUE) &&
+         grepl("COLORS_PERF_TIMING=0 ./deploy-colors-shinyproxy.sh", perf_workflow, fixed = TRUE) &&
+         grepl("APP_PERF_TIMING=0", deploy_guide, fixed = TRUE) &&
+         grepl("perf=0", deploy_guide, fixed = TRUE),
+       "Colors documentation must show explicit capture enablement, shutdown, and effective check state.")
 
 candidate_policy_default_pos <- regexpr(
   "  orthology_policy=0\n  if [ \\\"\\$policy_count\\\" = 1 ]; then",
@@ -212,6 +260,9 @@ required <- c(
   "APP_STATIC_BASE_URL: \\\"\\${APP_STATIC_BASE_URL:}\\\"",
   "APP_ASSET_VERSION: \\\"\\${APP_ASSET_VERSION:-}\\\"",
   "APP_STATIC_BASE_URL: \\\"\\${APP_STATIC_BASE_URL:-}\\\"",
+  "COLORS_PERF_TIMING=1",
+  "COLORS_PERF_TIMING debe ser 0 o 1",
+  "APP_PERF_TIMING: \\\"${COLORS_PERF_TIMING}\\\"",
   "--orthology-policy \\\"\\$orthology_policy\\\"",
   "APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY=\\$orthology_policy",
   "application_policy=\\$(sed -n",
@@ -233,9 +284,15 @@ required <- c(
   "STATIC_GUARD_FAILED: broker-orthology-policy",
   "STATIC_GUARD_FAILED: delegate-orthology-policy",
   "STATIC_GUARD_FAILED: orthology-policy-mismatch",
+  "STATIC_GUARD_FAILED: application-perf-timing",
+  "STATIC_GUARD_FAILED: delegate-perf-timing",
+  "STATIC_GUARD_FAILED: perf-timing-mismatch",
   "fail_guard broker-orthology-policy",
   "fail_guard delegate-orthology-policy",
   "fail_guard orthology-policy-mismatch",
+  "fail_guard application-perf-timing",
+  "fail_guard delegate-perf-timing",
+  "fail_guard perf-timing-mismatch",
   "la sesión pública recibió FEEDBACK_RESEND_API_KEY",
   "/srv/cgv-cache",
   "static_assets/manifests/${STATIC_REVISION}.sha256",

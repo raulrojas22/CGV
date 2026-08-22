@@ -91,9 +91,9 @@ assert_true(
     "Fast organism search readiness must not wait for genome warm-up."
 )
 assert_true(
-    grepl("APP_TABIX_PROBE_ON_WARM", server_txt, fixed = TRUE) &&
+    grepl('app_env_flag("APP_TABIX_PROBE_ON_WARM", FALSE)', server_txt, fixed = TRUE) &&
         grepl("run_followup_queue", server_txt, fixed = TRUE),
-    "Tabix probing must run in the non-blocking organism-preparation follow-up queue."
+    "Optional tabix probing must default off and stay in the organism-preparation follow-up queue."
 )
 assert_true(
     grepl("start_followup_queue <- function", server_txt, fixed = TRUE) &&
