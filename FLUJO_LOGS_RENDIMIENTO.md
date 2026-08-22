@@ -49,13 +49,15 @@ Los archivos persistentes quedan en el NAS:
 Ejecutar el despliegue seguro de Colors con otra etiqueta:
 
 ```bash
-PERF_RUN_LABEL=antes_colors_01 ./deploy-colors-shinyproxy.sh
+COLORS_PERF_TIMING=1 PERF_RUN_LABEL=antes_colors_01 ./deploy-colors-shinyproxy.sh
 ```
 
 Colors conserva su configuración endurecida de ShinyProxy en el servidor. El
-script añade únicamente la ruta persistente, la etiqueta de la captura y la
-identificación de la imagen. Después se realiza el recorrido manual en
-`cgv.mobilomics.org`.
+modo normal deja la telemetría desactivada; `COLORS_PERF_TIMING=1` habilita esta
+captura de forma explícita y propaga la etiqueta y la identificación de la
+imagen a las sesiones nuevas. Después se realiza el recorrido manual en
+`cgv.mobilomics.org`. `./deploy-colors-shinyproxy.sh --check` muestra el valor
+efectivo como `perf=0` o `perf=1`.
 
 Los archivos quedan en Colors:
 
@@ -77,11 +79,18 @@ PERF_RUN_LABEL=despues_nas_01 ./deploy-nas-shinyproxy.sh
 o para Colors:
 
 ```bash
-PERF_RUN_LABEL=despues_colors_01 ./deploy-colors-shinyproxy.sh
+COLORS_PERF_TIMING=1 PERF_RUN_LABEL=despues_colors_01 ./deploy-colors-shinyproxy.sh
 ```
 
 Repetir exactamente el recorrido utilizado en la captura ANTES del mismo
 servidor.
+
+Al terminar las capturas de Colors, volver al modo normal con un deploy sin el
+override (o con `COLORS_PERF_TIMING=0` explícito):
+
+```bash
+COLORS_PERF_TIMING=0 ./deploy-colors-shinyproxy.sh
+```
 
 ## 4. Qué compartir para la revisión
 
@@ -106,6 +115,33 @@ También indicar:
 - organismos seleccionados;
 - si era la primera sesión después del despliegue;
 - cualquier espera, error o comportamiento visual percibido.
+
+### Recorrido de control Cross-Species + Alignment
+
+Para medir esta ruta de forma reproducible:
+
+1. seleccionar `Canis lupus familiaris`, `Equus caballus`, `Homo sapiens` y
+   `Pan troglodytes`;
+2. buscar exactamente `TP53`;
+3. esperar a que aparezcan las cuatro visualizaciones primarias;
+4. abrir **Alignment > Synteny** con **Translated CDS**;
+5. esperar a que el SVG alineado y sus cuatro tracks sean visibles.
+
+En los logs del mismo `ORTHO_SEARCH` se comparan principalmente:
+
+- `browser_first_plot_painted_ms`: tiempo hasta el primer SVG realmente
+  pintado en el navegador;
+- `server_ready_to_browser_paint_ms`: transporte y render del primer SVG una
+  vez preparado por el servidor;
+- `search_finish_ms` y el mensaje `ALL ... CARDS RENDERED`: búsqueda y carga
+  progresiva completa;
+- `aligned_corr_compute_ms`: cálculo real de las correspondencias entre tracks;
+- `aligned_total_ms`: generación total de la vista de synteny alineada.
+
+La línea de correspondencias debe terminar en `schedule=in_process`. No debe
+aparecer `parallel_corr_fallback`: esa línea indicaría una release anterior que
+intentaba exportar los entornos de caché a workers antes de ejecutar el mismo
+cálculo local.
 
 Los logs incluyen etiqueta, fecha UTC, proceso, versión de R, imagen y variables
 de rendimiento permitidas. No se guardan claves ni secretos. Aun así, pueden

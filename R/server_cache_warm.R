@@ -2,6 +2,11 @@ init_cache_warm_domain <- function(append_status_fn = NULL) {
     warmed_annotation_keys <- new.env(parent = emptyenv(), hash = TRUE)
     warmed_genome_keys <- new.env(parent = emptyenv(), hash = TRUE)
 
+    tabix_probe_on_warm <- function() {
+        raw <- tolower(trimws(as.character(Sys.getenv("APP_TABIX_PROBE_ON_WARM", "0") %||% "0")))
+        raw %in% c("1", "true", "yes", "on")
+    }
+
     append_status_safe <- function(status_rv, msg) {
         if (is.function(append_status_fn) && !is.null(status_rv)) {
             tryCatch(append_status_fn(status_rv, msg), error = function(e) NULL)
@@ -54,6 +59,12 @@ init_cache_warm_domain <- function(append_status_fn = NULL) {
     }
 
     warm_annotation_tabix_probe <- function(annotation_path, idx = NULL) {
+        # This probe can block the Shiny event loop for several seconds on
+        # networked storage. Keep every warm-up call site opt-in, including
+        # synchronous fallbacks reached when a background future cannot run.
+        if (!isTRUE(tabix_probe_on_warm())) {
+            return(invisible(FALSE))
+        }
         p <- as.character(annotation_path %||% "")
         if (!nzchar(p) || !file.exists(p) ||
             !exists("is_tabix_annotation_file", mode = "function") ||

@@ -32,6 +32,7 @@ SHINYPROXY_IMAGE="${SHINYPROXY_IMAGE:-docker.io/openanalytics/shinyproxy:3.2.4@s
 SHINYPROXY_DIGEST="${SHINYPROXY_IMAGE##*@}"
 SHINYPROXY_RUNTIME_IMAGE="docker.io/openanalytics/shinyproxy@${SHINYPROXY_DIGEST}"
 REBUILD_R_DEPS="${REBUILD_R_DEPS:-0}"
+COLORS_PERF_TIMING="${COLORS_PERF_TIMING:-0}"
 PERF_RUN_LABEL="${PERF_RUN_LABEL:-manual}"
 MODE="deploy"
 SKIP_TESTS=0
@@ -57,7 +58,8 @@ Variables opcionales:
   COLORS_INLINE_FAST_SEQUENCE_PREFETCH=1
   COLORS_HOMO_DEFER_SEQUENCE=0
   COLORS_DEFER_FEATURE_GC=0
-  PERF_RUN_LABEL=antes_colors_01
+  COLORS_PERF_TIMING=1  Activa una captura de telemetría controlada (por defecto: 0).
+  PERF_RUN_LABEL=antes_colors_01  Etiqueta usada cuando COLORS_PERF_TIMING=1.
 
 El deploy normal exige que Git esté limpio y crea una imagen inmutable con
 la forma localhost/cgv:release-<commit>-<fecha UTC>.
@@ -80,6 +82,8 @@ done
 
 [[ "$REBUILD_R_DEPS" == "0" || "$REBUILD_R_DEPS" == "1" ]] || \
   die "REBUILD_R_DEPS debe ser 0 o 1"
+[[ "$COLORS_PERF_TIMING" == "0" || "$COLORS_PERF_TIMING" == "1" ]] || \
+  die "COLORS_PERF_TIMING debe ser 0 o 1"
 for tuning_value in \
   "$COLORS_INLINE_FAST_SEQUENCE_PREFETCH" \
   "$COLORS_HOMO_DEFER_SEQUENCE" \
@@ -154,7 +158,18 @@ echo "  Modo:       ${MODE}"
 echo "  Fuente:     ${SOURCE_BRANCH}@${SOURCE_REV}"
 echo "  Destino:    ${REMOTE_TARGET}:${APP_DIR}"
 echo "  URL:        https://${PUBLIC_HOSTNAME}"
-echo "  Captura:    ${PERF_RUN_LABEL}"
+case "$MODE" in
+  check)
+    echo "  Captura:    auditando release activa"
+    ;;
+  *)
+    if [[ "$COLORS_PERF_TIMING" == "1" ]]; then
+      echo "  Captura:    activa (${PERF_RUN_LABEL})"
+    else
+      echo "  Captura:    desactivada"
+    fi
+    ;;
+esac
 echo "============================================"
 echo ""
 
@@ -284,6 +299,20 @@ if [[ "$MODE" == "check" ]]; then
   [[ "$DELEGATE_POLICY" == "$BROKER_POLICY" ]] || \
     die "la política ortológica de la sesión (${DELEGATE_POLICY}) no coincide con ShinyProxy (${BROKER_POLICY})"
 
+  APPLICATION_PERF_TIMING="$(
+    rssh "sed -n 's/^        APP_PERF_TIMING: \"\([01]\)\"$/\1/p' '${APP_DIR}/shinyproxy/application.yml'"
+  )"
+  DELEGATE_PERF_TIMING="$(
+    rssh "podman inspect '${CHECK_DELEGATE}' --format '{{range .Config.Env}}{{println .}}{{end}}'" |
+      sed -n 's/^APP_PERF_TIMING=//p'
+  )"
+  [[ "$APPLICATION_PERF_TIMING" == "0" || "$APPLICATION_PERF_TIMING" == "1" ]] || \
+    die "el application.yml activo no declara exactamente un APP_PERF_TIMING válido"
+  [[ "$DELEGATE_PERF_TIMING" == "0" || "$DELEGATE_PERF_TIMING" == "1" ]] || \
+    die "la sesión pública ${CHECK_DELEGATE} no recibió APP_PERF_TIMING válido"
+  [[ "$DELEGATE_PERF_TIMING" == "$APPLICATION_PERF_TIMING" ]] || \
+    die "APP_PERF_TIMING de la sesión (${DELEGATE_PERF_TIMING}) no coincide con application.yml (${APPLICATION_PERF_TIMING})"
+
   WORKER_STATE="$(rssh "podman inspect '${BACKGROUND_WORKER_NAME}' --format '{{.State.Status}}' 2>/dev/null || true")"
   WORKER_IMAGE="$(rssh "podman inspect '${BACKGROUND_WORKER_NAME}' --format '{{.ImageName}}' 2>/dev/null || true")"
   [[ "$WORKER_STATE" == "running" ]] || die "el worker de reportes no está activo: ${WORKER_STATE:-ausente}"
@@ -293,7 +322,7 @@ if [[ "$MODE" == "check" ]]; then
   rssh "podman exec '${BACKGROUND_WORKER_NAME}' grep -q '^browser=Chrome/' /app/cache/background_reports/worker.ready" || \
     die "el worker no registró un arranque headless correcto en su marcador"
   echo "  Commit:     ${ACTIVE_IMAGE_REVISION}, coincide con la fuente local"
-  echo "  Sesión:     ${CHECK_DELEGATE}, policy=${BROKER_POLICY}"
+  echo "  Sesión:     ${CHECK_DELEGATE}, policy=${BROKER_POLICY}, perf=${APPLICATION_PERF_TIMING}"
   echo "  Worker:     ${WORKER_STATE}, preflight headless OK"
   echo ""
   echo "CHECK OK: no se realizaron cambios en Colors."
@@ -302,6 +331,7 @@ fi
 
 if [[ "$SKIP_TESTS" == "0" ]]; then
   command -v Rscript >/dev/null 2>&1 || die "Rscript no está disponible para ejecutar las pruebas"
+  command -v node >/dev/null 2>&1 || die "node no está disponible para ejecutar las pruebas JavaScript"
   echo ""
   echo "[1/7] Validando sintaxis y pruebas R..."
   (
@@ -309,6 +339,9 @@ if [[ "$SKIP_TESTS" == "0" ]]; then
     Rscript -e "invisible(parse(file='global.R')); invisible(parse(file='ui.R')); invisible(parse(file='server.R'))"
     Rscript -e "if (!requireNamespace('testthat', quietly=TRUE)) stop('testthat no está instalado'); testthat::test_dir('tests/testthat', reporter='summary')"
     Rscript scripts/test_background_report_jobs.R
+    Rscript scripts/test_renderer_prewarm_scheduling.R
+    Rscript scripts/test_plot_paint_timing_static.R
+    node tests/js/test_plot_paint_gate.js
     Rscript scripts/test_colors_shinyproxy_static_assets.R
     python3 -B scripts/test_colors_shinyproxy_candidates.py
   )
@@ -467,12 +500,12 @@ rssh "set -e
   if ! grep -q 'APP_BUILD_REVISION:' \"\$config\"; then
     sed -i '/APP_PERF_RUN_LABEL:/a\        APP_BUILD_REVISION: \"unknown\"' \"\$config\"
   fi
-  sed -i -E 's|^        APP_PERF_TIMING:.*|        APP_PERF_TIMING: \"1\"|' \"\$config\"
+  sed -i -E 's|^        APP_PERF_TIMING:.*|        APP_PERF_TIMING: \"${COLORS_PERF_TIMING}\"|' \"\$config\"
   sed -i -E 's|^        APP_PERF_RUN_LABEL:.*|        APP_PERF_RUN_LABEL: \"${PERF_RUN_LABEL}\"|' \"\$config\"
   sed -i -E 's|^        APP_BUILD_REVISION:.*|        APP_BUILD_REVISION: \"${NEW_IMAGE}\"|' \"\$config\"
   grep -q 'APP_BACKGROUND_REPORTS_ENABLED: \"\${SP_BACKGROUND_REPORTS_ENABLED:1}\"' \"\$config\"
   grep -q 'APP_LASTZ_GLOBAL_WORKERS:' \"\$config\"
-  grep -q 'APP_PERF_TIMING: \"1\"' \"\$config\"
+  test \"\$(grep -c '^        APP_PERF_TIMING: \"${COLORS_PERF_TIMING}\"$' \"\$config\")\" = 1
   grep -q 'APP_PERF_LOG_DIR: \"/app/cache/perf_runs\"' \"\$config\"
   grep -q 'APP_PERF_RUN_LABEL: \"${PERF_RUN_LABEL}\"' \"\$config\"
   grep -q 'APP_BUILD_REVISION: \"${NEW_IMAGE}\"' \"\$config\"
@@ -801,6 +834,20 @@ verify_static_release() {
       echo 'STATIC_GUARD_FAILED: orthology-policy-mismatch' >&2
       exit 1
     fi
+    application_perf=\$(sed -n 's/^        APP_PERF_TIMING: \"\([01]\)\"$/\1/p' '${APP_DIR}/shinyproxy/application.yml')
+    delegate_perf=\$(podman inspect \"\$delegate\" --format '{{range .Config.Env}}{{println .}}{{end}}' | sed -n 's/^APP_PERF_TIMING=//p')
+    if [ \"\$application_perf\" != '${COLORS_PERF_TIMING}' ]; then
+      echo 'STATIC_GUARD_FAILED: application-perf-timing' >&2
+      exit 1
+    fi
+    case \"\$delegate_perf\" in
+      0|1) ;;
+      *) echo 'STATIC_GUARD_FAILED: delegate-perf-timing' >&2; exit 1 ;;
+    esac
+    if [ \"\$delegate_perf\" != \"\$application_perf\" ]; then
+      echo 'STATIC_GUARD_FAILED: perf-timing-mismatch' >&2
+      exit 1
+    fi
     if podman inspect \"\$delegate\" --format '{{range .Config.Env}}{{println .}}{{end}}' | \
          grep -q '^FEEDBACK_RESEND_API_KEY='; then
       echo 'la sesión pública recibió FEEDBACK_RESEND_API_KEY' >&2
@@ -948,6 +995,11 @@ rssh "set -e
   delegate_policy=\$(podman inspect \"\$delegate\" --format '{{range .Config.Env}}{{println .}}{{end}}' | sed -n 's/^APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY=//p')
   case \"\$delegate_policy\" in 0|1) ;; *) fail_guard delegate-orthology-policy ;; esac
   test \"\$delegate_policy\" = \"\$broker_policy\" || fail_guard orthology-policy-mismatch
+  application_perf=\$(sed -n 's/^        APP_PERF_TIMING: \"\([01]\)\"$/\1/p' '${APP_DIR}/shinyproxy/application.yml')
+  test \"\$application_perf\" = '${COLORS_PERF_TIMING}' || fail_guard application-perf-timing
+  delegate_perf=\$(podman inspect \"\$delegate\" --format '{{range .Config.Env}}{{println .}}{{end}}' | sed -n 's/^APP_PERF_TIMING=//p')
+  case \"\$delegate_perf\" in 0|1) ;; *) fail_guard delegate-perf-timing ;; esac
+  test \"\$delegate_perf\" = \"\$application_perf\" || fail_guard perf-timing-mismatch
   podman ps --format '{{.Names}}|{{.Image}}|{{.Status}}|{{.Networks}}'
 "
 FINAL_STATUS=$?
