@@ -21,18 +21,25 @@ from typing import Iterable
 APP_VALUES = (
     ("APP_ASSET_VERSION", '"${APP_ASSET_VERSION:}"'),
     ("APP_STATIC_BASE_URL", '"${APP_STATIC_BASE_URL:}"'),
-    ("APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY", '"${APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY:0}"'),
 )
 COMPOSE_VALUES = (
     ("APP_ASSET_VERSION", '"${APP_ASSET_VERSION:-}"'),
     ("APP_STATIC_BASE_URL", '"${APP_STATIC_BASE_URL:-}"'),
-    ("APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY", '"${APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY:-0}"'),
 )
+ORTHOLOGY_POLICY_KEY = "APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY"
 ENV_FILE_MOUNT_RE = re.compile(r"(?<![A-Za-z0-9_.])\.env(?![A-Za-z0-9_.-])")
 
 
 class CandidateError(ValueError):
     """The input cannot be transformed without making an unsafe assumption."""
+
+
+def _resolved_values(
+    values: tuple[tuple[str, str], ...], orthology_policy: str
+) -> tuple[tuple[str, str], ...]:
+    if orthology_policy not in {"0", "1"}:
+        raise CandidateError("orthology policy must be the literal 0 or 1")
+    return (*values, (ORTHOLOGY_POLICY_KEY, f'"{orthology_policy}"'))
 
 
 def _body(line: str) -> str:
@@ -226,8 +233,9 @@ def _upsert_mapping(
     return output
 
 
-def build_application_candidate(text: str) -> str:
+def build_application_candidate(text: str, orthology_policy: str = "0") -> str:
     lines = _prepare(text, "application.yml")
+    values = _resolved_values(APP_VALUES, orthology_policy)
     if _key_matches(lines, "container-env-file"):
         raise CandidateError("application.yml: container-env-file is not accepted")
 
@@ -282,7 +290,7 @@ def build_application_candidate(text: str) -> str:
         raise CandidateError("application.yml: container-env is outside the cgv spec")
     end = _block_end(lines, anchor, _indent(lines[anchor]))
 
-    for key, _ in APP_VALUES:
+    for key, _ in values:
         in_spec = [
             index + spec + 1
             for index, _match in _key_matches(lines[spec + 1 : spec_end], key)
@@ -296,14 +304,15 @@ def build_application_candidate(text: str) -> str:
             lines,
             anchor=anchor,
             end=end,
-            values=APP_VALUES,
+            values=values,
             label="application.yml cgv container-env",
         )
     )
 
 
-def build_compose_candidate(text: str) -> str:
+def build_compose_candidate(text: str, orthology_policy: str = "0") -> str:
     lines = _prepare(text, "compose.yml")
+    values = _resolved_values(COMPOSE_VALUES, orthology_policy)
     services = _mapping_anchor_matches(lines, "services", indent=0)
     if len(services) != 1:
         raise CandidateError("compose.yml: expected exactly one top-level services mapping")
@@ -373,7 +382,7 @@ def build_compose_candidate(text: str) -> str:
     anchor = environments[0]
     end = _block_end(lines, anchor, _indent(lines[anchor]))
 
-    for key, _ in COMPOSE_VALUES:
+    for key, _ in values:
         in_service = [
             index + service + 1
             for index, _match in _key_matches(lines[service + 1 : service_end], key)
@@ -387,7 +396,7 @@ def build_compose_candidate(text: str) -> str:
             lines,
             anchor=anchor,
             end=end,
-            values=COMPOSE_VALUES,
+            values=values,
             label="compose.yml shinyproxy environment",
         )
     )
@@ -435,6 +444,7 @@ def write_candidates(
     application_output: Path,
     compose: Path,
     compose_output: Path,
+    orthology_policy: str,
 ) -> None:
     resolved = [path.resolve() for path in (application, application_output, compose, compose_output)]
     if len(set(resolved)) != 4:
@@ -446,8 +456,8 @@ def write_candidates(
     compose_text, compose_stat = _read_input(compose, "compose.yml")
 
     # Validate and build both documents before creating either output.
-    application_candidate = build_application_candidate(application_text)
-    compose_candidate = build_compose_candidate(compose_text)
+    application_candidate = build_application_candidate(application_text, orthology_policy)
+    compose_candidate = build_compose_candidate(compose_text, orthology_policy)
 
     staged: list[tuple[Path, Path]] = []
     try:
@@ -473,12 +483,14 @@ def main() -> None:
     parser.add_argument("--application-output", required=True, type=Path)
     parser.add_argument("--compose", required=True, type=Path)
     parser.add_argument("--compose-output", required=True, type=Path)
+    parser.add_argument("--orthology-policy", required=True, choices=("0", "1"))
     args = parser.parse_args()
     write_candidates(
         args.application,
         args.application_output,
         args.compose,
         args.compose_output,
+        args.orthology_policy,
     )
 
 

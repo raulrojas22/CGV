@@ -129,16 +129,94 @@ assert(broker_candidate_pos < compose_validate_pos &&
 assert(application_move_pos < cutover_teardown_pos && compose_move_pos < cutover_teardown_pos,
        "Server-owned ShinyProxy candidates must move immediately before cutover.")
 
+candidate_policy_default_pos <- regexpr(
+  "  orthology_policy=0\n  if [ \\\"\\$policy_count\\\" = 1 ]; then",
+  deploy,
+  fixed = TRUE
+)[1]
+candidate_policy_arg_pos <- regexpr(
+  "--orthology-policy \\\"\\$orthology_policy\\\"",
+  deploy,
+  fixed = TRUE
+)[1]
+assert(candidate_policy_default_pos > 0 && candidate_policy_arg_pos > candidate_policy_default_pos,
+       "A missing Colors .env policy must resolve to literal 0 before candidate generation.")
+
+cutover_start <- regexpr('echo "[6/7] Cambiando producción', deploy, fixed = TRUE)[1]
+assert(cutover_start > 0, "Colors cutover block is missing.")
+cutover_text <- substring(deploy, cutover_start)
+cutover_policy_default_pos <- regexpr("  orthology_policy=0", cutover_text, fixed = TRUE)[1]
+cutover_env_copy_pos <- regexpr("  cp -p .env \\\"\\$env_candidate\\\"", cutover_text, fixed = TRUE)[1]
+cutover_policy_append_pos <- regexpr(
+  "APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY=\\$orthology_policy\\\" >> \\\"\\$env_candidate",
+  cutover_text,
+  fixed = TRUE
+)[1]
+cutover_policy_agreement_pos <- regexpr(
+  "test \\\"\\$application_policy\\\" = \\\"\\$orthology_policy\\\"",
+  cutover_text,
+  fixed = TRUE
+)[1]
+cutover_compose_config_pos <- regexpr("podman-compose --env-file", cutover_text, fixed = TRUE)[1]
+cutover_first_move_pos <- regexpr("mv '${COLORS_APPLICATION_CANDIDATE}'", cutover_text, fixed = TRUE)[1]
+cutover_teardown_check_pos <- regexpr("${teardown_stack_command}", cutover_text, fixed = TRUE)[1]
+assert(all(c(cutover_policy_default_pos, cutover_env_copy_pos, cutover_policy_append_pos,
+             cutover_policy_agreement_pos, cutover_compose_config_pos,
+             cutover_first_move_pos, cutover_teardown_check_pos) > 0) &&
+         cutover_policy_default_pos < cutover_env_copy_pos &&
+         cutover_env_copy_pos < cutover_policy_append_pos &&
+         cutover_policy_append_pos < cutover_policy_agreement_pos &&
+         cutover_policy_agreement_pos < cutover_compose_config_pos &&
+         cutover_compose_config_pos < cutover_first_move_pos &&
+         cutover_first_move_pos < cutover_teardown_check_pos,
+       "Colors must materialize and verify the literal policy before Compose validation and teardown.")
+
+resolve_policy_fixture <- function(env_lines) {
+  values <- grep("^APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY=", env_lines, value = TRUE)
+  if (!length(values)) return("0")
+  if (length(values) != 1L || !grepl("^[01]$", sub("^[^=]*=", "", values))) return(NA_character_)
+  sub("^[^=]*=", "", values)
+}
+assert(identical(resolve_policy_fixture(c("CGV_IMAGE=release")), "0"),
+       "Regression: an absent policy must materialize as 0.")
+assert(identical(resolve_policy_fixture(c("APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY=1")), "1"),
+       "Regression: an explicit strict policy must survive as 1.")
+assert(is.na(resolve_policy_fixture(c("APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY=2"))),
+       "Regression: invalid policy values must fail closed.")
+
+rollback_text <- substring(deploy, rollback_pos, cutover_start - 1L)
+rollback_env_pos <- regexpr("cp -p '${BACKUP_DIR}/app.env' .env", rollback_text, fixed = TRUE)[1]
+rollback_compose_pos <- regexpr(
+  "cp -p '${BACKUP_DIR}/docker-compose.shinyproxy.colors.yml' docker-compose.shinyproxy.colors.yml",
+  rollback_text,
+  fixed = TRUE
+)[1]
+rollback_application_pos <- regexpr(
+  "cp -p '${BACKUP_DIR}/application.yml' shinyproxy/application.yml",
+  rollback_text,
+  fixed = TRUE
+)[1]
+rollback_teardown_pos <- regexpr("${teardown_stack_command}", rollback_text, fixed = TRUE)[1]
+rollback_up_pos <- regexpr("podman-compose -f docker-compose.shinyproxy.colors.yml up -d", rollback_text, fixed = TRUE)[1]
+assert(all(c(rollback_env_pos, rollback_compose_pos, rollback_application_pos,
+             rollback_teardown_pos, rollback_up_pos) > 0) &&
+         max(rollback_env_pos, rollback_compose_pos, rollback_application_pos) < rollback_teardown_pos &&
+         rollback_teardown_pos < rollback_up_pos,
+       "Rollback must restore .env, Compose, and application.yml before restarting the old stack.")
+
 required <- c(
   "CGV_STATIC_REVISION='${STATIC_REVISION}'",
   "APP_ASSET_VERSION=${STATIC_REVISION}",
   "APP_STATIC_BASE_URL=/cgv-static/${STATIC_REVISION}",
   "APP_ASSET_VERSION: \\\"\\${APP_ASSET_VERSION:}\\\"",
   "APP_STATIC_BASE_URL: \\\"\\${APP_STATIC_BASE_URL:}\\\"",
-  "APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY: \\\"\\${APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY:0}\\\"",
   "APP_ASSET_VERSION: \\\"\\${APP_ASSET_VERSION:-}\\\"",
   "APP_STATIC_BASE_URL: \\\"\\${APP_STATIC_BASE_URL:-}\\\"",
-  "APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY: \\\"\\${APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY:-0}\\\"",
+  "--orthology-policy \\\"\\$orthology_policy\\\"",
+  "APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY=\\$orthology_policy",
+  "application_policy=\\$(sed -n",
+  "compose_policy=\\$(sed -n",
+  "! grep -Fq '\\${APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY'",
   "COLORS_ENV_CANDIDATE",
   "rm -f '${COLORS_APPLICATION_CANDIDATE}' '${COLORS_COMPOSE_CANDIDATE}' '${COLORS_NGINX_CANDIDATE}' '${COLORS_ENV_CANDIDATE}'",
   "Colors no debe usar container-env-file",

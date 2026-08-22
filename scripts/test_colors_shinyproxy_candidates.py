@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import importlib.util
-import os
 from pathlib import Path
 import subprocess
 import sys
@@ -60,12 +59,12 @@ expected_application = APPLICATION.replace(
     "      container-env:\n"
     '        APP_ASSET_VERSION: "${APP_ASSET_VERSION:}"\n'
     '        APP_STATIC_BASE_URL: "${APP_STATIC_BASE_URL:}"\n'
-    '        APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY: "${APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY:0}"\n',
+    '        APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY: "0"\n',
 )
 assert application_candidate == expected_application
 assert '        APP_ASSET_VERSION: "${APP_ASSET_VERSION:}"\n' in application_candidate
 assert '        APP_STATIC_BASE_URL: "${APP_STATIC_BASE_URL:}"\n' in application_candidate
-assert '        APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY: "${APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY:0}"\n' in application_candidate
+assert '        APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY: "0"\n' in application_candidate
 assert '        KEEP_APPLICATION: "unchanged"\n' in application_candidate
 assert '        KEEP_OTHER: "yes"\n' in application_candidate
 assert MODULE.build_application_candidate(application_candidate) == application_candidate
@@ -76,14 +75,14 @@ expected_compose = COMPOSE.replace(
     "    environment:\n"
     '      APP_ASSET_VERSION: "${APP_ASSET_VERSION:-}"\n'
     '      APP_STATIC_BASE_URL: "${APP_STATIC_BASE_URL:-}"\n'
-    '      APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY: "${APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY:-0}"\n'
+    '      APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY: "0"\n'
     "      KEEP_COMPOSE",
     1,
 )
 assert compose_candidate == expected_compose
 assert '      APP_ASSET_VERSION: "${APP_ASSET_VERSION:-}"\n' in compose_candidate
 assert '      APP_STATIC_BASE_URL: "${APP_STATIC_BASE_URL:-}"\n' in compose_candidate
-assert '      APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY: "${APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY:-0}"\n' in compose_candidate
+assert '      APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY: "0"\n' in compose_candidate
 assert '      KEEP_COMPOSE: "unchanged"\n' in compose_candidate
 assert '      APP_ASSET_VERSION: "worker-value-is-unrelated"\n' in compose_candidate
 assert MODULE.build_compose_candidate(compose_candidate) == compose_candidate
@@ -93,8 +92,8 @@ existing_application = application_candidate.replace(
 ).replace(
     'APP_STATIC_BASE_URL: "${APP_STATIC_BASE_URL:}"', "APP_STATIC_BASE_URL: old"
 ).replace(
+    'APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY: "0"',
     'APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY: "${APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY:0}"',
-    'APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY: "1"',
 )
 assert MODULE.build_application_candidate(existing_application) == application_candidate
 
@@ -103,8 +102,8 @@ existing_compose = compose_candidate.replace(
 ).replace(
     'APP_STATIC_BASE_URL: "${APP_STATIC_BASE_URL:-}"', "APP_STATIC_BASE_URL: old", 1
 ).replace(
+    'APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY: "0"',
     'APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY: "${APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY:-0}"',
-    'APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY: "1"',
     1,
 )
 assert MODULE.build_compose_candidate(existing_compose) == compose_candidate
@@ -113,26 +112,25 @@ crlf_application = APPLICATION.replace("\n", "\r\n")
 crlf_candidate = MODULE.build_application_candidate(crlf_application)
 assert "\n" not in crlf_candidate.replace("\r\n", "")
 assert 'APP_ASSET_VERSION: "${APP_ASSET_VERSION:}"\r\n' in crlf_candidate
-assert 'APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY: "${APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY:0}"\r\n' in crlf_candidate
+assert 'APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY: "0"\r\n' in crlf_candidate
 
-compose_default_env = os.environ.copy()
-compose_default_env.pop("APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY", None)
-default_value = subprocess.run(
-    ["bash", "-c", 'printf %s "${APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY:-0}"'],
-    check=True,
-    env=compose_default_env,
-    stdout=subprocess.PIPE,
-    text=True,
-).stdout
-override_value = subprocess.run(
-    ["bash", "-c", 'printf %s "${APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY:-0}"'],
-    check=True,
-    env={**compose_default_env, "APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY": "1"},
-    stdout=subprocess.PIPE,
-    text=True,
-).stdout
-assert default_value == "0"
-assert override_value == "1"
+# Regression: a missing server .env flag is resolved to 0 by the deploy before
+# candidate generation. Neither ShinyProxy configuration layer may retain a
+# same-name placeholder for Spring or podman-compose to resolve later.
+assert "${APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY" not in application_candidate
+assert "${APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY" not in compose_candidate
+strict_application = MODULE.build_application_candidate(APPLICATION, "1")
+strict_compose = MODULE.build_compose_candidate(COMPOSE, "1")
+assert 'APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY: "1"' in strict_application
+assert 'APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY: "1"' in strict_compose
+assert MODULE.build_application_candidate(strict_application, "1") == strict_application
+assert MODULE.build_compose_candidate(strict_compose, "1") == strict_compose
+try:
+    MODULE.build_application_candidate(APPLICATION, "2")
+except MODULE.CandidateError as error:
+    assert "literal 0 or 1" in str(error)
+else:
+    raise AssertionError("an invalid orthology policy was accepted")
 
 
 def rejected(builder, text: str, expected: str) -> None:
@@ -341,6 +339,8 @@ with tempfile.TemporaryDirectory(prefix="colors-candidates-") as temp_dir:
             str(compose),
             "--compose-output",
             str(compose_output),
+            "--orthology-policy",
+            "0",
         ],
         check=True,
     )
@@ -371,6 +371,8 @@ with tempfile.TemporaryDirectory(prefix="colors-candidates-") as temp_dir:
             str(compose),
             "--compose-output",
             str(compose_output),
+            "--orthology-policy",
+            "0",
         ],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,

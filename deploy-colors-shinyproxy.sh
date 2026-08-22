@@ -404,11 +404,25 @@ rssh "chmod 600 '${REMOTE_EMAIL_ENV}' && test \"\$(stat -c '%a' '${REMOTE_EMAIL_
 echo "  Preparando candidatos server-owned con allow-list de assets..."
 rssh "set -e
   cd '${APP_DIR}'
+  policy_count=\$(grep -c '^APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY=' '${APP_DIR}/.env' || true)
+  if [ \"\$policy_count\" -gt 1 ]; then
+    echo 'POLICY_GUARD_FAILED: env-duplicate-orthology-policy' >&2
+    exit 1
+  fi
+  orthology_policy=0
+  if [ \"\$policy_count\" = 1 ]; then
+    if ! grep -Eq '^APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY=[01]$' '${APP_DIR}/.env'; then
+      echo 'POLICY_GUARD_FAILED: env-invalid-orthology-policy' >&2
+      exit 1
+    fi
+    orthology_policy=\$(sed -n 's/^APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY=//p' '${APP_DIR}/.env')
+  fi
   python3 -B scripts/build_colors_shinyproxy_candidates.py \
     --application '${APP_DIR}/shinyproxy/application.yml' \
     --application-output '${COLORS_APPLICATION_CANDIDATE}' \
     --compose '${COMPOSE_FILE}' \
-    --compose-output '${COLORS_COMPOSE_CANDIDATE}'
+    --compose-output '${COLORS_COMPOSE_CANDIDATE}' \
+    --orthology-policy \"\$orthology_policy\"
   test -s '${COLORS_APPLICATION_CANDIDATE}'
   test -s '${COLORS_COMPOSE_CANDIDATE}'
 " || die "no se pudieron generar los candidatos server-owned seguros"
@@ -498,10 +512,8 @@ rssh "set -e
 rssh "set -e
   test \"\$(grep -c '^        APP_ASSET_VERSION: \"\${APP_ASSET_VERSION:}\"$' '${COLORS_APPLICATION_CANDIDATE}')\" = 1
   test \"\$(grep -c '^        APP_STATIC_BASE_URL: \"\${APP_STATIC_BASE_URL:}\"$' '${COLORS_APPLICATION_CANDIDATE}')\" = 1
-  test \"\$(grep -c '^        APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY: \"\${APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY:0}\"$' '${COLORS_APPLICATION_CANDIDATE}')\" = 1
   test \"\$(grep -c '^      APP_ASSET_VERSION: \"\${APP_ASSET_VERSION:-}\"$' '${COLORS_COMPOSE_CANDIDATE}')\" = 1
   test \"\$(grep -c '^      APP_STATIC_BASE_URL: \"\${APP_STATIC_BASE_URL:-}\"$' '${COLORS_COMPOSE_CANDIDATE}')\" = 1
-  test \"\$(grep -c '^      APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY: \"\${APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY:-0}\"$' '${COLORS_COMPOSE_CANDIDATE}')\" = 1
   policy_count=\$(grep -c '^APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY=' '${APP_DIR}/.env' || true)
   if [ \"\$policy_count\" -gt 1 ]; then
     echo 'POLICY_GUARD_FAILED: env-duplicate-orthology-policy' >&2
@@ -511,6 +523,16 @@ rssh "set -e
     echo 'POLICY_GUARD_FAILED: env-invalid-orthology-policy' >&2
     exit 1
   fi
+  orthology_policy=0
+  if [ \"\$policy_count\" = 1 ]; then
+    orthology_policy=\$(sed -n 's/^APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY=//p' '${APP_DIR}/.env')
+  fi
+  application_policy=\$(sed -n 's/^        APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY: \"\([01]\)\"$/\1/p' '${COLORS_APPLICATION_CANDIDATE}')
+  compose_policy=\$(sed -n 's/^      APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY: \"\([01]\)\"$/\1/p' '${COLORS_COMPOSE_CANDIDATE}')
+  test \"\$application_policy\" = \"\$orthology_policy\"
+  test \"\$compose_policy\" = \"\$orthology_policy\"
+  ! grep -Fq '\${APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY' '${COLORS_APPLICATION_CANDIDATE}'
+  ! grep -Fq '\${APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY' '${COLORS_COMPOSE_CANDIDATE}'
   ! grep -q '^[[:space:]]*container-env-file:' '${COLORS_APPLICATION_CANDIDATE}'
   ! grep -q '^[[:space:]]*env_file:' '${COLORS_COMPOSE_CANDIDATE}'
   ! grep -q '/opt/shinyproxy/env/cgv.env' '${COLORS_COMPOSE_CANDIDATE}'
@@ -827,6 +849,10 @@ rssh "set -e
     echo 'POLICY_GUARD_FAILED: env-invalid-orthology-policy' >&2
     exit 1
   fi
+  orthology_policy=0
+  if [ \"\$policy_count\" = 1 ]; then
+    orthology_policy=\$(sed -n 's/^APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY=//p' .env)
+  fi
   env_candidate='${COLORS_ENV_CANDIDATE}'
   cp -p .env \"\$env_candidate\"
   sed -i -E 's|^CGV_IMAGE=.*|CGV_IMAGE=${NEW_IMAGE}|' \"\$env_candidate\"
@@ -840,11 +866,23 @@ rssh "set -e
   else
     printf '%s\n' 'APP_STATIC_BASE_URL=/cgv-static/${STATIC_REVISION}' >> \"\$env_candidate\"
   fi
+  if grep -q '^APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY=' \"\$env_candidate\"; then
+    sed -i -E \"s|^APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY=.*|APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY=\$orthology_policy|\" \"\$env_candidate\"
+  else
+    printf '%s\n' \"APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY=\$orthology_policy\" >> \"\$env_candidate\"
+  fi
   grep -qx 'APP_ASSET_VERSION=${STATIC_REVISION}' \"\$env_candidate\"
   grep -qx 'APP_STATIC_BASE_URL=/cgv-static/${STATIC_REVISION}' \"\$env_candidate\"
+  grep -qx \"APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY=\$orthology_policy\" \"\$env_candidate\"
   test -s '${COLORS_APPLICATION_CANDIDATE}'
   test -s '${COLORS_COMPOSE_CANDIDATE}'
   test -s '${COLORS_NGINX_CANDIDATE}'
+  application_policy=\$(sed -n 's/^        APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY: \"\([01]\)\"$/\1/p' '${COLORS_APPLICATION_CANDIDATE}')
+  compose_policy=\$(sed -n 's/^      APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY: \"\([01]\)\"$/\1/p' '${COLORS_COMPOSE_CANDIDATE}')
+  test \"\$application_policy\" = \"\$orthology_policy\"
+  test \"\$compose_policy\" = \"\$orthology_policy\"
+  ! grep -Fq '\${APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY' '${COLORS_APPLICATION_CANDIDATE}'
+  ! grep -Fq '\${APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY' '${COLORS_COMPOSE_CANDIDATE}'
   podman-compose --env-file \"\$env_candidate\" -f '${COLORS_COMPOSE_CANDIDATE}' config >/dev/null
   mv '${COLORS_APPLICATION_CANDIDATE}' '${APP_DIR}/shinyproxy/application.yml'
   mv '${COLORS_COMPOSE_CANDIDATE}' '${COMPOSE_FILE}'
