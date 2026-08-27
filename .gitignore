@@ -8,6 +8,7 @@
 .codex_work/
 .qodo/
 *.Rproj
+*.docx
 
 # Secrets / local env
 .env
@@ -20,6 +21,8 @@ cache/*
 !cache/.gitkeep
 logs/
 outputs/
+/output/
+/artifacts/
 reviewer-results/
 tmp/
 _incoming_*/
