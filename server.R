@@ -1257,28 +1257,48 @@ function(input, output, session) {
         ready <- as.character(orthoRenderedPlotIds() %||% character(0))
         all(ids %in% ready)
     })
-    homoRenderChunkSize <- 10L
-    homoInitialVisibleCount <- max(1L, min(homoRenderChunkSize, parse_positive_int_env("APP_HOMO_INITIAL_VISIBLE", 1L)))
+    # Register every normal primary card together. The progressive one-card-first
+    # profile remains available as an explicit environment override, but it is
+    # not the production default because it adds a browser-paint gate and a
+    # second reactive render wave after the search has already finished.
+    eagerCardRegistrationDefault <- 64L
+    eagerCardRegistrationSafetyCap <- 256L
+    homoRenderChunkSize <- eagerCardRegistrationDefault
+    homoInitialVisibleCount <- max(
+        1L,
+        min(
+            eagerCardRegistrationSafetyCap,
+            parse_positive_int_env("APP_HOMO_INITIAL_VISIBLE", eagerCardRegistrationDefault)
+        )
+    )
     homoVisibleCount <- reactiveVal(homoInitialVisibleCount)
     homoRenderedPlotIds <- reactiveVal(character())
     homoInsertedCardIds <- reactiveVal(character())
     homoFooterOutputsBound <- reactiveVal(character())
     homoDownloadOutputsBound <- reactiveVal(character())
-    orthoRenderChunkSize <- max(1L, min(8L, parse_positive_int_env("APP_ORTHO_RENDER_CHUNK_SIZE", 6L)))
+    orthoRenderChunkSize <- max(
+        1L,
+        min(
+            eagerCardRegistrationSafetyCap,
+            parse_positive_int_env("APP_ORTHO_RENDER_CHUNK_SIZE", eagerCardRegistrationDefault)
+        )
+    )
     orthoAutoRenderMore <- {
-        raw <- tolower(trimws(as.character(Sys.getenv("APP_ORTHO_AUTO_RENDER_MORE", "1") %||% "1")))
+        raw <- tolower(trimws(as.character(Sys.getenv("APP_ORTHO_AUTO_RENDER_MORE", "0") %||% "0")))
         !raw %in% c("", "0", "false", "no", "off")
     }
     configuredOrthoInitialVisibleCount <- max(
         1L,
-        min(orthoRenderChunkSize, parse_positive_int_env("APP_ORTHO_INITIAL_VISIBLE", 2L))
+        min(
+            eagerCardRegistrationSafetyCap,
+            parse_positive_int_env("APP_ORTHO_INITIAL_VISIBLE", eagerCardRegistrationDefault)
+        )
     )
-    # Automatic rendering is intentionally one-card-first: additional cards are
-    # released only after the browser acknowledges that primary SVG's paint.
+    # When explicitly enabled, progressive rendering still starts with one card.
     orthoInitialVisibleCount <- if (isTRUE(orthoAutoRenderMore)) 1L else configuredOrthoInitialVisibleCount
     orthoAutoRenderDelay <- {
-        raw <- suppressWarnings(as.numeric(Sys.getenv("APP_ORTHO_AUTO_RENDER_DELAY_MS", "30")))
-        if (!is.finite(raw) || is.na(raw)) raw <- 30
+        raw <- suppressWarnings(as.numeric(Sys.getenv("APP_ORTHO_AUTO_RENDER_DELAY_MS", "0")))
+        if (!is.finite(raw) || is.na(raw)) raw <- 0
         min(750, max(0, raw)) / 1000
     }
     orthoFirstPaintTimeout <- min(

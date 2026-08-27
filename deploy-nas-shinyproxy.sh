@@ -47,6 +47,22 @@ CGV_DEPS_IMAGE="${CGV_DEPS_IMAGE:-$(local_env_value CGV_DEPS_IMAGE cgv-deps:1.0.
 REBUILD_R_DEPS="${REBUILD_R_DEPS:-0}"
 CGV_NGINX_PORT="${CGV_NGINX_PORT:-$(local_env_value CGV_NGINX_PORT 18080)}"
 PERF_RUN_LABEL="${PERF_RUN_LABEL:-manual}"
+NAS_PERF_TIMING="${NAS_PERF_TIMING:-0}"
+
+# Personal/NAS uses the same fixed eager profile as Colors. Keeping these
+# values here prevents an old remote .env from silently re-enabling deferred
+# enrichment, progressive card batches, or a second render nudge.
+NAS_ORTHO_SUSPEND_HIDDEN="1"
+NAS_HOMO_DEFER_SEQUENCE="0"
+NAS_ORTHO_DEFER_SEQUENCE="0"
+NAS_FOOTER_DEFER_SEQUENCE="0"
+NAS_DEFER_FEATURE_GC="0"
+NAS_ORTHO_RENDER_CHUNK_SIZE="64"
+NAS_ORTHO_AUTO_RENDER_MORE="0"
+NAS_ORTHO_AUTO_RENDER_DELAY_MS="0"
+NAS_HOMO_INITIAL_VISIBLE="64"
+NAS_ORTHO_INITIAL_VISIBLE="64"
+NAS_ORTHO_SERVER_RENDER_NUDGE="0"
 
 SSH_SOCK="/tmp/deploy-nas-sp-ssh-$$"
 ssh -fNM -S "$SSH_SOCK" "${NAS_USER}@${NAS_HOST}"
@@ -78,13 +94,18 @@ echo "============================================"
 echo "  CGV ShinyProxy — Deploy to NAS"
 echo "  https://cgvapp.com"
 echo "  Modo: multiusuario (1 contenedor/usuario)"
-echo "  Captura rendimiento: ${PERF_RUN_LABEL}"
+echo "  Telemetría: ${NAS_PERF_TIMING} (etiqueta=${PERF_RUN_LABEL})"
+echo "  Render: eager, hasta 64 tarjetas primarias simultáneas"
 echo "  R dependencies: ${CGV_DEPS_IMAGE} (rebuild=${REBUILD_R_DEPS})"
 echo "============================================"
 echo ""
 
 if [[ "${REBUILD_R_DEPS}" != "0" && "${REBUILD_R_DEPS}" != "1" ]]; then
   echo "ERROR: REBUILD_R_DEPS debe ser 0 o 1." >&2
+  exit 1
+fi
+if [[ "${NAS_PERF_TIMING}" != "0" && "${NAS_PERF_TIMING}" != "1" ]]; then
+  echo "ERROR: NAS_PERF_TIMING debe ser 0 o 1." >&2
   exit 1
 fi
 if ! [[ "${PERF_RUN_LABEL}" =~ ^[A-Za-z0-9._-]+$ ]]; then
@@ -351,8 +372,38 @@ nssh "
   upsert_env SP_DATA_DIR '${NAS_APP_DIR}/data'
   upsert_env SP_CACHE_DIR '${NAS_APP_DIR}/cache'
   upsert_env SP_NCBI_DOWNLOADS_DIR '${NAS_APP_DIR}/ncbi_downloads'
-  upsert_env SP_APP_PERF_TIMING '1'
+  upsert_env SP_APP_PERF_TIMING '${NAS_PERF_TIMING}'
   upsert_env SP_PERF_RUN_LABEL '${PERF_RUN_LABEL}'
+  upsert_env SP_ORTHO_SUSPEND_HIDDEN '${NAS_ORTHO_SUSPEND_HIDDEN}'
+  upsert_env SP_HOMO_DEFER_SEQUENCE '${NAS_HOMO_DEFER_SEQUENCE}'
+  upsert_env SP_ORTHO_DEFER_SEQUENCE '${NAS_ORTHO_DEFER_SEQUENCE}'
+  upsert_env SP_FOOTER_DEFER_SEQUENCE '${NAS_FOOTER_DEFER_SEQUENCE}'
+  upsert_env SP_DEFER_FEATURE_GC '${NAS_DEFER_FEATURE_GC}'
+  upsert_env SP_ORTHO_RENDER_CHUNK_SIZE '${NAS_ORTHO_RENDER_CHUNK_SIZE}'
+  upsert_env SP_ORTHO_AUTO_RENDER_MORE '${NAS_ORTHO_AUTO_RENDER_MORE}'
+  upsert_env SP_ORTHO_AUTO_RENDER_DELAY_MS '${NAS_ORTHO_AUTO_RENDER_DELAY_MS}'
+  upsert_env SP_HOMO_INITIAL_VISIBLE '${NAS_HOMO_INITIAL_VISIBLE}'
+  upsert_env SP_ORTHO_INITIAL_VISIBLE '${NAS_ORTHO_INITIAL_VISIBLE}'
+  upsert_env SP_ORTHO_SERVER_RENDER_NUDGE '${NAS_ORTHO_SERVER_RENDER_NUDGE}'
+
+  for expected_profile in \
+    'SP_APP_PERF_TIMING=${NAS_PERF_TIMING}' \
+    'SP_ORTHO_SUSPEND_HIDDEN=${NAS_ORTHO_SUSPEND_HIDDEN}' \
+    'SP_HOMO_DEFER_SEQUENCE=${NAS_HOMO_DEFER_SEQUENCE}' \
+    'SP_ORTHO_DEFER_SEQUENCE=${NAS_ORTHO_DEFER_SEQUENCE}' \
+    'SP_FOOTER_DEFER_SEQUENCE=${NAS_FOOTER_DEFER_SEQUENCE}' \
+    'SP_DEFER_FEATURE_GC=${NAS_DEFER_FEATURE_GC}' \
+    'SP_ORTHO_RENDER_CHUNK_SIZE=${NAS_ORTHO_RENDER_CHUNK_SIZE}' \
+    'SP_ORTHO_AUTO_RENDER_MORE=${NAS_ORTHO_AUTO_RENDER_MORE}' \
+    'SP_ORTHO_AUTO_RENDER_DELAY_MS=${NAS_ORTHO_AUTO_RENDER_DELAY_MS}' \
+    'SP_HOMO_INITIAL_VISIBLE=${NAS_HOMO_INITIAL_VISIBLE}' \
+    'SP_ORTHO_INITIAL_VISIBLE=${NAS_ORTHO_INITIAL_VISIBLE}' \
+    'SP_ORTHO_SERVER_RENDER_NUDGE=${NAS_ORTHO_SERVER_RENDER_NUDGE}'; do
+    grep -Fqx "\$expected_profile" .env || {
+      echo "ERROR: no se pudo fijar el perfil eager: \$expected_profile" >&2
+      exit 1
+    }
+  done
 
   echo '  Iniciando servicios con rutas absolutas del host NAS...'
   CGV_IMAGE='${CGV_IMAGE}' ${REMOTE_DOCKER} compose -f docker-compose.shinyproxy.yml up -d
@@ -424,6 +475,27 @@ nssh "
     echo \"  snapshot=\$static_revision app=\$delegate_revision\" >&2
     exit 1
   fi
+
+  delegate_env=\$(${REMOTE_DOCKER} inspect \"\$delegate\" --format '{{range .Config.Env}}{{println .}}{{end}}')
+  for expected_env in \
+    'APP_PERF_TIMING=${NAS_PERF_TIMING}' \
+    'APP_ORTHO_SUSPEND_HIDDEN=${NAS_ORTHO_SUSPEND_HIDDEN}' \
+    'APP_HOMO_DEFER_SEQUENCE=${NAS_HOMO_DEFER_SEQUENCE}' \
+    'APP_ORTHO_DEFER_SEQUENCE=${NAS_ORTHO_DEFER_SEQUENCE}' \
+    'APP_FOOTER_DEFER_SEQUENCE=${NAS_FOOTER_DEFER_SEQUENCE}' \
+    'APP_DEFER_FEATURE_GC=${NAS_DEFER_FEATURE_GC}' \
+    'APP_ORTHO_RENDER_CHUNK_SIZE=${NAS_ORTHO_RENDER_CHUNK_SIZE}' \
+    'APP_ORTHO_AUTO_RENDER_MORE=${NAS_ORTHO_AUTO_RENDER_MORE}' \
+    'APP_ORTHO_AUTO_RENDER_DELAY_MS=${NAS_ORTHO_AUTO_RENDER_DELAY_MS}' \
+    'APP_HOMO_INITIAL_VISIBLE=${NAS_HOMO_INITIAL_VISIBLE}' \
+    'APP_ORTHO_INITIAL_VISIBLE=${NAS_ORTHO_INITIAL_VISIBLE}' \
+    'APP_ORTHO_SERVER_RENDER_NUDGE=${NAS_ORTHO_SERVER_RENDER_NUDGE}'; do
+    if ! printf '%s\n' \"\$delegate_env\" | grep -Fqx \"\$expected_env\"; then
+      echo \"ERROR: el contenedor CGV no recibió el perfil esperado: \$expected_env\" >&2
+      exit 1
+    fi
+  done
+  echo '  Perfil eager confirmado: chunk=64, auto=0, initial=64/64, nudge=0.'
 
   static_url='http://127.0.0.1:${CGV_NGINX_PORT}/cgv-static/'\"\$static_revision\"
   static_health_code=\$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 \"\$static_url/healthz.txt\" 2>/dev/null || true)

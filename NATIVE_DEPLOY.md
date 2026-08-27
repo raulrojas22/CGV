@@ -178,8 +178,15 @@ APP_FUTURE_MODE=multisession
 APP_FUTURE_WORKERS=2
 
 APP_ORTHO_SUSPEND_HIDDEN=1
+APP_HOMO_DEFER_SEQUENCE=0
 APP_ORTHO_DEFER_SEQUENCE=0
 APP_FOOTER_DEFER_SEQUENCE=0
+APP_DEFER_FEATURE_GC=0
+APP_HOMO_INITIAL_VISIBLE=64
+APP_ORTHO_INITIAL_VISIBLE=64
+APP_ORTHO_RENDER_CHUNK_SIZE=64
+APP_ORTHO_AUTO_RENDER_MORE=0
+APP_ORTHO_AUTO_RENDER_DELAY_MS=0
 APP_HOMO_UPFRONT_ISOFORMS=0
 APP_ORTHO_UPFRONT_ISOFORMS=0
 
@@ -188,10 +195,10 @@ APP_PREWARM_CLEAN=0
 APP_PREWARM_BLOCK_START=0
 ```
 
-These render defaults keep the first gene visualization fast in native/desktop
-runs without removing footer sequence composition or per-feature GC content:
-hidden outputs stay suspended, hidden isoforms are created on expansion, and
-sequence reads are reused from the cached genomic span where possible.
+These render defaults register all normal primary cards together and include
+footer sequence composition and per-feature GC in the first render. Hidden
+outputs stay suspended, hidden isoforms are created on expansion, and sequence
+reads are reused from the cached genomic span where possible.
 
 Optional secrets go in `.env.local`:
 

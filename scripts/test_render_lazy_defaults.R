@@ -4,6 +4,7 @@ server_txt <- paste(readLines("server.R", warn = FALSE), collapse = "\n")
 modules_txt <- paste(readLines(file.path("R", "modules.R"), warn = FALSE), collapse = "\n")
 env_txt <- paste(readLines(".env.example", warn = FALSE), collapse = "\n")
 desktop_main_txt <- paste(readLines(file.path("desktop", "src", "main.js"), warn = FALSE), collapse = "\n")
+perf_runner_txt <- paste(readLines(file.path("scripts", "run_app_perf.sh"), warn = FALSE), collapse = "\n")
 
 expect_pattern <- function(txt, pattern, label) {
     if (!grepl(pattern, txt, perl = TRUE)) {
@@ -100,27 +101,58 @@ expect_pattern(
     "orthologous footer avoids canonical gene sequence extraction while deferred"
 )
 for (env_key in c(
-    "APP_ORTHO_AUTO_RENDER_MORE=1",
+    "APP_ORTHO_RENDER_CHUNK_SIZE=64",
+    "APP_ORTHO_AUTO_RENDER_MORE=0",
+    "APP_ORTHO_AUTO_RENDER_DELAY_MS=0",
     "APP_ORTHO_FIRST_PAINT_TIMEOUT_MS=30000",
     "APP_ORTHO_SUSPEND_HIDDEN=1",
-    "APP_HOMO_DEFER_SEQUENCE=1",
-    "APP_ORTHO_DEFER_SEQUENCE=1",
-    "APP_FOOTER_DEFER_SEQUENCE=1",
-    "APP_DEFER_FEATURE_GC=1",
+    "APP_HOMO_DEFER_SEQUENCE=0",
+    "APP_ORTHO_DEFER_SEQUENCE=0",
+    "APP_FOOTER_DEFER_SEQUENCE=0",
+    "APP_DEFER_FEATURE_GC=0",
     "APP_HOMO_UPFRONT_ISOFORMS=0",
-    "APP_ORTHO_UPFRONT_ISOFORMS=0"
+    "APP_ORTHO_UPFRONT_ISOFORMS=0",
+    "APP_HOMO_INITIAL_VISIBLE=64",
+    "APP_ORTHO_INITIAL_VISIBLE=64"
 )) {
-    expect_pattern(env_txt, env_key, paste("env example keeps", env_key))
+    expect_pattern(env_txt, env_key, paste("env example uses eager rendering:", env_key))
 }
 expect_pattern(
     desktop_main_txt,
-    'APP_HOMO_DEFER_SEQUENCE:\\s*process\\.env\\.APP_HOMO_DEFER_SEQUENCE \\|\\| "1"',
-    "Desktop defers homologous sequence composition by default"
+    'APP_HOMO_DEFER_SEQUENCE:\\s*process\\.env\\.APP_HOMO_DEFER_SEQUENCE \\|\\| "0"',
+    "Desktop computes homologous sequence composition in the initial render"
 )
 expect_pattern(
     desktop_main_txt,
-    'APP_DEFER_FEATURE_GC:\\s*process\\.env\\.APP_DEFER_FEATURE_GC \\|\\| "1"',
-    "Desktop defers feature GC by default"
+    'APP_DEFER_FEATURE_GC:\\s*process\\.env\\.APP_DEFER_FEATURE_GC \\|\\| "0"',
+    "Desktop computes feature GC in the initial render"
+)
+
+for (runner_default in c(
+    'APP_HOMO_INITIAL_VISIBLE="${APP_HOMO_INITIAL_VISIBLE:-64}"',
+    'APP_ORTHO_INITIAL_VISIBLE="${APP_ORTHO_INITIAL_VISIBLE:-64}"',
+    'APP_ORTHO_RENDER_CHUNK_SIZE="${APP_ORTHO_RENDER_CHUNK_SIZE:-64}"',
+    'APP_ORTHO_AUTO_RENDER_MORE="${APP_ORTHO_AUTO_RENDER_MORE:-0}"',
+    'APP_ORTHO_AUTO_RENDER_DELAY_MS="${APP_ORTHO_AUTO_RENDER_DELAY_MS:-0}"',
+    'APP_ORTHO_SERVER_RENDER_NUDGE="${APP_ORTHO_SERVER_RENDER_NUDGE:-0}"',
+    'APP_HOMO_DEFER_SEQUENCE="${APP_HOMO_DEFER_SEQUENCE:-0}"',
+    'APP_ORTHO_DEFER_SEQUENCE="${APP_ORTHO_DEFER_SEQUENCE:-0}"',
+    'APP_FOOTER_DEFER_SEQUENCE="${APP_FOOTER_DEFER_SEQUENCE:-0}"',
+    'APP_DEFER_FEATURE_GC="${APP_DEFER_FEATURE_GC:-0}"'
+)) {
+    if (!grepl(runner_default, perf_runner_txt, fixed = TRUE)) {
+        stop(sprintf("Performance runner is not using the eager render default: %s", runner_default))
+    }
+}
+expect_pattern(
+    perf_runner_txt,
+    'APP_HOMO_DEFER_SEQUENCE="\\$APP_HOMO_DEFER_SEQUENCE"',
+    "performance runner forwards the eager homologous sequence setting"
+)
+expect_pattern(
+    perf_runner_txt,
+    'APP_ORTHO_SERVER_RENDER_NUDGE="\\$APP_ORTHO_SERVER_RENDER_NUDGE"',
+    "performance runner disables the post-flush second render"
 )
 
 cat("render-lazy-defaults-ok\n")
