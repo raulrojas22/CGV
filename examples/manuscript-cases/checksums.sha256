@@ -1,0 +1,3 @@
+deb0bb4eb781494e0885686e27118f3299f3b458d2efdfa1ae1ec555ed0ff635  inputs/queries.tsv
+df1b39299ed1570755853850adc7986c5726a14a6c7c5b5d8a98895f1bec87d9  expected/resolved_genes.tsv
+1094f9b7e0f319162336bdd2ce12c4d147f5a4b01781f891897831a161645cd8  expected/acceptance_criteria.md

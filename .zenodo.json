@@ -2,21 +2,21 @@
   "title": "CGeV: Comparative Gene Viewer",
   "version": "1.1.0",
   "upload_type": "software",
-  "description": "Comparative Gene Viewer (CGeV) is an interactive R/Shiny web application for comparative gene visualization and functional analysis across species.",
+  "description": "Comparative Gene Viewer (CGeV) is an R/Shiny web and desktop application for gene-centered structural comparison and functional context across species.",
   "access_right": "open",
   "license": "mit",
   "creators": [
     {
-      "name": "Rojas-Espinoza, Raul",
-      "affiliation": "University of Talca, Chile"
+      "name": "Rojas-Espinoza, Raúl",
+      "affiliation": "Center for Bioinformatics, Simulation and Modeling (CBSM), Faculty of Engineering, University of Talca, Chile"
     },
     {
       "name": "Riedelsberger, Janin",
-      "affiliation": "University of Talca, Chile"
+      "affiliation": "Center for Bioinformatics, Simulation and Modeling (CBSM), Faculty of Engineering, University of Talca, Chile"
     },
     {
       "name": "Riadi, Gonzalo",
-      "affiliation": "University of Talca, Chile"
+      "affiliation": "Center for Bioinformatics, Simulation and Modeling (CBSM), Faculty of Engineering, University of Talca, Chile"
     }
   ],
   "keywords": [

@@ -1,0 +1,15 @@
+case_id	query_order	species_id	input_query	resolved_symbol	figure_label	resolution_status
+hkt_rice	1	oryza_sativa_ssp_japonica_gcf_034140825_1_asm3414082v1_genomic	HKT1;1	HKT1;1	gene-HKT1;1 -> HKT1;1	resolved
+hkt_rice	2	oryza_sativa_ssp_japonica_gcf_034140825_1_asm3414082v1_genomic	HKT1;3	HKT1;3	gene-HKT1;3 -> HKT1;3	resolved
+hkt_rice	3	oryza_sativa_ssp_japonica_gcf_034140825_1_asm3414082v1_genomic	HKT1;4	HKT1;4	gene-HKT1;4 -> HKT1;4	resolved
+hkt_rice	4	oryza_sativa_ssp_japonica_gcf_034140825_1_asm3414082v1_genomic	HKT1;5	LOC4327757	gene-LOC4327757 -> LOC4327757	resolved_alias
+hkt_rice	5	oryza_sativa_ssp_japonica_gcf_034140825_1_asm3414082v1_genomic	HKT2;1	HKT2;1	gene-HKT2;1 -> HKT2;1	resolved
+hkt_rice	6	oryza_sativa_ssp_japonica_gcf_034140825_1_asm3414082v1_genomic	HKT2;3	HKT2;3	gene-HKT2;3 -> HKT2;3	resolved
+hkt_rice	7	oryza_sativa_ssp_japonica_gcf_034140825_1_asm3414082v1_genomic	HKT2;4	HKT2;4	gene-HKT2;4 -> HKT2;4	resolved
+tp53_cross_species	1	homo_sapiens_gcf_000001405_40_grch38_p14_genomic	TP53	TP53	TP53	resolved
+tp53_cross_species	2	canis_lupus_familiaris_gcf_011100685_1_uu_cfam_gsd_1_0_genomic	TP53	TP53	TP53	resolved
+tp53_cross_species	3	danio_rerio_gcf_049306965_1_grcz12tu_genomic	TP53	tp53	tp53	resolved
+tp53_cross_species	4	equus_caballus_gcf_041296265_1_tb_t2t_genomic	TP53	TP53	TP53	resolved
+tp53_cross_species	5	mus_musculus_gcf_000001635_27_grcm39_genomic	TP53	Trp53	tp53 -> Trp53	resolved_alias
+tp53_cross_species	6	pan_troglodytes_gcf_028858775_2_nhgri_mpantro3_v2_0_pri_genomic	TP53	TP53	TP53	resolved
+tp53_cross_species	7	xenopus_laevis_gcf_017654675_1_xenopus_laevis_v10_1_genomic	TP53	tp53.L	tp53 -> tp53.L	resolved_alias
