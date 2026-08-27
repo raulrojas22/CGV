@@ -1113,7 +1113,7 @@ rssh "set -e
   delegate_perf=\$(podman inspect \"\$delegate\" --format '{{range .Config.Env}}{{println .}}{{end}}' | sed -n 's/^APP_PERF_TIMING=//p')
   case \"\$delegate_perf\" in 0|1) ;; *) fail_guard delegate-perf-timing ;; esac
   test \"\$delegate_perf\" = \"\$application_perf\" || fail_guard perf-timing-mismatch
-  application_eager=\$(sed -n -E 's/^        (APP_ORTHO_SUSPEND_HIDDEN|APP_HOMO_DEFER_SEQUENCE|APP_ORTHO_DEFER_SEQUENCE|APP_FOOTER_DEFER_SEQUENCE|APP_DEFER_FEATURE_GC|APP_ORTHO_RENDER_CHUNK_SIZE|APP_ORTHO_AUTO_RENDER_MORE|APP_ORTHO_AUTO_RENDER_DELAY_MS|APP_HOMO_INITIAL_VISIBLE|APP_ORTHO_INITIAL_VISIBLE|APP_ORTHO_SERVER_RENDER_NUDGE): \"([^\"]+)\"$/\1=\2/p' '\${APP_DIR}/shinyproxy/application.yml')
+  application_eager=\$(sed -n -E 's/^        (APP_ORTHO_SUSPEND_HIDDEN|APP_HOMO_DEFER_SEQUENCE|APP_ORTHO_DEFER_SEQUENCE|APP_FOOTER_DEFER_SEQUENCE|APP_DEFER_FEATURE_GC|APP_ORTHO_RENDER_CHUNK_SIZE|APP_ORTHO_AUTO_RENDER_MORE|APP_ORTHO_AUTO_RENDER_DELAY_MS|APP_HOMO_INITIAL_VISIBLE|APP_ORTHO_INITIAL_VISIBLE|APP_ORTHO_SERVER_RENDER_NUDGE): \"([^\"]+)\"$/\1=\2/p' '${APP_DIR}/shinyproxy/application.yml')
   delegate_env=\$(podman inspect \"\$delegate\" --format '{{range .Config.Env}}{{println .}}{{end}}')
   for expected_env in \
     'APP_ORTHO_SUSPEND_HIDDEN=\${COLORS_ORTHO_SUSPEND_HIDDEN}' \
