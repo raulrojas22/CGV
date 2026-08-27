@@ -353,5 +353,7 @@ assert(!grepl("--tmpfs /var/run:", deploy, fixed = TRUE),
        "The nginx syntax check must mount /run, where nginx.pid is created.")
 assert(!grepl("'\\${APP_DIR}/shinyproxy/application.yml'", deploy, fixed = TRUE),
        "Colors final guards must expand APP_DIR instead of sending it literally over SSH.")
+assert(!grepl("=\\${COLORS_", deploy, fixed = TRUE),
+       "Colors final guards must compare expanded eager-profile values, not literal variable names.")
 
 message("Colors ShinyProxy immutable-static deployment contract is guarded.")
