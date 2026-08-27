@@ -45,7 +45,7 @@ Rscript scripts/verify_gaf_indexes.R --root=. --expected=24
 The generated `go_annotations/index/*.go.sqlite` files contain normalized GAF
 columns and indexed lookups by object ID and symbol. Downloadable Desktop
 datasets should include their corresponding SQLite file. If an older or
-external dataset has no packaged index, CGV returns the first result using the
+external dataset has no packaged index, CGeV returns the first result using the
 streaming fallback and builds an index later under `CGV_CACHE_DIR/go_index`.
 
 Optional (recommended): local GO term names

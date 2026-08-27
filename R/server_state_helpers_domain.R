@@ -161,6 +161,54 @@ init_server_state_helpers_domain <- function(
         invisible(was_pending)
     }
 
+    new_ortho_first_paint_gate <- function(run_id = "", enabled = TRUE, previous_token = 0L) {
+        run_key <- trimws(as.character(run_id %||% ""))
+        token <- suppressWarnings(as.integer(previous_token %||% 0L))
+        if (!is.finite(token) || is.na(token) || token < 0L) token <- 0L
+        token <- if (token >= .Machine$integer.max) 1L else as.integer(token + 1L)
+        gate_enabled <- isTRUE(enabled) && nzchar(run_key)
+        list(
+            run_id = run_key,
+            token = token,
+            enabled = gate_enabled,
+            armed = FALSE,
+            released = !gate_enabled,
+            release_reason = if (gate_enabled) "" else "disabled",
+            output_id = ""
+        )
+    }
+
+    arm_ortho_first_paint_gate <- function(gate, run_id) {
+        current <- gate %||% list()
+        run_key <- trimws(as.character(run_id %||% ""))
+        can_arm <- isTRUE(current$enabled) &&
+            !isTRUE(current$released) &&
+            !isTRUE(current$armed) &&
+            nzchar(run_key) &&
+            identical(run_key, trimws(as.character(current$run_id %||% "")))
+        if (!isTRUE(can_arm)) {
+            return(list(changed = FALSE, state = current))
+        }
+        current$armed <- TRUE
+        list(changed = TRUE, state = current)
+    }
+
+    release_ortho_first_paint_gate <- function(gate, run_id, reason, output_id = "") {
+        current <- gate %||% list()
+        run_key <- trimws(as.character(run_id %||% ""))
+        can_release <- isTRUE(current$enabled) &&
+            !isTRUE(current$released) &&
+            nzchar(run_key) &&
+            identical(run_key, trimws(as.character(current$run_id %||% "")))
+        if (!isTRUE(can_release)) {
+            return(list(changed = FALSE, state = current))
+        }
+        current$released <- TRUE
+        current$release_reason <- trimws(as.character(reason %||% "released"))
+        current$output_id <- trimws(as.character(output_id %||% ""))
+        list(changed = TRUE, state = current)
+    }
+
     list(
         parse_positive_int_env = parse_positive_int_env,
         get_autocomplete_epoch = get_autocomplete_epoch,
@@ -172,6 +220,9 @@ init_server_state_helpers_domain <- function(
         finish_search_run = finish_search_run,
         begin_session_source_restore = begin_session_source_restore,
         consume_session_source_restore = consume_session_source_restore,
-        finish_session_source_restore = finish_session_source_restore
+        finish_session_source_restore = finish_session_source_restore,
+        new_ortho_first_paint_gate = new_ortho_first_paint_gate,
+        arm_ortho_first_paint_gate = arm_ortho_first_paint_gate,
+        release_ortho_first_paint_gate = release_ortho_first_paint_gate
     )
 }

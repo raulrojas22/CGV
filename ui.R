@@ -34,14 +34,14 @@ guide_media_path <- function(path) {
       if (is.finite(mtime)) as.character(round(mtime)) else "0",
       if (is.finite(size)) as.character(round(size)) else "0"
     )
-    return(sprintf("%s?gv=%s", path, video_version))
+    return(sprintf("%s?gv=%s", static_asset_path(path), video_version))
   }
   ""
 }
 
-cgv_manual_path <- guide_media_path(file.path("docs", "CGV_User_Manual.pdf"))
+cgv_manual_path <- guide_media_path(file.path("docs", "CGeV_User_Manual.pdf"))
 if (!nzchar(cgv_manual_path)) {
-  cgv_manual_path <- "docs/CGV_User_Manual.pdf"
+  cgv_manual_path <- "docs/CGeV_User_Manual.pdf"
 }
 
 guide_media_files <- c(
@@ -127,110 +127,248 @@ initial_summary_context_header <- function(search_mode_label = "Multi-Gene", gen
         icon("bell"),
         span(class = "app-notification-center-badge", "0")
       )
-    ),
+    )
+  )
+}
+
+result_workspace_subheader <- function(scope = c("homo", "ortho")) {
+  scope <- match.arg(scope)
+  is_ortho <- identical(scope, "ortho")
+  sort_choices <- if (is_ortho) {
+    c(
+      "Load order" = "load",
+      "Total exon difference (high to low)" = "exondiff_desc",
+      "Total exon difference (low to high)" = "exondiff_asc",
+      "Transcript length (longest first)" = "tx_len_desc",
+      "Transcript length (shortest first)" = "tx_len_asc",
+      "Exon count (high to low)" = "exon_desc",
+      "Exon count (low to high)" = "exon_asc",
+      "Organism name (A-Z)" = "organism_asc",
+      "Organism name (Z-A)" = "organism_desc",
+      "Transcript name (A-Z)" = "tx_asc",
+      "Transcript name (Z-A)" = "tx_desc"
+    )
+  } else {
+    c(
+      "Load order" = "load",
+      "Total exon difference (high to low)" = "exondiff_desc",
+      "Total exon difference (low to high)" = "exondiff_asc",
+      "Transcript length (longest first)" = "tx_len_desc",
+      "Transcript length (shortest first)" = "tx_len_asc",
+      "Exon count (high to low)" = "exon_desc",
+      "Exon count (low to high)" = "exon_asc",
+      "Transcript name (A-Z)" = "tx_asc",
+      "Transcript name (Z-A)" = "tx_desc",
+      "Chromosome (A-Z)" = "chr_asc",
+      "Chromosome (Z-A)" = "chr_desc"
+    )
+  }
+  workflow_label <- if (is_ortho) "Cross-Species" else "Multi-Gene"
+
+  workspace_nav_button <- function(view, label, icon_name, active = FALSE, disabled = FALSE) {
+    htmltools::tagAppendAttributes(
+      actionButton(
+        inputId = paste0(scope, "_workspace_", view),
+        label = span(label),
+        icon = icon(icon_name),
+        class = paste("result-workspace-nav-button", if (isTRUE(active)) "is-active" else "")
+      ),
+      `data-workspace-view` = view,
+      `aria-pressed` = if (isTRUE(active)) "true" else "false",
+      disabled = if (isTRUE(disabled)) NA else NULL
+    )
+  }
+
+  tool_trigger <- function(name, label, icon_name) {
+    tags$button(
+      id = paste0(scope, "_workspace_", name, "_trigger"),
+      type = "button",
+      class = "result-workspace-tool-trigger",
+      `data-workspace-menu-trigger` = name,
+      `aria-expanded` = "false",
+      `aria-controls` = paste0(scope, "_workspace_", name, "_menu"),
+      disabled = NA,
+      icon(icon_name),
+      span(label),
+      icon("chevron-down", class = "result-workspace-tool-chevron")
+    )
+  }
+
+  div(
+    id = paste0(scope, "_result_workspace_subheader"),
+    class = "result-workspace-subheader",
+    `data-workspace-scope` = scope,
     div(
-      class = "summary-context-mode-slot",
+      class = "result-workspace-navigation",
       div(
-        class = "summary-display-mode-control",
+        class = "result-workspace-tabs",
+        role = "tablist",
+        `aria-label` = paste(workflow_label, "result views"),
+        workspace_nav_button("visualization", "Visualization", "eye", active = TRUE),
+        workspace_nav_button("alignment", "Alignment", "project-diagram", disabled = TRUE),
+        workspace_nav_button("analytics", "Analytics", "chart-bar", disabled = TRUE),
+        workspace_nav_button("table", "Table", "table", disabled = TRUE)
+      )
+    ),
+    if (is_ortho) {
+      div(
+        class = "result-workspace-alignment-methods",
+        `data-workspace-alignment-methods` = "ortho",
+        `aria-label` = "Cross-Species alignment method",
+        span(class = "result-workspace-alignment-methods-label", icon("project-diagram"), "Method"),
         div(
-          class = "summary-display-side summary-display-side--left",
-          div(
-            class = "summary-display-mode-subbar summary-display-context-subbar",
-            tags$button(
-              type = "button",
-              class = "summary-display-submode-button summary-genomic-context-toggle summary-genomic-context-toggle--neighbors is-active",
-              `data-genomic-context-toggle` = "neighbors",
-              `aria-pressed` = "true",
-              `aria-label` = "Hide neighboring genes",
-              title = "Hide neighboring genes on gene cards",
-              icon("location-arrow"),
-              span(class = "summary-genomic-context-toggle-label", "Hide neighbors")
-            ),
-            tags$button(
-              type = "button",
-              class = "summary-display-submode-button summary-genomic-context-toggle summary-genomic-context-toggle--overlaps is-active",
-              `data-genomic-context-toggle` = "overlaps",
-              `aria-pressed` = "true",
-              `aria-label` = "Hide overlapping genes",
-              title = "Hide overlapping genes on gene cards",
-              icon("layer-group"),
-              span(class = "summary-genomic-context-toggle-label", "Hide overlaps")
-            ),
-            tags$button(
-              type = "button",
-              class = "summary-display-submode-button summary-genomic-ruler-toggle is-active",
-              `data-genomic-ruler-toggle` = "true",
-              `aria-pressed` = "true",
-              `aria-label` = "Hide genomic context scale",
-              title = "Show or hide genomic coordinates and compressed neighbor-distance context",
-              icon("ruler-horizontal"),
-              span(class = "summary-genomic-ruler-toggle-label", "Hide scale")
-            )
-          )
-        ),
-        div(
-          class = "summary-display-mode-main",
+          class = "result-workspace-alignment-method-options",
+          role = "group",
+          `aria-label` = "Choose an alignment method",
           tags$button(
             type = "button",
-            class = "summary-display-mode-button summary-display-mode-button--visualize is-active",
+            class = "result-workspace-alignment-method is-active",
+            `data-workspace-alignment-method` = "aligned",
             `aria-pressed` = "true",
-            title = "Switch to visualization mode",
-            icon("eye"),
-            span(
-              class = "summary-display-mode-copy",
-              span(class = "summary-display-mode-label", "Visualize mode"),
-              span(class = "summary-display-mode-detail", "Explore gene models")
-            )
+            title = "Compare ordered gene and transcript structures across organisms",
+            "Synteny"
           ),
           tags$button(
             type = "button",
-            class = "summary-display-mode-button summary-display-mode-button--align is-disabled",
+            class = "result-workspace-alignment-method",
+            `data-workspace-alignment-method` = "pip_blocks",
             `aria-pressed` = "false",
-            `aria-disabled` = "true",
-            disabled = NA,
-            title = "Available after loading data",
-            icon("project-diagram"),
-            span(
-              class = "summary-display-mode-copy",
-              span(class = "summary-display-mode-label", "Alignment mode"),
-              span(class = "summary-display-mode-detail", align_detail)
-            )
-          )
-        ),
-        div(
-          class = "summary-display-side summary-display-side--right",
-          div(
-            class = "summary-display-mode-subbar summary-display-detail-subbar",
-            span(
-              class = "summary-display-submode-label summary-display-detail-label",
-              span("Visual"),
-              span("Detail")
-            ),
-            tags$button(type = "button", class = "summary-display-submode-button is-active", `aria-pressed` = "true", "Compact"),
-            tags$button(type = "button", class = "summary-display-submode-button", `aria-pressed` = "false", "Detailed")
+            title = "Inspect local LASTZ alignment blocks across organism loci",
+            "LASTZ Blocks"
           ),
-          div(
-            class = "summary-display-mode-subbar summary-display-orientation-subbar",
-            title = "Native genomic coordinates",
-            span(class = "summary-display-submode-label", "Direction"),
-            tags$button(
-              type = "button",
-              class = "summary-display-submode-button is-active",
-              `aria-pressed` = "true",
-              onclick = sprintf("if(window.Shiny){Shiny.setInputValue('%s','genomic',{priority:'event'});}", orientation_input_id),
-              "Genomic"
-            ),
-            tags$button(
-              type = "button",
-              class = "summary-display-submode-button",
-              `aria-pressed` = "false",
-              onclick = sprintf("if(window.Shiny){Shiny.setInputValue('%s','transcription',{priority:'event'});}", orientation_input_id),
-              "5\u2032\u21923\u2032"
-            ),
-            span(class = "summary-display-orientation-note", `aria-live` = "polite", "Native genomic coordinates")
+          tags$button(
+            type = "button",
+            class = "result-workspace-alignment-method",
+            `data-workspace-alignment-method` = "pip_multipip",
+            `aria-pressed` = "false",
+            title = "Inspect reference-centered conservation segments across organisms",
+            "MultiPIP"
           )
         )
       )
+    } else {
+      NULL
+    },
+    div(
+      class = "result-workspace-tools",
+      div(
+        class = "result-workspace-zoom",
+        id = paste0(scope, "-zoom-control"),
+        style = "display:none;",
+        tags$button(
+          id = paste0(scope, "-zoom-out"), class = "plot-zoom-btn",
+          `data-zoom-action` = "out", `data-zoom-mode` = scope,
+          title = "Zoom out", disabled = NA, "\u2212"
+        ),
+        span(id = paste0(scope, "-zoom-label"), class = "plot-zoom-label", "1\u00d7"),
+        tags$button(
+          id = paste0(scope, "-zoom-in"), class = "plot-zoom-btn",
+          `data-zoom-action` = "in", `data-zoom-mode` = scope,
+          title = "Zoom in", "+"
+        )
+      ),
+      div(
+        class = "result-workspace-tool",
+        `data-workspace-tool` = "view",
+        tool_trigger("view", "View", "sliders-h"),
+        div(
+          id = paste0(scope, "_workspace_view_menu"),
+          class = "result-workspace-menu result-workspace-menu--view",
+          `data-workspace-menu` = "view",
+          role = "dialog",
+          `aria-label` = "Visualization settings",
+          div(
+            class = "result-workspace-menu-heading",
+            div(icon("sliders-h"), span(strong("View settings"), tags$small("Choose detail, context and direction"))),
+            tags$button(type = "button", class = "result-workspace-menu-close", `aria-label` = "Close view settings", icon("times"))
+          ),
+          uiOutput(paste0(scope, "_header_mode_switch"))
+        )
+      ),
+      div(
+        class = "result-workspace-tool",
+        `data-workspace-tool` = "sort",
+        tool_trigger("sort", "Sort", "sort-amount-desc"),
+        div(
+          id = paste0(scope, "_workspace_sort_menu"),
+          class = "result-workspace-menu result-workspace-menu--sort",
+          `data-workspace-menu` = "sort",
+          role = "dialog",
+          `aria-label` = "Sort plots",
+          div(
+            class = "result-workspace-menu-heading",
+            div(icon("sort-amount-desc"), span(strong("Sort plots"), tags$small("Reorder the current visualization"))),
+            tags$button(type = "button", class = "result-workspace-menu-close", `aria-label` = "Close sort menu", icon("times"))
+          ),
+          selectInput(
+            inputId = paste0(scope, "_sort_mode"),
+            label = NULL,
+            choices = sort_choices,
+            selected = "load",
+            width = "100%"
+          )
+        )
+      ),
+      div(
+        class = "result-workspace-tool",
+        `data-workspace-tool` = "download",
+        tool_trigger("download", "Download", "download"),
+        div(
+          id = paste0(scope, "_workspace_download_menu"),
+          class = "result-workspace-menu result-workspace-menu--download",
+          `data-workspace-menu` = "download",
+          role = "dialog",
+          `aria-label` = "Download current results",
+          div(
+            class = "result-workspace-menu-heading",
+            div(icon("download"), span(strong("Download"), tags$small("Exports adapt to the active view"))),
+            tags$button(type = "button", class = "result-workspace-menu-close", `aria-label` = "Close download menu", icon("times"))
+          ),
+          div(
+            class = "result-workspace-download-list",
+            div(
+              class = "result-workspace-download-option workspace-download-visualization",
+              actionButton(
+                inputId = paste0("btn_download_all_", scope, "_svg"),
+                label = tagList(icon("file-zipper"), span(strong("Result SVGs"), tags$small("Download all visible gene plots as a ZIP"))),
+                class = "btn btn-sm btn-download-zip result-workspace-download-button",
+                style = "display:none;",
+                onclick = sprintf("exportAllSVGs('%s')", scope)
+              )
+            ),
+            div(
+              class = "result-workspace-download-option workspace-download-analytics",
+              actionButton(
+                inputId = paste0("btn_download_all_", scope, "_analytics_svg"),
+                label = tagList(icon("file-zipper"), span(strong("Analytics SVGs"), tags$small("Download available analytics charts as a ZIP"))),
+                class = "btn btn-sm btn-download-zip result-workspace-download-button",
+                style = "display:none;",
+                onclick = sprintf("exportAnalyticsSVGs('%s')", scope)
+              )
+            ),
+            div(
+              class = "result-workspace-download-option workspace-download-table",
+              downloadButton(
+                paste0("download_", scope, "_summary_csv"),
+                tagList(icon("file-csv"), span(strong("Summary CSV"), tags$small("Export the complete result table"))),
+                class = "btn-sm btn-download result-workspace-download-button"
+              )
+            )
+          )
+        )
+      )
+    ),
+    actionButton(
+      inputId = paste0("toggle_", scope, "_analytics"),
+      label = "Toggle analytics",
+      class = "result-workspace-legacy-toggle",
+      style = "display:none;"
+    ),
+    actionButton(
+      inputId = paste0("toggle_", scope, "_summary"),
+      label = "Toggle summary table",
+      class = "result-workspace-legacy-toggle",
+      style = "display:none;"
     )
   )
 }
@@ -394,14 +532,20 @@ figure_studio_page <- function() {
     div(
       class = "figure-studio-header",
       div(
-        class = "figure-studio-heading",
+        class = "figure-studio-header-main",
         div(
-          class = "figure-studio-kicker",
-          icon("object-group"),
-          span("Publication workspace")
+          class = "figure-studio-hero-icon",
+          icon("object-group")
         ),
-        h2("Figure Studio"),
-        p("Build a publication-ready figure one independent chart panel at a time.")
+        div(
+          class = "figure-studio-heading",
+          div(
+            class = "figure-studio-kicker",
+            span("Publication workspace")
+          ),
+          h2("Figure Studio"),
+          p("Build a publication-ready figure one independent chart panel at a time.")
+        )
       ),
       div(
         class = "figure-studio-header-actions",
@@ -420,7 +564,7 @@ figure_studio_page <- function() {
           id = "figure-studio-back",
           type = "button",
           class = "figure-studio-btn figure-studio-btn-secondary",
-          `data-figure-tooltip` = "Return to the CGV results without deleting this temporary draft",
+          `data-figure-tooltip` = "Return to the CGeV results without deleting this temporary draft",
           icon("arrow-left"),
           span("Back to results")
         ),
@@ -428,7 +572,7 @@ figure_studio_page <- function() {
           id = "figure-studio-new",
           type = "button",
           class = "figure-studio-btn figure-studio-btn-secondary",
-          `data-figure-tooltip` = "Start a clean composition while preserving CGV results",
+          `data-figure-tooltip` = "Start a clean composition while preserving CGeV results",
           icon("file"),
           span("New figure")
         ),
@@ -500,74 +644,88 @@ figure_studio_page <- function() {
         ),
         tags$li(
           span(class = "figure-studio-guide-number", "5"),
-          div(strong("Export or keep working later"), span("Download SVG/PNG. Save the CGV session if you want this draft restored later."))
+          div(strong("Export or keep working later"), span("Download SVG/PNG. Save the CGeV session if you want this draft restored later."))
         )
       )
     ),
     div(
       class = "figure-studio-toolbar",
       div(
-        class = "figure-studio-title-fields",
+        class = "figure-studio-title-column",
+        div(
+          class = "figure-studio-toolbar-intro",
+          span(class = "figure-studio-toolbar-icon", icon("sliders-h")),
+          div(
+            span(class = "figure-studio-pane-kicker", "Figure setup"),
+            strong("Shape the publication frame")
+          )
+        ),
+        div(
+          class = "figure-studio-title-fields",
+          tags$label(
+            class = "figure-studio-field figure-studio-field-title",
+            span("Figure title"),
+            tags$input(
+              id = "figure-studio-title",
+              type = "text",
+              value = "CGeV comparative analysis",
+              maxlength = "140",
+              placeholder = "Optional — leave blank for no figure title",
+              title = "Optional figure heading. Clear this field to export without a title.",
+              autocomplete = "off"
+            )
+          ),
+          tags$label(
+            class = "figure-studio-field figure-studio-field-subtitle",
+            span("Subtitle (optional)"),
+            tags$input(
+              id = "figure-studio-subtitle",
+              type = "text",
+              value = "",
+              maxlength = "200",
+              placeholder = "Study, cohort, method, or comparison",
+              title = "Optional line shown beneath the figure title.",
+              autocomplete = "off"
+            )
+          )
+        )
+      ),
+      div(
+        class = "figure-studio-layout-fields",
         tags$label(
-          class = "figure-studio-field figure-studio-field-title",
-          span("Figure title"),
-          tags$input(
-            id = "figure-studio-title",
-            type = "text",
-            value = "CGV comparative analysis",
-            maxlength = "140",
-            placeholder = "Optional — leave blank for no figure title",
-            title = "Optional figure heading. Clear this field to export without a title.",
-            autocomplete = "off"
+          class = "figure-studio-field",
+          title = "Set the publication grid to one, two, or three columns.",
+          span("Columns"),
+          tags$select(
+            id = "figure-studio-columns",
+            tags$option(value = "1", "1"),
+            tags$option(value = "2", selected = "selected", "2"),
+            tags$option(value = "3", "3")
           )
         ),
         tags$label(
-          class = "figure-studio-field figure-studio-field-subtitle",
-          span("Subtitle (optional)"),
-          tags$input(
-            id = "figure-studio-subtitle",
-            type = "text",
-            value = "",
-            maxlength = "200",
-            placeholder = "Study, cohort, method, or comparison",
-            title = "Optional line shown beneath the figure title.",
-            autocomplete = "off"
+          class = "figure-studio-field",
+          title = "Apply the selected color profile to the preview and final export.",
+          span("Figure style"),
+          tags$select(
+            id = "figure-studio-profile",
+            tags$option(value = "color", "Full Color"),
+            tags$option(value = "paper-color", "Paper Color"),
+            tags$option(value = "colorblind", "Colorblind"),
+            tags$option(value = "gray", "Paper Gray"),
+            tags$option(value = "mono", "Paper Mono")
           )
-        )
-      ),
-      tags$label(
-        class = "figure-studio-field",
-        title = "Set the publication grid to one, two, or three columns.",
-        span("Columns"),
-        tags$select(
-          id = "figure-studio-columns",
-          tags$option(value = "1", "1"),
-          tags$option(value = "2", selected = "selected", "2"),
-          tags$option(value = "3", "3")
-        )
-      ),
-      tags$label(
-        class = "figure-studio-field",
-        title = "Apply the selected color profile to the preview and final export.",
-        span("Figure style"),
-        tags$select(
-          id = "figure-studio-profile",
-          tags$option(value = "color", "Full Color"),
-          tags$option(value = "paper-color", "Paper Color"),
-          tags$option(value = "colorblind", "Colorblind"),
-          tags$option(value = "gray", "Paper Gray"),
-          tags$option(value = "mono", "Paper Mono")
-        )
-      ),
-      tags$label(
-        class = "figure-studio-field",
-        title = "Controls PNG raster resolution only. SVG remains vector.",
-        span("PNG size"),
-        tags$select(
-          id = "figure-studio-resolution",
-          tags$option(value = "1", "Screen (1×)"),
-          tags$option(value = "2", selected = "selected", "High (2×)"),
-          tags$option(value = "3", "Ultra (3×)")
+        ),
+        tags$label(
+          class = "figure-studio-field",
+          title = "Controls PNG raster resolution only. SVG remains vector.",
+          span("PNG size"),
+          tags$select(
+            id = "figure-studio-resolution",
+            tags$option(value = "1", "Screen (1×)"),
+            tags$option(value = "2", selected = "selected", "High (2×)"),
+            tags$option(value = "3", "Ultra (3×)")
+          )
         )
       ),
       div(
@@ -604,7 +762,9 @@ figure_studio_page <- function() {
         class = "figure-studio-library",
         div(
           class = "figure-studio-pane-heading",
+          div(class = "figure-studio-pane-icon", icon("th-large")),
           div(
+            class = "figure-studio-pane-title",
             span(class = "figure-studio-pane-kicker", "Panel library"),
             h3("Add one chart")
           ),
@@ -622,7 +782,7 @@ figure_studio_page <- function() {
         p(class = "figure-studio-pane-copy", "Choose a data context, then add any available visualization as a new panel."),
         tags$label(
           class = "figure-studio-field figure-studio-field-block",
-          title = "Choose which CGV workflow supplies charts to the library.",
+          title = "Choose which CGeV workflow supplies charts to the library.",
           span("Data context"),
           tags$select(
             id = "figure-studio-context",
@@ -644,7 +804,7 @@ figure_studio_page <- function() {
         div(
           class = "figure-studio-library-note",
           icon("info-circle"),
-          span("Unavailable charts remain visible and explain which CGV result must be generated first.")
+          span("Unavailable charts remain visible and explain which CGeV result must be generated first.")
         )
       ),
       div(
@@ -652,10 +812,12 @@ figure_studio_page <- function() {
         div(
           class = "figure-studio-canvas-topline",
           div(
+            class = "figure-studio-canvas-meta",
+            span(class = "figure-studio-canvas-kicker", "Composition"),
             strong(id = "figure-studio-panel-summary", "0 panels"),
             span(
               id = "figure-studio-save-status",
-              title = "This temporary draft is kept only when you save the CGV session.",
+              title = "This temporary draft is kept only when you save the CGeV session.",
               "Temporary draft"
             )
           ),
@@ -683,6 +845,7 @@ figure_studio_page <- function() {
           id = "figure-studio-empty",
           class = "figure-studio-empty",
           div(class = "figure-studio-empty-icon", icon("object-group")),
+          span(class = "figure-studio-empty-kicker", "Publication canvas"),
           h3("Start with an empty publication canvas"),
           p("Add as many panels as the figure needs. Each panel contains one chart and can be reordered, resized, duplicated, or removed."),
           tags$button(
@@ -710,7 +873,9 @@ figure_studio_page <- function() {
         class = "figure-studio-inspector",
         div(
           class = "figure-studio-pane-heading",
+          div(class = "figure-studio-pane-icon", icon("sliders-h")),
           div(
+            class = "figure-studio-pane-title",
             span(class = "figure-studio-pane-kicker", "Selected panel"),
             h3(id = "figure-studio-inspector-title", "No panel selected")
           )
@@ -1002,7 +1167,12 @@ build_initial_species_grouped_grid <- function(df_in, input_id, mode) {
         style = "cursor:pointer;",
         div(
           class = "species-grid-icon-wrap",
-          tags$img(class = "species-grid-icon-img", src = icn, alt = org)
+          tags$img(
+            class = "species-grid-icon-img",
+            src = icn,
+            alt = org,
+            loading = "lazy"
+          )
         ),
         div(
           class = "species-grid-text",
@@ -1041,6 +1211,10 @@ initial_ortho_species_grid <- tagList(
 )
 
 source("R/ui_desktop_downloads.R", local = TRUE)
+figure_studio_loader_source <- paste(
+  readLines(file.path("www", "js", "figure_studio_loader.js"), warn = FALSE, encoding = "UTF-8"),
+  collapse = "\n"
+)
 
 fluidPage(
   theme = theme_custom,
@@ -1052,7 +1226,36 @@ fluidPage(
       tags$meta(`http-equiv` = "Cache-Control", content = "no-cache, must-revalidate"),
       tags$meta(`http-equiv` = "Pragma", content = "no-cache"),
       tags$meta(`http-equiv` = "Expires", content = "0"),
-      tags$link(rel = "stylesheet", href = versioned_asset_path("css/figure_studio.css")),
+      # These Analytics rules historically lived in figure_studio.css. Keep
+      # their exact eager behavior while the Studio-only stylesheet is loaded
+      # on demand.
+      tags$style(HTML("
+        #homo_analytics_tabs > .nav,
+        #ortho_analytics_tabs > .nav {
+          padding-right: 112px;
+        }
+        .btn-analytics-download-all[aria-busy=\"true\"] {
+          min-width: 142px;
+          border-color: #78b9ad !important;
+          background: #edf8f5 !important;
+          color: #176f60 !important;
+          cursor: progress !important;
+          opacity: 1 !important;
+        }
+        .btn-analytics-download-all[aria-busy=\"true\"] .fa {
+          color: #18a98c;
+        }
+        @media (max-width: 1080px) {
+          .btn-analytics-download-all {
+            position: static !important;
+            margin: 0 5px 6px 0 !important;
+          }
+          #homo_analytics_tabs > .nav,
+          #ortho_analytics_tabs > .nav {
+            padding-right: 0;
+          }
+        }
+      ")),
       tags$script(HTML("
         (function() {
           function formatBytes(value) {
@@ -1126,6 +1329,7 @@ fluidPage(
           var desktopDatasetProgress = {};
           var desktopDatasetManifest = null;
           var desktopDatasetRemovalSelection = new Set();
+          var desktopDatasetRefreshPromise = null;
 
           function isInstalledDesktopDataset(item) {
             var status = item && item.local && item.local.status || '';
@@ -1233,7 +1437,7 @@ fluidPage(
             if (cachePath && manifest && manifest.cacheRoot) cachePath.textContent = manifest.cacheRoot;
 
             if (!window.cgvDesktop) {
-              root.innerHTML = '<div class=\"desktop-organism-empty\">Desktop organism downloads are available only in CGV Desktop.</div>';
+              root.innerHTML = '<div class=\"desktop-organism-empty\">Desktop organism downloads are available only in CGeV Desktop.</div>';
               return;
             }
             if (!datasets.length) {
@@ -1510,8 +1714,52 @@ fluidPage(
             return listPromise;
           }
 
+          function requestDesktopDatasets(options) {
+            options = options || {};
+            // Share only the currently active request. Once it settles, a later
+            // Settings activation or explicit Refresh must revalidate again.
+            if (!desktopDatasetRefreshPromise) {
+              desktopDatasetRefreshPromise = Promise.resolve()
+                .then(function() { return refreshDesktopDatasets(); })
+                .then(function(manifest) {
+                  desktopDatasetRefreshPromise = null;
+                  return manifest;
+                }, function(error) {
+                  desktopDatasetRefreshPromise = null;
+                  throw error;
+                });
+            }
+            if (!options.clearStatus) return desktopDatasetRefreshPromise;
+            return desktopDatasetRefreshPromise.then(function(manifest) {
+              if (manifest) clearDesktopOrganismStatusIfIdle();
+              return manifest;
+            });
+          }
+
+          function desktopSettingsIsActive() {
+            var settingsRoot = document.querySelector('.app-settings-pane');
+            var pane = settingsRoot && settingsRoot.closest ? settingsRoot.closest('.tab-pane') : null;
+            if (pane && (pane.classList.contains('active') || pane.classList.contains('show'))) return true;
+            var activeTab = document.querySelector('#navtabs li.active > a[data-value=\"settings\"], #navtabs a.active[data-value=\"settings\"]');
+            if (activeTab) return true;
+            return !!document.querySelector('.app-nav-btn.is-active[data-target=\"settings\"]');
+          }
+
+          function eventActivatesDesktopSettings(event) {
+            if (event && event.name === 'navtabs' && event.value === 'settings') return true;
+            var target = event && event.target;
+            var settingsTarget = target && target.closest
+              ? target.closest('.app-nav-btn[data-target=\"settings\"], #navtabs a[data-value=\"settings\"]')
+              : null;
+            if (settingsTarget) return true;
+            return !!(event && String(event.type || '').indexOf('shown') === 0 && desktopSettingsIsActive());
+          }
+
+          function activateDesktopDatasetsFromEvent(event) {
+            if (eventActivatesDesktopSettings(event)) requestDesktopDatasets();
+          }
+
           document.addEventListener('DOMContentLoaded', function() {
-            refreshDesktopDatasets();
             var openCatalogBtn = document.getElementById('desktop-organism-open-catalog');
             var closeCatalogBtn = document.getElementById('desktop-organism-modal-close');
             var catalogModal = document.getElementById('desktop-organism-modal');
@@ -1526,6 +1774,7 @@ fluidPage(
             var removalSubmitBtn = document.getElementById('desktop-organism-remove-selected');
             function openCatalogModal() {
               if (!catalogModal) return;
+              requestDesktopDatasets();
               catalogModal.classList.add('is-open');
               catalogModal.setAttribute('aria-hidden', 'false');
               renderDesktopOrganismModalList();
@@ -1565,7 +1814,7 @@ fluidPage(
             });
             var refreshBtn = document.getElementById('desktop-organism-refresh');
             if (refreshBtn) refreshBtn.addEventListener('click', function() {
-              refreshDesktopDatasets({ clearStatus: true });
+              requestDesktopDatasets({ clearStatus: true });
             });
             var resetBtn = document.getElementById('desktop-organism-reset');
             if (resetBtn) resetBtn.addEventListener('click', openRemovalModal);
@@ -1648,31 +1897,45 @@ fluidPage(
                 }
               });
             }
+            document.addEventListener('click', activateDesktopDatasetsFromEvent);
+            document.addEventListener('shown.bs.tab', activateDesktopDatasetsFromEvent);
+            if (window.jQuery) {
+              jQuery(document).on('shown.bs.tab.cgvDesktopDatasets', activateDesktopDatasetsFromEvent);
+              jQuery(document).on('shiny:inputchanged.cgvDesktopDatasets', function(event) {
+                if (event.name === 'navtabs' && event.value === 'settings') requestDesktopDatasets();
+              });
+            }
+            if (!window.cgvDesktop) renderDesktopDatasets({ datasets: [] });
+            else if (desktopSettingsIsActive()) requestDesktopDatasets();
           });
         })();
       ")),
-      tags$title("CGV | Comparative Gene Viewer"),
+      tags$title("CGeV | Comparative Gene Viewer"),
       tags$link(rel = "stylesheet", href = versioned_asset_path("css/cross_species_header_status.css")),
       tags$link(rel = "stylesheet", href = versioned_asset_path("css/cgv_desktop_downloads.css")),
       tags$script(HTML(sprintf(
-        "window.__cgvTransportTiming = %s; window.__cgvTransportFlushMs = %s;",
+        "window.__cgvTransportTiming = %s; window.__cgvTransportFlushMs = %s; window.__cgvPlotPaintTiming = %s;",
         jsonlite::toJSON(app_env_flag("APP_TRANSPORT_TIMING", FALSE), auto_unbox = TRUE),
-        jsonlite::toJSON(app_env_int("APP_TRANSPORT_FLUSH_MS", 5000L, min_value = 50L), auto_unbox = TRUE)
+        jsonlite::toJSON(app_env_int("APP_TRANSPORT_FLUSH_MS", 5000L, min_value = 50L), auto_unbox = TRUE),
+        jsonlite::toJSON(app_perf_enabled(), auto_unbox = TRUE)
       ))),
+      tags$script(HTML(sprintf("
+        window.__cgvAppVersion = %s;
+        window.__cgvVersionProbeUrl = %s;
+        window.__cgvDefaultLightIcon = %s;
+        window.__cgvDefaultDarkIcon = %s;
+      ",
+      jsonlite::toJSON(app_asset_version, auto_unbox = TRUE),
+      jsonlite::toJSON("cgv-meta/version.json", auto_unbox = TRUE),
+      jsonlite::toJSON(versioned_asset_path("favicon2.ico?v=2"), auto_unbox = TRUE),
+      jsonlite::toJSON(versioned_asset_path("favicon.ico?v=2"), auto_unbox = TRUE)))),
       tags$script(src = versioned_asset_path("js/transport_metrics.js")),
+      tags$script(src = versioned_asset_path("js/plot_paint_timing.js")),
       tags$script(src = versioned_asset_path("js/lazy_jszip.js")),
       tags$script(src = versioned_asset_path("js/version_probe.js")),
       tags$script(src = versioned_asset_path("js/rounded_rects.js")),
       tags$script(src = versioned_asset_path("js/autocomplete_core.js")),
       tags$script(src = versioned_asset_path("js/footer_scroll_controls.js")),
-      tags$script(HTML(sprintf("
-        window.__cgvAppVersion = %s;
-        window.__cgvDefaultLightIcon = %s;
-        window.__cgvDefaultDarkIcon = %s;
-      ",
-      jsonlite::toJSON(app_asset_version, auto_unbox = TRUE),
-      jsonlite::toJSON(versioned_asset_path("favicon2.ico?v=2"), auto_unbox = TRUE),
-      jsonlite::toJSON(versioned_asset_path("favicon.ico?v=2"), auto_unbox = TRUE)))),
       tags$script(HTML("
         Shiny.addCustomMessageHandler('lastz_debug', function(msg) {
           var level = msg.level || 'log';
@@ -2093,7 +2356,12 @@ fluidPage(
       tags$script(src = versioned_asset_path("js/plot_zoom.js")),
       tags$script(src = versioned_asset_path("js/genomic_ruler_toggle.js")),
       tags$script(src = versioned_asset_path("js/export_svg.js")),
-      tags$script(src = versioned_asset_path("js/figure_studio.js")),
+      tags$script(
+        id = "cgv-figure-studio-loader",
+        `data-module-src` = versioned_asset_path("js/figure_studio.js"),
+        `data-style-href` = versioned_asset_path("css/figure_studio.css"),
+        HTML(figure_studio_loader_source)
+      ),
       tags$script(src = versioned_asset_path("js/reproducible_report.js")),
       tags$script(src = versioned_asset_path("js/string_theme.js")),
       tags$script(src = versioned_asset_path("js/status_popup.js")),
@@ -2104,9 +2372,10 @@ fluidPage(
       tags$script(src = versioned_asset_path("js/papers_popup.js")),
       tags$script(src = versioned_asset_path("js/preloaded_assembly_popup.js")),
       tags$script(src = versioned_asset_path("js/metrics_popup.js")),
-      tags$script(src = versioned_asset_path("js/info_button_relocator.js")),
       tags$script(src = versioned_asset_path("js/ortho_lazy_loader.js")),
       tags$script(src = versioned_asset_path("js/summary_context_layout.js")),
+      tags$script(src = versioned_asset_path("js/result_workspace.js")),
+      tags$script(src = versioned_asset_path("js/gene_match_evidence_help.js")),
       tags$script(src = versioned_asset_path("js/ncbi_search.js")),
       tags$script(src = versioned_asset_path("js/organism_images.js")),
       tags$script(src = versioned_asset_path("js/mobile_enhancements.js"), defer = NA),
@@ -2123,6 +2392,8 @@ fluidPage(
         var globalSearchChips = [];
         var lastWorkflowTarget = 'homologous';
         var quickFabPanel = null;
+        var quickFabVisibilityFrame = null;
+        var quickFabResizeObserver = null;
         var suppressWorkflowPanelOnNextNav = false;
 
         function isValidTarget(target) {
@@ -2658,6 +2929,27 @@ fluidPage(
           updateFloatingTopVisibility(scrollY);
         }
 
+        function scheduleQuickFabVisibilityUpdate() {
+          if (quickFabVisibilityFrame !== null) return;
+          var scheduleFrame = window.requestAnimationFrame || function(callback) {
+            return window.setTimeout(callback, 16);
+          };
+          quickFabVisibilityFrame = scheduleFrame(function() {
+            quickFabVisibilityFrame = null;
+            updateQuickFabScrollTopVisibility();
+          });
+        }
+
+        function observeQuickFabScrollSize(node) {
+          if (!node || typeof window.ResizeObserver !== 'function') return;
+          if (!quickFabResizeObserver) {
+            quickFabResizeObserver = new window.ResizeObserver(scheduleQuickFabVisibilityUpdate);
+          }
+          if (node.getAttribute('data-fab-resize-bound') === '1') return;
+          node.setAttribute('data-fab-resize-bound', '1');
+          quickFabResizeObserver.observe(node);
+        }
+
         function scrollAppToTop() {
           var prefersReducedMotion = false;
           try {
@@ -2692,9 +2984,12 @@ fluidPage(
           );
 
           scrollTargets.forEach(function (node) {
-            if (!node || node.getAttribute('data-fab-scroll-bound') === '1') return;
-            node.setAttribute('data-fab-scroll-bound', '1');
-            node.addEventListener('scroll', updateQuickFabScrollTopVisibility, { passive: true });
+            if (!node) return;
+            if (node.getAttribute('data-fab-scroll-bound') !== '1') {
+              node.setAttribute('data-fab-scroll-bound', '1');
+              node.addEventListener('scroll', scheduleQuickFabVisibilityUpdate, { passive: true });
+            }
+            observeQuickFabScrollSize(node);
           });
         }
 
@@ -3053,17 +3348,16 @@ fluidPage(
             settingsToggle.checked = getStoredQuickFabEnabled();
           }
 
-          window.addEventListener('scroll', updateQuickFabScrollTopVisibility, { passive: true });
+          window.addEventListener('scroll', scheduleQuickFabVisibilityUpdate, { passive: true });
+          window.addEventListener('resize', scheduleQuickFabVisibilityUpdate, { passive: true });
+          document.addEventListener('shown.bs.tab', scheduleQuickFabVisibilityUpdate);
+          document.addEventListener('shiny:value', scheduleQuickFabVisibilityUpdate);
           bindQuickFabScrollListeners(document);
-
-          if (!window.__quickFabTopWatcher) {
-            window.__quickFabTopWatcher = window.setInterval(updateQuickFabScrollTopVisibility, 300);
-          }
 
           // Attach listeners to any pane/container added later by Shiny re-renders.
           var paneObserver = new MutationObserver(function() {
             bindQuickFabScrollListeners(document);
-            updateQuickFabScrollTopVisibility();
+            scheduleQuickFabVisibilityUpdate();
           });
           if (document.body && document.body.nodeType === 1) {
             paneObserver.observe(document.body, { childList: true, subtree: true });
@@ -3507,6 +3801,109 @@ fluidPage(
           out.requires_confirmation = !!out.requires_confirmation;
           return out;
         }
+
+        function normalizeGeneMatchFilter(value) {
+          return String(value || '').toLocaleLowerCase().replace(/\\s+/g, ' ').trim();
+        }
+
+        function updateGeneMatchBrowser(browser, requestedPage) {
+          if (!browser) return;
+          var allItems = Array.prototype.slice.call(browser.querySelectorAll('[data-gene-match-item=true]'));
+          var input = browser.querySelector('.gene-match-filter-input');
+          var filterText = normalizeGeneMatchFilter(input ? input.value : '');
+          var pageSize = parseInt(browser.getAttribute('data-page-size') || '24', 10);
+          if (!isFinite(pageSize) || pageSize < 1) pageSize = 24;
+          var matchingItems = allItems.filter(function(item) {
+            var searchable = normalizeGeneMatchFilter(item.getAttribute('data-search-text') || item.textContent || '');
+            return !filterText || searchable.indexOf(filterText) !== -1;
+          });
+          var pageCount = Math.max(1, Math.ceil(matchingItems.length / pageSize));
+          var currentPage = parseInt(requestedPage || browser.getAttribute('data-current-page') || '1', 10);
+          if (!isFinite(currentPage)) currentPage = 1;
+          currentPage = Math.max(1, Math.min(pageCount, currentPage));
+          browser.setAttribute('data-current-page', String(currentPage));
+
+          var visibleStart = (currentPage - 1) * pageSize;
+          var visibleEnd = Math.min(visibleStart + pageSize, matchingItems.length);
+          var visibleSet = new Set(matchingItems.slice(visibleStart, visibleEnd));
+          allItems.forEach(function(item) {
+            item.hidden = !visibleSet.has(item);
+          });
+
+          var exactCount = allItems.filter(function(item) {
+            return item.getAttribute('data-exact-match') === 'true';
+          }).length;
+          var resultCount = browser.querySelector('.gene-match-result-count');
+          if (resultCount) {
+            var resultLabel = String(browser.getAttribute('data-result-label') || 'suggestion').trim() || 'suggestion';
+            var totalLabel = allItems.length + ' total ' + resultLabel + (allItems.length === 1 ? '' : 's');
+            var exactLabel = exactCount ? ' • ' + exactCount + ' exact match' + (exactCount === 1 ? '' : 'es') : '';
+            resultCount.textContent = filterText
+              ? matchingItems.length + ' matching • ' + totalLabel + exactLabel
+              : totalLabel + exactLabel;
+          }
+
+          var pageStatus = browser.querySelector('.gene-match-page-status');
+          if (pageStatus) {
+            pageStatus.textContent = matchingItems.length
+              ? 'Showing ' + (visibleStart + 1) + '–' + visibleEnd + ' of ' + matchingItems.length +
+                ' • Page ' + currentPage + ' of ' + pageCount
+              : 'No suggestions match this filter';
+          }
+          var pagination = browser.querySelector('.gene-match-pagination');
+          if (pagination) pagination.hidden = matchingItems.length === 0 || pageCount <= 1;
+          var prev = browser.querySelector('.gene-match-page-prev');
+          var next = browser.querySelector('.gene-match-page-next');
+          if (prev) prev.disabled = currentPage <= 1;
+          if (next) next.disabled = currentPage >= pageCount;
+
+          var empty = browser.querySelector('.gene-match-filter-empty');
+          if (!empty) {
+            empty = document.createElement('p');
+            empty.className = 'gene-match-filter-empty';
+            empty.textContent = 'No suggestions match this filter.';
+            var list = browser.querySelector('.partial-gene-suggestion-list');
+            if (list && list.parentNode) list.parentNode.insertBefore(empty, list.nextSibling);
+          }
+          empty.hidden = matchingItems.length !== 0;
+          browser.setAttribute('data-gene-match-ready', 'true');
+        }
+
+        function initGeneMatchBrowsers(root) {
+          var scope = root && root.querySelectorAll ? root : document;
+          var browsers = [];
+          if (scope.matches && scope.matches('.gene-match-browser')) browsers.push(scope);
+          browsers = browsers.concat(Array.prototype.slice.call(scope.querySelectorAll('.gene-match-browser')));
+          browsers.forEach(function(browser) {
+            if (browser.getAttribute('data-gene-match-ready') !== 'true') updateGeneMatchBrowser(browser, 1);
+          });
+        }
+
+        document.addEventListener('input', function(evt) {
+          var input = evt.target;
+          if (!input || !input.matches || !input.matches('.gene-match-filter-input')) return;
+          updateGeneMatchBrowser(input.closest('.gene-match-browser'), 1);
+        }, true);
+
+        document.addEventListener('click', function(evt) {
+          var pageButton = evt.target && evt.target.closest ? evt.target.closest('.gene-match-page-btn') : null;
+          if (!pageButton) return;
+          evt.preventDefault();
+          var browser = pageButton.closest('.gene-match-browser');
+          if (!browser) return;
+          var currentPage = parseInt(browser.getAttribute('data-current-page') || '1', 10) || 1;
+          updateGeneMatchBrowser(browser, currentPage + (pageButton.matches('.gene-match-page-prev') ? -1 : 1));
+        }, true);
+
+        var geneMatchObserver = new MutationObserver(function(mutations) {
+          mutations.forEach(function(mutation) {
+            Array.prototype.slice.call(mutation.addedNodes || []).forEach(function(node) {
+              if (node && node.nodeType === 1) initGeneMatchBrowsers(node);
+            });
+          });
+        });
+        if (document.body) geneMatchObserver.observe(document.body, { childList: true, subtree: true });
+        initGeneMatchBrowsers(document);
 
         document.addEventListener('click', function(evt) {
           var btn = evt.target && evt.target.closest ? evt.target.closest('.partial-gene-suggestion-btn') : null;
@@ -4426,17 +4823,7 @@ fluidPage(
       div(
         id = "app-status-popup-loader",
         class = "app-status-popup-loader",
-        div(
-          class = "app-dna-loader",
-          div(
-            class = "app-dna-wave app-dna-wave-top",
-            lapply(seq_len(16), function(i) span(class = "app-dna-node", style = sprintf("--i:%d;", i - 1)))
-          ),
-          div(
-            class = "app-dna-wave app-dna-wave-bottom",
-            lapply(seq_len(16), function(i) span(class = "app-dna-node", style = sprintf("--i:%d;", i - 1)))
-          )
-        ),
+        span(class = "app-status-popup-current-label", "Current activity"),
         div(id = "app-status-popup-loader-text", class = "app-status-popup-loader-text", "Working...")
       ),
       div(id = "app-status-popup-log", class = "app-status-popup-log")
@@ -4463,7 +4850,7 @@ fluidPage(
       ),
       div(
         class = "app-work-indicator-copy",
-        tags$strong(id = "app-work-indicator-headline", "CGV is working"),
+        tags$strong(id = "app-work-indicator-headline", "CGeV is working"),
         span(id = "app-work-indicator-detail", "Processing data…")
       )
     ),
@@ -4487,11 +4874,11 @@ fluidPage(
             class = "app-brand-logo",
             `data-light-src` = versioned_asset_path("favicon2.ico?v=2"),
             `data-dark-src` = versioned_asset_path("favicon.ico?v=2"),
-            alt = "CGV logo"
+            alt = "CGeV logo"
           ),
           div(
             class = "app-brand-text",
-            div(class = "app-brand-title", "CGV"),
+            div(class = "app-brand-title", "CGeV"),
             div(class = "app-brand-divider"),
             div(
               class = "app-brand-descriptor",
@@ -4858,7 +5245,7 @@ fluidPage(
           icon("object-group"),
           span("Figure Studio")
         ),
-        tags$button(type = "button", class = "app-nav-btn", `data-target` = "guide", title = "CGV Guide", icon("route"), span("CGV Guide")),
+        tags$button(type = "button", class = "app-nav-btn", `data-target` = "guide", title = "CGeV Guide", icon("route"), span("CGeV Guide")),
         tags$button(type = "button", class = "app-nav-btn", `data-target` = "settings", title = "Settings", icon("cog"), span("Settings")),
 
         tags$button(type = "button", class = "app-nav-btn", `data-target` = "feedback", title = "Feedback", icon("comment-dots"), span("Feedback")),
@@ -4866,11 +5253,11 @@ fluidPage(
           type = "button",
           class = "app-nav-btn app-nav-btn-desktop",
           `data-target` = "desktop-app",
-          `data-tooltip` = "CGV Desktop downloads",
-          `aria-label` = "CGV Desktop downloads",
-          title = "CGV Desktop downloads",
+          `data-tooltip` = "CGeV Desktop downloads",
+          `aria-label` = "CGeV Desktop downloads",
+          title = "CGeV Desktop downloads",
           icon("laptop"),
-          span("CGV Desktop")
+          span("CGeV Desktop")
         ),
         div(class = "app-nav-separator"),
         div(
@@ -5034,7 +5421,7 @@ fluidPage(
         type = "hidden",
         selected = "home",
         tabPanel(
-          title = "CGV Guide",
+          title = "CGeV Guide",
           value = "guide",
           div(
             class = "content-wrapper app-main-pane app-guide-pane",
@@ -5047,7 +5434,7 @@ fluidPage(
                   class = "guide-route-intro",
                   div(
                     class = "guide-intro-copy",
-                    span(class = "guide-kicker", icon("route"), "CGV Guide"),
+                    span(class = "guide-kicker", icon("route"), "CGeV Guide"),
                     h1(class = "guide-title", "Choose a workflow, then follow each step"),
                     p(class = "guide-subtitle", "Use the video routes for a guided walkthrough or open the complete Web and Desktop reference.")
                   ),
@@ -5057,7 +5444,7 @@ fluidPage(
                     div(
                       class = "guide-manual-copy",
                       span(class = "guide-manual-eyebrow", "Complete documentation"),
-                      strong("CGV User Manual"),
+                      strong("CGeV User Manual"),
                       tags$small("English · Web and Desktop · Always opens the latest published edition")
                     ),
                     div(
@@ -5067,15 +5454,15 @@ fluidPage(
                         target = "_blank",
                         rel = "noopener noreferrer",
                         class = "guide-manual-open",
-                        `aria-label` = "Open the latest CGV User Manual",
+                        `aria-label` = "Open the latest CGeV User Manual",
                         icon("arrow-up-right-from-square"),
                         span("Open manual")
                       ),
                       tags$a(
                         href = cgv_manual_path,
-                        download = "CGV_User_Manual.pdf",
+                        download = "CGeV_User_Manual.pdf",
                         class = "guide-manual-download",
-                        `aria-label` = "Download the latest CGV User Manual PDF",
+                        `aria-label` = "Download the latest CGeV User Manual PDF",
                         icon("download"),
                         span("PDF")
                       )
@@ -5134,7 +5521,7 @@ fluidPage(
                   span(class = "guide-route-icon", icon("object-group")),
                   span(class = "guide-route-copy",
                     tags$strong("Figure Studio"),
-                    tags$small("Compose CGV results as a publication-ready multi-panel figure.")
+                    tags$small("Compose CGeV results as a publication-ready multi-panel figure.")
                   )
                 )
               ),
@@ -5240,7 +5627,7 @@ fluidPage(
                   class = "guide-video-shell",
                   div(
                     class = "guide-media-caption",
-                    h3(id = "guide-media-title", "Welcome to CGV Guide"),
+                    h3(id = "guide-media-title", "Welcome to CGeV Guide"),
                     p(id = "guide-media-copy", "Choose a workflow, then select the step you want to learn. The intro video appears here until you pick a specific step.")
                   ),
                   div(
@@ -5254,11 +5641,8 @@ fluidPage(
                         muted = NA,
                         loop = NA,
                         playsinline = NA,
-                        preload = "auto",
-                        tabindex = "-1",
-                        if (nzchar(guide_media_map[["guide-intro.mp4"]])) {
-                          tags$source(src = guide_media_map[["guide-intro.mp4"]], type = "video/mp4")
-                        }
+                        preload = "none",
+                        tabindex = "-1"
                       ),
                       span(class = "guide-video-icon", icon("film")),
                       h3("Video / GIF placeholder")
@@ -5307,8 +5691,8 @@ fluidPage(
                         copy: 'Select the organism or assembly that will define the annotation set for the Multi-Gene workflow.',
                         short: 'Preloaded, NCBI, or upload.',
                         substeps: [
-                          { title: 'Preloaded organism', short: 'Use an available organism.', copy: 'Choose an organism whose reference annotation and genome are available in this CGV session. Hosted deployments may provide references directly, while CGV Desktop installs them on demand.', media: guideVideo('guide-multigene-01a-preloaded-organism.mp4') },
-                          { title: 'NCBI search', short: 'Find a new assembly.', copy: 'Search NCBI when the organism is not preloaded, then let CGV prepare the selected assembly for the workflow.', media: guideVideo('guide-multigene-01b-ncbi-search.mp4') },
+                          { title: 'Preloaded organism', short: 'Use an available organism.', copy: 'Choose an organism whose reference annotation and genome are available in this CGeV session. Hosted deployments may provide references directly, while CGeV Desktop installs them on demand.', media: guideVideo('guide-multigene-01a-preloaded-organism.mp4') },
+                          { title: 'NCBI search', short: 'Find a new assembly.', copy: 'Search NCBI when the organism is not preloaded, then let CGeV prepare the selected assembly for the workflow.', media: guideVideo('guide-multigene-01b-ncbi-search.mp4') },
                           { title: 'Upload files', short: 'Bring your own data.', copy: 'Upload compatible annotation and genome files when you want to work with your own local dataset.', media: guideVideo('guide-multigene-01c-upload-files.mp4') }
                         ]
                       },
@@ -5318,7 +5702,7 @@ fluidPage(
                         short: 'One gene or batch genes.',
                         substeps: [
                           { title: 'Add one gene', short: 'Search a single gene.', copy: 'Enter one gene name, select the best match when suggestions appear, and add it to the current analysis.', media: guideVideo('guide-multigene-02a-add-one-gene.mp4') },
-                          { title: 'Add batch genes', short: 'Build a comparison set.', copy: 'Add several genes to the batch list before running the visualization, so CGV can render them as one comparison.', media: guideVideo('guide-multigene-02b-add-batch-genes.mp4') }
+                          { title: 'Add batch genes', short: 'Build a comparison set.', copy: 'Add several genes to the batch list before running the visualization, so CGeV can render them as one comparison.', media: guideVideo('guide-multigene-02b-add-batch-genes.mp4') }
                         ]
                       },
                       {
@@ -5338,8 +5722,8 @@ fluidPage(
                       },
                       {
                         title: 'Alignment, optional',
-                        copy: 'Use alignment to compare transcript structures within the same gene when multiple transcript isoforms are available.',
-                        short: 'Compare isoforms.',
+                        copy: 'Use Synteny to compare transcript structures within the same gene when multiple transcript isoforms are available.',
+                        short: 'Compare isoforms with Synteny.',
                         media: guideVideo('guide-multigene-05-alignment-optional.mp4')
                       },
                       {
@@ -5360,16 +5744,16 @@ fluidPage(
                     steps: [
                       {
                         title: 'Choose organisms',
-                        copy: 'Build the organism set that CGV will use for the cross-species comparison.',
+                        copy: 'Build the organism set that CGeV will use for the cross-species comparison.',
                         short: 'Preloaded, NCBI, upload, or mixed.',
                         substeps: [
-                          { title: 'Preloaded organisms', short: 'Use available species.', copy: 'Select organisms from the available registry when their annotations and genomes are ready in this session. In CGV Desktop, install organisms from the catalog before using them here.', media: guideVideo('guide-cross-01a-preloaded-organisms.mp4') },
+                          { title: 'Preloaded organisms', short: 'Use available species.', copy: 'Select organisms from the available registry when their annotations and genomes are ready in this session. In CGeV Desktop, install organisms from the catalog before using them here.', media: guideVideo('guide-cross-01a-preloaded-organisms.mp4') },
                           { title: 'NCBI search', short: 'Add external assemblies.', copy: 'Search NCBI to add organisms or assemblies that are not part of the preloaded set.', media: guideVideo('guide-cross-01b-ncbi-search.mp4') },
                           { title: 'Upload files', short: 'Use your own data.', copy: 'Upload compatible annotation and genome files for organisms that should be included in the comparison.', media: guideVideo('guide-cross-01c-upload-files.mp4') },
                           { title: 'Mixed sources', short: 'Combine inputs.', copy: 'Combine preloaded organisms, NCBI-downloaded assemblies, and uploaded files in the same cross-species analysis.', media: guideVideo('guide-cross-01d-mixed-sources.mp4') }
                         ]
                       },
-                      { title: 'Search gene', copy: 'Enter one target gene and let CGV resolve compatible identifiers across the selected organisms. Additional family members found only within individual organisms are not listed here; use Multi-Gene Search to explore a family in one organism.', short: 'Focus on one shared gene.', media: guideVideo('guide-cross-02-search-gene.mp4') },
+                      { title: 'Search gene', copy: 'Enter one target gene and let CGeV resolve compatible identifiers across the selected organisms. Additional family members found only within individual organisms are not listed here; use Multi-Gene Search to explore a family in one organism.', short: 'Focus on one shared gene.', media: guideVideo('guide-cross-02-search-gene.mp4') },
                       {
                         title: 'Generate visualization',
                         copy: 'Click Generate visualization to render the selected cross-species comparison and keep the returned charts in the workspace.',
@@ -5405,30 +5789,30 @@ fluidPage(
                   },
                   common: {
                     title: 'Common Analysis',
-                    summary: 'Shared tools for interpreting models, charts, reports, sessions, settings, and cleanup in CGV.',
+                    summary: 'Shared tools for interpreting models, charts, reports, sessions, settings, and cleanup in CGeV.',
                     open: '',
                     steps: [
                       { title: 'Review analytics charts', copy: 'Analyze the statistics generated from the current visualizations, including structural and sequence-derived summaries.', short: 'Statistics from rendered data.', media: guideVideo('guide-common-01-review-analytics-charts.mp4') },
                       { title: 'Review tables/results', copy: 'Inspect the tables and result summaries that support the currently rendered gene or cross-species views.', short: 'Structured result views.', media: guideVideo('guide-common-02-review-tables-results.mp4') },
                       { title: 'Visualize transcript variants', copy: 'Compare transcript isoforms from the same gene to inspect differences in exon structure, CDS organization, UTRs, and transcript length.', short: 'Isoforms from one gene.', media: guideVideo('guide-common-03-visualize-transcript-variants.mp4') },
-                      { title: 'Inspect gene information', copy: 'Open gene context layers from available external databases and CGV popups to add biological meaning to the visualization.', short: 'External database context.', media: guideVideo('guide-common-04-inspect-gene-information.mp4') },
+                      { title: 'Inspect gene information', copy: 'Open gene context layers from available external databases and CGeV popups to add biological meaning to the visualization.', short: 'External database context.', media: guideVideo('guide-common-04-inspect-gene-information.mp4') },
                       { title: 'Download promoter sequences', copy: 'Use promoter tools when you need upstream sequence context associated with the selected gene model.', short: 'Promoter sequence context.', media: guideVideo('guide-common-05-download-promoter-sequences.mp4') },
-                      { title: 'Review literature', copy: 'Inspect literature associated with the gene when CGV can connect the gene context to papers or external references.', short: 'Gene-associated papers.', media: guideVideo('guide-common-06-review-literature.mp4') },
+                      { title: 'Review literature', copy: 'Inspect literature associated with the gene when CGeV can connect the gene context to papers or external references.', short: 'Gene-associated papers.', media: guideVideo('guide-common-06-review-literature.mp4') },
                       { title: 'Review organism and assembly info', copy: 'Open organism photos, assembly reports, assembly statistics, and related organism metadata when available.', short: 'Organisms, assemblies, photos.', media: guideVideo('guide-common-07-review-organism-assembly-info.mp4') },
-                      { title: 'Configure external alias lookup', copy: 'Turn external alias lookup sources on or off to control which databases CGV uses when local gene names do not match directly.', short: 'Control alias databases.', media: guideVideo('guide-common-08-configure-external-alias-lookup.mp4') },
+                      { title: 'Configure external alias lookup', copy: 'Turn external alias lookup sources on or off to control which databases CGeV uses when local gene names do not match directly.', short: 'Control alias databases.', media: guideVideo('guide-common-08-configure-external-alias-lookup.mp4') },
                       {
                         title: 'Sessions',
                         copy: 'Save or restore work sessions so you can continue an analysis without rebuilding it from scratch.',
                         short: 'Save or load work.',
                         substeps: [
                           { title: 'Save work session', short: 'Export current state.', copy: 'Save the current plots and settings as a session file when you want to return to the same analysis later.', media: guideVideo('guide-common-09a-save-work-session.mp4') },
-                          { title: 'Load work session', short: 'Restore previous state.', copy: 'Load a previously saved session file to restore plots and settings into the current CGV session.', media: guideVideo('guide-common-09b-load-work-session.mp4') }
+                          { title: 'Load work session', short: 'Restore previous state.', copy: 'Load a previously saved session file to restore plots and settings into the current CGeV session.', media: guideVideo('guide-common-09b-load-work-session.mp4') }
                         ]
                       },
                       {
                         title: window.cgvDesktop ? 'Export interactive report' : 'Share analysis',
                         copy: window.cgvDesktop
-                          ? 'Use Share to save a self-contained read-only HTML report and reproducibility ZIP locally. CGV Desktop does not upload the analysis or create a public URL.'
+                          ? 'Use Share to save a self-contained read-only HTML report and reproducibility ZIP locally. CGeV Desktop does not upload the analysis or create a public URL.'
                           : 'Use Share to create an expiring secret read-only URL. Choose Multi-Gene, Cross-Species, or both, review privacy and download options, and copy the completed link for the intended readers.',
                         short: window.cgvDesktop ? 'Save HTML and ZIP locally.' : 'Create a secret read-only link.',
                         media: window.cgvDesktop
@@ -5440,19 +5824,19 @@ fluidPage(
                   },
                   'figure-studio': {
                     title: 'Figure Studio',
-                    summary: 'Turn structural views, alignments, analytics, and labels already generated in CGV into one reusable multi-panel figure.',
+                    summary: 'Turn structural views, alignments, analytics, and labels already generated in CGeV into one reusable multi-panel figure.',
                     open: 'figure-studio',
                     steps: [
                       {
                         title: 'Open the workspace',
-                        copy: 'Open Figure Studio after generating the CGV results you want to compose. The source library only includes figures available in the current analysis.',
+                        copy: 'Open Figure Studio after generating the CGeV results you want to compose. The source library only includes figures available in the current analysis.',
                         short: 'Start from current results.',
                         media: guideVideo('guide-figure-studio-01-open-workspace.mp4')
                       },
                       {
                         title: 'Add source panels',
                         copy: 'Choose gene structures, synteny or alignment views, analytics charts, and other available SVG sources, then add the required panels to the canvas.',
-                        short: 'Choose CGV visual sources.',
+                        short: 'Choose CGeV visual sources.',
                         media: guideVideo('guide-figure-studio-02-add-panels.mp4')
                       },
                       {
@@ -5471,14 +5855,14 @@ fluidPage(
                   },
                   'desktop-downloads': {
                     title: 'Desktop Downloads',
-                    summary: 'Install organisms from the CGV Desktop catalog. The base installer ships without organisms; up to 25 installable organisms are available depending on the catalog and what you choose to download.',
+                    summary: 'Install organisms from the CGeV Desktop catalog. The base installer ships without organisms; up to 25 installable organisms are available depending on the catalog and what you choose to download.',
                     open: 'settings',
                     desktopOnly: true,
                     steps: [
-                      { title: 'Open Settings', copy: 'Go to Settings and find the Organisms section. This section is available only in CGV Desktop.', short: 'Go to Settings.', media: guideVideo('guide-desktop-downloads-01-open-settings.mp4') },
+                      { title: 'Open Settings', copy: 'Go to Settings and find the Organisms section. This section is available only in CGeV Desktop.', short: 'Go to Settings.', media: guideVideo('guide-desktop-downloads-01-open-settings.mp4') },
                       { title: 'Open organism catalog', copy: 'Click Open catalog to view the downloadable organism library for this desktop profile.', short: 'View the library.', media: guideVideo('guide-desktop-downloads-02-open-organism-catalog.mp4') },
                       { title: 'Search or filter', copy: 'Use search and status filters to find an organism. The catalog can provide up to 25 installable organisms, but only downloaded organisms appear in Preloaded selectors.', short: 'Find an organism.', media: guideVideo('guide-desktop-downloads-03-search-and-filter.mp4') },
-                      { title: 'Download organism', copy: 'Click Download for the organism you need. CGV Desktop downloads the package, verifies it, extracts it, and installs local caches.', short: 'Install references.', media: guideVideo('guide-desktop-downloads-04-download-organism.mp4') },
+                      { title: 'Download organism', copy: 'Click Download for the organism you need. CGeV Desktop downloads the package, verifies it, extracts it, and installs local caches.', short: 'Install references.', media: guideVideo('guide-desktop-downloads-04-download-organism.mp4') },
                       { title: 'Confirm availability', copy: 'After installation, return to Multi-Gene or Cross-Species Search and choose the organism from the Preloaded organism selectors.', short: 'Use the organism.', media: guideVideo('guide-desktop-downloads-05-confirm-availability.mp4') },
                       { title: 'Remove organisms', copy: 'Choose one, several, or all installed catalog organisms and remove only the selected local datasets and caches.', short: 'Selective cleanup.', media: guideVideo('guide-desktop-downloads-06-remove-installed-organisms.mp4') }
                     ]
@@ -5502,11 +5886,12 @@ fluidPage(
                 var stepList = root.querySelector('.guide-step-list');
                 var openButtons = root.querySelectorAll('[data-guide-open]');
                 var videoBlobCache = {};
-                var preloadedVideos = {};
-                var videoReadyTimer = null;
+                var nextVideoPreload = null;
+                var guideActivated = false;
+                var currentMediaContent = null;
                 var introMedia = guideVideo('guide-intro.mp4');
                 var introContent = {
-                  title: 'Welcome to CGV Guide',
+                  title: 'Welcome to CGeV Guide',
                   copy: 'Choose a workflow, then select the step you want to learn. The intro video appears here until you pick a specific step.',
                   media: introMedia
                 };
@@ -5589,38 +5974,43 @@ fluidPage(
                     .catch(function() {});
                 }
 
-                function preloadVideo(src) {
-                  if (!src || preloadedVideos[src]) return;
-                  preloadedVideos[src] = true;
-                  var link = document.createElement('link');
-                  link.rel = 'preload';
-                  link.as = 'video';
-                  link.href = src;
-                  document.head.appendChild(link);
-                  if (window.fetch) {
-                    fetch(src, { cache: 'force-cache' }).catch(function() {});
-                  }
-                }
-
-                function preloadRouteVideos(route) {
+                function routeVideoSequence(route) {
                   var data = routeData[route];
-                  if (!data || !data.steps) return;
+                  var sequence = introMedia ? [introMedia] : [];
+                  if (!data || !data.steps) return sequence;
                   data.steps.forEach(function(step) {
-                    preloadVideo(step.media || '');
-                    (step.substeps || []).forEach(function(substep) {
-                      preloadVideo(substep.media || '');
-                    });
+                    if (step.substeps && step.substeps.length) {
+                      step.substeps.forEach(function(substep) {
+                        var nestedMedia = substep.media || step.media || '';
+                        if (nestedMedia) sequence.push(nestedMedia);
+                      });
+                    } else if (step.media) {
+                      sequence.push(step.media);
+                    }
                   });
+                  return sequence;
                 }
 
-                function scheduleVideoFallback(src) {
-                  if (videoReadyTimer) window.clearTimeout(videoReadyTimer);
-                  if (!src) return;
-                  videoReadyTimer = window.setTimeout(function() {
-                    if (!mediaVideo || mediaVideo.classList.contains('is-ready')) return;
-                    if (mediaVideo.dataset.guideSource !== src) return;
-                    loadVideoAsBlob(src);
-                  }, 1600);
+                function getNextVideoSource(content) {
+                  var source = content && content.media ? content.media : '';
+                  if (!source) return '';
+                  var sequence = routeVideoSequence(root.dataset.activeGuideRoute || 'multigene');
+                  var currentIndex = sequence.indexOf(source);
+                  return currentIndex >= 0 ? (sequence[currentIndex + 1] || '') : '';
+                }
+
+                function preloadNextVideo(src) {
+                  if (nextVideoPreload && nextVideoPreload.getAttribute('href') === src) return;
+                  if (nextVideoPreload && nextVideoPreload.parentNode) {
+                    nextVideoPreload.parentNode.removeChild(nextVideoPreload);
+                  }
+                  nextVideoPreload = null;
+                  if (!guideActivated || !src) return;
+                  nextVideoPreload = document.createElement('link');
+                  nextVideoPreload.rel = 'preload';
+                  nextVideoPreload.as = 'video';
+                  nextVideoPreload.href = src;
+                  document.head.appendChild(nextVideoPreload);
                 }
 
                 function getStep(route, index, subIndex) {
@@ -5642,6 +6032,7 @@ fluidPage(
 
                 function updateMedia(content) {
                   if (!content) return;
+                  currentMediaContent = content;
                   if (mediaCaption) mediaCaption.classList.remove('is-refreshing');
                   if (mediaTitle) mediaTitle.textContent = content.title;
                   if (mediaCopy) mediaCopy.textContent = content.copy;
@@ -5649,12 +6040,17 @@ fluidPage(
                     void mediaCaption.offsetWidth;
                     mediaCaption.classList.add('is-refreshing');
                   }
+                  if (!guideActivated) {
+                    markVideoHasMedia(false);
+                    markVideoReady(false);
+                    return;
+                  }
                   if (mediaVideo && content.media) {
                     var current = mediaVideo.dataset.guideOriginalSource || mediaVideo.dataset.guideSource || mediaVideo.getAttribute('src') || mediaVideo.currentSrc || '';
                     if (current !== content.media) {
                       setVideoSource(content.media, false, content.media);
                     }
-                    scheduleVideoFallback(content.media);
+                    preloadNextVideo(getNextVideoSource(content));
                   } else {
                     if (mediaVideo) {
                       mediaVideo.pause();
@@ -5666,6 +6062,7 @@ fluidPage(
                     }
                     markVideoHasMedia(false);
                     markVideoReady(false);
+                    preloadNextVideo('');
                   }
                 }
 
@@ -5715,7 +6112,6 @@ fluidPage(
                 function renderRoute(route) {
                   var data = routeData[route] || routeData.multigene;
                   root.dataset.activeGuideRoute = route;
-                  preloadRouteVideos(route);
                   root.querySelectorAll('[data-guide-route]').forEach(function(card) {
                     card.classList.toggle('is-active', card.dataset.guideRoute === route);
                   });
@@ -5772,6 +6168,29 @@ fluidPage(
                   renderIntro();
                 }
 
+                function isGuideTabActive() {
+                  var pane = root.closest ? root.closest('.tab-pane') : null;
+                  if (pane && (pane.classList.contains('active') || pane.classList.contains('show'))) return true;
+                  var activeButton = document.querySelector('.app-nav-btn.is-active[data-target=guide]');
+                  return !!activeButton;
+                }
+
+                function activateGuideMedia() {
+                  if (guideActivated) return;
+                  guideActivated = true;
+                  root.dataset.guideMediaActive = '1';
+                  if (mediaVideo) mediaVideo.preload = 'auto';
+                  updateMedia(currentMediaContent || introContent);
+                }
+
+                function activateGuideFromEvent(event) {
+                  var target = event && event.target ? event.target : null;
+                  var guideTarget = target && target.closest
+                    ? target.closest('.app-nav-btn[data-target=guide], #navtabs a[data-value=guide]')
+                    : null;
+                  if (guideTarget || isGuideTabActive()) activateGuideMedia();
+                }
+
                 root.querySelectorAll('[data-guide-route]').forEach(function(card) {
                   card.addEventListener('click', function() {
                     var route = card.dataset.guideRoute || 'multigene';
@@ -5779,7 +6198,16 @@ fluidPage(
                     renderRoute(route);
                   });
                 });
+                document.addEventListener('click', activateGuideFromEvent);
+                document.addEventListener('shown.bs.tab', activateGuideFromEvent);
+                if (window.jQuery) {
+                  jQuery(document).on('shown.bs.tab.cgvGuideMedia', activateGuideFromEvent);
+                  jQuery(document).on('shiny:inputchanged.cgvGuideMedia', function(event) {
+                    if (event.name === 'navtabs' && event.value === 'guide') activateGuideMedia();
+                  });
+                }
                 renderRoute('multigene');
+                if (isGuideTabActive()) activateGuideMedia();
               })();
             "))
           )
@@ -5904,7 +6332,7 @@ fluidPage(
           figure_studio_page()
         ),
         tabPanel(
-          title = "CGV Desktop",
+          title = "CGeV Desktop",
           value = "desktop-app",
           cgv_desktop_downloads_page()
         ),
@@ -5918,79 +6346,35 @@ fluidPage(
               class = "summary-context-section",
               style = "display:none;",
               initial_summary_context_header("Multi-Gene", "Genes: pending"),
-              uiOutput("homo_context_header")
+              uiOutput("homo_context_header"),
+              result_workspace_subheader("homo")
             ),
             div(
               id = "homo_summary_section",
               class = "summary-section homo-summary-section",
               style = "display:none;",
               div(
-                class = "summary-header",
+                class = "result-workspace-view-intro",
                 div(
-                  class = "summary-actions",
-                  actionButton(
-                    inputId = "toggle_homo_analytics",
-                    label   = tagList("\u25B6", icon("chart-bar"), " Show Analytics"),
-                    class   = "btn btn-sm btn-analytics-toggle",
-                    style   = "display:none;"
-                  ),
-                  actionButton(
-                    inputId = "toggle_homo_summary",
-                    label = span("\u25B6 Show Summary Table"),
-                    class = "btn btn-sm btn-summary-toggle"
-                  ),
-                  downloadButton("download_homo_summary_csv", span("Download CSV"), class = "btn-sm btn-download"),
-                  actionButton(
-                    inputId = "btn_download_all_homo_svg",
-                    label = span(icon("file-zipper"), " Download result SVGs (.zip)"),
-                    class = "btn btn-sm btn-download-zip",
-                    style = "display:none;",
-                    onclick = "exportAllSVGs('homo')"
-                  ),
-                  div(
-                    class = "plot-zoom-control",
-                    style = "display:none;",
-                    id = "homo-zoom-control",
-                    tags$button(
-                      id = "homo-zoom-out", class = "plot-zoom-btn",
-                      `data-zoom-action` = "out", `data-zoom-mode` = "homo",
-                      title = "Zoom out", disabled = NA, "−"
-                    ),
-                    span(id = "homo-zoom-label", class = "plot-zoom-label", "1\u00d7"),
-                    tags$button(
-                      id = "homo-zoom-in", class = "plot-zoom-btn",
-                      `data-zoom-action` = "in", `data-zoom-mode` = "homo",
-                      title = "Zoom in", "\u002b"
-                    )
-                  ),
-                  div(
-                    class = "plot-sort-toolbar",
-                    span(class = "plot-sort-toolbar-label", icon("sort-amount-desc"), span("Sort plots")),
-                    selectInput(
-                      inputId = "homo_sort_mode",
-                      label = NULL,
-                      choices = c(
-                        "Load order" = "load",
-                        "Total exon difference (high to low)" = "exondiff_desc",
-                        "Total exon difference (low to high)" = "exondiff_asc",
-                        "Transcript length (longest first)" = "tx_len_desc",
-                        "Transcript length (shortest first)" = "tx_len_asc",
-                        "Exon count (high to low)" = "exon_desc",
-                        "Exon count (low to high)" = "exon_asc",
-                        "Transcript name (A-Z)" = "tx_asc",
-                        "Transcript name (Z-A)" = "tx_desc",
-                        "Chromosome (A-Z)" = "chr_asc",
-                        "Chromosome (Z-A)" = "chr_desc"
-                      ),
-                      selected = "load",
-                      width = "320px"
-                    )
-                  )
+                  class = "result-workspace-view-intro-copy",
+                  span(class = "result-workspace-view-kicker", icon("table"), " Structured results"),
+                  h2("Summary table"),
+                  p("Search, sort and review the records behind the current gene visualizations.")
+                ),
+                tags$button(
+                  type = "button",
+                  class = "result-workspace-view-back",
+                  `data-workspace-back` = "true",
+                  `data-workspace-scope` = "homo",
+                  `aria-label` = "Back to Multi-Gene visualization",
+                  icon("arrow-left"),
+                  span("Back to visualization")
                 )
               ),
               div(
                 id = "homo_summary_body",
-                style = "display:none; margin-top:8px;",
+                class = "result-workspace-table-body",
+                style = "display:none;",
                 DT::dataTableOutput("homo_summary_dt")
               )
             ),
@@ -6002,16 +6386,27 @@ fluidPage(
               div(
                 id = "homo_analytics_body",
                 class = "analytics-body",
-                style = "display:none; margin-top:12px;",
+                style = "display:none; margin-top:2px;",
+                div(
+                  class = "result-workspace-view-intro",
+                  div(
+                    class = "result-workspace-view-intro-copy",
+                    span(class = "result-workspace-view-kicker", icon("chart-bar"), " Comparative metrics"),
+                    h2("Analytics"),
+                    p("Explore statistical views generated from the active set of gene results.")
+                  ),
+                  tags$button(
+                    type = "button",
+                    class = "result-workspace-view-back",
+                    `data-workspace-back` = "true",
+                    `data-workspace-scope` = "homo",
+                    `aria-label` = "Back to Multi-Gene visualization",
+                    icon("arrow-left"),
+                    span("Back to visualization")
+                  )
+                ),
                 div(
                 class = "analytics-tabs-shell",
-                  actionButton(
-                    inputId = "btn_download_all_homo_analytics_svg",
-                    label = span(icon("file-zipper"), " SVG ZIP"),
-                    class = "btn btn-sm btn-download-zip btn-analytics-download-all",
-                    style = "display:none;",
-                    onclick = "exportAnalyticsSVGs('homo')"
-                  ),
                   tabsetPanel(
                     id = "homo_analytics_tabs",
                     type = "pills",
@@ -6188,79 +6583,35 @@ fluidPage(
               class = "summary-context-section",
               style = "display:none;",
               initial_summary_context_header("Cross-Species", "Gene: pending", "Compare across organisms"),
-              uiOutput("ortho_context_header")
+              uiOutput("ortho_context_header"),
+              result_workspace_subheader("ortho")
             ),
             div(
               id = "ortho_summary_section",
               class = "summary-section ortho-summary-section",
               style = "display:none;",
               div(
-                class = "summary-header",
+                class = "result-workspace-view-intro",
                 div(
-                  class = "summary-actions",
-                  actionButton(
-                    inputId = "toggle_ortho_analytics",
-                    label   = tagList("\u25B6", icon("chart-bar"), " Show Analytics"),
-                    class   = "btn btn-sm btn-analytics-toggle",
-                    style   = "display:none;"
-                  ),
-                  actionButton(
-                    inputId = "toggle_ortho_summary",
-                    label = span("\u25B6 Show Summary Table"),
-                    class = "btn btn-sm btn-summary-toggle btn-ortho-summary-toggle"
-                  ),
-                  downloadButton("download_ortho_summary_csv", span("Download CSV"), class = "btn-sm btn-download"),
-                  actionButton(
-                    inputId = "btn_download_all_ortho_svg",
-                    label = span(icon("file-zipper"), " Download result SVGs (.zip)"),
-                    class = "btn btn-sm btn-download-zip",
-                    style = "display:none;",
-                    onclick = "exportAllSVGs('ortho')"
-                  ),
-                  div(
-                    class = "plot-zoom-control",
-                    style = "display:none;",
-                    id = "ortho-zoom-control",
-                    tags$button(
-                      id = "ortho-zoom-out", class = "plot-zoom-btn",
-                      `data-zoom-action` = "out", `data-zoom-mode` = "ortho",
-                      title = "Zoom out", disabled = NA, "−"
-                    ),
-                    span(id = "ortho-zoom-label", class = "plot-zoom-label", "1\u00d7"),
-                    tags$button(
-                      id = "ortho-zoom-in", class = "plot-zoom-btn",
-                      `data-zoom-action` = "in", `data-zoom-mode` = "ortho",
-                      title = "Zoom in", "\u002b"
-                    )
-                  ),
-                  div(
-                    class = "plot-sort-toolbar",
-                    span(class = "plot-sort-toolbar-label", icon("sort-amount-desc"), span("Sort plots")),
-                    selectInput(
-                      inputId = "ortho_sort_mode",
-                      label = NULL,
-                      choices = c(
-                        "Load order" = "load",
-                        "Total exon difference (high to low)" = "exondiff_desc",
-                        "Total exon difference (low to high)" = "exondiff_asc",
-                        "Transcript length (longest first)" = "tx_len_desc",
-                        "Transcript length (shortest first)" = "tx_len_asc",
-                        "Exon count (high to low)" = "exon_desc",
-                        "Exon count (low to high)" = "exon_asc",
-                        "Organism name (A-Z)" = "organism_asc",
-                        "Organism name (Z-A)" = "organism_desc",
-                        "Transcript name (A-Z)" = "tx_asc",
-                        "Transcript name (Z-A)" = "tx_desc"
-                      ),
-                      selected = "load",
-                      width = "320px"
-                    )
-                  )
+                  class = "result-workspace-view-intro-copy",
+                  span(class = "result-workspace-view-kicker", icon("table"), " Structured results"),
+                  h2("Summary table"),
+                  p("Search, sort and review the records behind the cross-species comparison.")
+                ),
+                tags$button(
+                  type = "button",
+                  class = "result-workspace-view-back",
+                  `data-workspace-back` = "true",
+                  `data-workspace-scope` = "ortho",
+                  `aria-label` = "Back to Cross-Species visualization",
+                  icon("arrow-left"),
+                  span("Back to visualization")
                 )
               ),
               div(
                 id = "ortho_summary_body",
-                style = "display:none; margin-top:8px;",
+                class = "result-workspace-table-body",
+                style = "display:none;",
                 DT::dataTableOutput("ortho_summary_dt")
               )
             ),
@@ -6272,16 +6623,27 @@ fluidPage(
               div(
                 id = "ortho_analytics_body",
                 class = "analytics-body",
-                style = "display:none; margin-top:12px;",
+                style = "display:none; margin-top:2px;",
+                div(
+                  class = "result-workspace-view-intro",
+                  div(
+                    class = "result-workspace-view-intro-copy",
+                    span(class = "result-workspace-view-kicker", icon("chart-bar"), " Comparative metrics"),
+                    h2("Analytics"),
+                    p("Explore statistical views generated from the active cross-species result set.")
+                  ),
+                  tags$button(
+                    type = "button",
+                    class = "result-workspace-view-back",
+                    `data-workspace-back` = "true",
+                    `data-workspace-scope` = "ortho",
+                    `aria-label` = "Back to Cross-Species visualization",
+                    icon("arrow-left"),
+                    span("Back to visualization")
+                  )
+                ),
                 div(
                 class = "analytics-tabs-shell",
-                  actionButton(
-                    inputId = "btn_download_all_ortho_analytics_svg",
-                    label = span(icon("file-zipper"), " SVG ZIP"),
-                    class = "btn btn-sm btn-download-zip btn-analytics-download-all",
-                    style = "display:none;",
-                    onclick = "exportAnalyticsSVGs('ortho')"
-                  ),
                   tabsetPanel(
                     id = "ortho_analytics_tabs",
                     type = "pills",
@@ -6778,6 +7140,7 @@ fluidPage(
                           src = "icons/databases/mygene.ico",
                           alt = "MyGene",
                           class = "db-source-card-icon",
+                          loading = "lazy",
                           onerror = "this.onerror=null;this.src='icons/DNA.ico';"
                         )
                       ),
@@ -6806,6 +7169,7 @@ fluidPage(
                           src = "icons/databases/ncbi.ico",
                           alt = "NCBI Gene",
                           class = "db-source-card-icon",
+                          loading = "lazy",
                           onerror = "this.onerror=null;this.src='icons/DNA.ico';"
                         )
                       ),
@@ -6834,6 +7198,7 @@ fluidPage(
                           src = "icons/databases/uniprot.ico",
                           alt = "UniProt",
                           class = "db-source-card-icon",
+                          loading = "lazy",
                           onerror = "this.onerror=null;this.src='icons/DNA.ico';"
                         )
                       ),
@@ -6862,6 +7227,7 @@ fluidPage(
                           src = "icons/databases/ensembl.ico",
                           alt = "Ensembl",
                           class = "db-source-card-icon",
+                          loading = "lazy",
                           onerror = "this.onerror=null;this.src='icons/DNA.ico';"
                         )
                       ),
@@ -7050,7 +7416,7 @@ fluidPage(
               div(
                 class = "help-section",
                 h3(icon("share-nodes"), span("Shared analysis reports")),
-                p("Secret read-only reports created in this browser appear below. They can be copied or revoked without a CGV account."),
+                p("Secret read-only reports created in this browser appear below. They can be copied or revoked without a CGeV account."),
                 div(id = "cgv-shared-report-list", class = "cgv-shared-report-list"),
                 p(
                   class = "app-submenu-hint",
@@ -7077,7 +7443,7 @@ fluidPage(
                   class = "feedback-hero-copy",
                   div(class = "feedback-kicker", icon("comment-dots"), span("Community Feedback")),
                   h2("Feedback & Support"),
-                  p("Help us improve CGV. Report bugs, suggest features, or flag rough edges in the workflow."),
+                  p("Help us improve CGeV. Report bugs, suggest features, or flag rough edges in the workflow."),
                   div(
                     class = "feedback-pill-row home-stagger-parent",
                     span(class = "feedback-pill home-stagger-child", icon("flask"), span("Scientific workflows")),
@@ -7093,7 +7459,7 @@ fluidPage(
                 div(
                   class = "feedback-manual-prompt-copy",
                   span("Documentation"),
-                  h3("Check the CGV User Manual"),
+                  h3("Check the CGeV User Manual"),
                   p("Search the complete Web and Desktop reference for workflows, interpretation guidance, exports, and troubleshooting.")
                 ),
                 tags$a(
@@ -7101,7 +7467,7 @@ fluidPage(
                   target = "_blank",
                   rel = "noopener noreferrer",
                   class = "feedback-manual-prompt-action",
-                  `aria-label` = "Open the latest CGV User Manual",
+                  `aria-label` = "Open the latest CGeV User Manual",
                   icon("arrow-up-right-from-square"),
                   span("Open manual")
                 )
@@ -7117,7 +7483,7 @@ fluidPage(
                   div(class = "feedback-info-card-icon", icon("circle-info")),
                   h4("What we capture automatically"),
                   tags$ul(
-                    tags$li("The CGV section active when you submitted."),
+                    tags$li("The CGeV section active when you submitted."),
                     tags$li("Submission timestamp and page context."),
                     tags$li("Your contact details for follow-up.")
                   )
@@ -7130,7 +7496,7 @@ fluidPage(
                   h4("What happens after you send it?"),
                   tags$ul(
                     class = "feedback-step-list",
-                    tags$li(span(class = "feedback-step-num", "1"), "Your report is delivered to the CGV inbox."),
+                    tags$li(span(class = "feedback-step-num", "1"), "Your report is delivered to the CGeV inbox."),
                     tags$li(span(class = "feedback-step-num", "2"), "Bug reports blocking analysis get reviewed first."),
                     tags$li(span(class = "feedback-step-num", "3"), "Suggestions shape community-facing improvements.")
                   )
@@ -7222,7 +7588,7 @@ fluidPage(
                       h3(icon("lightbulb"), span("Feature suggestion")),
                       textInput("sugg_title", HTML('Short Title <span class="field-required">*</span>'), placeholder = "Example: Add PDF export for publication-ready figures", width = "100%"),
                       textAreaInput("sugg_problem", HTML('What is missing or difficult today? <span class="field-required">*</span>'), placeholder = "Describe the gap in the current workflow.", width = "100%", rows = 4),
-                      textAreaInput("sugg_idea", "What would you like CGV to do? (Optional)", placeholder = "Explain the feature or improvement you would like to see.", width = "100%", rows = 4)
+                      textAreaInput("sugg_idea", "What would you like CGeV to do? (Optional)", placeholder = "Explain the feature or improvement you would like to see.", width = "100%", rows = 4)
                     )
                   ),
 

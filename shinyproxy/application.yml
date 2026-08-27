@@ -1,5 +1,5 @@
 proxy:
-  title: CGV - Comparative Gene Viewer
+  title: CGeV - Comparative Gene Viewer
   landing-page: /app_direct/cgv
   heartbeat-rate: ${SP_HEARTBEAT_RATE_MS:30000}
   heartbeat-timeout: 120000
@@ -18,7 +18,7 @@ proxy:
 
   specs:
     - id: cgv
-      display-name: CGV - Comparative Gene Viewer
+      display-name: CGeV - Comparative Gene Viewer
       description: Interactive Shiny app for ortholog analysis, GO enrichment, and genome comparison
       container-image: ${CGV_IMAGE:cgv:1.0.0}
       container-cmd: ["bash", "/app/docker/run-app.sh"]
@@ -29,9 +29,18 @@ proxy:
         APP_PREWARM_BLOCK_START: "0"
         APP_SESSION_METRICS: "1"
         APP_PERF_TIMING: "${SP_APP_PERF_TIMING:1}"
+        APP_PERF_LOG_DIR: "/app/cache/perf_runs"
+        APP_PERF_RUN_LABEL: "${SP_PERF_RUN_LABEL:manual}"
+        APP_BUILD_REVISION: "${CGV_IMAGE:cgv:1.0.0}"
         APP_BACKGROUND_REPORTS_ENABLED: "${SP_BACKGROUND_REPORTS_ENABLED:1}"
         APP_LASTZ_GLOBAL_WORKERS: "${SP_LASTZ_GLOBAL_WORKERS:1}"
         APP_LASTZ_GLOBAL_QUEUE_WAIT_SECONDS: "${SP_LASTZ_GLOBAL_QUEUE_WAIT_SECONDS:1800}"
+        FEEDBACK_RESEND_API_KEY: "${FEEDBACK_RESEND_API_KEY:}"
+        FEEDBACK_TO_EMAIL: "${FEEDBACK_TO_EMAIL:cgvviewer@gmail.com}"
+        FEEDBACK_FROM_EMAIL: "${FEEDBACK_FROM_EMAIL:CGeV Feedback <feedback@cgvapp.com>}"
+        REPORT_RESEND_API_KEY: "${REPORT_RESEND_API_KEY:}"
+        REPORT_FROM_EMAIL: "${REPORT_FROM_EMAIL:CGeV Reports <reports@cgvapp.com>}"
+        REPORT_REPLY_TO_EMAIL: "${REPORT_REPLY_TO_EMAIL:cgvviewer@gmail.com}"
         CGV_DATA_ROOT: "/app"
         CGV_CACHE_DIR: "/app/cache"
         CGV_NCBI_DOWNLOADS_DIR: "/app/ncbi_downloads"

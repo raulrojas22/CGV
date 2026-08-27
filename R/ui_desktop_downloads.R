@@ -35,9 +35,9 @@ cgv_desktop_downloads_page <- function() {
         div(
           class = "cgv-download-context-pill",
           tags$i(class = "fas fa-globe", `data-cgv-context-icon` = "true", `aria-hidden` = "true"),
-          span(`data-cgv-runtime-label` = "true", "CGV Web")
+          span(`data-cgv-runtime-label` = "true", "CGeV Web")
         ),
-        h1("Your CGV workspace, ", span("wherever you work.")),
+        h1("Your CGeV workspace, ", span("wherever you work.")),
         p(
           class = "cgv-download-hero-copy",
           `data-cgv-hero-copy` = "true",
@@ -63,17 +63,17 @@ cgv_desktop_downloads_page <- function() {
           class = "cgv-download-hero-facts",
           span(tags$i(class = "fas fa-shield-halved"), "Private local session"),
           span(tags$i(class = "fas fa-database"), "25 reference organisms"),
-          span(tags$i(class = "fas fa-code-branch"), "Same CGV workflows")
+          span(tags$i(class = "fas fa-code-branch"), "Same CGeV workflows")
         ),
         div(
           class = "cgv-download-visual",
-          `aria-label` = "Preview of the CGV Desktop Multi-Gene Search workspace",
+          `aria-label` = "Preview of the CGeV Desktop Multi-Gene Search workspace",
           div(
             class = "cgv-download-window",
             div(
               class = "cgv-download-window-bar",
               span(class = "cgv-download-window-dots", tags$i(), tags$i(), tags$i()),
-              span("CGV Desktop"),
+              span("CGeV Desktop"),
               span(class = "cgv-download-window-local", tags$i(class = "fas fa-lock"), "Local")
             ),
             div(
@@ -83,7 +83,7 @@ cgv_desktop_downloads_page <- function() {
                 div(
                   class = "cgv-download-mini-brand",
                   span(class = "cgv-download-mini-mark", tags$i(class = "fas fa-dna")),
-                  div(strong("CGV"), tags$small("Comparative Gene Viewer"))
+                  div(strong("CGeV"), tags$small("Comparative Gene Viewer"))
                 ),
                 div(
                   class = "cgv-download-mini-nav",
@@ -91,9 +91,9 @@ cgv_desktop_downloads_page <- function() {
                   span(class = "is-active", tags$i(class = "fas fa-dna"), "Multi-Gene Search"),
                   span(tags$i(class = "fas fa-sitemap"), "Cross-Species"),
                   span(tags$i(class = "fas fa-image"), "Figure Studio"),
-                  span(tags$i(class = "fas fa-route"), "CGV Guide")
+                  span(tags$i(class = "fas fa-route"), "CGeV Guide")
                 ),
-                span(class = "cgv-download-mini-desktop", tags$i(class = "fas fa-laptop"), "CGV Desktop")
+                span(class = "cgv-download-mini-desktop", tags$i(class = "fas fa-laptop"), "CGeV Desktop")
               ),
               div(
                 class = "cgv-download-mini-canvas",
@@ -212,7 +212,7 @@ cgv_desktop_downloads_page <- function() {
         div(
           span(class = "cgv-download-eyebrow", "Choose your platform"),
           h2("One workspace. Three operating systems."),
-          p("CGV checks this device and highlights the best match. Download buttons activate only for installers listed with a verified SHA-256 checksum in the official public release manifest.")
+          p("CGeV checks this device and highlights the best match. Download buttons activate only for installers listed with a verified SHA-256 checksum in the official public release manifest.")
         ),
         div(
           id = "cgv-download-release-status",
@@ -252,11 +252,11 @@ cgv_desktop_downloads_page <- function() {
           ),
           tags$details(
             class = "cgv-download-install-guide",
-            tags$summary(tags$i(class = "fas fa-circle-info"), "How to open CGV on macOS"),
+            tags$summary(tags$i(class = "fas fa-circle-info"), "How to open CGeV on macOS"),
             ol(
-              tags$li("Download the correct DMG and drag CGV Desktop into Applications."),
+              tags$li("Download the correct DMG and drag CGeV Desktop into Applications."),
               tags$li("Try to open it once. If macOS blocks it, open System Settings → Privacy & Security."),
-              tags$li("Choose Open Anyway for CGV Desktop, then confirm Open.")
+              tags$li("Choose Open Anyway for CGeV Desktop, then confirm Open.")
             ),
             p("This manual approval is expected while the macOS build is distributed without paid Apple notarization.")
           )
@@ -307,7 +307,7 @@ cgv_desktop_downloads_page <- function() {
           ),
           span(class = "cgv-download-platform-kicker", "Desktop"),
           h3("Windows"),
-          p("A Windows x64 installer with the same private local runtime and CGV workflows."),
+          p("A Windows x64 installer with the same private local runtime and CGeV workflows."),
           div(
             class = "cgv-download-asset-list",
             div(
@@ -322,7 +322,7 @@ cgv_desktop_downloads_page <- function() {
             ul(
               tags$li("Download the x64 setup from this page."),
               tags$li("Run the setup and follow the installation wizard for your Windows account."),
-              tags$li("CGV Desktop stores its runtime and workspace locally on your computer.")
+              tags$li("CGeV Desktop stores its runtime and workspace locally on your computer.")
             )
           )
         )
@@ -335,7 +335,7 @@ cgv_desktop_downloads_page <- function() {
         class = "cgv-download-section-heading cgv-download-section-heading-centered",
         div(
           span(class = "cgv-download-eyebrow", "Built for local comparative genomics"),
-          h2("The complete CGV experience, on your machine."),
+          h2("The complete CGeV experience, on your machine."),
           p("Desktop is not a reduced companion. It packages the same analysis interface and adds persistent local data management.")
         )
       ),
@@ -358,7 +358,7 @@ cgv_desktop_downloads_page <- function() {
           class = "cgv-download-local-copy",
           span(class = "cgv-download-eyebrow", "Local by design"),
           h2("Your analyses stay in a private session on your computer."),
-          p("CGV Desktop starts its own local Shiny service and opens it only inside the desktop application. Reference datasets and caches are stored in your user profile, where they remain available for later work. Interactive reports are written only to locations you choose through the operating-system save dialog."),
+          p("CGeV Desktop starts its own local Shiny service and opens it only inside the desktop application. Reference datasets and caches are stored in your user profile, where they remain available for later work. Interactive reports are written only to locations you choose through the operating-system save dialog."),
           div(
             class = "cgv-download-local-points",
             span(tags$i(class = "fas fa-lock"), "Private localhost session"),
@@ -370,7 +370,7 @@ cgv_desktop_downloads_page <- function() {
         ),
         div(
           class = "cgv-download-local-diagram",
-          div(class = "cgv-download-local-node is-main", tags$i(class = "fas fa-laptop"), strong("CGV Desktop"), span("Private local app")),
+          div(class = "cgv-download-local-node is-main", tags$i(class = "fas fa-laptop"), strong("CGeV Desktop"), span("Private local app")),
           div(class = "cgv-download-local-line"),
           div(
             class = "cgv-download-local-stack",
@@ -396,7 +396,7 @@ cgv_desktop_downloads_page <- function() {
         class = "cgv-download-info-card cgv-download-release-card",
         span(class = "cgv-download-eyebrow", "Current release"),
         h2(`data-cgv-release-title` = "true", "Public installers pending"),
-        p(`data-cgv-release-copy` = "true", "The download center reads the official CGV Desktop release manifest and enables only the verified assets that are actually public."),
+        p(`data-cgv-release-copy` = "true", "The download center reads the official CGeV Desktop release manifest and enables only the verified assets that are actually public."),
         dl(
           div(dt("Version"), dd(`data-cgv-release-version` = "true", "Not published")),
           div(dt("Published"), dd(`data-cgv-release-date` = "true", "—")),
@@ -446,7 +446,7 @@ cgv_desktop_downloads_page <- function() {
       div(
         span(class = "cgv-download-web-icon", tags$i(class = "fas fa-globe")),
         div(
-          span(class = "cgv-download-eyebrow", "CGV Web"),
+          span(class = "cgv-download-eyebrow", "CGeV Web"),
           h2(`data-cgv-web-title` = "true", "Already working in your browser?"),
           p(`data-cgv-web-copy` = "true", "Continue with the hosted application when you prefer server-managed references and no local installation.")
         )
@@ -457,7 +457,7 @@ cgv_desktop_downloads_page <- function() {
         target = "_blank",
         rel = "noopener noreferrer",
         tags$i(class = "fas fa-arrow-up-right-from-square"),
-        span("Open CGV Web")
+        span("Open CGeV Web")
       )
     )
   )

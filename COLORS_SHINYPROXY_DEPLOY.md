@@ -29,6 +29,10 @@ El resultado esperado termina con:
 CHECK OK: no se realizaron cambios en Colors.
 ```
 
+La línea `Sesión` informa además la telemetría efectiva (`perf=0` o `perf=1`)
+que recibió el contenedor público. El check compara ese valor con el
+`application.yml` activo; no lo deduce del valor por defecto del comando local.
+
 El script aborta si detecta cualquiera de estas condiciones:
 
 - ShinyProxy no corresponde al digest fijado de la versión `3.2.4`;
@@ -60,6 +64,25 @@ emergencia conocida:
 
 ```bash
 ./deploy-colors-shinyproxy.sh --skip-tests
+```
+
+## Telemetría de rendimiento
+
+El deploy normal publica `APP_PERF_TIMING=0`, por lo que no mantiene la
+instrumentación de captura activa para usuarios comunes. Para una medición
+manual controlada, habilítala sólo en esa publicación y usa una etiqueta
+segura:
+
+```bash
+COLORS_PERF_TIMING=1 PERF_RUN_LABEL=despues_colors_01 ./deploy-colors-shinyproxy.sh
+```
+
+Ambos valores permitidos son literales (`0` o `1`); cualquier otro valor hace
+fallar el deploy antes de modificar Colors. Al terminar la medición, vuelve al
+modo normal:
+
+```bash
+COLORS_PERF_TIMING=0 ./deploy-colors-shinyproxy.sh
 ```
 
 ## Qué hace el script
@@ -129,9 +152,11 @@ envía el enlace bajo `https://cgv.mobilomics.org/share/...` usando la
 configuración existente de feedback. El usuario puede continuar trabajando o
 cerrar la sesión; otro alineamiento crea un trabajo separado.
 
-El worker se ejecuta en serie y comparte un único cupo global de LASTZ con las
-sesiones públicas. El remitente corresponde a `FEEDBACK_FROM_EMAIL` y las
-respuestas se dirigen a `FEEDBACK_TO_EMAIL`.
+El worker se ejecuta en serie y comparte dos cupos globales de LASTZ con las
+sesiones públicas (`APP_LASTZ_GLOBAL_WORKERS=2`). Esto permite dos alineamientos
+simultáneos sin liberar una cantidad no acotada de procesos. El remitente
+corresponde a `FEEDBACK_FROM_EMAIL` y las respuestas se dirigen a
+`FEEDBACK_TO_EMAIL`.
 
 Comprobación rápida después del deploy:
 

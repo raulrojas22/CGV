@@ -334,6 +334,9 @@
     popup.classList.add('open');
     syncPopupBounds(popup);
     setToggleExpanded(true);
+    if (window.cgvActivity && typeof window.cgvActivity.refreshLayout === 'function') {
+      window.cgvActivity.refreshLayout();
+    }
   }
 
   function closePopup(popup) {
@@ -344,14 +347,16 @@
       target.classList.remove('open');
     }
     setToggleExpanded(false);
+    if (window.cgvActivity && typeof window.cgvActivity.refreshLayout === 'function') {
+      window.cgvActivity.refreshLayout();
+    }
   }
 
   function scheduleAutoClose(popup) {
     clearAutoCloseTimer();
     autoCloseTimer = setTimeout(function () {
       if (popup && !manualOpen) {
-        popup.classList.remove('open');
-        setToggleExpanded(false);
+        closePopup(popup);
       }
     }, AUTO_CLOSE_MS);
   }
@@ -363,7 +368,7 @@
   function beginGlobalActivity(context, headline, detail) {
     if (!window.cgvActivity) return;
     window.cgvActivity.begin(activitySource(context), {
-      headline: txt(headline || context || 'CGV is working'),
+      headline: txt(headline || context || 'CGeV is working'),
       detail: txt(detail || 'Processing data…'),
       priority: 60,
       delay: 140

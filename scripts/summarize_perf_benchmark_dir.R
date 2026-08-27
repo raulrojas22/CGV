@@ -15,6 +15,10 @@ if (!dir.exists(bench_dir)) {
 focus_metrics <- c(
     "first_plot_ready_ms",
     "total_plots_ready_ms",
+    "browser_first_plot_painted_ms",
+    "browser_total_plots_painted_ms",
+    "client_click_to_first_paint_ms",
+    "server_ready_to_browser_paint_ms",
     "search_finish_ms",
     "search_observer_total_ms",
     "lookup_local_exact_ms",
@@ -25,9 +29,17 @@ focus_metrics <- c(
     "reactive_state_commit_ms",
     "module_init_ms",
     "sequence_prefetch_ms",
+    "inline_fast_prefetch_ms",
+    "gc_span_fetch_ms",
+    "gene_sequence_fetch_ms",
+    "neighbor_prefetch_ms",
     "neighbor_context_ms",
     "create_gene_plot_ms",
-    "girafe_build_ms"
+    "create_gene_plot_entry_delay_ms",
+    "create_gene_plot_gc_ms",
+    "model_build_ms",
+    "girafe_build_ms",
+    "compact_svg_ms"
 )
 
 extract_trial_num <- function(path_txt) {

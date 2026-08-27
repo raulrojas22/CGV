@@ -1,4 +1,4 @@
-name: CGV Desktop Windows x64 beta
+name: CGeV Desktop Windows x64 beta
 
 on:
   workflow_dispatch:
@@ -89,17 +89,17 @@ jobs:
             (Resolve-Path "desktop/dist/latest.yml").Path,
             (Resolve-Path "desktop/resources/r/win32-x64/cgv-runtime-manifest.json").Path
           )
-          $Archive = "desktop/dist/CGV-Desktop-Windows-x64-private-beta.7z"
+          $Archive = "desktop/dist/CGeV-Desktop-Windows-x64-private-beta.7z"
           & $SevenZip a -t7z "-p$env:WINDOWS_BETA_ARTIFACT_PASSWORD" -mhe=on $Archive $Files
           if ($LASTEXITCODE -ne 0 -or -not (Test-Path $Archive)) { throw "Private beta encryption failed." }
 
       - name: Upload private Windows beta artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: CGV-Desktop-Windows-x64-beta-${{ github.run_number }}
+          name: CGeV-Desktop-Windows-x64-beta-${{ github.run_number }}
           if-no-files-found: error
           retention-days: 14
-          path: desktop/dist/CGV-Desktop-Windows-x64-private-beta.7z
+          path: desktop/dist/CGeV-Desktop-Windows-x64-private-beta.7z
 
       - name: Build Microsoft Store fallback
         if: ${{ inputs.build_store_package }}
@@ -120,7 +120,7 @@ jobs:
           $SevenZip = Join-Path $env:ProgramFiles "7-Zip\7z.exe"
           $Appx = (Get-ChildItem "desktop/dist/*-Windows-x64-Store.appx" | Select-Object -First 1).FullName
           if (-not $Appx) { throw "Microsoft Store AppX was not produced." }
-          $Archive = "desktop/dist/CGV-Desktop-Windows-x64-Store-private.7z"
+          $Archive = "desktop/dist/CGeV-Desktop-Windows-x64-Store-private.7z"
           & $SevenZip a -t7z "-p$env:WINDOWS_BETA_ARTIFACT_PASSWORD" -mhe=on $Archive $Appx
           if ($LASTEXITCODE -ne 0 -or -not (Test-Path $Archive)) { throw "Store package encryption failed." }
 
@@ -128,7 +128,7 @@ jobs:
         if: ${{ inputs.build_store_package }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: CGV-Desktop-Windows-x64-Store-${{ github.run_number }}
+          name: CGeV-Desktop-Windows-x64-Store-${{ github.run_number }}
           if-no-files-found: error
           retention-days: 14
-          path: desktop/dist/CGV-Desktop-Windows-x64-Store-private.7z
+          path: desktop/dist/CGeV-Desktop-Windows-x64-Store-private.7z

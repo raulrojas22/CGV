@@ -8,7 +8,7 @@ toggle_txt <- read_all(file.path("www", "js", "genomic_ruler_toggle.js"))
 scss_txt <- read_all("custom.scss")
 css_txt <- read_all(file.path("www", "css", "cgv_compiled.css"))
 
-for (txt in list(ui_txt, server_txt)) {
+for (txt in list(server_txt)) {
     stopifnot(grepl('summary-display-side summary-display-side--left', txt, fixed = TRUE))
     stopifnot(grepl('summary-display-side summary-display-side--right', txt, fixed = TRUE))
     stopifnot(grepl('summary-display-detail-label', txt, fixed = TRUE))
@@ -19,9 +19,12 @@ for (txt in list(ui_txt, server_txt)) {
     stopifnot(!grepl('summary-genomic-ruler-toggle--standalone', txt, fixed = TRUE))
 }
 
+stopifnot(grepl('result-workspace-menu--view', ui_txt, fixed = TRUE))
+stopifnot(grepl('uiOutput(paste0(scope, "_header_mode_switch"))', ui_txt, fixed = TRUE))
+stopifnot(!grepl('class = "summary-context-mode-slot"', ui_txt, fixed = TRUE))
+
 stopifnot(!grepl('summary-display-context-label", "Context"', ui_txt, fixed = TRUE))
 stopifnot(!grepl('summary-display-context-label", "Context"', server_txt, fixed = TRUE))
-stopifnot(grepl('summary-display-context-subbar[\\s\\S]{0,2500}summary-genomic-ruler-toggle', ui_txt, perl = TRUE))
 stopifnot(grepl('summary-display-context-subbar[\\s\\S]{0,500}header_genomic_ruler_button\\(\\)', server_txt, perl = TRUE))
 stopifnot(grepl("rulerVisible ? 'Hide scale' : 'Show scale'", toggle_txt, fixed = TRUE))
 

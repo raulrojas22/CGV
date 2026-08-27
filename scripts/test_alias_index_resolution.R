@@ -11,14 +11,87 @@ suppressPackageStartupMessages({
 
 `%||%` <- function(x, y) if (is.null(x) || length(x) == 0L) y else x
 
-root <- normalizePath("/Users/rarojas/Documents/A_FULLAPP", winslash = "/", mustWork = TRUE)
+script_arg <- grep("^--file=", commandArgs(trailingOnly = FALSE), value = TRUE)
+script_path <- if (length(script_arg) > 0L) {
+  sub("^--file=", "", script_arg[[1L]])
+} else {
+  file.path("scripts", "test_alias_index_resolution.R")
+}
+root <- normalizePath(file.path(dirname(script_path), ".."), winslash = "/", mustWork = TRUE)
 source(file.path(root, "R", "alias_resolution.R"))
 source(file.path(root, "R", "utils.R"))
 source(file.path(root, "gene_search_lib.R"))
+alias_sqlite_builder_env <- new.env(parent = globalenv())
+sys.source(file.path(root, "scripts", "build_alias_index_sqlite.R"), envir = alias_sqlite_builder_env)
 
 assert_true <- function(cond, msg) {
   if (!isTRUE(cond)) stop(msg, call. = FALSE)
 }
+
+# Operation-local reuse must be result-equivalent, context-sensitive, and must
+# not retain no-match/error outcomes that the existing pipeline is allowed to retry.
+positive_lookup_calls <- 0L
+positive_lookup_result <- list(
+  status = "unique_exact",
+  matches = data.frame(local_gene_id = "gene-positive", stringsAsFactors = FALSE)
+)
+positive_lookup <- make_operation_alias_index_lookup(
+  query = "POSITIVE_ALIAS",
+  file_path = "mock.gff3",
+  file_label = "Mock organism",
+  lookup_fun = function(...) {
+    positive_lookup_calls <<- positive_lookup_calls + 1L
+    positive_lookup_result
+  }
+)
+positive_first <- positive_lookup(list(species_id = "mock_species", organism = "Mock organism", taxid = "999999", source = "first"))
+positive_second <- positive_lookup(list(species_id = "mock_species", organism = "Mock organism", taxid = "999999", source = "second"))
+assert_true(identical(positive_first$result, positive_second$result),
+            "Operation-local alias reuse changed the successful lookup result.")
+assert_true(identical(positive_lookup_calls, 1L) && !isTRUE(positive_first$reused) && isTRUE(positive_second$reused),
+            "Equivalent alias contexts did not reuse exactly one successful lookup.")
+invisible(positive_lookup(list(species_id = "mock_species", organism = "Mock organism", taxid = "1000000")))
+assert_true(identical(positive_lookup_calls, 2L),
+            "A changed effective alias context incorrectly reused a prior result.")
+
+retry_lookup_calls <- 0L
+retry_lookup <- make_operation_alias_index_lookup(
+  query = "RETRY_ALIAS",
+  file_path = "mock.gff3",
+  lookup_fun = function(...) {
+    retry_lookup_calls <<- retry_lookup_calls + 1L
+    if (retry_lookup_calls == 1L) {
+      return(list(status = "no_match", matches = data.frame()))
+    }
+    positive_lookup_result
+  }
+)
+retry_first <- retry_lookup(list(species_id = "mock_species"))
+retry_second <- retry_lookup(list(species_id = "mock_species"))
+retry_third <- retry_lookup(list(species_id = "mock_species"))
+assert_true(identical(retry_first$result$status, "no_match") &&
+              identical(retry_second$result, positive_lookup_result) &&
+              identical(retry_third$result, positive_lookup_result) &&
+              identical(retry_lookup_calls, 2L) &&
+              !isTRUE(retry_second$reused) && isTRUE(retry_third$reused),
+            "No-match retry semantics changed under operation-local alias reuse.")
+
+error_lookup_calls <- 0L
+error_lookup <- make_operation_alias_index_lookup(
+  query = "ERROR_ALIAS",
+  file_path = "mock.gff3",
+  lookup_fun = function(...) {
+    error_lookup_calls <<- error_lookup_calls + 1L
+    if (error_lookup_calls == 1L) stop("transient alias lookup failure")
+    positive_lookup_result
+  }
+)
+error_first <- tryCatch(error_lookup(list(species_id = "mock_species")), error = identity)
+error_second <- error_lookup(list(species_id = "mock_species"))
+assert_true(inherits(error_first, "error") &&
+              identical(error_second$result, positive_lookup_result) &&
+              identical(error_lookup_calls, 2L) && !isTRUE(error_second$reused),
+            "Alias lookup errors were retained instead of preserving the existing retry path.")
 
 tmp_root <- tempfile("cgv-alias-index-test-")
 dir.create(tmp_root, recursive = TRUE, showWarnings = FALSE)
@@ -128,7 +201,135 @@ mock_rows <- rbind(
     stringsAsFactors = FALSE
   )
 )
-invisible(write_alias_index_tsv(mock_rows, "mock_species", base_dir = tmp_root))
+mock_tsv <- write_alias_index_tsv(mock_rows, "mock_species", base_dir = tmp_root)
+
+has_exact_sqlite_index <- function(sqlite_path) {
+  con <- DBI::dbConnect(RSQLite::SQLite(), sqlite_path, flags = RSQLite::SQLITE_RO)
+  on.exit(DBI::dbDisconnect(con), add = TRUE)
+  alias_sqlite_builder_env$alias_sqlite_has_exact_index(con)
+}
+
+has_partial_symbol_sqlite_index <- function(sqlite_path) {
+  con <- DBI::dbConnect(RSQLite::SQLite(), sqlite_path, flags = RSQLite::SQLITE_RO)
+  on.exit(DBI::dbDisconnect(con), add = TRUE)
+  alias_sqlite_builder_env$alias_sqlite_has_partial_symbol_index(con)
+}
+
+exact_alias_query_plan <- function(con, query, organism_id) {
+  qn <- normalize_gene_query(query)
+  org <- gsub("'", "''", as.character(organism_id), fixed = TRUE)
+  sql <- sprintf(
+    paste0(
+      "EXPLAIN QUERY PLAN SELECT * FROM alias_index WHERE 1=1 ",
+      "AND (organism_id = '%s' OR organism_id = '') AND (",
+      "query_term_original = ?1 OR query_term_upper = ?2 OR ",
+      "query_term_upper = ?3 OR query_term_clean_basic = ?4 OR ",
+      "query_term_clean_strict = ?5)"
+    ),
+    org
+  )
+  DBI::dbGetQuery(
+    con,
+    sql,
+    params = list(qn$original, qn$upper, qn$upper, qn$clean_basic, qn$clean_strict)
+  )
+}
+
+# A legacy SQLite fixture reproduces the exact-query plan before the migration.
+# Extra rows keep the plan representative while all returned lookup data remains deterministic.
+legacy_rows <- normalize_alias_index_df(mock_rows)
+filler <- legacy_rows[rep(1L, 200L), , drop = FALSE]
+filler_terms <- sprintf("NOISE_ALIAS_%03d", seq_len(nrow(filler)))
+filler_keys <- alias_query_keys_df(filler_terms)
+filler[, names(filler_keys)] <- filler_keys
+filler$local_gene_id <- sprintf("noise-gene-%03d", seq_len(nrow(filler)))
+filler$local_feature_id <- filler$local_gene_id
+legacy_rows <- rbind(legacy_rows, filler)
+
+legacy_sqlite <- file.path(tmp_root, "legacy.alias_index.sqlite")
+legacy_con <- DBI::dbConnect(RSQLite::SQLite(), legacy_sqlite)
+DBI::dbWriteTable(legacy_con, "alias_index", legacy_rows, overwrite = TRUE)
+DBI::dbExecute(legacy_con, "CREATE INDEX idx_upper ON alias_index(query_term_upper)")
+DBI::dbExecute(legacy_con, "CREATE INDEX idx_clean_basic ON alias_index(query_term_clean_basic)")
+DBI::dbExecute(legacy_con, "CREATE INDEX idx_clean_strict ON alias_index(query_term_clean_strict)")
+legacy_before <- search_alias_index_sqlite("HKT1;5", legacy_con, organism_id = "mock_species")
+plan_before <- exact_alias_query_plan(legacy_con, "HKT1;5", "mock_species")
+assert_true(any(grepl("SCAN alias_index", plan_before$detail, fixed = TRUE)),
+            "Legacy exact alias fixture did not reproduce the full-table scan.")
+DBI::dbDisconnect(legacy_con)
+
+migration_first <- alias_sqlite_builder_env$ensure_alias_sqlite_exact_index(legacy_sqlite)
+migration_second <- alias_sqlite_builder_env$ensure_alias_sqlite_exact_index(legacy_sqlite)
+partial_migration_first <- alias_sqlite_builder_env$ensure_alias_sqlite_partial_symbol_index(legacy_sqlite)
+partial_migration_second <- alias_sqlite_builder_env$ensure_alias_sqlite_partial_symbol_index(legacy_sqlite)
+assert_true(isTRUE(migration_first$ok) && isTRUE(migration_first$created),
+            "Existing alias SQLite migration did not create idx_query_term_original.")
+assert_true(isTRUE(migration_second$ok) && !isTRUE(migration_second$created),
+            "Existing alias SQLite migration is not idempotent.")
+assert_true(isTRUE(partial_migration_first$ok) && isTRUE(partial_migration_first$created),
+            "Existing alias SQLite migration did not create idx_local_symbol_upper.")
+assert_true(isTRUE(partial_migration_second$ok) && !isTRUE(partial_migration_second$created),
+            "Existing partial-symbol SQLite migration is not idempotent.")
+
+invalid_partial_sqlite <- file.path(tmp_root, "invalid-partial-symbol.alias_index.sqlite")
+file.copy(legacy_sqlite, invalid_partial_sqlite)
+invalid_partial_con <- DBI::dbConnect(RSQLite::SQLite(), invalid_partial_sqlite)
+DBI::dbExecute(invalid_partial_con, "DROP INDEX idx_local_symbol_upper")
+DBI::dbExecute(
+  invalid_partial_con,
+  "CREATE INDEX idx_local_symbol_upper ON alias_index(UPPER(local_symbol)) WHERE local_symbol <> ''"
+)
+DBI::dbDisconnect(invalid_partial_con)
+invalid_partial_migration <- alias_sqlite_builder_env$ensure_alias_sqlite_partial_symbol_index(invalid_partial_sqlite)
+assert_true(!isTRUE(invalid_partial_migration$ok) && !isTRUE(invalid_partial_migration$created),
+            "Partial idx_local_symbol_upper was incorrectly accepted as a valid migration target.")
+
+invalid_exact_sqlite <- file.path(tmp_root, "invalid-partial-exact.alias_index.sqlite")
+file.copy(legacy_sqlite, invalid_exact_sqlite)
+invalid_exact_con <- DBI::dbConnect(RSQLite::SQLite(), invalid_exact_sqlite)
+DBI::dbExecute(invalid_exact_con, "DROP INDEX idx_query_term_original")
+DBI::dbExecute(
+  invalid_exact_con,
+  "CREATE INDEX idx_query_term_original ON alias_index(query_term_original) WHERE query_term_original <> ''"
+)
+DBI::dbDisconnect(invalid_exact_con)
+invalid_exact_migration <- alias_sqlite_builder_env$ensure_alias_sqlite_exact_index(invalid_exact_sqlite)
+assert_true(!isTRUE(invalid_exact_migration$ok) && !isTRUE(invalid_exact_migration$created),
+            "Partial idx_query_term_original was incorrectly accepted as a valid migration target.")
+
+legacy_con <- DBI::dbConnect(RSQLite::SQLite(), legacy_sqlite, flags = RSQLite::SQLITE_RO)
+legacy_after <- search_alias_index_sqlite("HKT1;5", legacy_con, organism_id = "mock_species")
+plan_after <- exact_alias_query_plan(legacy_con, "HKT1;5", "mock_species")
+DBI::dbDisconnect(legacy_con)
+assert_true(identical(legacy_before, legacy_after),
+            "Adding idx_query_term_original changed exact alias lookup results.")
+assert_true(!any(grepl("SCAN alias_index", plan_after$detail, fixed = TRUE)),
+            "Exact alias query still performs a full alias_index scan after migration.")
+assert_true(any(grepl("idx_query_term_original", plan_after$detail, fixed = TRUE)),
+            "Exact alias query plan does not use idx_query_term_original.")
+
+compact_sqlite <- file.path(tmp_root, "compact-builder.alias_index.sqlite")
+write_alias_sqlite_compact(mock_rows, compact_sqlite)
+assert_true(has_exact_sqlite_index(compact_sqlite),
+            "Compact alias SQLite builder omitted idx_query_term_original.")
+assert_true(has_partial_symbol_sqlite_index(compact_sqlite),
+            "Compact alias SQLite builder omitted idx_local_symbol_upper.")
+
+full_sqlite <- file.path(tmp_root, "full-builder.alias_index.sqlite")
+build_alias_sqlite_from_tsv(mock_tsv, full_sqlite, external_compact = FALSE)
+assert_true(has_exact_sqlite_index(full_sqlite),
+            "Full alias SQLite builder omitted idx_query_term_original.")
+assert_true(has_partial_symbol_sqlite_index(full_sqlite),
+            "Full alias SQLite builder omitted idx_local_symbol_upper.")
+
+script_sqlite <- file.path(tmp_root, "script-builder.alias_index.sqlite")
+alias_sqlite_builder_env$build_sqlite_for_tsv(mock_tsv, script_sqlite, external_compact = TRUE)
+assert_true(has_exact_sqlite_index(script_sqlite),
+            "Standalone alias SQLite builder omitted idx_query_term_original.")
+assert_true(has_partial_symbol_sqlite_index(script_sqlite),
+            "Standalone alias SQLite builder omitted idx_local_symbol_upper.")
+assert_true(alias_sqlite_builder_env$sqlite_is_current(mock_tsv, script_sqlite, external_compact = TRUE),
+            "Standalone alias SQLite validation did not recognize the required exact-query index.")
 
 loaded_idx <- load_alias_index("mock_species", annotation_path = tmp_gff, organism_name = "Mock organism", taxid = "999999", base_dir = tmp_root)
 assert_true(nrow(loaded_idx) >= nrow(mock_rows), "Mock alias index did not load.")
@@ -160,13 +361,57 @@ pipe_alias <- run_lookup_pipeline_pure(
 )
 assert_true(identical(pipe_alias$lookup_stage, "alias_index"), "Pipeline did not resolve through alias_index.")
 
-pipe_tp53_alias <- run_lookup_pipeline_pure(
-  file_path = tmp_gff,
-  input_gene = "TP53",
-  det_info = det,
-  enabled_external_sources = character(0),
-  allow_partial_suggestions = FALSE
-)
+alias_context_lookup_env <- environment()
+alias_context_lookup_original <- get("search_alias_index_for_context", envir = alias_context_lookup_env, inherits = TRUE)
+operation_lookup_factory_original <- get("make_operation_alias_index_lookup", envir = alias_context_lookup_env, inherits = TRUE)
+alias_context_lookup_calls <- 0L
+tp53_reuse_probe <- tryCatch({
+  assign(
+    "search_alias_index_for_context",
+    function(...) {
+      alias_context_lookup_calls <<- alias_context_lookup_calls + 1L
+      alias_context_lookup_original(...)
+    },
+    envir = alias_context_lookup_env
+  )
+  assign("make_operation_alias_index_lookup", NULL, envir = alias_context_lookup_env)
+  baseline <- run_lookup_pipeline_pure(
+    file_path = tmp_gff,
+    input_gene = "TP53",
+    det_info = det,
+    enabled_external_sources = character(0),
+    allow_partial_suggestions = FALSE
+  )
+  baseline_calls <- alias_context_lookup_calls
+
+  alias_context_lookup_calls <- 0L
+  assign("make_operation_alias_index_lookup", operation_lookup_factory_original, envir = alias_context_lookup_env)
+  optimized <- run_lookup_pipeline_pure(
+    file_path = tmp_gff,
+    input_gene = "TP53",
+    det_info = det,
+    enabled_external_sources = character(0),
+    allow_partial_suggestions = FALSE
+  )
+  list(
+    baseline = baseline,
+    baseline_calls = baseline_calls,
+    optimized = optimized,
+    optimized_calls = alias_context_lookup_calls
+  )
+}, finally = {
+  assign("search_alias_index_for_context", alias_context_lookup_original, envir = alias_context_lookup_env)
+  assign("make_operation_alias_index_lookup", operation_lookup_factory_original, envir = alias_context_lookup_env)
+})
+pipe_tp53_baseline_compare <- tp53_reuse_probe$baseline
+pipe_tp53_alias <- tp53_reuse_probe$optimized
+pipe_tp53_counted_compare <- pipe_tp53_alias
+pipe_tp53_baseline_compare$lookup_elapsed_ms <- NULL
+pipe_tp53_counted_compare$lookup_elapsed_ms <- NULL
+assert_true(isTRUE(all.equal(pipe_tp53_counted_compare, pipe_tp53_baseline_compare, check.attributes = TRUE)),
+            "Operation-local alias reuse changed the pure pipeline result.")
+assert_true(identical(tp53_reuse_probe$baseline_calls, 2L) && identical(tp53_reuse_probe$optimized_calls, 1L),
+            "The pure pipeline did not reduce the successful exact alias lookup from two calls to one.")
 assert_true(identical(pipe_tp53_alias$lookup_stage, "alias_index"), "Pipeline did not resolve explicit TP53 alias through alias_index.")
 
 pipe_ambig <- run_lookup_pipeline_pure(

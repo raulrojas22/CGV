@@ -18,6 +18,10 @@ assert.ok(browserCode.includes("mapOracleManifest"));
 assert.ok(browserCode.includes("isSha256"));
 assert.ok(browserCode.includes('"windows-x64"'));
 assert.ok(browserCode.includes("findGithubRelease(fallback)"));
+assert.ok(browserCode.includes('document.addEventListener("shown.bs.tab"'));
+assert.ok(browserCode.includes('value === "desktop-app"'));
+assert.ok(browserCode.includes("ready(boot)"));
+assert.ok(!browserCode.includes("ready(init)"), "Desktop release lookup must wait until its hidden tab is opened");
 
 const uiCode = read("R/ui_desktop_downloads.R");
 for (const kind of ["mac-arm64", "mac-x64", "linux-appimage", "linux-deb", "windows-x64"]) {
@@ -26,7 +30,7 @@ for (const kind of ["mac-arm64", "mac-x64", "linux-appimage", "linux-deb", "wind
 assert.ok(!/\b(?:signed|unsigned|SignPath)\b/i.test(uiCode), "Public download UI must use neutral Windows wording");
 
 const preparationScript = read("scripts/preparar-publicacion-desktop.sh");
-assert.ok(preparationScript.includes('"windows-x64|CGV-Desktop-$VERSION-Windows-x64-Setup.exe"'));
+assert.ok(preparationScript.includes('"windows-x64|CGeV-Desktop-$VERSION-Windows-x64-Setup.exe"'));
 assert.ok(!preparationScript.includes("--include-windows-signed"));
 
 for (const script of [

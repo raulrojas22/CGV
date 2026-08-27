@@ -1,6 +1,6 @@
 # Durable background-report queue and branded result delivery.
 #
-# The queue deliberately uses only the shared CGV cache. Every ShinyProxy
+# The queue deliberately uses only the shared CGeV cache. Every ShinyProxy
 # container can enqueue a job, while one dedicated worker claims and renders
 # them serially. Job files are private; only the finished /share/<token> report
 # is exposed by nginx.
@@ -119,7 +119,7 @@ cgv_enqueue_background_report <- function(snapshot,
     if (!isTRUE(valid_email)) stop("Enter a valid email address for report delivery.")
     if (!is.list(snapshot) || !length(snapshot)) stop("The current analysis could not be captured.")
     if (cgv_snapshot_has_unportable_sources(snapshot)) {
-        stop("Background delivery currently supports preloaded CGV data only. Remove uploaded/private sources or generate the report in this session.")
+        stop("Background delivery currently supports preloaded CGeV data only. Remove uploaded/private sources or generate the report in this session.")
     }
     max_snapshot_mb <- suppressWarnings(as.numeric(Sys.getenv("APP_BACKGROUND_REPORT_SNAPSHOT_MAX_MB", "200")))
     if (!is.finite(max_snapshot_mb) || max_snapshot_mb < 10) max_snapshot_mb <- 200
@@ -161,6 +161,11 @@ cgv_enqueue_background_report <- function(snapshot,
         unlink(cgv_background_report_job_path(job_id, base_dir), force = TRUE)
         stop("Could not place the background report in the processing queue.")
     }
+    message(sprintf(
+        "[background-report-queue] enqueued job=%s kind=%s",
+        job_id,
+        as.character(options$request_kind %||% "report")
+    ))
     list(
         id = job_id,
         state = "queued",
@@ -275,7 +280,7 @@ cgv_report_delivery_config <- function(getenv = Sys.getenv) {
     feedback_config <- if (exists("feedback_delivery_config", mode = "function")) {
         feedback_delivery_config(getenv = getenv)
     } else {
-        list(api_key = "", to_email = "cgvviewer@gmail.com", from_email = "CGV <feedback@cgvapp.com>", logo_path = file.path("www", "cgv-email-logo.png"))
+        list(api_key = "", to_email = "cgvviewer@gmail.com", from_email = "CGeV <feedback@cgvapp.com>", logo_path = file.path("www", "cgv-email-logo.png"))
     }
     env_value <- function(name, fallback = "") {
         value <- trimws(as.character(getenv(name, unset = "") %||% ""))
@@ -283,11 +288,40 @@ cgv_report_delivery_config <- function(getenv = Sys.getenv) {
     }
     list(
         api_key = env_value("REPORT_RESEND_API_KEY", feedback_config$api_key),
-        from_email = env_value("REPORT_FROM_EMAIL", "CGV Reports <reports@cgvapp.com>"),
+        from_email = env_value("REPORT_FROM_EMAIL", "CGeV Reports <reports@cgvapp.com>"),
         reply_to = env_value("REPORT_REPLY_TO_EMAIL", feedback_config$to_email %||% "cgvviewer@gmail.com"),
         logo_path = env_value("REPORT_LOGO_PATH", feedback_config$logo_path),
         public_url = sub("/+$", "", env_value("CGV_PUBLIC_BASE_URL", feedback_config$public_url))
     )
+}
+
+cgv_report_delivery_preflight <- function(config = cgv_report_delivery_config()) {
+    api_key <- trimws(as.character(config$api_key %||% ""))
+    from_address <- if (exists("feedback_extract_address", mode = "function")) {
+        feedback_extract_address(config$from_email %||% "")
+    } else {
+        trimws(as.character(config$from_email %||% ""))
+    }
+    valid <- if (exists("feedback_is_valid_email", mode = "function")) {
+        feedback_is_valid_email
+    } else {
+        function(x) grepl("^[^\\s@<>]+@[^\\s@<>]+\\.[^\\s@<>]+$", x, perl = TRUE)
+    }
+    if (!nzchar(api_key)) {
+        return(list(
+            ok = FALSE,
+            state = "not_configured",
+            error = "REPORT_RESEND_API_KEY/FEEDBACK_RESEND_API_KEY is not configured."
+        ))
+    }
+    if (!isTRUE(valid(from_address)) || !isTRUE(valid(config$reply_to %||% ""))) {
+        return(list(
+            ok = FALSE,
+            state = "invalid_configuration",
+            error = "Report sender or reply address is invalid."
+        ))
+    }
+    list(ok = TRUE, state = "ready", error = "")
 }
 
 cgv_report_request_meta <- function(job) {
@@ -300,7 +334,7 @@ cgv_report_request_meta <- function(job) {
     } else if (isTRUE(options$include_cross_species)) {
         "Cross-Species"
     } else {
-        "CGV"
+        "CGeV"
     }
     mode <- switch(
         tolower(trimws(as.character(options$alignment_mode %||% "complete"))),
@@ -314,9 +348,9 @@ cgv_report_request_meta <- function(job) {
 cgv_report_email_subject <- function(job, success = TRUE) {
     meta <- cgv_report_request_meta(job)
     if (isTRUE(success)) {
-        if (isTRUE(meta$alignment)) "Your CGV alignment report is ready" else "Your interactive CGV report is ready"
+        if (isTRUE(meta$alignment)) "Your CGeV alignment report is ready" else "Your interactive CGeV report is ready"
     } else {
-        if (isTRUE(meta$alignment)) "CGV could not complete your alignment report" else "CGV could not complete your report"
+        if (isTRUE(meta$alignment)) "CGeV could not complete your alignment report" else "CGeV could not complete your report"
     }
 }
 
@@ -342,12 +376,12 @@ cgv_report_email_text <- function(job, success = TRUE) {
         )
     } else {
         paste(
-            "CGV could not finish your background report.",
+            "CGeV could not finish your background report.",
             "",
             paste0("Reference: ", job$id %||% ""),
             paste0("Reason: ", job$error %||% "The report worker stopped before publication."),
             "",
-            "You can return to CGV and submit the analysis again.",
+            "You can return to CGeV and submit the analysis again.",
             sep = "\n"
         )
     }
@@ -358,22 +392,22 @@ cgv_report_email_html <- function(job, success = TRUE, config = cgv_report_deliv
     summary <- job$summary %||% list()
     meta <- cgv_report_request_meta(job)
     genes <- paste(as.character(summary$genes %||% character(0)), collapse = ", ")
-    if (!nzchar(genes)) genes <- "CGV analysis"
+    if (!nzchar(genes)) genes <- "CGeV analysis"
     if (isTRUE(success)) {
         badge <- if (isTRUE(meta$alignment)) "Alignment report ready" else "Report ready"
         heading <- if (isTRUE(meta$alignment)) {
-            "Your complete CGV alignment report is ready"
+            "Your complete CGeV alignment report is ready"
         } else {
-            "Your interactive CGV report is ready"
+            "Your interactive CGeV report is ready"
         }
         description <- if (isTRUE(meta$alignment)) {
             paste0(
-                "CGV finished the requested ", esc(meta$workflow),
+                "CGeV finished the requested ", esc(meta$workflow),
                 " analysis in the background. The interactive report includes the structural results, analytics and completed ",
                 esc(meta$mode), "."
             )
         } else {
-            "CGV finished the analysis snapshot you sent to the background queue. You can open the complete read-only report without returning to the original session."
+            "CGeV finished the analysis snapshot you sent to the background queue. You can open the complete read-only report without returning to the original session."
         }
         alignment_details <- if (isTRUE(meta$alignment)) paste0(
             '<div style="margin-top:7px;font-size:12px;line-height:18px;color:#60758a;">Workflow: ', esc(meta$workflow),
@@ -392,15 +426,15 @@ cgv_report_email_html <- function(job, success = TRUE, config = cgv_report_deliv
             '<div style="margin-top:18px;font-size:12px;line-height:19px;color:#7b8c9d;">This secret URL acts as the access key. Anyone who receives it can view and copy the report until it expires. The report reflects the session exactly when the job was submitted.</div>'
         )
         preheader <- if (isTRUE(meta$alignment)) {
-            "Your complete CGV alignment report is ready."
+            "Your complete CGeV alignment report is ready."
         } else {
-            "Your complete interactive CGV report is ready."
+            "Your complete interactive CGeV report is ready."
         }
     } else {
         failed_heading <- if (isTRUE(meta$alignment)) {
-            "CGV could not finish the alignment report"
+            "CGeV could not finish the alignment report"
         } else {
-            "CGV could not finish the report"
+            "CGeV could not finish the report"
         }
         content <- paste0(
             '<span style="display:inline-block;padding:6px 10px;border-radius:999px;font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;background:#fff1f0;color:#b42318;border:1px solid #ffd6d2;">Report not completed</span>',
@@ -409,12 +443,12 @@ cgv_report_email_html <- function(job, success = TRUE, config = cgv_report_deliv
             '<div style="margin-top:22px;padding:18px;background:#fff7f6;border:1px solid #f3d4d0;border-radius:10px;">',
             '<div style="font-size:11px;line-height:16px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:#b42318;">Reference ', esc(job$id), '</div>',
             '<div style="margin-top:7px;font-size:13px;line-height:21px;color:#536b81;">', esc(job$error %||% "The report worker stopped before publication."), '</div></div>',
-            '<div style="margin-top:24px;"><a href="', esc(config$public_url %||% ""), '" style="display:inline-block;padding:11px 17px;border-radius:8px;background:#314c70;color:#ffffff;font-size:13px;line-height:18px;font-weight:700;text-decoration:none;">Return to CGV</a></div>'
+            '<div style="margin-top:24px;"><a href="', esc(config$public_url %||% ""), '" style="display:inline-block;padding:11px 17px;border-radius:8px;background:#314c70;color:#ffffff;font-size:13px;line-height:18px;font-weight:700;text-decoration:none;">Return to CGeV</a></div>'
         )
         preheader <- if (isTRUE(meta$alignment)) {
-            "CGV could not complete your alignment report."
+            "CGeV could not complete your alignment report."
         } else {
-            "CGV could not complete your background report."
+            "CGeV could not complete your background report."
         }
     }
     if (exists("feedback_email_shell", mode = "function")) {
@@ -428,8 +462,9 @@ cgv_report_send_email <- function(job,
                                   success = TRUE,
                                   config = cgv_report_delivery_config(),
                                   transport = NULL) {
-    if (!nzchar(config$api_key %||% "")) {
-        return(list(ok = FALSE, state = "not_configured", status = NA_integer_, provider_id = "", error = "REPORT_RESEND_API_KEY/FEEDBACK_RESEND_API_KEY is not configured."))
+    preflight <- cgv_report_delivery_preflight(config)
+    if (!isTRUE(preflight$ok)) {
+        return(list(ok = FALSE, state = preflight$state, status = NA_integer_, provider_id = "", error = preflight$error))
     }
     email <- trimws(as.character(job$email %||% ""))
     from_address <- if (exists("feedback_extract_address", mode = "function")) feedback_extract_address(config$from_email) else config$from_email

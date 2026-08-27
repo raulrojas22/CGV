@@ -20,7 +20,7 @@ async function refreshSignedWindowsUpdate(options) {
   const updateInfoPath = path.resolve(options.updateInfoPath);
   const createBlockmap = options.createBlockmap || buildBlockmap;
   const version = packageJson.version;
-  const expectedName = `CGV-Desktop-${version}-Windows-x64-Setup.exe`;
+  const expectedName = `CGeV-Desktop-${version}-Windows-x64-Setup.exe`;
 
   if (!fs.existsSync(installerPath)) throw new Error(`Signed Windows installer not found: ${installerPath}`);
   if (!fs.existsSync(updateInfoPath)) throw new Error(`Windows update manifest not found: ${updateInfoPath}`);

@@ -1,92 +1,71 @@
-# Data Availability and Repository Policy
+# Data availability and reconstruction
 
-This project includes both application code and large local biological resources. For public release and journal submission, these components should not be handled in the same way.
+CGeV separates versioned source code and metadata from production-scale
+biological data. This keeps the Git repository reviewable while preserving the
+assembly accessions and reconstruction information needed to reproduce an
+analysis.
 
-## Recommended separation
+## Data included in this repository
 
-### 1. Source code and configuration
+The repository versions:
 
-Store in **GitHub**:
+- application source, tests, and deployment configuration;
+- `annotations/registry.tsv`, containing the 25 reference datasets used by the
+  application;
+- `genomes/registry.tsv` and `go_annotations/registry.tsv`;
+- scripts used to build indexes, registries, and caches;
+- reviewer inputs and expected outputs in `examples/manuscript-cases/`.
 
-- R/Shiny application code
-- Docker and deployment files
-- helper scripts
-- lightweight registries such as `annotations/registry.tsv`, `genomes/registry.tsv`, and `go_annotations/registry.tsv`
-- documentation, figures, and manuscript-support files
+The reviewer package covers the HKT and TP53 examples reported in the
+manuscript. Validate its integrity with:
 
-### 2. Large biological resources
+```bash
+python3 scripts/validate_reviewer_package.py
+```
 
-Do **not** store in standard Git history:
+See the [reviewer walkthrough](examples/manuscript-cases/README.md) for the
+fixed assembly accessions, input queries, settings, and acceptance criteria.
 
-- genome sequence files (`.2bit`, `.fa`, `.fna`, `.fasta`)
-- compressed annotations (`.gff.gz`, `.gff3.gz`, `.gtf.gz`) and indexes
-- GO annotation archives (`.gaf.gz`)
-- ontology snapshots and large derived caches
-- generated cache artifacts under `cache/`
+## Data maintained outside Git history
 
-These files are too large for healthy long-term GitHub repository use and are operational data rather than source code.
+The following production assets are not committed because of their size and
+update frequency:
 
-## Recommended publication model
+- genome sequence files (`.2bit`, `.fa`, `.fna`, `.fasta`);
+- bgzip-compressed annotations and Tabix indexes (`.gff.gz`, `.gff3.gz`,
+  `.gtf.gz`, `.tbi`);
+- GO annotation archives and generated ontology indexes;
+- generated caches, logs, reports, uploads, and local configuration;
+- desktop installers and packaged runtimes.
 
-### Software
+These assets are obtained from the public upstream providers identified by the
+accessions in the registries and are mounted or installed at runtime. Dataset
+packages used by CGeV Desktop are verified by checksum.
 
-- Keep the canonical development repository in GitHub.
-- Create versioned GitHub releases for each public software version.
-- Connect the repository to Zenodo and archive releases to obtain a DOI.
+## Reconstruction
 
-### Data
+1. Choose an entry from `annotations/registry.tsv`.
+2. Obtain the exact assembly and matching annotation release from its upstream
+   provider, normally NCBI RefSeq/GenBank or Ensembl.
+3. Follow [annotation reconstruction](annotations/README.md) to bgzip and index
+   the annotation.
+4. Follow [genome reconstruction](genomes/README.md) to prepare the matching
+   2bit genome.
+5. Place the assets at the registry paths or set the corresponding Docker
+   volume variables from `.env.example`.
+6. Record the CGeV version/commit, assembly accession, query, transcript,
+   orientation, window, alignment threshold, and optional external-service
+   results in the exported reproducibility package.
 
-Choose one of these paths depending on journal requirements:
+Network-backed results from STRING, Europe PMC, MyGene.info, NCBI Gene,
+UniProt, or Ensembl may change independently of a CGeV release. The structural
+reviewer cases therefore use the fixed local assembly and annotation references
+as their reproducible core.
 
-1. **Preferred for this project:** keep production-scale data outside GitHub and document how to obtain or reconstruct it from upstream sources.
-2. Archive a **small example dataset** in Zenodo so reviewers and readers can run a lightweight demonstration.
-3. If the journal requires a frozen full dataset, deposit the data in Zenodo, Figshare, OSF, or an institutional repository as a separate record from the software.
+## Archival policy
 
-## What should go to Zenodo
-
-### Definitely
-
-- release snapshots of the software repository
-- release metadata used for citation
-- optional small demo dataset
-
-### Maybe
-
-- full registries used in the published release
-- exact frozen metadata tables used in the manuscript
-
-### Usually not ideal
-
-- the entire live production dataset if it is very large and can be reconstructed from public upstream sources
-
-## Practical guidance for CGV
-
-Given the current project structure:
-
-- `genomes/` is production data and should stay out of GitHub
-- `annotations/` is production data and should stay out of GitHub
-- `go_annotations/raw/` should stay out of GitHub
-- `cache/` should stay out of GitHub
-- the small registry files should remain versioned
-- the repository should explain where datasets live and how they are mounted into Docker
-
-## What reviewers usually need
-
-For a scientific software release, reviewers generally need:
-
-- access to the source code
-- clear installation instructions
-- a stable citation target
-- enough example data to verify functionality
-- an explanation of how full datasets are managed
-
-This means a strong public release often consists of:
-
-1. a clean GitHub repository
-2. a Zenodo DOI for the software release
-3. a small demo dataset or precise reconstruction instructions
-4. a manuscript-ready README and citation metadata
-
-## Suggested statement for manuscript or README
-
-> The CGV source code is distributed through GitHub and archived in Zenodo for versioned citation. Due to size and update frequency, production genome, annotation, and GO resources are maintained outside Git history and mounted at runtime; lightweight registries and reconstruction instructions are provided in the repository.
+Each public software release should be tagged in GitHub and archived in Zenodo
+for an immutable software DOI. A frozen dataset snapshot, when required by a
+journal or funder, should be deposited as a separate data record rather than
+added to Git history. The repository's `CITATION.cff` and `.zenodo.json` contain
+the current software metadata.

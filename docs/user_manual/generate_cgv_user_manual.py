@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build the CGV Web and Desktop user manual as a publication-ready PDF."""
+"""Build the CGeV Web and Desktop user manual as a publication-ready PDF."""
 
 from __future__ import annotations
 
@@ -43,7 +43,7 @@ from reportlab.platypus.tableofcontents import TableOfContents
 
 
 ROOT = Path(__file__).resolve().parents[2]
-SOURCE = ROOT / "docs" / "user_manual" / "CGV_User_Manual_Source.md"
+SOURCE = ROOT / "docs" / "user_manual" / "CGeV_User_Manual_Source.md"
 REGISTRY = ROOT / "annotations" / "registry.tsv"
 APP_ICON = ROOT / "desktop" / "build" / "icon.png"
 SCREENSHOT_DIR = ROOT / "docs" / "user_manual" / "assets" / "screenshots"
@@ -54,9 +54,10 @@ PRODUCT_VERSION = str(CONFIG["product_version"])
 REVISION_DATE = str(CONFIG["revision_date"])
 REVISION_DISPLAY = str(CONFIG["revision_display"])
 PUBLIC_FILENAME = str(CONFIG["public_filename"])
-VERSIONED_FILENAME = f"CGV_User_Manual_Web_and_Desktop_v{MANUAL_VERSION}.pdf"
+VERSIONED_FILENAME = f"CGeV_User_Manual_Web_and_Desktop_v{MANUAL_VERSION}.pdf"
 OUTPUT = ROOT / "output" / "pdf" / VERSIONED_FILENAME
 PUBLIC_LATEST = ROOT / "www" / "docs" / PUBLIC_FILENAME
+LEGACY_PUBLIC_LATEST = ROOT / "www" / "docs" / "CGV_User_Manual.pdf"
 PUBLIC_ARCHIVE = ROOT / "www" / "docs" / "archive" / VERSIONED_FILENAME
 PUBLIC_METADATA = ROOT / "www" / "docs" / "manual.json"
 
@@ -352,7 +353,7 @@ def draw_cover(canvas, doc):
 
     canvas.setFillColor(WHITE)
     canvas.setFont(FONT_BOLD, 34)
-    canvas.drawString(20 * mm, PAGE_H - 127 * mm, "CGV User Manual")
+    canvas.drawString(20 * mm, PAGE_H - 127 * mm, "CGeV User Manual")
     canvas.setFont(FONT, 17)
     canvas.setFillColor(HexColor("#C9D6DF"))
     canvas.drawString(20 * mm, PAGE_H - 140 * mm, "Web and Desktop Edition")
@@ -395,7 +396,7 @@ def draw_content_page(canvas, doc):
     canvas.line(LEFT, PAGE_H - 12.5 * mm, PAGE_W - RIGHT, PAGE_H - 12.5 * mm)
     canvas.setFillColor(NAVY)
     canvas.setFont(FONT_BOLD, 7.1)
-    canvas.drawString(LEFT, PAGE_H - 9.5 * mm, "CGV USER MANUAL")
+    canvas.drawString(LEFT, PAGE_H - 9.5 * mm, "CGeV USER MANUAL")
     canvas.setFillColor(MUTED)
     canvas.setFont(FONT, 7.1)
     canvas.drawRightString(
@@ -588,7 +589,7 @@ class WorkflowDiagram(Flowable):
             textColor=MUTED,
             alignment=TA_CENTER,
         )
-        draw_paragraph(c, Paragraph("THE CGV ANALYSIS PATH", title_style), 12, 182, width - 24, 16)
+        draw_paragraph(c, Paragraph("THE CGeV ANALYSIS PATH", title_style), 12, 182, width - 24, 16)
 
         labels = [
             ("1", "SELECT<br/>WORKFLOW", "One organism with many genes, or many organisms with one gene."),
@@ -692,7 +693,7 @@ class InterfaceMap(Flowable):
             "Multi-Gene Search",
             "Cross-Species Search",
             "Figure Studio",
-            "CGV Guide",
+            "CGeV Guide",
             "Settings / Feedback",
         ]
         for i, item in enumerate(items):
@@ -854,7 +855,7 @@ def workflow_diagram():
         col_widths.append(box_w if i % 2 == 0 else 10)
     outer = Table(
         [
-            [Paragraph("THE CGV ANALYSIS PATH", title_style)] + [""] * 8,
+            [Paragraph("THE CGeV ANALYSIS PATH", title_style)] + [""] * 8,
             cells,
             [Paragraph(
                 "Verify source provenance and the resolved gene or transcript before interpreting differences.",
@@ -907,7 +908,7 @@ def interface_map():
         "Multi-Gene Search",
         "Cross-Species Search",
         "Figure Studio",
-        "CGV Guide",
+        "CGeV Guide",
         "Settings / Feedback",
     ):
         sidebar_rows.append([Paragraph(item, sidebar_item)])
@@ -1051,8 +1052,8 @@ def screenshot_figure(filename: str, caption: str, max_height: float = 290):
 
 def screenshot_interface():
     return screenshot_figure(
-        "cgv_interface_orientation.png",
-        "<b>Figure 2.1.</b> The real CGV workspace with the Multi-Gene configuration panel open. "
+        "cgev_interface_orientation.png",
+        "<b>Figure 2.1.</b> The real CGeV workspace with the Multi-Gene configuration panel open. "
         "The sidebar contains workflow navigation and gene entry; the main header controls visualization mode and detail.",
         max_height=274,
     )
@@ -1060,7 +1061,7 @@ def screenshot_interface():
 
 def screenshot_cross_species():
     return screenshot_figure(
-        "cgv_cross_species_workflow.png",
+        "cgev_cross_species_workflow.png",
         "<b>Figure 5.1.</b> Cross-Species Gene Search before execution. "
         "The source selector includes Preloaded organisms, NCBI Search, Upload files, and Mixed sources.",
         max_height=274,
@@ -1086,7 +1087,7 @@ def screenshot_analytics():
 
 def screenshot_figure_studio():
     return screenshot_figure(
-        "cgv_figure_studio.png",
+        "cgev_figure_studio.png",
         "<b>Figure 10.1.</b> Figure Studio publication controls, panel library, empty canvas, and selected-panel inspector.",
         max_height=310,
     )
@@ -1094,7 +1095,7 @@ def screenshot_figure_studio():
 
 def screenshot_settings():
     return screenshot_figure(
-        "cgv_settings_workspace.png",
+        "cgev_settings_workspace.png",
         "<b>Figure 12.1.</b> Settings provides appearance, interface, alias-source, organism, and work-session controls.",
         max_height=274,
     )
@@ -1293,11 +1294,11 @@ def build_pdf(output: Path) -> None:
         rightMargin=RIGHT,
         topMargin=TOP,
         bottomMargin=BOTTOM,
-        title="CGV User Manual - Web and Desktop Edition",
+        title="CGeV User Manual - Web and Desktop Edition",
         author="Comparative Gene Viewer",
-        subject="Complete user manual for CGV Web and CGV Desktop",
+        subject="Complete user manual for CGeV Web and CGeV Desktop",
         creator="Comparative Gene Viewer documentation",
-        keywords="CGV, comparative genomics, gene visualization, user manual, desktop",
+        keywords="CGeV, comparative genomics, gene visualization, user manual, desktop",
     )
     cover_frame = Frame(0, 0, PAGE_W, PAGE_H, leftPadding=0, rightPadding=0, topPadding=0, bottomPadding=0)
     content_frame = Frame(
@@ -1321,6 +1322,9 @@ def publish_manual(source_pdf: Path) -> None:
     PUBLIC_LATEST.parent.mkdir(parents=True, exist_ok=True)
     PUBLIC_ARCHIVE.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(source_pdf, PUBLIC_LATEST)
+    # Keep the former stable URL serving the current manual so existing Web and
+    # Desktop installations do not lose their documentation link.
+    shutil.copy2(source_pdf, LEGACY_PUBLIC_LATEST)
     shutil.copy2(source_pdf, PUBLIC_ARCHIVE)
     metadata = {
         "title": str(CONFIG["title"]),
@@ -1331,6 +1335,7 @@ def publish_manual(source_pdf: Path) -> None:
         "revision_date": REVISION_DATE,
         "revision_display": REVISION_DISPLAY,
         "latest_url": f"docs/{PUBLIC_FILENAME}",
+        "legacy_url": "docs/CGV_User_Manual.pdf",
         "archive_url": f"docs/archive/{VERSIONED_FILENAME}",
     }
     PUBLIC_METADATA.write_text(

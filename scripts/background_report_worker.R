@@ -1,12 +1,6 @@
 #!/usr/bin/env Rscript
 
 options(warn = 1)
-options(chromote.chrome_args = unique(c(
-    getOption("chromote.chrome_args", character(0)),
-    "--no-sandbox",
-    "--disable-dev-shm-usage",
-    "--disable-gpu"
-)))
 
 `%||%` <- function(a, b) if (!is.null(a)) a else b
 
@@ -57,6 +51,40 @@ required <- c("processx", "chromote", "httr2", "jsonlite")
 missing <- required[!vapply(required, requireNamespace, logical(1), quietly = TRUE)]
 if (length(missing)) stop("Missing worker packages: ", paste(missing, collapse = ", "))
 
+worker_chrome_args <- unique(c(
+    "--no-sandbox",
+    "--disable-dev-shm-usage",
+    "--disable-gpu",
+    chromote::get_chrome_args()
+))
+chromote::set_chrome_args(worker_chrome_args)
+worker_log("headless browser args=%s", paste(worker_chrome_args, collapse = " "))
+
+verify_worker_chrome <- function(timeout_seconds = 30) {
+    verifier <- file.path(base_dir, "scripts", "verify_headless_chrome.R")
+    if (!file.exists(verifier)) stop("Missing isolated headless Chrome verifier: ", verifier)
+
+    child_env <- Sys.getenv()
+    child_env[["CHROMOTE_CHROME"]] <- worker_chrome
+    result <- processx::run(
+        "Rscript",
+        c("--vanilla", verifier),
+        env = child_env,
+        echo = FALSE,
+        error_on_status = FALSE,
+        timeout = max(1, as.numeric(timeout_seconds)) * 1000
+    )
+    if (!identical(as.integer(result$status %||% 1L), 0L)) {
+        detail <- trimws(paste(c(result$stderr, result$stdout), collapse = "\n"))
+        if (!nzchar(detail)) detail <- "isolated verifier exited unsuccessfully"
+        stop("Headless Chrome preflight failed: ", detail)
+    }
+    products <- trimws(as.character(result$stdout %||% character(0)))
+    products <- products[grepl("^(Chrome|Chromium)/", products)]
+    if (!length(products)) stop("Headless Chrome preflight did not return a browser product.")
+    products[[length(products)]]
+}
+
 poll_seconds <- max(1, suppressWarnings(as.numeric(Sys.getenv("APP_BACKGROUND_REPORT_POLL_SECONDS", "3"))))
 timeout_minutes <- max(5, suppressWarnings(as.numeric(Sys.getenv("APP_BACKGROUND_REPORT_TIMEOUT_MINUTES", "30"))))
 renderer_port <- suppressWarnings(as.integer(Sys.getenv("APP_BACKGROUND_REPORT_PORT", "3891")))
@@ -65,6 +93,24 @@ if (!is.finite(renderer_port) || renderer_port < 1024L || renderer_port > 65535L
 paths <- cgv_background_report_paths(base_dir)
 log_dir <- file.path(paths$root, "logs")
 dir.create(log_dir, recursive = TRUE, showWarnings = FALSE)
+ready_path <- file.path(paths$root, "worker.ready")
+if (file.exists(ready_path)) unlink(ready_path, force = TRUE)
+delivery_config <- cgv_report_delivery_config()
+delivery_preflight <- cgv_report_delivery_preflight(delivery_config)
+if (!isTRUE(delivery_preflight$ok)) {
+    stop("Report email delivery preflight failed: ", delivery_preflight$error)
+}
+headless_product <- verify_worker_chrome()
+worker_log("headless browser preflight ready; product=%s", headless_product)
+writeLines(c(
+    format(Sys.time(), "%Y-%m-%dT%H:%M:%S%z"),
+    paste0("browser=", headless_product)
+), ready_path, useBytes = TRUE)
+worker_log(
+    "email delivery ready; sender=%s reply_to=%s",
+    delivery_config$from_email,
+    delivery_config$reply_to
+)
 try(cgv_recover_stale_background_reports(base_dir, stale_minutes = timeout_minutes + 10), silent = TRUE)
 
 wait_for_renderer <- function(process, port, timeout_seconds = 180) {

@@ -12,6 +12,7 @@
 # Secrets / local env
 .env
 .env.local
+.env.save
 .Renviron
 
 # Runtime / generated artifacts
@@ -19,6 +20,7 @@ cache/*
 !cache/.gitkeep
 logs/
 outputs/
+reviewer-results/
 tmp/
 _incoming_*/
 

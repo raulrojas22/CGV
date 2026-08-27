@@ -18,7 +18,7 @@ async function withTempDirectory(callback) {
 
 test("regenerates Windows updater metadata from the signed installer bytes", async () => {
   await withTempDirectory(async (directory) => {
-    const installerName = `CGV-Desktop-${packageJson.version}-Windows-x64-Setup.exe`;
+    const installerName = `CGeV-Desktop-${packageJson.version}-Windows-x64-Setup.exe`;
     const installerPath = path.join(directory, installerName);
     const updateInfoPath = path.join(directory, "latest.yml");
     fs.writeFileSync(installerPath, Buffer.from("signed-installer-content"));
@@ -46,7 +46,7 @@ test("regenerates Windows updater metadata from the signed installer bytes", asy
 
 test("rejects updater metadata for a different version", async () => {
   await withTempDirectory(async (directory) => {
-    const installerName = `CGV-Desktop-${packageJson.version}-Windows-x64-Setup.exe`;
+    const installerName = `CGeV-Desktop-${packageJson.version}-Windows-x64-Setup.exe`;
     const installerPath = path.join(directory, installerName);
     const updateInfoPath = path.join(directory, "latest.yml");
     fs.writeFileSync(installerPath, "signed");

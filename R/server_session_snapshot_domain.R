@@ -476,7 +476,8 @@ init_session_snapshot_domain <- function(
 
         homo_visual <- tolower(trimws(as.character(state$homo_visual_mode %||% "compact")))
         ortho_visual <- tolower(trimws(as.character(state$ortho_visual_mode %||% "compact")))
-        if (!homo_visual %in% c("compact", "detailed", "aligned", "pip_blocks", "pip_multipip")) homo_visual <- "compact"
+        if (homo_visual %in% c("pip_blocks", "pip_multipip")) homo_visual <- "aligned"
+        if (!homo_visual %in% c("compact", "detailed", "aligned")) homo_visual <- "compact"
         if (!ortho_visual %in% c("compact", "detailed", "aligned", "pip_blocks", "pip_multipip")) ortho_visual <- "compact"
         updateRadioButtons(session, "homo_visual_mode", selected = homo_visual)
         updateRadioButtons(session, "ortho_visual_mode", selected = ortho_visual)
@@ -641,7 +642,8 @@ init_session_snapshot_domain <- function(
         session$onFlushed(function() {
             homo_visual <- tolower(trimws(as.character(visual_state$homo_visual_mode %||% "compact")))
             ortho_visual <- tolower(trimws(as.character(visual_state$ortho_visual_mode %||% "compact")))
-            if (!homo_visual %in% c("compact", "detailed", "aligned", "pip_blocks", "pip_multipip")) homo_visual <- "compact"
+            if (homo_visual %in% c("pip_blocks", "pip_multipip")) homo_visual <- "aligned"
+            if (!homo_visual %in% c("compact", "detailed", "aligned")) homo_visual <- "compact"
             if (!ortho_visual %in% c("compact", "detailed", "aligned", "pip_blocks", "pip_multipip")) ortho_visual <- "compact"
             updateRadioButtons(session, "homo_visual_mode", selected = homo_visual)
             updateRadioButtons(session, "ortho_visual_mode", selected = ortho_visual)

@@ -33,7 +33,9 @@
     if (!main || typeof main.getBoundingClientRect !== 'function') {
       node.style.left = '';
       node.style.width = '';
+      node.style.bottom = '';
       node.removeAttribute('data-layout-anchor');
+      node.removeAttribute('data-layout-placement');
       return;
     }
 
@@ -42,9 +44,43 @@
     var availableWidth = Math.max(0, Number(rect.width) - 28);
     if (!Number.isFinite(center) || !Number.isFinite(availableWidth) || availableWidth < 1) return;
 
+    var indicatorWidth = Math.min(460, availableWidth);
+    var placement = 'center';
+    var popup = document.getElementById('app-status-popup');
+    var popupOpen = popup && popup.classList && popup.classList.contains('open');
+    node.style.bottom = '';
+
+    if (popupOpen && typeof popup.getBoundingClientRect === 'function') {
+      var popupRect = popup.getBoundingClientRect();
+      var popupLeft = Number(popupRect.left);
+      var popupTop = Number(popupRect.top);
+      var gap = 14;
+      var mainLeft = Number(rect.left);
+      var leftEdge = mainLeft + gap;
+      var shiftedCenter = popupLeft - gap - (indicatorWidth / 2);
+
+      if (
+        Number.isFinite(popupLeft) &&
+        Number(popupRect.width) > 0 &&
+        shiftedCenter - (indicatorWidth / 2) >= leftEdge
+      ) {
+        center = Math.min(center, shiftedCenter);
+        placement = center < (Number(rect.left) + Number(rect.width) / 2) - 1
+          ? 'shifted'
+          : 'center';
+      } else if (Number.isFinite(popupTop) && Number(popupRect.height) > 0) {
+        var viewportHeight = Number(window.innerHeight);
+        if (Number.isFinite(viewportHeight) && viewportHeight > popupTop) {
+          node.style.bottom = Math.ceil(viewportHeight - popupTop + gap) + 'px';
+          placement = 'stacked';
+        }
+      }
+    }
+
     node.style.left = center + 'px';
-    node.style.width = Math.min(460, availableWidth) + 'px';
+    node.style.width = indicatorWidth + 'px';
     node.setAttribute('data-layout-anchor', 'app-main');
+    node.setAttribute('data-layout-placement', placement);
   }
 
   function scheduleIndicatorLayout() {
@@ -66,18 +102,28 @@
 
     var main = document.querySelector('.app-main');
     var shell = document.querySelector('.app-shell');
+    var popup = document.getElementById('app-status-popup');
     syncIndicatorLayout();
 
     if (main && typeof window.ResizeObserver === 'function') {
       layoutResizeObserver = new window.ResizeObserver(scheduleIndicatorLayout);
       layoutResizeObserver.observe(main);
+      if (popup) layoutResizeObserver.observe(popup);
     }
-    if (shell && typeof window.MutationObserver === 'function') {
+    if ((shell || popup) && typeof window.MutationObserver === 'function') {
       layoutMutationObserver = new window.MutationObserver(scheduleIndicatorLayout);
-      layoutMutationObserver.observe(shell, {
-        attributes: true,
-        attributeFilter: ['class', 'style']
-      });
+      if (shell) {
+        layoutMutationObserver.observe(shell, {
+          attributes: true,
+          attributeFilter: ['class', 'style']
+        });
+      }
+      if (popup) {
+        layoutMutationObserver.observe(popup, {
+          attributes: true,
+          attributeFilter: ['class', 'style']
+        });
+      }
     }
     if (shell && typeof shell.addEventListener === 'function') {
       shell.addEventListener('transitionend', scheduleIndicatorLayout);
@@ -183,7 +229,7 @@
     var delay = Math.max(0, Number(opts.delay == null ? DEFAULT_DELAY_MS : opts.delay) || 0);
     sources[id] = {
       id: id,
-      headline: clean(opts.headline, existing ? existing.headline : 'CGV is working'),
+      headline: clean(opts.headline, existing ? existing.headline : 'CGeV is working'),
       detail: clean(opts.detail, existing ? existing.detail : 'Processing data…'),
       priority: Number(opts.priority == null ? (existing ? existing.priority : 20) : opts.priority) || 0,
       startedAt: existing ? existing.startedAt : now,
@@ -233,6 +279,7 @@
     update: begin,
     end: end,
     clear: clearAll,
+    refreshLayout: scheduleIndicatorLayout,
     isActive: function (sourceId) {
       return Object.prototype.hasOwnProperty.call(sources, clean(sourceId, 'activity'));
     }
@@ -247,7 +294,7 @@
 
   function shinyBusy() {
     begin('shiny', {
-      headline: 'CGV is working',
+      headline: 'CGeV is working',
       detail: inferBusyDetail(),
       priority: 5,
       delay: 360

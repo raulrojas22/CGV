@@ -59,8 +59,10 @@ assert_true(
     "Cross-species organism preparation must support lightweight local handle warming."
 )
 assert_true(
-    grepl('later::later\\(function\\(\\) \\{\\s*tryCatch\\(warm_gene_plot_renderer_once\\(\\)', server_txt, perl = TRUE),
-    "The renderer prewarm flag must schedule an actual session prewarm."
+    grepl('session$onFlushed(function() {', server_txt, fixed = TRUE) &&
+        grepl('APP_GENE_PLOT_RENDERER_PREWARM_DELAY_MS', server_txt, fixed = TRUE) &&
+        grepl('tryCatch(warm_gene_plot_renderer_once(), error = function(e) NULL)', server_txt, fixed = TRUE),
+    "The renderer warm-up must run after the first flush with a configurable delay."
 )
 assert_true(
     grepl("load_gff_autocomplete_cache\\(p, base_dir = \"\\.\"\\)", autocomplete_txt, perl = TRUE),
@@ -89,9 +91,9 @@ assert_true(
     "Fast organism search readiness must not wait for genome warm-up."
 )
 assert_true(
-    grepl("APP_TABIX_PROBE_ON_WARM", server_txt, fixed = TRUE) &&
+    grepl('app_env_flag("APP_TABIX_PROBE_ON_WARM", FALSE)', server_txt, fixed = TRUE) &&
         grepl("run_followup_queue", server_txt, fixed = TRUE),
-    "Tabix probing must run in the non-blocking organism-preparation follow-up queue."
+    "Optional tabix probing must default off and stay in the organism-preparation follow-up queue."
 )
 assert_true(
     grepl("start_followup_queue <- function", server_txt, fixed = TRUE) &&
@@ -118,6 +120,15 @@ assert_true(
         perl = TRUE
     ),
     "Cross-Species cache warming must not be invalidated by autocomplete epochs."
+)
+alias_timing_guard <- paste0(
+    "if (!isTRUE((alias_index_attempt %||% list())$reused)) {\n",
+    "                app_perf_mark_ms(lookup_perf, \"lookup_alias_index_ms\""
+)
+alias_timing_guard_matches <- gregexpr(alias_timing_guard, server_txt, fixed = TRUE)[[1L]]
+assert_true(
+    identical(sum(alias_timing_guard_matches > 0L), 3L),
+    "Session alias lookup timing must retain the real query duration when a later stage reuses its result."
 )
 
 tmp_gff <- tempfile(fileext = ".gff3")

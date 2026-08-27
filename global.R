@@ -60,7 +60,7 @@ load_project_env_file <- function(path) {
 load_project_env_file(".Renviron")
 load_project_env_file(".env")
 
-cgv_release_version <- "1.1.0"
+cgv_release_version <- Sys.getenv("CGV_RELEASE_VERSION", unset = "1.1.0")
 
 compute_app_asset_version <- function() {
     env_version <- trimws(Sys.getenv("APP_ASSET_VERSION", unset = ""))
@@ -95,11 +95,85 @@ compute_app_asset_version <- function() {
 
 app_asset_version <- compute_app_asset_version()
 
+# ShinyProxy gives every spawned session a different URL prefix.  When nginx
+# publishes the exact /app/www tree for an immutable image, opt selected CGV
+# assets into that stable, cross-session namespace.  The strict release check
+# deliberately makes this a no-op for Desktop, direct Shiny, and partially
+# configured deployments.
+compute_app_static_base_url <- function(
+    asset_version = app_asset_version,
+    candidate = Sys.getenv("APP_STATIC_BASE_URL", unset = "")
+) {
+    candidate <- trimws(candidate)
+    expected <- sprintf("/cgv-static/%s", asset_version)
+    if (
+        grepl("^/cgv-static/[a-f0-9]{64}$", candidate) &&
+        identical(candidate, expected)
+    ) {
+        candidate
+    } else {
+        ""
+    }
+}
+
+app_static_base_url <- compute_app_static_base_url()
+
+static_asset_path <- function(path) {
+    path_txt <- as.character(path %||% "")
+    if (!length(path_txt) || is.na(path_txt[[1L]])) {
+        return("")
+    }
+    path_txt <- path_txt[[1L]]
+    if (!nzchar(path_txt) || !nzchar(app_static_base_url)) {
+        return(path_txt)
+    }
+
+    unsafe_path <- startsWith(path_txt, "/") ||
+        grepl("^[A-Za-z][A-Za-z0-9+.-]*:", path_txt) ||
+        grepl("\\\\", path_txt, perl = TRUE) ||
+        grepl("%2[eEfF]|%5[cC]", path_txt, perl = TRUE) ||
+        grepl("[\r\n]", path_txt, perl = TRUE) ||
+        grepl("(^|[/\\\\])[.][.]([/\\\\]|$)", path_txt, perl = TRUE) ||
+        grepl("[/\\\\]$", path_txt, perl = TRUE)
+    if (unsafe_path) {
+        return(path_txt)
+    }
+
+    paste0(app_static_base_url, "/", path_txt)
+}
+
+# Expose the current build identifier through a tiny static JSON resource.
+# The browser version probe only needs this value; fetching and parsing the
+# complete Shiny page adds avoidable network, HTML parsing, and UI construction
+# work.  A process-local directory also keeps concurrent app versions isolated
+# during rolling deployments.
+.cgv_runtime_metadata_dir <- file.path(
+    tempdir(),
+    sprintf("cgv-runtime-metadata-%s", Sys.getpid())
+)
+dir.create(.cgv_runtime_metadata_dir, recursive = TRUE, showWarnings = FALSE)
+writeLines(
+    jsonlite::toJSON(
+        list(
+            version = app_asset_version,
+            release = cgv_release_version
+        ),
+        auto_unbox = TRUE
+    ),
+    file.path(.cgv_runtime_metadata_dir, "version.json"),
+    useBytes = TRUE
+)
+if ("cgv-meta" %in% names(shiny::resourcePaths())) {
+    shiny::removeResourcePath("cgv-meta")
+}
+shiny::addResourcePath("cgv-meta", .cgv_runtime_metadata_dir)
+
 versioned_asset_path <- function(path) {
     path_txt <- as.character(path %||% "")
     if (!nzchar(path_txt)) {
         return("")
     }
+    path_txt <- static_asset_path(path_txt)
     sep <- if (grepl("?", path_txt, fixed = TRUE)) "&" else "?"
     paste0(path_txt, sep, "av=", app_asset_version)
 }
@@ -181,6 +255,7 @@ configure_app_future_plan <- function() {
     if (!mode %in% c("sequential", "multisession")) {
         mode <- "multisession"
     }
+    Sys.setenv(APP_FUTURE_MODE = mode)
 
     if (identical(mode, "multisession")) {
         detected <- suppressWarnings(as.integer(parallel::detectCores(logical = FALSE)))
@@ -242,6 +317,10 @@ configure_app_future_plan <- function() {
             ))
         }
         workers_arg <- if (identical(as.integer(workers), 1L)) I(as.integer(workers)) else as.integer(workers)
+        # APP_MEMORY_CACHE_BUDGET_MB is a total web/container allowance. Set the
+        # effective main + worker process count before workers are created so the
+        # same value is inherited by every persistent multisession process.
+        Sys.setenv(APP_MEMORY_CACHE_PROCESS_COUNT = as.character(workers + 1L))
         tryCatch(
             future::plan(future::multisession, workers = workers_arg),
             error = function(e) {
@@ -253,10 +332,12 @@ configure_app_future_plan <- function() {
                     fallback_workers
                 ))
                 fallback_arg <- if (identical(as.integer(fallback_workers), 1L)) I(as.integer(fallback_workers)) else as.integer(fallback_workers)
+                Sys.setenv(APP_MEMORY_CACHE_PROCESS_COUNT = as.character(fallback_workers + 1L))
                 future::plan(future::multisession, workers = fallback_arg)
             }
         )
     } else {
+        Sys.setenv(APP_MEMORY_CACHE_PROCESS_COUNT = "1")
         future::plan(future::sequential)
     }
 

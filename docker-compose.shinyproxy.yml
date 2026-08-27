@@ -4,6 +4,10 @@ services:
     container_name: cgv-shinyproxy
     restart: unless-stopped
     user: "0:0"
+    env_file:
+      - .env
+      - path: .env.local
+        required: false
     networks:
       - sp-net
     volumes:
@@ -28,6 +32,7 @@ services:
       SP_MAX_LIFETIME_MINUTES: "${SP_MAX_LIFETIME_MINUTES:-120}"
       SP_HEARTBEAT_RATE_MS: "${SP_HEARTBEAT_RATE_MS:-30000}"
       SP_APP_PERF_TIMING: "${SP_APP_PERF_TIMING:-1}"
+      SP_PERF_RUN_LABEL: "${SP_PERF_RUN_LABEL:-manual}"
       SP_BACKGROUND_REPORTS_ENABLED: "${APP_BACKGROUND_REPORTS_ENABLED:-1}"
       SP_LASTZ_GLOBAL_WORKERS: "${APP_LASTZ_GLOBAL_WORKERS:-1}"
       SP_LASTZ_GLOBAL_QUEUE_WAIT_SECONDS: "${APP_LASTZ_GLOBAL_QUEUE_WAIT_SECONDS:-1800}"
@@ -65,6 +70,7 @@ services:
     image: "${CGV_IMAGE:-cgv:1.1.0}"
     container_name: cgv-background-report-worker
     restart: unless-stopped
+    init: true
     command: ["Rscript", "/app/scripts/background_report_worker.R"]
     env_file:
       - .env
@@ -97,7 +103,11 @@ services:
     security_opt:
       - no-new-privileges:true
     healthcheck:
-      disable: true
+      test: ["CMD-SHELL", "test -s /app/cache/background_reports/worker.ready"]
+      interval: 15s
+      timeout: 5s
+      retries: 4
+      start_period: 20s
 
 networks:
   sp-net:

@@ -1,7 +1,13 @@
-# CGV Desktop v1.1.0
+# CGeV Desktop v1.2.0
 
-CGV Desktop starts the Shiny app on a private localhost port and opens it in an
+CGeV Desktop starts the Shiny app on a private localhost port and opens it in an
 Electron window with its own scientific runtime and persistent data workspace.
+
+Version 1.2.0 changes the operating-system-visible product name from
+`CGV Desktop` to `CGeV Desktop`. Compatibility identifiers remain unchanged:
+the Electron package is still `cgv-desktop`, the app ID is still
+`org.cgv.desktop`, updates still use `CGV-Desktop-Releases`, and all supported
+systems explicitly reuse the historical `CGV Desktop` user-data directory.
 
 ## Development
 
@@ -11,9 +17,9 @@ npm install
 npm start
 ```
 
-In development, CGV Desktop uses the repository root as `CGV_DATA_ROOT` when it
+In development, CGeV Desktop uses the repository root as `CGV_DATA_ROOT` when it
 finds `annotations/registry.tsv`. On the first packaged Windows launch, the user
-selects a storage folder. CGV stores genomes under `<storageRoot>/data`, caches
+selects a storage folder. CGeV stores genomes under `<storageRoot>/data`, caches
 under `<storageRoot>/cache`, and the setting under
 `%LOCALAPPDATA%\CGV Desktop\desktop-settings.json`.
 
@@ -25,7 +31,8 @@ not move or delete existing data.
 
 The startup window hides R/Shiny internals by default and keeps them in a
 diagnostics log instead. Use the launcher's "Open log file" button during
-startup, or inspect the Electron user-data log directly:
+startup, or inspect the Electron user-data log directly. The old directory name
+below is intentional and must not be renamed:
 
 ```text
 macOS: ~/Library/Application Support/CGV Desktop/logs/startup.log
@@ -61,7 +68,7 @@ folder and installed datasets.
 
 ## Desktop Performance Defaults
 
-CGV Desktop starts the Shiny app with a conservative resource profile. It keeps
+CGeV Desktop starts the Shiny app with a conservative resource profile. It keeps
 the first result responsive by rendering one card initially, auto-rendering
 orthologous cards in small chunks, deferring sequence-heavy footer work until
 after the first plot render, calculating feature-GC tooltips in the same
@@ -141,7 +148,7 @@ delivered by a package catalog and downloaded into the user's local data folder.
 
 ## Dataset Catalog
 
-CGV Desktop supports an IGV-style lightweight catalog: the installer ships with
+CGeV Desktop supports an IGV-style lightweight catalog: the installer ships with
 runtime + app + demo data, while full organisms are downloaded later from a NAS,
 web server, or mounted `file://` location.
 
@@ -192,6 +199,11 @@ when the CDN URLs are ready.
 
 ## Packaging
 
+The complete maintainer procedure for CGeV Desktop 1.2.0—including macOS,
+GitHub Actions for Linux and signed Windows, GitHub draft publication, Oracle
+upload, and the 1.1.0 → 1.2.0 compatibility test—is in
+[`../GUIA-INSTALABLES.md`](../GUIA-INSTALABLES.md).
+
 Installer commands use `--publish never`; generating a local package cannot
 implicitly upload it from CI or create a GitHub release.
 
@@ -230,7 +242,7 @@ publishes or uploads a raw unsigned installer. Before using `workflow_dispatch`,
 set the repository Actions secret `WINDOWS_BETA_ARTIFACT_PASSWORD`. The workflow
 uploads only a header-encrypted 7z payload with 14-day retention. It builds the
 scientific runtime, installer, and update metadata; installs the NSIS package
-silently; waits for `CGV is ready`; checks the localhost response; closes the
+silently; waits for `CGeV is ready`; checks the localhost response; closes the
 app; and confirms that no bundled R process remains.
 
 To build locally on Windows x64 with Node.js 22 and the required MSYS2 MinGW64

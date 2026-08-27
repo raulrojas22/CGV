@@ -42,6 +42,160 @@ COMPACT_COLUMNS <- c(
     "source_db"
 )
 
+EXACT_QUERY_INDEX_NAME <- "idx_query_term_original"
+EXACT_QUERY_INDEX_SQL <- paste(
+    "CREATE INDEX IF NOT EXISTS",
+    EXACT_QUERY_INDEX_NAME,
+    "ON alias_index(query_term_original)"
+)
+PARTIAL_SYMBOL_INDEX_NAME <- "idx_local_symbol_upper"
+PARTIAL_SYMBOL_INDEX_SQL <- paste(
+    "CREATE INDEX IF NOT EXISTS",
+    PARTIAL_SYMBOL_INDEX_NAME,
+    "ON alias_index(UPPER(local_symbol))"
+)
+
+alias_sqlite_has_exact_index <- function(con) {
+    if (is.null(con) || !dbIsValid(con) || !("alias_index" %in% dbListTables(con))) {
+        return(FALSE)
+    }
+    fields <- dbListFields(con, "alias_index")
+    if (!("query_term_original" %in% fields)) {
+        return(FALSE)
+    }
+    indexes <- dbGetQuery(con, "PRAGMA index_list('alias_index')")
+    index_row <- indexes[as.character(indexes$name %||% character(0)) == EXACT_QUERY_INDEX_NAME, , drop = FALSE]
+    if (!is.data.frame(index_row) || nrow(index_row) != 1L) {
+        return(FALSE)
+    }
+    if ("partial" %in% names(index_row) && !identical(as.integer(index_row$partial), 0L)) {
+        return(FALSE)
+    }
+    index_info <- dbGetQuery(con, "PRAGMA index_xinfo('idx_query_term_original')")
+    if (!all(c("name", "key") %in% names(index_info))) {
+        return(FALSE)
+    }
+    key_columns <- index_info[as.integer(index_info$key) == 1L, , drop = FALSE]
+    if (!identical(as.character(key_columns$name), "query_term_original")) {
+        return(FALSE)
+    }
+    if ("coll" %in% names(key_columns) &&
+        !identical(toupper(as.character(key_columns$coll)), "BINARY")) {
+        return(FALSE)
+    }
+    !("desc" %in% names(key_columns)) || identical(as.integer(key_columns$desc), 0L)
+}
+
+ensure_alias_sqlite_exact_index <- function(sqlite_path) {
+    path <- normalizePath(as.character(sqlite_path %||% ""), winslash = "/", mustWork = FALSE)
+    if (!nzchar(path) || !file.exists(path)) {
+        return(list(ok = FALSE, created = FALSE, path = path, reason = "SQLite file not found"))
+    }
+
+    con <- NULL
+    tryCatch({
+        con <- dbConnect(SQLite(), path)
+        on.exit({
+            if (!is.null(con) && dbIsValid(con)) try(dbDisconnect(con), silent = TRUE)
+        }, add = TRUE)
+        dbExecute(con, "PRAGMA busy_timeout = 5000")
+        if (!("alias_index" %in% dbListTables(con))) {
+            return(list(ok = FALSE, created = FALSE, path = path, reason = "alias_index table not found"))
+        }
+        if (!("query_term_original" %in% dbListFields(con, "alias_index"))) {
+            return(list(ok = FALSE, created = FALSE, path = path, reason = "query_term_original column not found"))
+        }
+        if (alias_sqlite_has_exact_index(con)) {
+            return(list(ok = TRUE, created = FALSE, path = path, reason = ""))
+        }
+        dbExecute(con, EXACT_QUERY_INDEX_SQL)
+        ok <- alias_sqlite_has_exact_index(con)
+        list(
+            ok = isTRUE(ok),
+            created = isTRUE(ok),
+            path = path,
+            reason = if (isTRUE(ok)) "" else "index definition could not be verified"
+        )
+    }, error = function(e) {
+        list(ok = FALSE, created = FALSE, path = path, reason = conditionMessage(e))
+    })
+}
+
+alias_sqlite_has_partial_symbol_index <- function(con) {
+    if (is.null(con) || !dbIsValid(con) || !("alias_index" %in% dbListTables(con))) {
+        return(FALSE)
+    }
+    fields <- dbListFields(con, "alias_index")
+    if (!("local_symbol" %in% fields)) {
+        return(FALSE)
+    }
+    indexes <- dbGetQuery(con, "PRAGMA index_list('alias_index')")
+    index_row <- indexes[as.character(indexes$name %||% character(0)) == PARTIAL_SYMBOL_INDEX_NAME, , drop = FALSE]
+    if (!is.data.frame(index_row) || nrow(index_row) != 1L) {
+        return(FALSE)
+    }
+    if ("partial" %in% names(index_row) && !identical(as.integer(index_row$partial), 0L)) {
+        return(FALSE)
+    }
+    index_sql <- dbGetQuery(
+        con,
+        "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = ?1 LIMIT 1",
+        params = list(PARTIAL_SYMBOL_INDEX_NAME)
+    )$sql[1]
+    normalized_sql <- toupper(gsub("[^A-Za-z0-9_()]+", "", as.character(index_sql %||% "")))
+    index_info <- dbGetQuery(con, "PRAGMA index_xinfo('idx_local_symbol_upper')")
+    if (!("key" %in% names(index_info))) {
+        return(FALSE)
+    }
+    key_columns <- index_info[as.integer(index_info$key) == 1L, , drop = FALSE]
+    if (nrow(key_columns) != 1L ||
+        ("cid" %in% names(key_columns) && !identical(as.integer(key_columns$cid), -2L)) ||
+        ("coll" %in% names(key_columns) &&
+            !identical(toupper(as.character(key_columns$coll)), "BINARY")) ||
+        ("desc" %in% names(key_columns) && !identical(as.integer(key_columns$desc), 0L))) {
+        return(FALSE)
+    }
+    identical(
+        normalized_sql,
+        "CREATEINDEXIDX_LOCAL_SYMBOL_UPPERONALIAS_INDEX(UPPER(LOCAL_SYMBOL))"
+    )
+}
+
+ensure_alias_sqlite_partial_symbol_index <- function(sqlite_path) {
+    path <- normalizePath(as.character(sqlite_path %||% ""), winslash = "/", mustWork = FALSE)
+    if (!nzchar(path) || !file.exists(path)) {
+        return(list(ok = FALSE, created = FALSE, path = path, reason = "SQLite file not found"))
+    }
+
+    con <- NULL
+    tryCatch({
+        con <- dbConnect(SQLite(), path)
+        on.exit({
+            if (!is.null(con) && dbIsValid(con)) try(dbDisconnect(con), silent = TRUE)
+        }, add = TRUE)
+        dbExecute(con, "PRAGMA busy_timeout = 5000")
+        if (!("alias_index" %in% dbListTables(con))) {
+            return(list(ok = FALSE, created = FALSE, path = path, reason = "alias_index table not found"))
+        }
+        if (!("local_symbol" %in% dbListFields(con, "alias_index"))) {
+            return(list(ok = FALSE, created = FALSE, path = path, reason = "local_symbol column not found"))
+        }
+        if (alias_sqlite_has_partial_symbol_index(con)) {
+            return(list(ok = TRUE, created = FALSE, path = path, reason = ""))
+        }
+        dbExecute(con, PARTIAL_SYMBOL_INDEX_SQL)
+        ok <- alias_sqlite_has_partial_symbol_index(con)
+        list(
+            ok = isTRUE(ok),
+            created = isTRUE(ok),
+            path = path,
+            reason = if (isTRUE(ok)) "" else "index definition could not be verified"
+        )
+    }, error = function(e) {
+        list(ok = FALSE, created = FALSE, path = path, reason = conditionMessage(e))
+    })
+}
+
 filter_external_alias_rows <- function(df) {
     if (is.null(df) || !is.data.frame(df) || nrow(df) == 0L) return(df[0, , drop = FALSE])
     if (!("source_db" %in% names(df))) df$source_db <- ""
@@ -132,12 +286,14 @@ build_sqlite_for_tsv <- function(tsv_path, sqlite_path, chunk_size = 500000L, ex
     invisible(gc())
 
     write_msg("creating indexes...")
+    dbExecute(con, EXACT_QUERY_INDEX_SQL)
     dbExecute(con, "CREATE INDEX IF NOT EXISTS idx_upper ON alias_index(query_term_upper)")
     dbExecute(con, "CREATE INDEX IF NOT EXISTS idx_clean_basic ON alias_index(query_term_clean_basic)")
     dbExecute(con, "CREATE INDEX IF NOT EXISTS idx_clean_strict ON alias_index(query_term_clean_strict)")
     dbExecute(con, "CREATE INDEX IF NOT EXISTS idx_local_gene ON alias_index(local_gene_id)")
     dbExecute(con, "CREATE INDEX IF NOT EXISTS idx_local_feature ON alias_index(local_feature_id)")
     dbExecute(con, "CREATE INDEX IF NOT EXISTS idx_local_symbol ON alias_index(local_symbol)")
+    dbExecute(con, PARTIAL_SYMBOL_INDEX_SQL)
     if (!isTRUE(external_compact)) {
         dbExecute(con, "CREATE INDEX IF NOT EXISTS idx_term_type ON alias_index(term_type)")
         dbExecute(con, "CREATE INDEX IF NOT EXISTS idx_confidence ON alias_index(confidence)")
@@ -172,6 +328,14 @@ sqlite_is_current <- function(tsv_path, sqlite_path, external_compact = TRUE) {
         if (!("alias_index" %in% tables)) return(FALSE)
         count <- dbGetQuery(con, "SELECT COUNT(*) AS n FROM alias_index")$n[1]
         if (!is.finite(count) || count <= 0) return(FALSE)
+        if (!alias_sqlite_has_exact_index(con)) {
+            dbExecute(con, EXACT_QUERY_INDEX_SQL)
+            if (!alias_sqlite_has_exact_index(con)) return(FALSE)
+        }
+        if (!alias_sqlite_has_partial_symbol_index(con)) {
+            dbExecute(con, PARTIAL_SYMBOL_INDEX_SQL)
+            if (!alias_sqlite_has_partial_symbol_index(con)) return(FALSE)
+        }
         if (isTRUE(external_compact)) {
             if (!("alias_index_meta" %in% tables)) return(FALSE)
             fmt <- dbGetQuery(con, "SELECT value FROM alias_index_meta WHERE key = 'format' LIMIT 1")$value[1]
@@ -204,17 +368,23 @@ main <- function() {
 
     idx_dir <- alias_index_dir(base_dir)
     tsv_files <- list.files(idx_dir, pattern = "\\.alias_index\\.tsv\\.gz$", full.names = TRUE)
+    sqlite_files <- list.files(idx_dir, pattern = "\\.alias_index\\.sqlite$", full.names = TRUE)
 
     if (!is.null(organism_filter)) {
         tsv_files <- tsv_files[grepl(organism_filter, basename(tsv_files), fixed = TRUE)]
+        sqlite_files <- sqlite_files[grepl(organism_filter, basename(sqlite_files), fixed = TRUE)]
     }
 
-    if (length(tsv_files) == 0L) {
-        write_msg("no .alias_index.tsv.gz files found in %s", idx_dir)
+    if (length(tsv_files) == 0L && length(sqlite_files) == 0L) {
+        write_msg("no alias SQLite or .alias_index.tsv.gz files found in %s", idx_dir)
         return(invisible(NULL))
     }
 
-    write_msg("found %d TSV.gz files to convert", length(tsv_files))
+    if (length(tsv_files) > 0L) {
+        write_msg("found %d TSV.gz files to convert", length(tsv_files))
+    } else {
+        write_msg("no .alias_index.tsv.gz files found; checking existing SQLite files directly")
+    }
 
     for (tsv_path in tsv_files) {
         base_name <- basename(tsv_path)
@@ -236,7 +406,34 @@ main <- function() {
         write_msg("elapsed: %.1fs", as.numeric(elapsed))
     }
 
+    # Migrate SQLite-only assets after processing TSV-backed databases. This order
+    # preserves the source-vs-SQLite mtime check, so adding an index cannot make a
+    # stale SQLite file appear newer than its source TSV.
+    sqlite_files <- list.files(idx_dir, pattern = "\\.alias_index\\.sqlite$", full.names = TRUE)
+    if (!is.null(organism_filter)) {
+        sqlite_files <- sqlite_files[grepl(organism_filter, basename(sqlite_files), fixed = TRUE)]
+    }
+    if (length(sqlite_files) > 0L) {
+        write_msg("checking lookup indexes on %d existing SQLite file(s)", length(sqlite_files))
+        for (sqlite_path in sqlite_files) {
+            migration <- ensure_alias_sqlite_exact_index(sqlite_path)
+            if (isTRUE(migration$created)) {
+                write_msg("added %s to %s", EXACT_QUERY_INDEX_NAME, basename(sqlite_path))
+            } else if (!isTRUE(migration$ok)) {
+                write_msg("FAILED to migrate %s: %s", basename(sqlite_path), migration$reason %||% "unknown error")
+            }
+            partial_migration <- ensure_alias_sqlite_partial_symbol_index(sqlite_path)
+            if (isTRUE(partial_migration$created)) {
+                write_msg("added %s to %s", PARTIAL_SYMBOL_INDEX_NAME, basename(sqlite_path))
+            } else if (!isTRUE(partial_migration$ok)) {
+                write_msg("FAILED to migrate %s: %s", basename(sqlite_path), partial_migration$reason %||% "unknown error")
+            }
+        }
+    }
+
     write_msg("all done")
 }
 
-main()
+if (sys.nframe() == 0L) {
+    main()
+}

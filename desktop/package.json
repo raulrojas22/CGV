@@ -1,7 +1,7 @@
 {
   "name": "cgv-desktop",
-  "version": "1.1.0",
-  "description": "CGV Desktop wrapper for running the Shiny app locally with portable data roots.",
+  "version": "1.2.0",
+  "description": "CGeV Desktop wrapper for running the Shiny app locally with portable data roots.",
   "main": "src/main.js",
   "author": {
     "name": "Raul Rojas",
@@ -48,7 +48,7 @@
   },
   "build": {
     "appId": "org.cgv.desktop",
-    "productName": "CGV Desktop",
+    "productName": "CGeV Desktop",
     "icon": "build/icon",
     "afterPack": "scripts/trim-packaged-runtime.js",
     "asar": true,
@@ -124,7 +124,7 @@
           "StartupWMClass": "cgv-desktop"
         }
       },
-      "artifactName": "CGV-Desktop-${version}-Linux-${arch}.${ext}"
+      "artifactName": "CGeV-Desktop-${version}-Linux-${arch}.${ext}"
     },
     "win": {
       "target": [
@@ -155,7 +155,7 @@
       "createStartMenuShortcut": true,
       "deleteAppDataOnUninstall": false,
       "runAfterFinish": true,
-      "artifactName": "CGV-Desktop-${version}-Windows-${arch}-Setup.${ext}"
+      "artifactName": "CGeV-Desktop-${version}-Windows-${arch}-Setup.${ext}"
     },
     "mac": {
       "target": [
@@ -164,7 +164,7 @@
       ],
       "identity": null,
       "category": "public.app-category.education",
-      "artifactName": "CGV-Desktop-${version}-macOS-${arch}.${ext}"
+      "artifactName": "CGeV-Desktop-${version}-macOS-${arch}.${ext}"
     },
     "publish": {
       "provider": "github",

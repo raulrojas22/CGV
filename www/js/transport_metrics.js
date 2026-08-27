@@ -81,7 +81,7 @@
       window.WebSocket = PatchedWebSocket;
     } catch (assignErr) {
       if (window.console && typeof console.warn === 'function') {
-        console.warn('[CGV transport] WebSocket patch unavailable', assignErr);
+        console.warn('[CGeV transport] WebSocket patch unavailable', assignErr);
       }
     }
   }
@@ -185,7 +185,7 @@
     window.__cgvLastTransportMetrics = payload;
 
     if (window.console && typeof console.info === 'function') {
-      console.info('[CGV transport]', payload);
+      console.info('[CGeV transport]', payload);
     }
 
     try {

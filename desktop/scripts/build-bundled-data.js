@@ -165,7 +165,7 @@ copyFile(path.join("go_annotations", "go_term_map.rds"));
 const meta = {
   id: "bundled-organisms",
   version: "2026.05",
-  description: "CGV Desktop bundled organisms (7 species).",
+  description: "CGeV Desktop bundled organisms (7 species).",
   species: annRows.map((r) => ({
     speciesId: r.species_id,
     label: r.label,

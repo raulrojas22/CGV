@@ -34,7 +34,7 @@
 
     var sectionRect = section.getBoundingClientRect();
     var paneRect = pane.getBoundingClientRect();
-    var reserve = Math.ceil(Math.max(16, (sectionRect.bottom - paneRect.top) + 12));
+    var reserve = Math.ceil(Math.max(16, (sectionRect.bottom - paneRect.top) + 6));
     return String(reserve) + 'px';
   }
 

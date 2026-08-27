@@ -46,6 +46,16 @@ expect_pattern(
     'schedule_deferred_sequence_prefetch\\(\\)',
     "orthologous plots prefetch sequence composition after the first deferred render"
 )
+expect_pattern(
+    modules_txt,
+    '!isTRUE\\(local_need_gc_span\\) && !isTRUE\\(local_need_sequence\\)[\\s\\S]*initial sequence and GC prefetch fully deferred',
+    "homologous fully deferred first paint skips an empty future"
+)
+expect_pattern(
+    modules_txt,
+    'deferred_plot_enrichment_delay_seconds\\(0\\.5\\)',
+    "deferred enrichment waits long enough for the initial widget to flush"
+)
 for (output_id in c(
     "homo_aligned_plot_out",
     "homo_aligned_footer",
@@ -91,6 +101,7 @@ expect_pattern(
 )
 for (env_key in c(
     "APP_ORTHO_AUTO_RENDER_MORE=1",
+    "APP_ORTHO_FIRST_PAINT_TIMEOUT_MS=30000",
     "APP_ORTHO_SUSPEND_HIDDEN=1",
     "APP_HOMO_DEFER_SEQUENCE=1",
     "APP_ORTHO_DEFER_SEQUENCE=1",

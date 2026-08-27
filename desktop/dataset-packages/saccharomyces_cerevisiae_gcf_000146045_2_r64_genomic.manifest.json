@@ -3,7 +3,7 @@
   "label": "Saccharomyces cerevisiae",
   "speciesId": "saccharomyces_cerevisiae_gcf_000146045_2_r64_genomic",
   "version": "2026.09",
-  "description": "Saccharomyces cerevisiae CGV Desktop dataset package.",
+  "description": "Saccharomyces cerevisiae CGeV Desktop dataset package.",
   "downloadable": true,
   "sizeBytes": 13862732,
   "package": {

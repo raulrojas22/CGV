@@ -95,7 +95,7 @@ expect_pattern(
 )
 expect_pattern(
   ui_txt,
-  'id = "figure-studio-guide-toggle"[\\s\\S]*id = "figure-studio-guide"[\\s\\S]*Build a figure in five steps[\\s\\S]*Save the CGV session',
+  'id = "figure-studio-guide-toggle"[\\s\\S]*id = "figure-studio-guide"[\\s\\S]*Build a figure in five steps[\\s\\S]*Save the CGeV session',
   "step-by-step Figure Studio guide"
 )
 expect_pattern(

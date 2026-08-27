@@ -5,6 +5,28 @@ function(input, output, session) {
     session_token <- as.character(session$token %||% "unknown")
     session_metric_enabled <- app_env_flag("APP_SESSION_METRICS", default = FALSE)
     if (isTRUE(session_metric_enabled)) {
+        session_memory_metric_fields <- function() {
+            snapshot <- tryCatch(app_memory_telemetry_snapshot(), error = function(e) NULL)
+            if (!is.list(snapshot)) return("")
+            mb_text <- function(value) {
+                num <- suppressWarnings(as.numeric(value %||% NA_real_))
+                if (is.finite(num) && !is.na(num) && num >= 0) sprintf("%.1f", num / 1024^2) else "NA"
+            }
+            sprintf(
+                paste0(
+                    " rss_mb=%s cache_mb=%s cache_budget_mb=%s",
+                    " cache_total_budget_mb=%s cache_process_count=%s",
+                    " cgroup_current_mb=%s cgroup_limit_mb=%s"
+                ),
+                mb_text(snapshot$rss_bytes),
+                mb_text(snapshot$cache_bytes),
+                mb_text(snapshot$cache_budget_bytes),
+                mb_text(snapshot$cache_total_budget_bytes),
+                as.character(as.integer(snapshot$cache_process_count %||% 1L)),
+                mb_text(snapshot$cgroup_current_bytes),
+                mb_text(snapshot$cgroup_limit_bytes)
+            )
+        }
         startup_epoch <- suppressWarnings(as.numeric(Sys.getenv("APP_START_EPOCH", "")))
         startup_msg <- if (is.finite(startup_epoch)) {
             sprintf(" startup_elapsed_s=%.1f", as.numeric(Sys.time()) - startup_epoch)
@@ -12,22 +34,24 @@ function(input, output, session) {
             ""
         }
         message(sprintf(
-            "[SESSION][start] token=%s pid=%d%s data_root=%s cache_dir=%s",
+            "[SESSION][start] token=%s pid=%d%s data_root=%s cache_dir=%s%s",
             session_token,
             Sys.getpid(),
             startup_msg,
             Sys.getenv("CGV_DATA_ROOT", "."),
-            Sys.getenv("CGV_CACHE_DIR", "cache")
+            Sys.getenv("CGV_CACHE_DIR", "cache"),
+            session_memory_metric_fields()
         ))
         session$onSessionEnded(function() {
             elapsed <- app_perf_elapsed_ms(session_t0) / 1000
             gc_info <- tryCatch(sum(gc()[, "used"], na.rm = TRUE), error = function(e) NA_real_)
             message(sprintf(
-                "[SESSION][end] token=%s pid=%d elapsed_s=%.1f gc_used_cells=%s",
+                "[SESSION][end] token=%s pid=%d elapsed_s=%.1f gc_used_cells=%s%s",
                 session_token,
                 Sys.getpid(),
                 elapsed,
-                if (is.finite(gc_info)) as.character(as.integer(gc_info)) else "NA"
+                if (is.finite(gc_info)) as.character(as.integer(gc_info)) else "NA",
+                session_memory_metric_fields()
             ))
         })
     }
@@ -388,9 +412,16 @@ function(input, output, session) {
         list(
             run = NULL,
             expected = character(0),
+            gate_expected = character(0),
             ready = character(0),
+            painted = character(0),
             first_logged = FALSE,
-            total_logged = FALSE
+            total_logged = FALSE,
+            first_ready_ms = NA_real_,
+            first_painted_logged = FALSE,
+            first_painted_ms = NA_real_,
+            ready_to_paint_logged = FALSE,
+            total_painted_logged = FALSE
         )
     }
 
@@ -412,17 +443,85 @@ function(input, output, session) {
         tracker_rv(tr)
         if (is.list(run)) {
             app_perf_mark(run, "timing_start", context)
+            browser_context <- if (grepl("^HOMO", context)) "homologous" else if (grepl("^ORTHO", context)) "orthologous" else ""
+            functional_first_paint <- identical(browser_context, "orthologous") &&
+                isTRUE(get0("orthoAutoRenderMore", envir = environment(), inherits = TRUE, ifnotfound = FALSE))
+            if (isTRUE(app_perf_enabled()) || isTRUE(functional_first_paint)) {
+                session$sendCustomMessage("cgv_plot_timing_start", list(
+                    run_id = as.character(run$id %||% ""),
+                    context = browser_context,
+                    first_paint_only = !isTRUE(app_perf_enabled()) && isTRUE(functional_first_paint)
+                ))
+            }
         }
         invisible(NULL)
     }
 
-    set_plot_timing_expected <- function(tracker_rv, ids, context = "APP_TIMING") {
+    initial_plot_timing_ids <- function(
+        ids,
+        initial_visible_count,
+        plot_meta = NULL,
+        primary_only = FALSE
+    ) {
+        ids_chr <- unique(as.character(ids %||% character(0)))
+        ids_chr <- ids_chr[nzchar(ids_chr)]
+        if (isTRUE(primary_only) && is.list(plot_meta) && length(ids_chr) > 0L) {
+            ids_chr <- Filter(function(plot_id) {
+                meta <- tryCatch(plot_meta[[plot_id]], error = function(e) NULL)
+                !identical((meta %||% list())$is_canonical, FALSE)
+            }, ids_chr)
+        }
+        visible_n <- suppressWarnings(as.integer(initial_visible_count %||% 1L))
+        if (!is.finite(visible_n) || is.na(visible_n) || visible_n < 1L) {
+            visible_n <- 1L
+        }
+        if (length(ids_chr) <= visible_n) ids_chr else ids_chr[seq_len(visible_n)]
+    }
+
+    set_plot_timing_expected <- function(
+        tracker_rv,
+        ids,
+        context = "APP_TIMING",
+        gate_expected_ids = ids,
+        gate_candidate_ids = ids
+    ) {
         tr <- tracker_rv()
         ids_chr <- unique(as.character(ids %||% character(0)))
         ids_chr <- ids_chr[nzchar(ids_chr)]
+        gate_ids_chr <- unique(as.character(gate_expected_ids %||% character(0)))
+        gate_ids_chr <- gate_ids_chr[nzchar(gate_ids_chr)]
         tr$expected <- ids_chr
+        tr$gate_expected <- gate_ids_chr
         run <- tr$run
         if (is.list(run)) {
+            browser_context <- if (grepl("^HOMO", context)) "homologous" else if (grepl("^ORTHO", context)) "orthologous" else ""
+            functional_first_paint <- identical(browser_context, "orthologous") &&
+                isTRUE(get0("orthoAutoRenderMore", envir = environment(), inherits = TRUE, ifnotfound = FALSE))
+            functional_gate_active <- FALSE
+            gate_candidates <- unique(as.character(gate_candidate_ids %||% character(0)))
+            gate_candidates <- gate_candidates[nzchar(gate_candidates)]
+            visible_expected_is_new <- length(gate_ids_chr) > 0L && gate_ids_chr[[1L]] %in% gate_candidates
+            if (isTRUE(functional_first_paint) && isTRUE(visible_expected_is_new)) {
+                activate_gate <- get0(
+                    "activate_ortho_first_paint_gate",
+                    envir = environment(),
+                    inherits = TRUE,
+                    ifnotfound = NULL
+                )
+                if (is.function(activate_gate)) {
+                    functional_gate_active <- isTRUE(activate_gate(as.character(run$id %||% "")))
+                }
+            }
+            if (isTRUE(app_perf_enabled()) || isTRUE(functional_gate_active)) {
+                output_prefix <- if (identical(browser_context, "homologous")) "plot_homo_" else if (identical(browser_context, "orthologous")) "plot_ortho_" else "plot_"
+                browser_expected_ids <- if (isTRUE(app_perf_enabled())) ids_chr else gate_ids_chr
+                session$sendCustomMessage("cgv_plot_timing_expect", list(
+                    run_id = as.character(run$id %||% ""),
+                    context = browser_context,
+                    output_ids = paste0(output_prefix, browser_expected_ids, "-plot"),
+                    first_paint_only = !isTRUE(app_perf_enabled()) && isTRUE(functional_gate_active)
+                ))
+            }
             app_perf_mark(run, sprintf("expected_plots=%d", as.integer(length(ids_chr))), context)
 
             # Backfill timing markers if plots were already marked ready before expected was set.
@@ -441,6 +540,11 @@ function(input, output, session) {
                     context
                 )
                 tr$first_logged <- TRUE
+                tr$first_ready_ms <- elapsed_ms
+                if (!isTRUE(tr$ready_to_paint_logged) && is.finite(tr$first_painted_ms) && is.finite(elapsed_ms)) {
+                    app_perf_mark_ms(run, "server_ready_to_browser_paint_ms", max(0, tr$first_painted_ms - elapsed_ms), context)
+                    tr$ready_to_paint_logged <- TRUE
+                }
             }
             if (!isTRUE(tr$total_logged) && length(ids_chr) > 0L && length(matched_ready) >= length(ids_chr)) {
                 app_perf_mark(
@@ -480,6 +584,11 @@ function(input, output, session) {
                 context
             )
             tr$first_logged <- TRUE
+            tr$first_ready_ms <- elapsed_ms
+            if (!isTRUE(tr$ready_to_paint_logged) && is.finite(tr$first_painted_ms) && is.finite(elapsed_ms)) {
+                app_perf_mark_ms(run, "server_ready_to_browser_paint_ms", max(0, tr$first_painted_ms - elapsed_ms), context)
+                tr$ready_to_paint_logged <- TRUE
+            }
         }
         if (!isTRUE(tr$total_logged) && length(expected_ids) > 0L && length(matched_ready) >= length(expected_ids)) {
             app_perf_mark(
@@ -500,7 +609,9 @@ function(input, output, session) {
             return(invisible(NULL))
         }
         tr$expected <- setdiff(as.character(tr$expected %||% character(0)), pid)
+        tr$gate_expected <- setdiff(as.character(tr$gate_expected %||% character(0)), pid)
         tr$ready <- setdiff(as.character(tr$ready %||% character(0)), pid)
+        tr$painted <- setdiff(as.character(tr$painted %||% character(0)), pid)
         tracker_rv(tr)
         invisible(NULL)
     }
@@ -933,29 +1044,45 @@ function(input, output, session) {
         if (!is.finite(delay_val) || delay_val < 0) {
             delay_val <- 1.5
         }
-        session$onFlushed(function() {
-            later::later(function() {
-                warm_perf <- app_perf_new_run("STRING_PREWARM")
-                app_perf_mark(warm_perf, "launch", "STRING_PREWARM")
-                tryCatch({
-                    lastz_future_promise({
-                        TRUE
-                    }, seed = TRUE) %...>% (function(ok) {
-                        app_perf_mark(warm_perf, "ready", "STRING_PREWARM")
-                        invisible(ok)
-                    }) %...!% (function(e) {
-                        app_perf_mark(warm_perf, sprintf("error=%s", as.character(e$message %||% "unknown")), "STRING_PREWARM")
-                        invisible(NULL)
-                    })
-                }, error = function(e) {
-                    app_perf_mark(warm_perf, sprintf("launch_error=%s", as.character(e$message %||% "unknown")), "STRING_PREWARM")
+        warm_perf <- app_perf_new_run("STRING_PREWARM")
+        launch_string_worker_prewarm <- NULL
+        launch_string_worker_prewarm <- function() {
+            session_closed <- tryCatch(
+                is.function(session$isClosed) && isTRUE(session$isClosed()),
+                error = function(e) FALSE
+            )
+            if (isTRUE(session_closed)) {
+                return(invisible(FALSE))
+            }
+            if (isTRUE(secondary_work_should_yield())) {
+                app_perf_mark(warm_perf, "yield: user search active", "STRING_PREWARM")
+                later::later(launch_string_worker_prewarm, delay = secondary_work_retry_delay_sec)
+                return(invisible(FALSE))
+            }
+            app_perf_mark(warm_perf, "launch", "STRING_PREWARM")
+            tryCatch({
+                lastz_future_promise({
+                    TRUE
+                }, seed = TRUE) %...>% (function(ok) {
+                    app_perf_mark(warm_perf, "ready", "STRING_PREWARM")
+                    invisible(ok)
+                }) %...!% (function(e) {
+                    app_perf_mark(warm_perf, sprintf("error=%s", as.character(e$message %||% "unknown")), "STRING_PREWARM")
                     invisible(NULL)
                 })
-            }, delay = delay_val)
+            }, error = function(e) {
+                app_perf_mark(warm_perf, sprintf("launch_error=%s", as.character(e$message %||% "unknown")), "STRING_PREWARM")
+                invisible(NULL)
+            })
+        }
+        session$onFlushed(function() {
+            later::later(
+                launch_string_worker_prewarm,
+                delay = max(delay_val, secondary_work_initial_delay_sec)
+            )
         }, once = TRUE)
         invisible(TRUE)
     }
-    schedule_string_worker_prewarm()
     orthoExternalRescueState <- new.env(parent = emptyenv())
     orthoExternalRescueState$id <- ""
     cancel_orthologous_background_rescue <- function(reason = "user_action") {
@@ -1001,6 +1128,7 @@ function(input, output, session) {
     orthoSearchObserverRef <- reactiveVal(NULL)
     pendingHomoSearchGene <- reactiveVal(NULL)
     pendingOrthoSearchGene <- reactiveVal(NULL)
+    pendingOrthoReferenceAnchor <- reactiveVal(NULL)
     pendingHomoSearchOrigin <- reactiveVal("local")
     pendingOrthoSearchOrigin <- reactiveVal("local")
     searchPreparationReadyHomo <- reactiveVal(TRUE)
@@ -1078,9 +1206,49 @@ function(input, output, session) {
     get_search_run_mode_state <- stateHelpersDomain$get_search_run_mode_state
     begin_search_run <- stateHelpersDomain$begin_search_run
     finish_search_run <- stateHelpersDomain$finish_search_run
+    secondary_work_initial_delay_sec <- app_env_int(
+        "APP_SECONDARY_WORK_INITIAL_DELAY_MS",
+        2500L,
+        min_value = 250L,
+        max_value = 30000L
+    ) / 1000
+    secondary_work_retry_delay_sec <- app_env_int(
+        "APP_SECONDARY_WORK_RETRY_MS",
+        750L,
+        min_value = 100L,
+        max_value = 10000L
+    ) / 1000
+    secondary_work_should_yield <- function() {
+        search_state <- tryCatch(isolate(searchRunState()), error = function(e) list())
+        search_active <- is.list(search_state) && length(search_state) > 0L && any(vapply(
+            search_state,
+            function(mode_state) isTRUE((mode_state %||% list())$active),
+            logical(1)
+        ))
+        if (isTRUE(search_active)) {
+            return(TRUE)
+        }
+        # Async lookup can finish before ggiraph paints the first primary card.
+        # Resolve the gate lazily because its reactiveVal is declared below.
+        first_paint_gate_rv <- get0(
+            "orthoFirstPaintGate",
+            envir = environment(),
+            inherits = TRUE,
+            ifnotfound = NULL
+        )
+        if (!is.function(first_paint_gate_rv)) {
+            return(FALSE)
+        }
+        gate <- tryCatch(isolate(first_paint_gate_rv()), error = function(e) list())
+        isTRUE((gate %||% list())$enabled) && !isTRUE((gate %||% list())$released)
+    }
+    schedule_string_worker_prewarm()
     begin_session_source_restore <- stateHelpersDomain$begin_session_source_restore
     consume_session_source_restore <- stateHelpersDomain$consume_session_source_restore
     finish_session_source_restore <- stateHelpersDomain$finish_session_source_restore
+    new_ortho_first_paint_gate_state <- stateHelpersDomain$new_ortho_first_paint_gate
+    arm_ortho_first_paint_gate_state <- stateHelpersDomain$arm_ortho_first_paint_gate
+    release_ortho_first_paint_gate_state <- stateHelpersDomain$release_ortho_first_paint_gate
     analyticsPhase2DelayMs <- min(4000L, max(0L, parse_positive_int_env("APP_ANALYTICS_PHASE2_DELAY_MS", 900L)))
     analyticsPhase3DelayMs <- min(8000L, max(analyticsPhase2DelayMs + 250L, parse_positive_int_env("APP_ANALYTICS_PHASE3_DELAY_MS", 2200L)))
     orthoPlotsReadyGate <- reactive({
@@ -1097,18 +1265,44 @@ function(input, output, session) {
     homoFooterOutputsBound <- reactiveVal(character())
     homoDownloadOutputsBound <- reactiveVal(character())
     orthoRenderChunkSize <- max(1L, min(8L, parse_positive_int_env("APP_ORTHO_RENDER_CHUNK_SIZE", 6L)))
-    orthoInitialVisibleCount <- max(1L, min(orthoRenderChunkSize, parse_positive_int_env("APP_ORTHO_INITIAL_VISIBLE", 2L)))
     orthoAutoRenderMore <- {
         raw <- tolower(trimws(as.character(Sys.getenv("APP_ORTHO_AUTO_RENDER_MORE", "1") %||% "1")))
         !raw %in% c("", "0", "false", "no", "off")
     }
+    configuredOrthoInitialVisibleCount <- max(
+        1L,
+        min(orthoRenderChunkSize, parse_positive_int_env("APP_ORTHO_INITIAL_VISIBLE", 2L))
+    )
+    # Automatic rendering is intentionally one-card-first: additional cards are
+    # released only after the browser acknowledges that primary SVG's paint.
+    orthoInitialVisibleCount <- if (isTRUE(orthoAutoRenderMore)) 1L else configuredOrthoInitialVisibleCount
     orthoAutoRenderDelay <- {
         raw <- suppressWarnings(as.numeric(Sys.getenv("APP_ORTHO_AUTO_RENDER_DELAY_MS", "30")))
         if (!is.finite(raw) || is.na(raw)) raw <- 30
         min(750, max(0, raw)) / 1000
     }
+    orthoFirstPaintTimeout <- min(
+        120000L,
+        max(5000L, parse_positive_int_env("APP_ORTHO_FIRST_PAINT_TIMEOUT_MS", 30000L))
+    ) / 1000
+    orthoFirstPaintActivationTimeout <- max(90, min(300, 3 * orthoFirstPaintTimeout))
     orthoVisibleCount <- reactiveVal(orthoInitialVisibleCount)
     orthoAutoRenderQueued <- reactiveVal(FALSE)
+    orthoAutoRenderGeneration <- 0L
+    bump_ortho_auto_render_generation <- function() {
+        next_generation <- suppressWarnings(as.integer(orthoAutoRenderGeneration %||% 0L))
+        if (!is.finite(next_generation) || is.na(next_generation) || next_generation < 0L ||
+            next_generation >= .Machine$integer.max) {
+            next_generation <- 0L
+        }
+        orthoAutoRenderGeneration <<- as.integer(next_generation + 1L)
+        orthoAutoRenderGeneration
+    }
+    cancel_ortho_auto_render_queue <- function() {
+        bump_ortho_auto_render_generation()
+        orthoAutoRenderQueued(FALSE)
+        invisible(NULL)
+    }
     orthoRenderedPlotIds <- reactiveVal(character())
     orthoInsertedCardIds <- reactiveVal(character())
     orthoFooterOutputsBound <- reactiveVal(character())
@@ -1116,6 +1310,241 @@ function(input, output, session) {
     orthoDownloadOutputsBound <- reactiveVal(character())
     homoPlotTimingTracker <- reactiveVal(empty_plot_timing_tracker())
     orthoPlotTimingTracker <- reactiveVal(empty_plot_timing_tracker())
+    orthoFirstPaintGate <- reactiveVal(new_ortho_first_paint_gate_state(enabled = FALSE))
+
+    reset_ortho_first_paint_gate <- function(run) {
+        run_id <- trimws(as.character((run %||% list())$id %||% ""))
+        previous <- isolate(orthoFirstPaintGate())
+        next_gate <- new_ortho_first_paint_gate_state(
+            run_id = run_id,
+            enabled = FALSE,
+            previous_token = previous$token %||% 0L
+        )
+        next_gate$release_reason <- "awaiting_expected_plot"
+        orthoFirstPaintGate(next_gate)
+        invisible(next_gate)
+    }
+
+    activate_ortho_first_paint_gate <- function(run_id) {
+        current <- isolate(orthoFirstPaintGate())
+        run_key <- trimws(as.character(run_id %||% ""))
+        if (!isTRUE(orthoAutoRenderMore) || !nzchar(run_key) ||
+            !identical(run_key, trimws(as.character(current$run_id %||% "")))) {
+            return(invisible(FALSE))
+        }
+        visual_mode <- tolower(trimws(as.character(isolate(input$ortho_visual_mode) %||% "compact")))
+        if (visual_mode %in% c("aligned", "pip", "pip_blocks", "pip_multipip")) {
+            return(invisible(FALSE))
+        }
+        primary_count <- length(isolate(primaryPlotIdsOrthologous() %||% character(0)))
+        current_visible <- suppressWarnings(as.integer(isolate(orthoVisibleCount()) %||% orthoInitialVisibleCount))
+        if (!is.finite(current_visible) || is.na(current_visible) || current_visible < 1L) {
+            current_visible <- orthoInitialVisibleCount
+        }
+        if (primary_count <= current_visible) {
+            return(invisible(FALSE))
+        }
+        activated <- FALSE
+        if (!isTRUE(current$enabled)) {
+            current <- new_ortho_first_paint_gate_state(
+                run_id = run_key,
+                enabled = TRUE,
+                previous_token = current$token %||% 0L
+            )
+            orthoFirstPaintGate(current)
+            activated <- TRUE
+            activation_token <- current$token
+            if (requireNamespace("later", quietly = TRUE)) {
+                later::later(function() {
+                    isolate({
+                        latest <- orthoFirstPaintGate()
+                        same_gate <- identical(as.character(latest$run_id %||% ""), run_key) &&
+                            identical(as.integer(latest$token %||% 0L), as.integer(activation_token %||% 0L))
+                        if (isTRUE(same_gate) && isTRUE(latest$enabled) && !isTRUE(latest$released)) {
+                            release_ortho_first_paint_gate(run_key, reason = "activation_timeout")
+                        }
+                    })
+                }, delay = orthoFirstPaintActivationTimeout)
+            }
+        }
+        if (isTRUE(current$released)) {
+            return(invisible(activated))
+        }
+        invisible(TRUE)
+    }
+
+    release_ortho_first_paint_gate <- function(run_id, reason, output_id = "") {
+        current <- isolate(orthoFirstPaintGate())
+        transition <- release_ortho_first_paint_gate_state(
+            current,
+            run_id = run_id,
+            reason = reason,
+            output_id = output_id
+        )
+        if (!isTRUE(transition$changed)) {
+            return(invisible(FALSE))
+        }
+        orthoFirstPaintGate(transition$state)
+        tracker_run <- isolate(orthoPlotTimingTracker())$run
+        if (is.list(tracker_run) && identical(as.character(tracker_run$id %||% ""), as.character(run_id %||% ""))) {
+            app_perf_mark(
+                tracker_run,
+                sprintf(
+                    "first paint gate released reason=%s output=%s",
+                    as.character(reason %||% "unknown"),
+                    as.character(output_id %||% "")
+                ),
+                "ORTHO_UI"
+            )
+        }
+        if (!isTRUE(app_perf_enabled()) && !identical(as.character(reason %||% ""), "browser_paint")) {
+            try(
+                session$sendCustomMessage("cgv_plot_timing_stop", list(run_id = as.character(run_id %||% ""))),
+                silent = TRUE
+            )
+        }
+        invisible(TRUE)
+    }
+
+    arm_ortho_first_paint_timeout <- function(run_id) {
+        current <- isolate(orthoFirstPaintGate())
+        transition <- arm_ortho_first_paint_gate_state(current, run_id = run_id)
+        if (!isTRUE(transition$changed)) {
+            return(invisible(FALSE))
+        }
+        orthoFirstPaintGate(transition$state)
+        gate_token <- transition$state$token
+        tracker_run <- isolate(orthoPlotTimingTracker())$run
+        if (is.list(tracker_run) && identical(as.character(tracker_run$id %||% ""), as.character(run_id %||% ""))) {
+            app_perf_mark(
+                tracker_run,
+                sprintf("first paint gate armed timeout_ms=%d", as.integer(1000 * orthoFirstPaintTimeout)),
+                "ORTHO_UI"
+            )
+        }
+        if (!requireNamespace("later", quietly = TRUE)) {
+            release_ortho_first_paint_gate(run_id, reason = "timer_unavailable")
+            return(invisible(TRUE))
+        }
+        later::later(function() {
+            isolate({
+                latest <- orthoFirstPaintGate()
+                same_gate <- identical(as.character(latest$run_id %||% ""), as.character(run_id %||% "")) &&
+                    identical(as.integer(latest$token %||% 0L), as.integer(gate_token %||% 0L))
+                if (isTRUE(same_gate) && isTRUE(latest$armed) && !isTRUE(latest$released)) {
+                    release_ortho_first_paint_gate(run_id, reason = "timeout")
+                }
+            })
+        }, delay = orthoFirstPaintTimeout)
+        invisible(TRUE)
+    }
+
+    handle_browser_plot_paint <- function(tracker_rv, payload, context = "APP_TIMING") {
+        tr <- tracker_rv()
+        run <- tr$run
+        run_id <- trimws(as.character(payload$run_id %||% ""))
+        output_id <- trimws(as.character(payload$output_id %||% ""))
+        if (!is.list(run) || !nzchar(run_id) || !identical(run_id, as.character(run$id %||% "")) || !nzchar(output_id)) {
+            return(invisible(FALSE))
+        }
+        if (output_id %in% as.character(tr$painted %||% character(0))) {
+            return(invisible(FALSE))
+        }
+        tr$painted <- unique(c(as.character(tr$painted %||% character(0)), output_id))
+        elapsed_ms <- suppressWarnings(as.numeric(ms_since_run_start(run)))
+        client_click_ms <- suppressWarnings(as.numeric(payload$click_to_paint_ms %||% NA_real_))
+        svg_bytes <- suppressWarnings(as.numeric(payload$svg_bytes %||% NA_real_))
+        svg_nodes <- suppressWarnings(as.numeric(payload$svg_nodes %||% NA_real_))
+        if (!isTRUE(tr$first_painted_logged)) {
+            app_perf_mark_ms(run, "browser_first_plot_painted_ms", elapsed_ms, context)
+            if (is.finite(client_click_ms)) {
+                app_perf_mark_ms(run, "client_click_to_first_paint_ms", client_click_ms, context)
+            }
+            if (is.finite(tr$first_ready_ms) && is.finite(elapsed_ms)) {
+                app_perf_mark_ms(run, "server_ready_to_browser_paint_ms", max(0, elapsed_ms - tr$first_ready_ms), context)
+                tr$ready_to_paint_logged <- TRUE
+            }
+            if (is.finite(svg_bytes)) app_perf_mark_ms(run, "browser_svg_bytes", svg_bytes, context)
+            if (is.finite(svg_nodes)) app_perf_mark_ms(run, "browser_svg_nodes", svg_nodes, context)
+            tr$first_painted_logged <- TRUE
+            tr$first_painted_ms <- elapsed_ms
+        }
+        expected_outputs <- if (grepl("^HOMO", context)) {
+            paste0("plot_homo_", as.character(tr$expected %||% character(0)), "-plot")
+        } else if (grepl("^ORTHO", context)) {
+            paste0("plot_ortho_", as.character(tr$expected %||% character(0)), "-plot")
+        } else {
+            character(0)
+        }
+        if (!isTRUE(tr$total_painted_logged) && length(expected_outputs) > 0L && all(expected_outputs %in% tr$painted)) {
+            app_perf_mark_ms(run, "browser_total_plots_painted_ms", elapsed_ms, context)
+            tr$total_painted_logged <- TRUE
+        }
+        tracker_rv(tr)
+        invisible(TRUE)
+    }
+
+    observeEvent(input$cgv_plot_painted, {
+        payload <- input$cgv_plot_painted %||% list()
+        run_id <- trimws(as.character(payload$run_id %||% ""))
+        if (!nzchar(run_id)) return(invisible(NULL))
+        homo_run <- (homoPlotTimingTracker()$run %||% list())$id %||% ""
+        ortho_run <- (orthoPlotTimingTracker()$run %||% list())$id %||% ""
+        if (identical(run_id, as.character(homo_run))) {
+            handle_browser_plot_paint(homoPlotTimingTracker, payload, "HOMO_TIMING")
+        } else if (identical(run_id, as.character(ortho_run))) {
+            handled <- handle_browser_plot_paint(orthoPlotTimingTracker, payload, "ORTHO_TIMING")
+            expected_outputs <- paste0(
+                "plot_ortho_",
+                as.character(orthoPlotTimingTracker()$gate_expected %||% character(0)),
+                "-plot"
+            )
+            output_id <- trimws(as.character(payload$output_id %||% ""))
+            if (isTRUE(handled) && output_id %in% expected_outputs) {
+                release_ortho_first_paint_gate(
+                    run_id,
+                    reason = "browser_paint",
+                    output_id = output_id
+                )
+            }
+        }
+    }, ignoreInit = TRUE, ignoreNULL = TRUE)
+    observeEvent(input$ortho_visual_mode, {
+        visual_mode <- tolower(trimws(as.character(input$ortho_visual_mode %||% "compact")))
+        if (!visual_mode %in% c("aligned", "pip", "pip_blocks", "pip_multipip")) {
+            return(invisible(NULL))
+        }
+        gate_now <- isolate(orthoFirstPaintGate())
+        if (isTRUE(gate_now$enabled) && !isTRUE(gate_now$released)) {
+            release_ortho_first_paint_gate(
+                as.character(gate_now$run_id %||% ""),
+                reason = "non_card_visual_mode"
+            )
+        }
+        invisible(NULL)
+    }, ignoreInit = TRUE, ignoreNULL = TRUE)
+    observe({
+        gate_now <- orthoFirstPaintGate()
+        if (!isTRUE(gate_now$enabled) || isTRUE(gate_now$released)) {
+            return(invisible(NULL))
+        }
+        gate_target <- head(
+            as.character(orthoPlotTimingTracker()$gate_expected %||% character(0)),
+            1L
+        )
+        visible_target <- head(
+            as.character(primaryPlotIdsOrthologous() %||% character(0)),
+            1L
+        )
+        if (length(gate_target) == 0L || length(visible_target) == 0L ||
+            !identical(gate_target[[1L]], visible_target[[1L]])) {
+            release_ortho_first_paint_gate(
+                as.character(gate_now$run_id %||% ""),
+                reason = "visible_target_changed"
+            )
+        }
+        invisible(NULL)
+    })
     genePlotRendererWarmed <- reactiveVal(FALSE)
     orthoAlignedRenderCache <- reactiveVal(list(key = "", plot_obj = NULL))
     orthoAlignedTrackCache <- new.env(parent = emptyenv())
@@ -3142,7 +3571,41 @@ function(input, output, session) {
                 source_label_preview = "source_label_preview" %in% names(suggestions)
             )
         }
+        if (exists("collapse_partial_gene_suggestions_by_locus", mode = "function")) {
+            suggestions <- collapse_partial_gene_suggestions_by_locus(suggestions, query = query_txt)
+        }
         suggestions <- suggestions[!is.na(suggestions$gene_name) & nzchar(trimws(as.character(suggestions$gene_name))), , drop = FALSE]
+        query_key <- normalize_partial_gene_query(query_txt)
+        suggestion_keys <- normalize_partial_gene_query(suggestions$gene_name)
+        exact_flags <- suggestion_keys == query_key | tolower(as.character(suggestions$match_type %||% "")) == "exact"
+        exact_flags[is.na(exact_flags)] <- FALSE
+        if (nrow(suggestions) > 0L) {
+            suggestions <- suggestions[order(!exact_flags, -suppressWarnings(as.numeric(suggestions$score %||% 0)), tolower(as.character(suggestions$gene_name))), , drop = FALSE]
+            suggestion_keys <- normalize_partial_gene_query(suggestions$gene_name)
+            exact_flags <- suggestion_keys == query_key | tolower(as.character(suggestions$match_type %||% "")) == "exact"
+            exact_flags[is.na(exact_flags)] <- FALSE
+            rownames(suggestions) <- NULL
+        }
+        total_suggestions <- nrow(suggestions)
+        exact_count <- sum(exact_flags)
+        evidence_help_text <- paste(
+            "Confidence describes how reliably the displayed term maps to this annotation locus, not the strength of biological or experimental evidence.",
+            "HIGH: a stable gene, transcript, or protein identifier.",
+            "MEDIUM: an annotation name, alias, synonym, locus tag, or database cross-reference.",
+            "LOW: a descriptive or less-specific term; confirm the locus before plotting."
+        )
+        evidence_label <- function(focusable = TRUE) {
+            tagList(
+                "Evidence",
+                tags$span(
+                    class = "gene-match-help",
+                    tabindex = if (isTRUE(focusable)) "0" else NULL,
+                    `aria-label` = "Explain evidence confidence",
+                    `data-evidence-help` = "true",
+                    icon("circle-question")
+                )
+            )
+        }
 
         suggestion_items <- lapply(seq_len(nrow(suggestions)), function(i) {
             row <- suggestions[i, , drop = FALSE]
@@ -3153,7 +3616,16 @@ function(input, output, session) {
             term_type <- tolower(trimws(as.character(row$term_type[1] %||% "")))
             confidence <- toupper(trimws(as.character(row$confidence[1] %||% "")))
             match_role <- trimws(as.character(row$match_role[1] %||% ""))
+            alias_names <- trimws(as.character(row$alias_names[1] %||% ""))
+            alias_values <- if (nzchar(alias_names)) trimws(strsplit(alias_names, " | ", fixed = TRUE)[[1L]]) else character(0)
+            alias_values <- unique(alias_values[nzchar(alias_values)])
+            alias_preview <- if (length(alias_values) <= 8L) {
+                paste(alias_values, collapse = ", ")
+            } else {
+                paste0(paste(alias_values[seq_len(8L)], collapse = ", "), sprintf(" +%d more", length(alias_values) - 8L))
+            }
             requires_confirmation <- isTRUE(row$requires_confirmation[1] %||% FALSE)
+            is_exact <- isTRUE(exact_flags[[i]])
             is_local_alias <- nzchar(source_db) && toupper(source_db) == "GFF"
             plot_gene <- if (identical(mode, "homologous") && nzchar(local_gene_id)) local_gene_id else gene
             payload <- list(
@@ -3165,6 +3637,7 @@ function(input, output, session) {
                 source_db = source_db,
                 confidence = confidence,
                 match_role = match_role,
+                aliases = alias_values,
                 requires_confirmation = requires_confirmation,
                 local_alias = isTRUE(is_local_alias)
             )
@@ -3176,29 +3649,67 @@ function(input, output, session) {
             if (!is.finite(source_count) || is.na(source_count) || source_count < 1L) source_count <- 1L
             source_label <- trimws(as.character(row$file_label[1] %||% ""))
             source_preview <- trimws(as.character(row$source_label_preview[1] %||% row$source_labels[1] %||% source_label))
-            meta_bits <- c(
-                if (identical(mode, "orthologous")) {
-                    paste(c(
-                        sprintf("%d organism%s", source_count, ifelse(source_count == 1L, "", "s")),
-                        if (nzchar(source_preview)) source_preview else NULL
-                    ), collapse = ": ")
-                } else {
-                    source_label
-                },
-                if (nzchar(local_gene_id) && identical(mode, "homologous")) paste0("locus: ", local_gene_id) else NULL,
-                if (nzchar(local_symbol) && !identical(local_symbol, gene)) paste0("symbol: ", local_symbol) else NULL,
-                if (nzchar(source_db) || nzchar(term_type) || nzchar(confidence)) {
-                    paste(c(source_db, term_type, confidence), collapse = " / ")
-                } else {
-                    NULL
-                },
-                if (isTRUE(requires_confirmation)) "external alias: confirm before plotting" else NULL,
-                if (identical(as.character(row$match_type[1] %||% ""), "prefix")) "starts with query" else "contains query"
+            organism_value <- if (identical(mode, "orthologous")) {
+                paste(c(
+                    sprintf("%d organism%s", source_count, ifelse(source_count == 1L, "", "s")),
+                    if (nzchar(source_preview)) source_preview else NULL
+                ), collapse = " · ")
+            } else {
+                source_label
+            }
+            evidence_parts <- c(source_db, term_type, confidence)
+            evidence_parts <- evidence_parts[nzchar(evidence_parts)]
+            evidence_value <- paste(evidence_parts, collapse = " · ")
+            match_label <- if (is_exact) {
+                "Exact match"
+            } else if (identical(as.character(row$match_type[1] %||% ""), "prefix")) {
+                "Starts with query"
+            } else {
+                "Contains query"
+            }
+            detail_row <- function(label, value, value_class = "") {
+                value_txt <- trimws(as.character(value %||% ""))
+                if (!nzchar(value_txt)) return(NULL)
+                tags$span(
+                    class = "gene-match-detail-row",
+                    tags$span(class = "gene-match-detail-label", label),
+                    tags$span(class = paste("gene-match-detail-value", value_class), value_txt)
+                )
+            }
+            suggestion_copy <- tags$span(
+                class = "partial-gene-suggestion-copy",
+                tags$span(
+                    class = "gene-match-card-header",
+                    tags$span(class = "partial-gene-suggestion-name", gene),
+                    if (is_exact) tags$span(class = "gene-match-exact-badge", "Exact match") else NULL
+                ),
+                tags$span(
+                    class = "gene-match-detail-list",
+                    if (identical(mode, "orthologous")) detail_row("Name seen in", organism_value, "gene-match-detail-value--organism") else NULL,
+                    if (identical(mode, "homologous")) detail_row("Locus", local_gene_id, "gene-match-detail-value--mono") else NULL,
+                    if (nzchar(local_symbol) && !identical(local_symbol, gene)) detail_row("Symbol", local_symbol) else NULL,
+                    detail_row("Aliases", alias_preview),
+                    detail_row(evidence_label(focusable = identical(mode, "homologous")), evidence_value)
+                ),
+                tags$span(
+                    class = "gene-match-card-footer",
+                    tags$span(
+                        class = paste("gene-match-type-badge", if (is_exact) "gene-match-type-badge--exact" else ""),
+                        match_label
+                    ),
+                    if (isTRUE(requires_confirmation)) {
+                        tags$span(class = "gene-match-confirmation-badge", "Confirmation required")
+                    } else {
+                        NULL
+                    }
+                )
             )
-            meta_bits <- meta_bits[nzchar(meta_bits)]
             if (identical(mode, "homologous")) {
                 tags$label(
-                    class = "partial-gene-suggestion-option",
+                    class = paste("partial-gene-suggestion-option", if (is_exact) "partial-gene-suggestion-item--exact" else ""),
+                    `data-gene-match-item` = "true",
+                    `data-search-text` = paste(gene, alias_names, local_gene_id, local_symbol, source_label, source_preview),
+                    `data-exact-match` = if (is_exact) "true" else "false",
                     tags$input(
                         type = "checkbox",
                         class = "partial-gene-suggestion-check",
@@ -3206,29 +3717,19 @@ function(input, output, session) {
                         `data-gene` = gene,
                         `data-resolution` = payload_json
                     ),
-                    tags$span(
-                        class = "partial-gene-suggestion-copy",
-                        tags$span(class = "partial-gene-suggestion-name", gene),
-                        if (length(meta_bits) > 0L) {
-                            tags$span(class = "partial-gene-suggestion-meta", paste(meta_bits, collapse = " | "))
-                        } else {
-                            NULL
-                        }
-                    )
+                    suggestion_copy
                 )
             } else {
                 tags$button(
                     type = "button",
-                    class = "partial-gene-suggestion-btn",
+                    class = paste("partial-gene-suggestion-btn", if (is_exact) "partial-gene-suggestion-item--exact" else ""),
                     `data-mode` = mode,
                     `data-gene` = gene,
                     `data-resolution` = payload_json,
-                    tags$span(class = "partial-gene-suggestion-name", gene),
-                    if (length(meta_bits) > 0L) {
-                        tags$span(class = "partial-gene-suggestion-meta", paste(meta_bits, collapse = " | "))
-                    } else {
-                        NULL
-                    }
+                    `data-gene-match-item` = "true",
+                    `data-search-text` = paste(gene, alias_names, local_gene_id, local_symbol, source_label, source_preview),
+                    `data-exact-match` = if (is_exact) "true" else "false",
+                    suggestion_copy
                 )
             }
         })
@@ -3281,19 +3782,50 @@ function(input, output, session) {
                 div(
                     class = "app-confirmation-modal-body-inner partial-gene-suggestion-modal",
                     tags$p(
-                        class = "app-confirmation-modal-text",
-                        if (identical(mode, "orthologous")) {
+                        class = paste("app-confirmation-modal-text gene-match-intro", if (exact_count > 0L) "gene-match-intro--exact" else ""),
+                        if (exact_count > 0L) {
+                            "An exact match was found for "
+                        } else if (identical(mode, "orthologous")) {
                             "The query needs a cross-species-compatible gene choice for "
                         } else {
                             "No exact gene match was found for "
                         },
-                        tags$strong(query_txt),
-                        if (identical(mode, "orthologous")) {
-                            ". Similar local names or aliases were found in the selected annotation data:"
+                        tags$strong(paste0(query_txt, if (exact_count > 0L && total_suggestions > exact_count) "," else ".")),
+                        if (exact_count > 0L) {
+                            if (total_suggestions > exact_count) {
+                                sprintf(" together with %d additional gene%s containing that term. The exact match is highlighted; choose any result below.", total_suggestions - exact_count, ifelse(total_suggestions - exact_count == 1L, "", "s"))
+                            } else {
+                                " The exact match is highlighted below."
+                            }
+                        } else if (identical(mode, "orthologous")) {
+                            " Similar local names or aliases were found in the selected annotation data:"
                         } else {
-                            ". Perhaps you meant one of these similar gene names found in the selected annotation data:"
+                            " Perhaps you meant one of these similar gene names found in the selected annotation data:"
                         }
                     ),
+                    div(
+                        class = "gene-match-browser",
+                        `data-page-size` = "24",
+                        `data-result-label` = "unique gene",
+                        tags$div(
+                            class = "gene-match-browser-toolbar",
+                            tags$label(
+                                class = "gene-match-filter-wrap",
+                                tags$span(class = "sr-only", "Filter all gene suggestions"),
+                                icon("filter"),
+                                tags$input(
+                                    type = "search",
+                                    class = "gene-match-filter-input",
+                                    placeholder = "Filter all suggestions...",
+                                    autocomplete = "off"
+                                )
+                            ),
+                            tags$span(
+                                class = "gene-match-result-count",
+                                `aria-live` = "polite",
+                                sprintf("%d unique gene%s", total_suggestions, ifelse(total_suggestions == 1L, "", "s"))
+                            )
+                        ),
                     if (identical(mode, "homologous")) {
                         div(
                             class = "gene-match-selection-toolbar",
@@ -3324,12 +3856,21 @@ function(input, output, session) {
                         ),
                         suggestion_items
                     ),
+                    tags$div(
+                        class = "gene-match-pagination",
+                        tags$button(type = "button", class = "gene-match-page-btn gene-match-page-prev", icon("chevron-left"), " Previous"),
+                        tags$span(class = "gene-match-page-status", `aria-live` = "polite"),
+                        tags$button(type = "button", class = "gene-match-page-btn gene-match-page-next", "Next ", icon("chevron-right"))
+                    ),
+                    ),
                     tags$p(
                         class = "partial-gene-suggestion-footnote",
                         if (identical(mode, "homologous")) {
                             "Select one or more suggested genes to plot, or search external databases for alternate nomenclature of the original query."
+                        } else if (isTRUE(cross_species_requires_verified_orthology())) {
+                            "Choose a candidate term. For Cross-Species searches, matching names or aliases only identify candidate loci; CGeV will plot only loci supported by explicit one-to-one orthology evidence."
                         } else {
-                            "Choose a suggested gene to search with that exact name. Cross-Species results require matches in at least two organisms; use external aliases when nomenclature differs across species."
+                            "Choose a candidate term. Cross-Species resolves that term independently in each organism's local annotation; matching names or aliases do not by themselves prove one-to-one orthology."
                         }
                     )
                 ),
@@ -3355,6 +3896,24 @@ function(input, output, session) {
         matches <- if (is.data.frame(matches)) matches else data.frame()
         if (nrow(matches) == 0L) {
             return(NULL)
+        }
+        evidence_help_text <- paste(
+            "Confidence describes how reliably the displayed term maps to this annotation locus, not the strength of biological or experimental evidence.",
+            "HIGH: a stable gene, transcript, or protein identifier.",
+            "MEDIUM: an annotation name, alias, synonym, locus tag, or database cross-reference.",
+            "LOW: a descriptive or less-specific term; confirm the locus before plotting."
+        )
+        evidence_label <- function(focusable = TRUE) {
+            tagList(
+                "Evidence",
+                tags$span(
+                    class = "gene-match-help",
+                    tabindex = if (isTRUE(focusable)) "0" else NULL,
+                    `aria-label` = "Explain evidence confidence",
+                    `data-evidence-help` = "true",
+                    icon("circle-question")
+                )
+            )
         }
         highlight_query_text <- function(text, query) {
             txt <- safe_text_one(text)
@@ -3389,7 +3948,7 @@ function(input, output, session) {
             short <- trimws(substr(txt, 1L, cut_at))
             list(short = paste0(short, "..."), full = txt, truncated = TRUE)
         }
-        max_rows <- min(nrow(matches), 20L)
+        max_rows <- nrow(matches)
         match_items <- lapply(seq_len(max_rows), function(i) {
             row <- matches[i, , drop = FALSE]
             gene_id <- safe_text_one(row$local_gene_id[1] %||% row$local_feature_id[1] %||% "")
@@ -3401,6 +3960,7 @@ function(input, output, session) {
             source_db <- safe_text_one(row$source_db[1] %||% "alias index", fallback = "alias index")
             term_type <- safe_text_one(row$term_type[1] %||% "alias", fallback = "alias")
             confidence <- safe_text_one(row$confidence[1] %||% "")
+            organism_name <- safe_text_one(row$organism_name[1] %||% "")
             input_match <- safe_text_one(row$input_match[1] %||% row$query_term_original[1] %||% "")
             match_role <- safe_text_one(row$match_role[1] %||% "")
             role_label <- switch(
@@ -3426,31 +3986,53 @@ function(input, output, session) {
             payload <- list(
                 mode = mode,
                 gene = if (nzchar(gene_id)) gene_id else gene_name,
-                query = query_txt
+                query = query_txt,
+                local_gene_id = gene_id,
+                organism_id = safe_text_one(row$organism_id[1] %||% ""),
+                organism_name = organism_name
             )
             payload_js <- tryCatch(
                 as.character(jsonlite::toJSON(payload, auto_unbox = TRUE, null = "null", na = "null")),
                 error = function(e) "{}"
             )
-            title_parts <- unique(c(gene_name, gene_id))
-            title_parts <- title_parts[nzchar(title_parts)]
-            match_copy <- tagList(
+            is_exact_alias <- tolower(trimws(input_match)) == tolower(trimws(query_txt))
+            alias_detail_row <- function(label, value, highlight = FALSE, value_class = "") {
+                value_txt <- safe_text_one(value)
+                if (!nzchar(value_txt)) return(NULL)
                 tags$span(
-                    class = "partial-gene-suggestion-name",
-                    paste(c(if (isTRUE(recommended)) "Recommended" else NULL, paste(title_parts, collapse = " | ")), collapse = ": ")
+                    class = "gene-match-detail-row",
+                    tags$span(class = "gene-match-detail-label", label),
+                    tags$span(
+                        class = paste("gene-match-detail-value", value_class),
+                        if (isTRUE(highlight)) highlight_query_text(value_txt, query_txt) else value_txt
+                    )
+                )
+            }
+            evidence_parts <- c(source_db, term_type, confidence)
+            evidence_parts <- evidence_parts[nzchar(evidence_parts)]
+            match_copy <- tags$span(
+                class = "alias-index-match-copy",
+                tags$span(
+                    class = "gene-match-card-header",
+                    tags$span(class = "partial-gene-suggestion-name", gene_name),
+                    tags$span(
+                        class = "gene-match-card-badges",
+                        if (isTRUE(recommended)) tags$span(class = "gene-match-recommended-badge", "Recommended") else NULL,
+                        if (isTRUE(is_exact_alias)) tags$span(class = "gene-match-exact-badge", "Exact match") else NULL
+                    )
                 ),
                 tags$span(
-                    class = "partial-gene-suggestion-meta",
-                    highlight_query_text(paste(c(
-                        if (nzchar(input_match)) paste0("match: ", input_match) else NULL,
-                        role_label,
-                        if (nzchar(coord)) coord else NULL,
-                        paste(c(source_db, term_type, confidence), collapse = " / ")
-                    ), collapse = " | "), query_txt)
+                    class = "gene-match-detail-list",
+                    alias_detail_row("Matched term", input_match, highlight = TRUE),
+                    alias_detail_row("Locus", gene_id, value_class = "gene-match-detail-value--mono"),
+                    if (identical(mode, "orthologous")) alias_detail_row("Organism", organism_name, value_class = "gene-match-detail-value--organism") else NULL,
+                    alias_detail_row("Role", role_label),
+                    alias_detail_row("Location", coord, value_class = "gene-match-detail-value--mono"),
+                    alias_detail_row(evidence_label(focusable = identical(mode, "homologous")), paste(evidence_parts, collapse = " · "))
                 ),
                 if (nzchar(desc_preview$short)) {
                     tags$span(
-                        class = "partial-gene-suggestion-meta alias-index-description-preview",
+                        class = "alias-index-description-preview",
                         highlight_query_text(desc_preview$short, query_txt)
                     )
                 } else {
@@ -3462,6 +4044,9 @@ function(input, output, session) {
                     "alias-index-match-card",
                     if (isTRUE(recommended)) "alias-index-match-card--recommended" else ""
                 ),
+                `data-gene-match-item` = "true",
+                `data-search-text` = paste(gene_name, gene_id, organism_name, input_match, match_role, desc, source_db),
+                `data-exact-match` = if (isTRUE(is_exact_alias)) "true" else "false",
                 if (identical(mode, "homologous")) {
                     tags$label(
                         class = "alias-index-match-select",
@@ -3470,7 +4055,7 @@ function(input, output, session) {
                             class = "alias-index-match-check",
                             value = payload$gene
                         ),
-                        tags$span(class = "alias-index-match-copy", match_copy)
+                        match_copy
                     )
                 } else {
                     tags$button(
@@ -3511,15 +4096,40 @@ function(input, output, session) {
                 div(
                     class = "app-confirmation-modal-body-inner partial-gene-suggestion-modal",
                     tags$p(
-                        class = "app-confirmation-modal-text",
+                        class = "app-confirmation-modal-text gene-match-intro",
                         "The local alias index found several genes for ",
-                        tags$strong(query_txt),
+                        tags$strong(paste0(query_txt, ".")),
                         if (identical(mode, "homologous")) {
-                            ". Select one or more genes CGV should plot."
+                            " Select one or more genes CGeV should plot."
+                        } else if (isTRUE(cross_species_requires_verified_orthology())) {
+                            " Select the reference locus CGeV should evaluate for orthology."
                         } else {
-                            ". Select the gene CGV should plot."
+                            " Select the local locus CGeV should use for this organism."
                         }
                     ),
+                    div(
+                        class = "gene-match-browser",
+                        `data-page-size` = "24",
+                        `data-result-label` = "gene",
+                        tags$div(
+                            class = "gene-match-browser-toolbar",
+                            tags$label(
+                                class = "gene-match-filter-wrap",
+                                tags$span(class = "sr-only", "Filter all alias matches"),
+                                icon("filter"),
+                                tags$input(
+                                    type = "search",
+                                    class = "gene-match-filter-input",
+                                    placeholder = "Filter all matches...",
+                                    autocomplete = "off"
+                                )
+                            ),
+                            tags$span(
+                                class = "gene-match-result-count",
+                                `aria-live` = "polite",
+                                sprintf("%d total match%s", nrow(matches), ifelse(nrow(matches) == 1L, "", "es"))
+                            )
+                        ),
                     if (identical(mode, "homologous")) {
                         div(
                             class = "gene-match-selection-toolbar",
@@ -3546,9 +4156,17 @@ function(input, output, session) {
                     div(
                         class = paste(
                             "partial-gene-suggestion-list",
+                            "alias-index-match-list",
                             if (identical(mode, "homologous")) "partial-gene-suggestion-list--multi" else "partial-gene-suggestion-list--single"
                         ),
                         match_items
+                    ),
+                    tags$div(
+                        class = "gene-match-pagination",
+                        tags$button(type = "button", class = "gene-match-page-btn gene-match-page-prev", icon("chevron-left"), " Previous"),
+                        tags$span(class = "gene-match-page-status", `aria-live` = "polite"),
+                        tags$button(type = "button", class = "gene-match-page-btn gene-match-page-next", "Next ", icon("chevron-right"))
+                    )
                     )
                 ),
                 easyClose = TRUE,
@@ -3660,6 +4278,12 @@ function(input, output, session) {
         if (!is.data.frame(suggestions) || nrow(suggestions) == 0L) {
             return(invisible(FALSE))
         }
+        query_key <- normalize_partial_gene_query(query_txt)
+        has_exact <- any(
+            normalize_partial_gene_query(suggestions$gene_name %||% character(0)) == query_key |
+                tolower(as.character(suggestions$match_type %||% "")) == "exact",
+            na.rm = TRUE
+        )
         modal <- build_partial_gene_suggestions_modal(query_txt, suggestions, mode = mode)
         show_suggestions <- function() {
             showModal(modal)
@@ -3672,7 +4296,11 @@ function(input, output, session) {
         }
         emit_popup_status(
             context,
-            sprintf("No exact match for '%s'. Similar local gene names are available to choose from.", query_txt),
+            if (isTRUE(has_exact)) {
+                sprintf("An exact match for '%s' and additional genes containing that term are available to choose from.", query_txt)
+            } else {
+                sprintf("No exact match for '%s'. Similar local gene names are available to choose from.", query_txt)
+            },
             tone = "info",
             clear = TRUE
         )
@@ -3693,9 +4321,14 @@ function(input, output, session) {
             min_count = exact_required,
             time_budget_sec = min(0.8, time_budget_sec)
         )
-        if (exact_found >= exact_required) {
+        broad_family_query <- is_low_specific_gene_family_query(query_txt)
+        if (exact_found >= exact_required && !isTRUE(broad_family_query)) {
             return(invisible(FALSE))
         }
+        # The modal paginates and filters on the client, so collecting the complete
+        # family is preferable to silently truncating it at the legacy 10/20 rows.
+        max_per_file <- Inf
+        max_total <- Inf
         min_shared <- if (identical(mode, "orthologous")) 2L else 1L
         suggestions <- find_deterministic_partial_gene_suggestions(
             annotation_paths = annotation_paths,
@@ -3711,7 +4344,7 @@ function(input, output, session) {
         )
         if ((!is.data.frame(suggestions) || nrow(suggestions) == 0L) &&
             isTRUE(include_alias_family) &&
-            is_low_specific_gene_family_query(query_txt) &&
+            isTRUE(broad_family_query) &&
             exists("find_cross_species_alias_family_suggestions", mode = "function")) {
             # Alias-index family expansion is useful, but it can be expensive across many organisms.
             # Only use it as a fallback after direct gene-name suggestions fail.
@@ -3922,37 +4555,20 @@ function(input, output, session) {
             if (is.null(con)) {
                 return(NULL)
             }
-            sql <- sprintf(
-                paste0(
-                    "SELECT query_term_original, query_term_clean_strict, query_term_upper, local_gene_id, local_symbol, term_type, confidence, source_db ",
-                    "FROM alias_index WHERE term_type IN (%s) AND LENGTH(query_term_original) <= 100 AND ",
-                    "(query_term_clean_strict LIKE ?1 OR query_term_upper LIKE ?1 OR UPPER(local_symbol) LIKE ?1) ",
-                    "ORDER BY CASE confidence WHEN 'HIGH' THEN 1 WHEN 'MEDIUM' THEN 2 ELSE 3 END, LENGTH(query_term_original), query_term_original ",
-                    "LIMIT %d"
-                ),
-                type_sql,
-                as.integer(max_per_file * 2L)
-            )
-            alias_rows <- tryCatch(
-                DBI::dbGetQuery(con, sql, params = list(q_like_prefix)),
-                error = function(e) data.frame()
+            alias_rows <- query_partial_alias_rows_sqlite(
+                con = con,
+                like_value = q_like_prefix,
+                type_sql = type_sql,
+                row_limit_sql = sprintf(" LIMIT %d", as.integer(max_per_file * 2L)),
+                prefix_value = toupper(q_comp)
             )
             match_type <- "prefix"
             if (!is.data.frame(alias_rows) || nrow(alias_rows) == 0L) {
-                sql_contains <- sprintf(
-                    paste0(
-                        "SELECT query_term_original, query_term_clean_strict, query_term_upper, local_gene_id, local_symbol, term_type, confidence, source_db ",
-                        "FROM alias_index WHERE term_type IN (%s) AND LENGTH(query_term_original) <= 100 AND ",
-                        "(query_term_clean_strict LIKE ?1 OR query_term_upper LIKE ?1 OR UPPER(local_symbol) LIKE ?1) ",
-                        "ORDER BY CASE confidence WHEN 'HIGH' THEN 1 WHEN 'MEDIUM' THEN 2 ELSE 3 END, LENGTH(query_term_original), query_term_original ",
-                        "LIMIT %d"
-                    ),
-                    type_sql,
-                    as.integer(max_per_file * 2L)
-                )
-                alias_rows <- tryCatch(
-                    DBI::dbGetQuery(con, sql_contains, params = list(q_like_contains)),
-                    error = function(e) data.frame()
+                alias_rows <- query_partial_alias_rows_sqlite(
+                    con = con,
+                    like_value = q_like_contains,
+                    type_sql = type_sql,
+                    row_limit_sql = sprintf(" LIMIT %d", as.integer(max_per_file * 2L))
                 )
                 match_type <- "contains"
             }
@@ -4479,7 +5095,7 @@ function(input, output, session) {
     close_popup_status <- popupStatusDomain$close_popup_status
     lastz_patience_notice <- paste(
         "LASTZ is computationally intensive and may take several minutes.",
-        "Keep CGV open and please wait until the process finishes."
+        "Keep CGeV open and please wait until the process finishes."
     )
     lastz_progress_text <- function(status_text) {
         paste(trimws(as.character(status_text %||% "")), lastz_patience_notice)
@@ -4602,6 +5218,11 @@ function(input, output, session) {
                     return(invisible(FALSE))
                 }
             }
+            if (isTRUE(secondary_work_should_yield())) {
+                app_perf_mark(warm_perf, "yield: user search active", "CACHE_BG")
+                later::later(run_next, delay = secondary_work_retry_delay_sec)
+                return(invisible(FALSE))
+            }
             if (next_idx > length(ann)) {
                 app_perf_mark(warm_perf, "done", "CACHE_BG")
                 return(invisible(TRUE))
@@ -4614,6 +5235,11 @@ function(input, output, session) {
             app_perf_mark(warm_perf, sprintf("warm %d/%d %s", as.integer(i), as.integer(length(ann)), basename(ann_i)), "CACHE_BG")
 
             finish_this_warm <- function() {
+                if (isTRUE(secondary_work_should_yield())) {
+                    app_perf_mark(warm_perf, "followup yield: user search active", "CACHE_BG")
+                    later::later(finish_this_warm, delay = secondary_work_retry_delay_sec)
+                    return(invisible(FALSE))
+                }
                 tryCatch(
                     {
                         if (nzchar(rp_i) && file.exists(rp_i)) {
@@ -4642,35 +5268,56 @@ function(input, output, session) {
 
             if (!isTRUE(annotation_is_warmed(ann_i)) && requireNamespace("promises", quietly = TRUE)) {
                 local_ann <- ann_i
+                complete_annotation_future <- NULL
+                complete_annotation_future <- function(idx = NULL, err = NULL) {
+                    if (isTRUE(secondary_work_should_yield())) {
+                        app_perf_mark(warm_perf, "annotation callback yield: user search active", "CACHE_BG")
+                        later::later(
+                            function() complete_annotation_future(idx = idx, err = err),
+                            delay = secondary_work_retry_delay_sec
+                        )
+                        return(invisible(FALSE))
+                    }
+                    if (!is.null(err)) {
+                        app_perf_mark(warm_perf, sprintf("annotation future warm error: %s", as.character(err$message %||% "unknown")), "CACHE_BG")
+                        tryCatch(warm_annotation_cache(local_ann, status_rv = NULL, context_label = NULL), error = function(e) NULL)
+                        finish_this_warm()
+                        return(invisible(FALSE))
+                    }
+                    if (!is.null(idx) && is.list(idx) && !is.null(idx$genes_df)) {
+                        tryCatch(
+                            cache_env_set(
+                                .gff_gene_light_index_cache,
+                                gff_cache_key(local_ann),
+                                idx,
+                                max_size = annotation_memory_cache_limits$gene_light_max_entries,
+                                max_bytes = annotation_memory_cache_limits$gene_light_max_bytes
+                            ),
+                            error = function(e) NULL
+                        )
+                        tryCatch(save_gff_index_to_disk(local_ann, idx, cache_kind = "gene_light", base_dir = "."), error = function(e) NULL)
+                        tryCatch(get_genes_table_from_annotation(local_ann), error = function(e) NULL)
+                        tryCatch(get_genes_chr_index_from_annotation(local_ann), error = function(e) NULL)
+                        tryCatch(get_chromosome_name_map(local_ann), error = function(e) NULL)
+                        if (isTRUE(app_env_flag("APP_TABIX_PROBE_ON_WARM", FALSE))) {
+                            tryCatch(warm_annotation_tabix_probe(local_ann, idx), error = function(e) NULL)
+                        }
+                        mark_annotation_warmed(local_ann)
+                    }
+                    app_perf_mark(warm_perf, sprintf("annotation future warmed rows=%d", as.integer(nrow((idx %||% list())$genes_df %||% data.frame()))), "CACHE_BG")
+                    finish_this_warm()
+                    invisible(TRUE)
+                }
                 tryCatch(
                     {
                         promises::future_promise({
                             build_gff_gene_light_index(local_ann)
                         }, seed = FALSE) %...>% (function(idx) {
-                            if (!is.null(idx) && is.list(idx) && !is.null(idx$genes_df)) {
-                                tryCatch(
-                                    cache_env_set(
-                                        .gff_gene_light_index_cache,
-                                        gff_cache_key(local_ann),
-                                        idx,
-                                        max_size = annotation_memory_cache_limits$gene_light_max_entries,
-                                        max_bytes = annotation_memory_cache_limits$gene_light_max_bytes
-                                    ),
-                                    error = function(e) NULL
-                                )
-                                tryCatch(save_gff_index_to_disk(local_ann, idx, cache_kind = "gene_light", base_dir = "."), error = function(e) NULL)
-                                tryCatch(get_genes_table_from_annotation(local_ann), error = function(e) NULL)
-                                tryCatch(get_genes_chr_index_from_annotation(local_ann), error = function(e) NULL)
-                                tryCatch(get_chromosome_name_map(local_ann), error = function(e) NULL)
-                                tryCatch(warm_annotation_tabix_probe(local_ann, idx), error = function(e) NULL)
-                                mark_annotation_warmed(local_ann)
-                            }
-                            app_perf_mark(warm_perf, sprintf("annotation future warmed rows=%d", as.integer(nrow((idx %||% list())$genes_df %||% data.frame()))), "CACHE_BG")
-                            finish_this_warm()
+                            complete_annotation_future(idx = idx)
+                            invisible(idx)
                         }) %...!% (function(err) {
-                            app_perf_mark(warm_perf, sprintf("annotation future warm error: %s", as.character(err$message %||% "unknown")), "CACHE_BG")
-                            tryCatch(warm_annotation_cache(ann_i, status_rv = NULL, context_label = NULL), error = function(e) NULL)
-                            finish_this_warm()
+                            complete_annotation_future(err = err)
+                            invisible(NULL)
                         })
                         return(invisible(TRUE))
                     },
@@ -4688,7 +5335,7 @@ function(input, output, session) {
             invisible(TRUE)
         }
 
-        later::later(run_next, delay = delay_val)
+        later::later(run_next, delay = max(delay_val, secondary_work_initial_delay_sec))
         invisible(TRUE)
     }
 
@@ -4738,6 +5385,11 @@ function(input, output, session) {
                     return(invisible(FALSE))
                 }
             }
+            if (isTRUE(secondary_work_should_yield())) {
+                app_perf_mark(warm_perf, "yield: user search active", "LOOKUP_WORKER_WARM")
+                later::later(launch, delay = secondary_work_retry_delay_sec)
+                return(invisible(FALSE))
+            }
             promises <- lapply(seq_len(worker_count), function(worker_idx) {
                 ann_local <- ann
                 promises::future_promise({
@@ -4781,7 +5433,7 @@ function(input, output, session) {
             invisible(TRUE)
         }
 
-        later::later(launch, delay = delay_val)
+        later::later(launch, delay = max(delay_val, secondary_work_initial_delay_sec))
         invisible(TRUE)
     }
 
@@ -4867,6 +5519,11 @@ function(input, output, session) {
                 followup_running <<- FALSE
                 return(invisible(FALSE))
             }
+            if (isTRUE(secondary_work_should_yield())) {
+                app_perf_mark(prep_perf, "followup yield: user search active", "ORG_FAST")
+                later::later(run_followup_queue, delay = secondary_work_retry_delay_sec)
+                return(invisible(FALSE))
+            }
             if (length(followup_queue) == 0L) {
                 followup_running <<- FALSE
                 app_perf_mark(prep_perf, "followup done", "ORG_FAST")
@@ -4882,7 +5539,10 @@ function(input, output, session) {
             sid_i <- as.character(item$species_id %||% "")
             app_perf_mark(prep_perf, sprintf("followup %s/%d", ifelse(is.finite(i), as.character(i), "?"), length(ann)), "ORG_FAST")
 
-            if (isTRUE(app_env_flag("APP_TABIX_PROBE_ON_WARM", TRUE)) &&
+            # Tabix opens can take several seconds on networked storage and
+            # block Shiny's event loop. Keep this optional warm-up off by
+            # default; real lookups still open the existing index on demand.
+            if (isTRUE(app_env_flag("APP_TABIX_PROBE_ON_WARM", FALSE)) &&
                 nzchar(ann_i) && file.exists(ann_i)) {
                 component_t0 <- app_perf_now()
                 tryCatch(warm_annotation_tabix_probe(ann_i), error = function(e) NULL)
@@ -4950,10 +5610,10 @@ function(input, output, session) {
                 # or delay delivery of the ready state to the browser.
                 tryCatch(
                     session$onFlushed(function() {
-                        later::later(start_followup_queue, delay = 0.02)
+                        later::later(start_followup_queue, delay = secondary_work_initial_delay_sec)
                     }, once = TRUE),
                     error = function(e) {
-                        later::later(start_followup_queue, delay = 0.05)
+                        later::later(start_followup_queue, delay = secondary_work_initial_delay_sec)
                     }
                 )
             } else {
@@ -5027,11 +5687,9 @@ function(input, output, session) {
         next_idx <- 1L
         run_next <- NULL
         run_next <- function() {
-            search_state <- tryCatch(isolate(searchRunState()), error = function(e) list())
-            search_busy <- any(vapply(search_state, function(x) isTRUE((x %||% list())$active), logical(1)))
             prep_busy <- !isTRUE(isolate(searchPreparationReadyHomo())) ||
                 !isTRUE(isolate(searchPreparationReadyOrtho()))
-            if (isTRUE(search_busy || prep_busy)) {
+            if (isTRUE(secondary_work_should_yield()) || isTRUE(prep_busy)) {
                 later::later(run_next, delay = 2)
                 return(invisible(FALSE))
             }
@@ -5091,7 +5749,8 @@ function(input, output, session) {
     }
     warm_gene_plot_renderer_once <- function() {
         if (isTRUE(genePlotRendererWarmed()) ||
-            !isTRUE(app_env_flag("APP_GENE_PLOT_RENDERER_PREWARM", TRUE))) {
+            !isTRUE(app_env_flag("APP_GENE_PLOT_RENDERER_PREWARM", TRUE)) ||
+            isTRUE(secondary_work_should_yield())) {
             return(invisible(FALSE))
         }
         genePlotRendererWarmed(TRUE)
@@ -5124,9 +5783,38 @@ function(input, output, session) {
     }
     if (requireNamespace("later", quietly = TRUE) &&
         isTRUE(app_env_flag("APP_GENE_PLOT_RENDERER_PREWARM", TRUE))) {
-        later::later(function() {
+        # Keep the synchronous ggiraph warm-up out of the first response.  A
+        # cold call takes a few hundred milliseconds, so scheduling it before
+        # the initial flush competes directly with the browser's first paint.
+        # The same warm-up still runs shortly afterwards and remains optional.
+        renderer_prewarm_delay_ms <- app_env_int(
+            "APP_GENE_PLOT_RENDERER_PREWARM_DELAY_MS",
+            1000L,
+            min_value = 0L,
+            max_value = 30000L
+        )
+        run_renderer_prewarm <- NULL
+        run_renderer_prewarm <- function() {
+            session_closed <- tryCatch(
+                is.function(session$isClosed) && isTRUE(session$isClosed()),
+                error = function(e) FALSE
+            )
+            if (isTRUE(session_closed)) {
+                return(invisible(FALSE))
+            }
+            if (isTRUE(secondary_work_should_yield())) {
+                app_perf_mark(NULL, "renderer_prewarm_yield=user_search_active", "PLOT_WARM")
+                later::later(run_renderer_prewarm, delay = secondary_work_retry_delay_sec)
+                return(invisible(FALSE))
+            }
             tryCatch(warm_gene_plot_renderer_once(), error = function(e) NULL)
-        }, delay = 0.15)
+        }
+        session$onFlushed(function() {
+            later::later(
+                run_renderer_prewarm,
+                delay = max(renderer_prewarm_delay_ms / 1000, secondary_work_initial_delay_sec)
+            )
+        }, once = TRUE)
     }
     sanitize_girafe_tooltip_text <- function(x) {
         txt <- as.character(x %||% "")
@@ -9470,23 +10158,12 @@ function(input, output, session) {
         as.character(groups[[key]]$ids %||% character(0))
     })
 
-    homoLastzModesEnabled <- function() {
-        isTRUE(app_env_flag("APP_HOMO_LASTZ_MODES", default = TRUE))
-    }
-
     output$homo_visual_mode_ui <- renderUI({
         groups <- homoMultiTranscriptGeneGroups()
         current <- tolower(trimws(as.character(input$homo_visual_mode %||% "compact")))
         choices <- c("Compact" = "compact", "Detailed" = "detailed")
         if (length(groups) > 0L) {
-            choices <- c(choices, "Align transcripts" = "aligned")
-            if (isTRUE(homoLastzModesEnabled())) {
-                choices <- c(
-                    choices,
-                    "LASTZ blocks" = "pip_blocks",
-                    "MultiPIP" = "pip_multipip"
-                )
-            }
+            choices <- c(choices, "Synteny" = "aligned")
         }
         if (!current %in% unname(choices)) {
             current <- "compact"
@@ -12498,6 +13175,35 @@ function(input, output, session) {
             remember_lookup(cache_key_initial, nohit)
             return(nohit)
         }
+        operation_alias_index_lookup <- NULL
+        if (exists("make_operation_alias_index_lookup", mode = "function") &&
+            exists("search_alias_index_for_context", mode = "function")) {
+            operation_alias_index_lookup <- tryCatch(
+                make_operation_alias_index_lookup(
+                    query = input_gene,
+                    file_path = file_path,
+                    file_label = file_label,
+                    base_dir = ".",
+                    lookup_fun = get("search_alias_index_for_context", mode = "function")
+                ),
+                error = function(e) NULL
+            )
+        }
+        lookup_alias_index_for_operation <- function(det_resolved) {
+            if (is.function(operation_alias_index_lookup)) {
+                return(operation_alias_index_lookup(det_resolved))
+            }
+            list(
+                result = search_alias_index_for_context(
+                    query = input_gene,
+                    file_path = file_path,
+                    det_info = det_resolved,
+                    file_label = file_label,
+                    base_dir = "."
+                ),
+                reused = FALSE
+            )
+        }
         alias_index_preflight <- function(det_resolved) {
             det <- det_resolved %||% list()
             org_id <- trimws(as.character(det$species_id %||% det$preloaded_id %||% ""))
@@ -12508,22 +13214,19 @@ function(input, output, session) {
             }
             alias_index_t0 <- app_perf_now()
             push_progress(sprintf("\u2022 Local alias index preflight for '%s'...", input_gene))
-            alias_index_res <- tryCatch(
-                search_alias_index_for_context(
-                    query = input_gene,
-                    file_path = file_path,
-                    det_info = det,
-                    file_label = file_label,
-                    base_dir = "."
-                ),
+            alias_index_attempt <- tryCatch(
+                lookup_alias_index_for_operation(det),
                 error = function(e) {
                     app_debug_log("[AliasIndex] preflight failed: ", e$message)
                     NULL
                 }
             )
+            alias_index_res <- (alias_index_attempt %||% list())$result
             alias_index_status <- as.character((alias_index_res %||% list())$status %||% "no_match")
             alias_index_matches <- (alias_index_res %||% list())$matches
-            app_perf_mark_ms(lookup_perf, "lookup_alias_index_ms", app_perf_elapsed_ms(alias_index_t0), perf_context)
+            if (!isTRUE((alias_index_attempt %||% list())$reused)) {
+                app_perf_mark_ms(lookup_perf, "lookup_alias_index_ms", app_perf_elapsed_ms(alias_index_t0), perf_context)
+            }
             if (startsWith(alias_index_status, "multiple") &&
                 is.data.frame(alias_index_matches) && nrow(alias_index_matches) > 0L) {
                 push_progress(sprintf("\u2022 Local alias index found %d possible genes; user selection is required.", nrow(alias_index_matches)))
@@ -12569,7 +13272,7 @@ function(input, output, session) {
                         best_res$det_resolved <- det
                         best_res$lookup_elapsed_ms <- app_perf_elapsed_ms(lookup_t0)
                         push_progress(sprintf(
-                            "\u2022 CGV resolved stable ID '%s' as %s using the local alias index.",
+                            "\u2022 CGeV resolved stable ID '%s' as %s using the local alias index.",
                             input_gene,
                             as.character(best_res$matched_gene_id %||% best_res$matched_gene_name %||% selected_alias_match$local_gene_id[1] %||% "")
                         ))
@@ -12688,22 +13391,19 @@ function(input, output, session) {
             alias_index_checked <- TRUE
             alias_index_t0 <- app_perf_now()
             push_progress(sprintf("\u2022 Local alias index lookup for '%s'...", input_gene))
-            alias_index_res <- tryCatch(
-                search_alias_index_for_context(
-                    query = input_gene,
-                    file_path = file_path,
-                    det_info = det_resolved,
-                    file_label = file_label,
-                    base_dir = "."
-                ),
+            alias_index_attempt <- tryCatch(
+                lookup_alias_index_for_operation(det_resolved),
                 error = function(e) {
                     app_debug_log("[AliasIndex] lookup failed: ", e$message)
                     NULL
                 }
             )
+            alias_index_res <- (alias_index_attempt %||% list())$result
             alias_index_status <- as.character((alias_index_res %||% list())$status %||% "no_match")
             alias_index_matches <- (alias_index_res %||% list())$matches
-            app_perf_mark_ms(lookup_perf, "lookup_alias_index_ms", app_perf_elapsed_ms(alias_index_t0), perf_context)
+            if (!isTRUE((alias_index_attempt %||% list())$reused)) {
+                app_perf_mark_ms(lookup_perf, "lookup_alias_index_ms", app_perf_elapsed_ms(alias_index_t0), perf_context)
+            }
             if (startsWith(alias_index_status, "multiple") &&
                 is.data.frame(alias_index_matches) && nrow(alias_index_matches) > 0L) {
                 push_progress(sprintf("\u2022 Local alias index found %d possible genes; user selection is required.", nrow(alias_index_matches)))
@@ -12748,7 +13448,7 @@ function(input, output, session) {
                         best_res$alias_index_status <- alias_index_status
                         best_res$alias_index_match <- selected_alias_match
                         push_progress(sprintf(
-                            "\u2022 CGV resolved '%s' as alias of %s using the local alias index.",
+                            "\u2022 CGeV resolved '%s' as alias of %s using the local alias index.",
                             input_gene,
                             as.character(best_res$matched_gene_id %||% best_res$matched_gene_name %||% selected_alias_match$local_gene_id[1] %||% "")
                         ))
@@ -12813,22 +13513,19 @@ function(input, output, session) {
             exists("alias_index_match_to_lookup", mode = "function")) {
             alias_index_t0 <- app_perf_now()
             push_progress(sprintf("\u2022 Local alias index lookup for '%s'...", input_gene))
-            alias_index_res <- tryCatch(
-                search_alias_index_for_context(
-                    query = input_gene,
-                    file_path = file_path,
-                    det_info = det_resolved,
-                    file_label = file_label,
-                    base_dir = "."
-                ),
+            alias_index_attempt <- tryCatch(
+                lookup_alias_index_for_operation(det_resolved),
                 error = function(e) {
                     app_debug_log("[AliasIndex] lookup failed: ", e$message)
                     NULL
                 }
             )
+            alias_index_res <- (alias_index_attempt %||% list())$result
             alias_index_status <- as.character((alias_index_res %||% list())$status %||% "no_match")
             alias_index_matches <- (alias_index_res %||% list())$matches
-            app_perf_mark_ms(lookup_perf, "lookup_alias_index_ms", app_perf_elapsed_ms(alias_index_t0), perf_context)
+            if (!isTRUE((alias_index_attempt %||% list())$reused)) {
+                app_perf_mark_ms(lookup_perf, "lookup_alias_index_ms", app_perf_elapsed_ms(alias_index_t0), perf_context)
+            }
             if (startsWith(alias_index_status, "multiple") &&
                 is.data.frame(alias_index_matches) && nrow(alias_index_matches) > 0L) {
                 push_progress(sprintf("\u2022 Local alias index found %d possible genes; user selection is required.", nrow(alias_index_matches)))
@@ -12873,7 +13570,7 @@ function(input, output, session) {
                         best_res$alias_index_status <- alias_index_status
                         best_res$alias_index_match <- selected_alias_match
                         push_progress(sprintf(
-                            "\u2022 CGV resolved '%s' as alias of %s using the local alias index.",
+                            "\u2022 CGeV resolved '%s' as alias of %s using the local alias index.",
                             input_gene,
                             as.character(best_res$matched_gene_id %||% best_res$matched_gene_name %||% selected_alias_match$local_gene_id[1] %||% "")
                         ))
@@ -13145,7 +13842,12 @@ function(input, output, session) {
                     style = "cursor:pointer;",
                     div(
                         class = "species-grid-icon-wrap",
-                        tags$img(class = "species-grid-icon-img", src = icn, alt = org)
+                        tags$img(
+                            class = "species-grid-icon-img",
+                            src = icn,
+                            alt = org,
+                            loading = "lazy"
+                        )
                     ),
                     div(
                         class = "species-grid-text",
@@ -14188,19 +14890,15 @@ function(input, output, session) {
         if (length(genes) == 0L) return(invisible(NULL))
         if (identical(mode_txt, "orthologous")) {
             first_gene <- genes[[1]]
-            pendingOrthoSearchGene(first_gene)
-            updateTextInput(session, "gene_name", value = first_gene)
-            session$sendCustomMessage("cgv_trigger_ortho_search", list(gene = first_gene))
+            execute_orthologous_search(gene_override = first_gene, origin = "suggestion")
         } else if (length(genes) > 1L) {
-            genes <- genes[seq_len(min(length(genes), 24L))]
             set_batch_search_state("homologous", length(genes))
             queue_global_batch_search(genes, target_mode = "homologous")
         } else {
             first_gene <- genes[[1]]
-            pendingHomoSearchGene(first_gene)
             display_gene <- trimws(as.character(items[[1]]$gene %||% first_gene))
             updateTextInput(session, "filter1", value = if (nzchar(display_gene)) display_gene else first_gene)
-            session$sendCustomMessage("cgv_trigger_homo_search", list(gene = first_gene))
+            execute_homologous_search(gene_override = first_gene, origin = "suggestion")
         }
         invisible(TRUE)
     }
@@ -14234,16 +14932,24 @@ function(input, output, session) {
             body = tagList(
                 tags$p(
                     class = "app-confirmation-modal-text",
-                    "One or more selected suggestions came from an external alias source, not from the local GFF gene name."
+                    "One or more selected suggestions came from an external alias source, not from the local GFF gene name. An alias identifies a candidate locus but does not prove orthology across species."
                 ),
                 tags$ul(class = "app-confirmation-modal-list", item_nodes),
                 tags$p(
                     class = "app-confirmation-modal-question",
-                    tags$strong("Plot using the shown local locus/loci?")
+                    tags$strong(if (identical(mode_txt, "orthologous") && isTRUE(cross_species_requires_verified_orthology())) {
+                        "Use this as an orthology candidate?"
+                    } else {
+                        "Plot using the shown local locus/loci?"
+                    })
                 )
             ),
             confirm_input_id = "confirm_partial_gene_external_alias_btn",
-            confirm_label = "Plot confirmed alias",
+            confirm_label = if (identical(mode_txt, "orthologous") && isTRUE(cross_species_requires_verified_orthology())) {
+                "Validate candidate"
+            } else {
+                "Plot confirmed alias"
+            },
             confirm_icon = "check"
         )
     }
@@ -14299,9 +15005,17 @@ function(input, output, session) {
             removeModal()
             if (identical(mode_txt, "orthologous")) {
                 first_gene <- genes[[1]]
-                pendingOrthoSearchGene(first_gene)
-                updateTextInput(session, "gene_name", value = first_gene)
-                session$sendCustomMessage("cgv_trigger_ortho_search", list(gene = first_gene))
+                original_query <- trimws(as.character(payload$query %||% first_gene))
+                pendingOrthoReferenceAnchor(list(
+                    local_gene_id = trimws(as.character(payload$local_gene_id %||% first_gene)),
+                    organism_id = trimws(as.character(payload$organism_id %||% "")),
+                    organism_name = trimws(as.character(payload$organism_name %||% "")),
+                    query = original_query
+                ))
+                execute_orthologous_search(
+                    gene_override = if (nzchar(original_query)) original_query else first_gene,
+                    origin = "orthology_reference"
+                )
             } else if (length(genes) > 1L) {
                 genes <- genes[seq_len(min(length(genes), 24L))]
                 set_batch_search_state("homologous", length(genes))
@@ -16627,8 +17341,41 @@ function(input, output, session) {
                     text = "\u2022 Initializing search workflow..."
                 )
 
+                if (!isTRUE(force_external_alias_lookup) &&
+                    !isTRUE(is_batch_homo) &&
+                    !identical(gate_origin, "suggestion") &&
+                    is_low_specific_gene_family_query(filter_text)) {
+                    shown_family_suggestions <- isTRUE(maybe_show_partial_gene_suggestions(
+                        mode = "homologous",
+                        query = filter_text,
+                        annotation_paths = ruta_archivo,
+                        det_list = list(det),
+                        file_labels = {
+                            lbl <- trimws(as.character(homo_org_name %||% ""))
+                            if (!nzchar(lbl)) lbl <- trimws(as.character(det$organism %||% ""))
+                            if (!nzchar(lbl)) lbl <- trimws(as.character(file_label %||% ""))
+                            lbl
+                        },
+                        max_per_file = Inf,
+                        max_total = Inf,
+                        context = "Multi-Gene Search",
+                        time_budget_sec = 3.0,
+                        include_alias_family = TRUE
+                    ))
+                    if (isTRUE(shown_family_suggestions)) {
+                        final_msg <- sprintf(
+                            "The query '%s' matches a gene family. Choose the exact match or any gene containing that term.",
+                            filter_text
+                        )
+                        searchStatusHomologous(final_msg)
+                        emit_popup_status("Multi-Gene Search", final_msg, tone = "info", clear = TRUE)
+                        return(invisible(NULL))
+                    }
+                }
+
                 if (isTRUE(app_env_flag("APP_HOMO_PREFLIGHT_PARTIAL_SUGGESTIONS", FALSE)) &&
-                    !isTRUE(force_external_alias_lookup) && !isTRUE(is_batch_homo)) {
+                    !isTRUE(force_external_alias_lookup) && !isTRUE(is_batch_homo) &&
+                    !identical(gate_origin, "suggestion")) {
                     preflight_partial_t0 <- app_perf_now()
                     shown_preflight_partial <- isTRUE(maybe_show_partial_gene_suggestions(
                         mode = "homologous",
@@ -16641,8 +17388,8 @@ function(input, output, session) {
                             if (!nzchar(lbl)) lbl <- trimws(as.character(file_label %||% ""))
                             lbl
                         },
-                        max_per_file = 20L,
-                        max_total = 20L,
+                        max_per_file = Inf,
+                        max_total = Inf,
                         context = "Multi-Gene Search",
                         time_budget_sec = 3.0,
                         include_alias_family = FALSE
@@ -16724,8 +17471,8 @@ function(input, output, session) {
                             if (!nzchar(lbl)) lbl <- trimws(as.character(file_label %||% ""))
                             lbl
                         },
-                        max_per_file = 20L,
-                        max_total = 20L,
+                        max_per_file = Inf,
+                        max_total = Inf,
                         context = "Multi-Gene Search",
                         time_budget_sec = 3.0,
                         include_alias_family = FALSE
@@ -17015,7 +17762,11 @@ function(input, output, session) {
                             app_perf_mark_ms(perf_run, "reactive_state_commit_ms", app_perf_elapsed_ms(commit_homo_t0), "HOMO")
                         }
                         app_perf_mark(perf_run, sprintf("loop done added=%d duplicates=%d", as.integer(added_count), as.integer(duplicate_count)), "HOMO")
-                        set_plot_timing_expected(homoPlotTimingTracker, added_plot_ids, context = "HOMO_TIMING")
+                        set_plot_timing_expected(
+                            homoPlotTimingTracker,
+                            added_plot_ids,
+                            context = "HOMO_TIMING"
+                        )
                         if (length(metrics_plot_ids) > 0L) {
                             schedule_plot_metrics_payload_build(
                                 context = "homo",
@@ -17097,10 +17848,16 @@ function(input, output, session) {
 		        ortho_timing_search_start <<- Sys.time()
 		        message(sprintf("[ORTHO_TIMING] === SEARCH START at %s ===", format(ortho_timing_search_start, "%H:%M:%OS3")))
 		        perf_run <- app_perf_new_run("ORTHO_SEARCH")
+		        orthology_verification_required <- isTRUE(cross_species_requires_verified_orthology())
+		        app_perf_mark(
+		            perf_run,
+		            sprintf("orthology policy=%s", if (orthology_verification_required) "verified_compara" else "local_matches"),
+		            "ORTHO"
+		        )
 		        orthoExternalRescueState$id <- paste0("cancel_", as.integer(Sys.time()), "_", sample.int(1000000L, 1))
 	        reset_ortho_organism_lookup_status()
 	        ortho_async_search <- FALSE
-	        orthoAutoRenderQueued(FALSE)
+	        cancel_ortho_auto_render_queue()
 	        # Guard: only reset if value differs to avoid premature renderUI invalidation
         if (!identical(as.integer(orthoVisibleCount()), as.integer(orthoInitialVisibleCount))) {
             orthoVisibleCount(orthoInitialVisibleCount)
@@ -17302,15 +18059,17 @@ function(input, output, session) {
             return(invisible(NULL))
         }
         force_external_alias_lookup <- consume_external_alias_search_for_gene("orthologous", gene_name)
-        if (!isTRUE(force_external_alias_lookup) && is_low_specific_gene_family_query(gene_name)) {
+        if (!isTRUE(force_external_alias_lookup) &&
+            !identical(gate_origin, "suggestion") &&
+            is_low_specific_gene_family_query(gene_name)) {
                 shown_family_suggestions <- maybe_show_partial_gene_suggestions(
                     mode = "orthologous",
                     query = gene_name,
                     annotation_paths = files,
                 file_labels = file_names,
                 det_list = dets,
-                    max_per_file = 12L,
-                    max_total = 20L,
+                    max_per_file = Inf,
+                    max_total = Inf,
                     context = "Cross-Species Gene Search",
                     time_budget_sec = 2.5,
                     include_alias_family = FALSE
@@ -17407,7 +18166,7 @@ function(input, output, session) {
             tolower(trimws(as.character(batchSearchMode() %||% ""))),
             "orthologous"
         ) && suppressWarnings(as.integer(batchSearchRemaining() %||% 0L)) > 0L
-        duplicate_window <- if (isTRUE(is_batch_ortho)) 0 else 1.2
+        duplicate_window <- if (isTRUE(is_batch_ortho) || identical(gate_origin, "orthology_reference")) 0 else 1.2
         search_gate <- begin_search_run(
             "orthologous",
             fingerprint = paste("gene", tolower(gene_name), sep = "::"),
@@ -17424,6 +18183,7 @@ function(input, output, session) {
             return(invisible(NULL))
         }
         start_plot_timing_tracker(orthoPlotTimingTracker, perf_run, context = "ORTHO_TIMING")
+        reset_ortho_first_paint_gate(perf_run)
         app_perf_mark(perf_run, "click search", "ORTHO")
         lookup_status_rows <- data.frame(
             key = paste0("file:", seq_along(files)),
@@ -17458,6 +18218,7 @@ function(input, output, session) {
             fallback = sprintf("%d organism(s)", length(files))
         )
         matched_count <- 0L
+        matched_file_indices <- integer(0L)
         plotted_count <- 0L
         plotted_file_indices <- integer(0L)
         plotted_output_ids <- character(0)
@@ -17649,14 +18410,85 @@ function(input, output, session) {
             results
         }
 
+        expand_reference_result_with_one_to_one_orthologs <- function(reference_result) {
+            if (is.null(reference_result) || !isTRUE(reference_result$found)) return(list(reference_result))
+            if (!isTRUE(orthology_verification_required)) return(list(reference_result))
+            identity <- orthology_identity_from_lookup_result(reference_result)
+            reference_ids <- as.character(identity$ensembl_gene_ids %||% character(0))
+            reference_species <- as.character(identity$species %||% "")
+            reference_idx <- suppressWarnings(as.integer(reference_result$file_idx %||% NA_integer_))
+            if (length(reference_ids) != 1L || !nzchar(reference_species) || !is.finite(reference_idx)) {
+                return(list(reference_result))
+            }
+
+            set_popup_loading(
+                TRUE,
+                context = "Cross-Species Gene Search",
+                text = sprintf("\u2022 Resolving one-to-one orthologs from reference locus %s...", identity$local_gene_id %||% reference_ids[[1L]])
+            )
+            compara <- ensembl_compara_division(kingdom = identity$kingdom, organism = identity$organism)
+            target_jobs <- list()
+            for (target_idx in setdiff(seq_along(lookup_jobs), reference_idx)) {
+                target_det <- lookup_jobs[[target_idx]]$det %||% list()
+                target_species <- normalize_ensembl_species_name(
+                    organism = target_det$organism %||% lookup_jobs[[target_idx]]$file_label,
+                    ensembl_species = target_det$ensembl_species %||% target_det$ensembl_name %||% ""
+                )
+                if (!nzchar(target_species)) next
+                homology <- fetch_ensembl_orthologs(
+                    source_gene_id = reference_ids[[1L]],
+                    source_species = reference_species,
+                    target_species = target_species,
+                    compara = compara
+                )
+                rows <- tryCatch(homology$rows, error = function(e) NULL)
+                if (!identical(as.character(homology$status %||% ""), "ok") || !is.data.frame(rows) || nrow(rows) == 0L) next
+                is_one_to_one <- tolower(trimws(as.character(rows$homology_type %||% ""))) == "ortholog_one2one"
+                is_target <- tolower(trimws(as.character(rows$target_species %||% ""))) == target_species
+                target_ids <- unique(trimws(as.character(rows$target_id[is_one_to_one & is_target] %||% character(0))))
+                target_ids <- target_ids[nzchar(target_ids)]
+                if (length(target_ids) != 1L) {
+                    if (any(!is_one_to_one & is_target)) {
+                        append_status(
+                            searchStatusOrthologous,
+                            sprintf(
+                                "Excluded %s: Ensembl reports a non-1:1 orthology relationship that requires explicit paralog selection.",
+                                as.character(lookup_jobs[[target_idx]]$file_label %||% sprintf("organism %d", target_idx))
+                            )
+                        )
+                    }
+                    next
+                }
+                target_job <- lookup_jobs[[target_idx]]
+                target_job$gene_name <- target_ids[[1L]]
+                target_job$enabled_external_sources <- character(0)
+                target_job$allow_partial_suggestions <- FALSE
+                target_jobs[[length(target_jobs) + 1L]] <- target_job
+            }
+            target_results <- run_orthologous_lookup_jobs(
+                target_jobs,
+                phase_label = "orthology_target_lookup",
+                status_label = "verified ortholog locus lookups"
+            )
+            out <- c(list(reference_result), target_results)
+            ord <- order(vapply(out, function(result) suppressWarnings(as.integer((result %||% list())$file_idx %||% .Machine$integer.max)), integer(1)))
+            out[ord]
+        }
+
         process_orthologous_lookup_results <- function(results, phase_label = "local_lookup", report_not_found = TRUE) {
         phase_added_ids <- character(0L)
         phase_tx_lengths <- numeric(0)
-        for (res_pre in results) {
+        # Hold each successful split only until its blocks are transferred to
+        # the reactive plot maps below. Data frames remain shared by R's
+        # copy-on-write semantics, and each slot is released after that transfer.
+        phase_transcript_splits <- prepare_orthologous_transcript_splits_once(results)
+        for (res_idx in seq_along(results)) {
+            res_pre <- results[[res_idx]]
             if (is.null(res_pre) || !isTRUE(res_pre$found)) next
             data_pre <- res_pre$data
             if (!is.data.frame(data_pre) || nrow(data_pre) == 0L) next
-            transcript_blocks_pre <- tryCatch(split_gene_data_by_transcript(data_pre), error = function(e) list())
+            prepared_split <- phase_transcript_splits[[res_idx]]
+            transcript_blocks_pre <- if (is.list(prepared_split)) prepared_split$blocks else list()
             if (length(transcript_blocks_pre) == 0L) {
                 transcript_blocks_pre <- list(data_pre)
             }
@@ -17686,7 +18518,8 @@ function(input, output, session) {
                 )
             }
         }
-        for (res in results) {
+        for (res_idx in seq_along(results)) {
+            res <- results[[res_idx]]
             if (is.null(res)) next
             j <- suppressWarnings(as.integer(res$file_idx %||% NA_integer_))
             if (!is.finite(j) || is.na(j)) j <- 0L
@@ -17719,6 +18552,10 @@ function(input, output, session) {
             }
 
             if (isTRUE(res$found)) {
+                if (is.finite(j) && !is.na(j) && j > 0L && !j %in% matched_file_indices) {
+                    matched_file_indices <<- c(matched_file_indices, as.integer(j))
+                    matched_count <<- length(matched_file_indices)
+                }
                 set_ortho_organism_lookup_status(
                     file_idx = j,
                     status = if (identical(lookup_stage, "external_alias")) {
@@ -17764,13 +18601,29 @@ function(input, output, session) {
                     signature_gene_key <- normalize_display_id(lookup$matched_gene_id %||% matched_annotation_name)
                     if (!nzchar(signature_gene_key)) signature_gene_key <- representative_name
                     split_t0 <- app_perf_now()
-                    transcript_blocks <- split_gene_data_by_transcript(data)
+                    prepared_split <- phase_transcript_splits[[res_idx]]
+                    if (is.list(prepared_split) && isTRUE(prepared_split$reusable)) {
+                        transcript_blocks <- prepared_split$blocks
+                        split_elapsed_ms <- suppressWarnings(as.numeric(prepared_split$elapsed_ms %||% NA_real_))
+                    } else {
+                        # Preserve the prior error path: a failed prepass retries
+                        # without a handler here, so a repeated split error still
+                        # propagates instead of being silently converted to data.
+                        transcript_blocks <- split_gene_data_by_transcript(data)
+                        split_elapsed_ms <- app_perf_elapsed_ms(split_t0)
+                    }
+                    # Drop the prepass wrapper as soon as this result owns the
+                    # shared blocks locally; later commits retain the same frames.
+                    phase_transcript_splits[res_idx] <- list(NULL)
                     if (length(transcript_blocks) == 0) transcript_blocks <- list(data)
                     canonical_block_idx_ortho <- tryCatch(
                         compute_canonical_block_idx(transcript_blocks),
                         error = function(e) 1L
                     )
-                    app_perf_mark_ms(perf_run, "split_transcripts_ms", app_perf_elapsed_ms(split_t0), "ORTHO")
+                    if (!is.finite(split_elapsed_ms) || is.na(split_elapsed_ms)) {
+                        split_elapsed_ms <- app_perf_elapsed_ms(split_t0)
+                    }
+                    app_perf_mark_ms(perf_run, "split_transcripts_ms", split_elapsed_ms, "ORTHO")
                     resolved_genome <- if (nzchar(forced_genome) && file.exists(forced_genome)) {
                         list(
                             path = forced_genome,
@@ -17834,7 +18687,6 @@ function(input, output, session) {
                     metrics_plot_signatures <- list()
                     for (block_idx in seq_along(transcript_blocks)) {
                         block_data <- transcript_blocks[[block_idx]]
-                        matched_count <<- matched_count + 1L
                         row_types <- tolower(trimws(as.character(block_data$V3 %||% rep("", nrow(block_data)))))
                         anchor_idx <- which(row_types %in% c("gene", "mrna", "transcript"))[1]
                         if (!is.finite(anchor_idx)) {
@@ -18032,7 +18884,22 @@ function(input, output, session) {
                 activePlotIdsOrthologous(c(isolate(activePlotIdsOrthologous()), local_new_ids))
                 app_perf_mark(perf_run, "reactive commit done", "ORTHO")
                 app_perf_mark_ms(perf_run, "reactive_state_commit_ms", app_perf_elapsed_ms(commit_t0), "ORTHO")
-                set_plot_timing_expected(orthoPlotTimingTracker, added_plot_ids, context = "ORTHO_TIMING")
+                set_plot_timing_expected(
+                    orthoPlotTimingTracker,
+                    added_plot_ids,
+                    context = "ORTHO_TIMING",
+                    gate_expected_ids = initial_plot_timing_ids(
+                        if (length(added_plot_ids) > 0L) {
+                            isolate(as.character(primaryPlotIdsOrthologous() %||% character(0)))
+                        } else {
+                            character(0)
+                        },
+                        orthoInitialVisibleCount,
+                        plot_meta = isolate(plotGeneMetaOrthologous()),
+                        primary_only = TRUE
+                    ),
+                    gate_candidate_ids = added_plot_ids
+                )
                 if (length(pending_metric_jobs) > 0L) {
                     for (job in pending_metric_jobs) {
                         schedule_plot_metrics_payload_build(
@@ -18072,6 +18939,37 @@ function(input, output, session) {
         }
 
         finish_orthologous_local_phase <- function(lookup_results, lookup_stage_t0, already_processed = FALSE) {
+            ambiguous_positions <- which(vapply(lookup_results, function(res) {
+                identical(
+                    as.character((((res %||% list())$lookup %||% list())$lookup_stage %||% "")),
+                    "alias_index_ambiguous"
+                )
+            }, logical(1)))
+            if (length(ambiguous_positions) > 0L) {
+                ambiguous_lookup <- (lookup_results[[ambiguous_positions[[1L]]]] %||% list())$lookup
+                maybe_show_alias_index_ambiguity(
+                    mode = "orthologous",
+                    query = gene_name,
+                    lookup = ambiguous_lookup,
+                    context = "Cross-Species Gene Search"
+                )
+                final_msg <- if (isTRUE(orthology_verification_required)) {
+                    sprintf(
+                        "'%s' maps to more than one local locus. Choose an explicit reference locus; a shared name is not orthology evidence, so nothing was plotted.",
+                        gene_name
+                    )
+                } else {
+                    sprintf(
+                        "'%s' maps to more than one local locus. Choose an explicit local locus before plotting.",
+                        gene_name
+                    )
+                }
+                searchStatusOrthologous(final_msg)
+                emit_popup_status("Cross-Species Gene Search", final_msg, tone = "warning", clear = TRUE)
+                app_perf_mark(perf_run, "blocked: ambiguous reference locus", "ORTHO")
+                return(invisible(NULL))
+            }
+
             no_match_positions <- which(!vapply(lookup_results, function(res) isTRUE((res %||% list())$found), logical(1)))
             local_found_positions <- which(vapply(lookup_results, function(res) isTRUE((res %||% list())$found), logical(1)))
             shown_immediate_partial_suggestions <- FALSE
@@ -18097,6 +18995,93 @@ function(input, output, session) {
                     )
                 }
             }
+
+            if (isTRUE(orthology_verification_required) && length(local_found_positions) < 2L) {
+                final_msg <- sprintf(
+                    "Gene '%s' has fewer than 2 unambiguous local loci. Cross-Species Gene Search requires at least 2 loci plus explicit orthology evidence; nothing was plotted.",
+                    gene_name
+                )
+                searchStatusOrthologous(final_msg)
+                emit_popup_status("Cross-Species Gene Search", final_msg, tone = "warning", clear = TRUE)
+                app_perf_mark(perf_run, "blocked: fewer than two unambiguous loci", "ORTHO")
+                return(invisible(NULL))
+            }
+
+            set_popup_loading(
+                TRUE,
+                context = "Cross-Species Gene Search",
+                text = if (isTRUE(orthology_verification_required)) {
+                    "\u2022 Verifying locus-level orthology with Ensembl Compara..."
+                } else {
+                    "\u2022 Using unambiguous matches from each local annotation..."
+                }
+            )
+            orthology_selection <- tryCatch(
+                select_cross_species_results_by_orthology_policy(
+                    lookup_results,
+                    require_verified = orthology_verification_required
+                ),
+                error = function(e) list(
+                    status = "evidence_unavailable",
+                    approved_positions = integer(0),
+                    rejected_positions = local_found_positions,
+                    message = conditionMessage(e)
+                )
+            )
+            approved_positions <- suppressWarnings(as.integer(orthology_selection$approved_positions %||% integer(0)))
+            approved_positions <- approved_positions[is.finite(approved_positions) & approved_positions >= 1L & approved_positions <= length(lookup_results)]
+            if (isTRUE(orthology_verification_required)) {
+                if (!identical(as.character(orthology_selection$status %||% ""), "verified") || length(approved_positions) < 2L) {
+                    reason <- as.character(orthology_selection$message %||% "No verified one-to-one ortholog group was found.")
+                    reason <- gsub("[\r\n]+", " ", reason)
+                    final_msg <- sprintf(
+                        "Gene '%s' was not plotted: %s Shared aliases or symbols alone are not accepted as biological equivalence.",
+                        gene_name,
+                        reason
+                    )
+                    searchStatusOrthologous(final_msg)
+                    emit_popup_status("Cross-Species Gene Search", final_msg, tone = "warning", clear = TRUE)
+                    app_perf_mark(perf_run, sprintf("blocked: orthology status=%s", as.character(orthology_selection$status %||% "unknown")), "ORTHO")
+                    return(invisible(NULL))
+                }
+
+                rejected_positions <- setdiff(local_found_positions, approved_positions)
+                if (length(rejected_positions) > 0L) {
+                    rejected_labels <- vapply(rejected_positions, function(pos) {
+                        as.character((lookup_results[[pos]] %||% list())$file_label %||% file_names[pos] %||% sprintf("organism %d", pos))
+                    }, character(1))
+                    append_status(
+                        searchStatusOrthologous,
+                        sprintf(
+                            "Excluded non-verified same-name loci: %s.",
+                            paste(rejected_labels, collapse = ", ")
+                        )
+                    )
+                    for (pos in rejected_positions) {
+                        idx <- suppressWarnings(as.integer((lookup_results[[pos]] %||% list())$file_idx %||% pos))
+                        set_ortho_organism_lookup_status(file_idx = idx, status = "not_found")
+                    }
+                }
+                verified_labels <- vapply(approved_positions, function(pos) {
+                    as.character((lookup_results[[pos]] %||% list())$file_label %||% file_names[pos] %||% sprintf("organism %d", pos))
+                }, character(1))
+                target_preview <<- summarize_label_list(
+                    verified_labels,
+                    max_items = 3L,
+                    fallback = sprintf("%d verified organism(s)", length(approved_positions))
+                )
+                lookup_results <- lookup_results[approved_positions]
+                no_match_positions <- integer(0)
+                local_found_positions <- seq_along(lookup_results)
+                shown_immediate_partial_suggestions <- FALSE
+            } else {
+                app_perf_mark(
+                    perf_run,
+                    sprintf("local-match policy accepted=%d", as.integer(length(approved_positions))),
+                    "ORTHO"
+                )
+            }
+
             rescue_jobs <- list()
             rescue_needed <- isTRUE(ortho_external_alias_enabled) &&
                 length(enabled_external_sources_ortho) > 0L &&
@@ -18153,7 +19138,22 @@ function(input, output, session) {
                     as.integer(local_phase_summary$added %||% 0L),
                     paste(as.character(local_phase_summary$ids %||% character(0)), collapse = ",")))
             }
-            set_plot_timing_expected(orthoPlotTimingTracker, added_plot_ids, context = "ORTHO_TIMING")
+            set_plot_timing_expected(
+                orthoPlotTimingTracker,
+                added_plot_ids,
+                context = "ORTHO_TIMING",
+                gate_expected_ids = initial_plot_timing_ids(
+                    if (length(added_plot_ids) > 0L) {
+                        isolate(as.character(primaryPlotIdsOrthologous() %||% character(0)))
+                    } else {
+                        character(0)
+                    },
+                    orthoInitialVisibleCount,
+                    plot_meta = isolate(plotGeneMetaOrthologous()),
+                    primary_only = TRUE
+                ),
+                gate_candidate_ids = added_plot_ids
+            )
 
             if (isTRUE(rescue_needed)) {
             rescue_request_id <- paste0("ortho_rescue_", as.integer(Sys.time()), "_", sample.int(1000000L, 1))
@@ -18222,6 +19222,21 @@ function(input, output, session) {
                         sprintf("external alias rescue render rebinding ids=%s", paste(rescue_new_ids, collapse = ",")),
                         "ORTHO_UI"
                     )
+                    gate_now <- isolate(orthoFirstPaintGate())
+                    if (isTRUE(orthoAutoRenderMore)) {
+                        gate_locked <- isTRUE(gate_now$enabled) && !isTRUE(gate_now$released)
+                        app_perf_mark(
+                            perf_run,
+                            sprintf(
+                                "external alias rescue render %s ids=%s",
+                                if (gate_locked) "deferred until first paint" else "delegated to progressive scheduler",
+                                paste(rescue_new_ids, collapse = ",")
+                            ),
+                            "ORTHO_UI"
+                        )
+                        cancel_ortho_auto_render_queue()
+                        return(invisible(NULL))
+                    }
                     isolate({
                         ids_all <- as.character(primaryPlotIdsOrthologous() %||% character(0))
                         ids_all <- ids_all[nzchar(ids_all)]
@@ -18236,7 +19251,7 @@ function(input, output, session) {
                             next_n <- min(length(ids_all), as.integer(next_n))
                             if (is.finite(next_n) && !is.na(next_n) && next_n > current_n) {
                                 orthoVisibleCount(as.integer(next_n))
-                                orthoAutoRenderQueued(FALSE)
+                                cancel_ortho_auto_render_queue()
                                 app_perf_mark(
                                     perf_run,
                                     sprintf(
@@ -18517,6 +19532,41 @@ function(input, output, session) {
             job$allow_partial_suggestions <- FALSE
             job
         })
+        reference_anchor <- pendingOrthoReferenceAnchor()
+        pendingOrthoReferenceAnchor(NULL)
+        anchor_resolution <- apply_cross_species_reference_anchor(local_lookup_jobs, reference_anchor)
+        local_lookup_jobs <- anchor_resolution$jobs
+        if (isTRUE(anchor_resolution$applied)) {
+            reference_idx <- anchor_resolution$reference_idx
+            if (isTRUE(orthology_verification_required)) {
+                ref_job <- local_lookup_jobs[[reference_idx[[1L]]]]
+                reference_results <- run_orthologous_lookup_jobs(
+                    list(ref_job),
+                    phase_label = "reference_locus_lookup",
+                    status_label = "reference locus lookup"
+                )
+                expanded_results <- if (length(reference_results) == 1L && isTRUE(reference_results[[1L]]$found)) {
+                    expand_reference_result_with_one_to_one_orthologs(reference_results[[1L]])
+                } else {
+                    reference_results
+                }
+                finish_orthologous_local_phase(expanded_results, lookup_stage_t0, already_processed = FALSE)
+                return(invisible(NULL))
+            } else {
+                append_status(
+                    searchStatusOrthologous,
+                    sprintf(
+                        "Using selected local locus '%s' for %s; other organisms keep the original query '%s'.",
+                        as.character(reference_anchor$local_gene_id %||% ""),
+                        as.character(reference_anchor$organism_name %||% sprintf("organism %d", reference_idx[[1L]])),
+                        gene_name
+                    )
+                )
+            }
+        } else if (is.list(reference_anchor) &&
+            nzchar(trimws(as.character(reference_anchor$local_gene_id %||% "")))) {
+            append_status(searchStatusOrthologous, "The selected reference locus could not be mapped back to exactly one selected organism.")
+        }
         local_progressive_enabled <- {
             raw <- tolower(trimws(as.character(Sys.getenv("APP_ORTHO_LOCAL_PROGRESSIVE", "0") %||% "0")))
             isTRUE(ortho_lookup_parallel_enabled) &&
@@ -18576,15 +19626,7 @@ function(input, output, session) {
                         return(res)
                     }
                     progressive_results[[job_idx]] <<- res
-                    isolate({
-                        process_orthologous_lookup_results(
-                            list(res),
-                            phase_label = "local_lookup_progressive",
-                            report_not_found = FALSE
-                        )
-                    })
-                    set_plot_timing_expected(orthoPlotTimingTracker, added_plot_ids, context = "ORTHO_TIMING")
-                    app_perf_mark(perf_run, sprintf("progressive local result processed %d/%d", as.integer(job_idx), as.integer(length(local_lookup_jobs))), "ORTHO")
+                    app_perf_mark(perf_run, sprintf("progressive local result staged %d/%d", as.integer(job_idx), as.integer(length(local_lookup_jobs))), "ORTHO")
                     res
                 })
             })
@@ -18599,7 +19641,16 @@ function(input, output, session) {
                         final_results[[idx]] <- all_results[[idx]]
                     }
                 }
-                finish_orthologous_local_phase(final_results, lookup_stage_t0, already_processed = TRUE)
+                progressive_found <- which(vapply(final_results, function(result) isTRUE((result %||% list())$found), logical(1)))
+                progressive_ambiguous <- any(vapply(final_results, function(result) {
+                    identical(as.character((((result %||% list())$lookup %||% list())$lookup_stage %||% "")), "alias_index_ambiguous")
+                }, logical(1)))
+                if (isTRUE(orthology_verification_required) &&
+                    length(progressive_found) == 1L &&
+                    !isTRUE(progressive_ambiguous)) {
+                    final_results <- expand_reference_result_with_one_to_one_orthologs(final_results[[progressive_found[[1L]]]])
+                }
+                finish_orthologous_local_phase(final_results, lookup_stage_t0, already_processed = FALSE)
                 set_popup_loading(FALSE, context = "Cross-Species Gene Search")
                 finalize_search_cleanup("orthologous")
                 finish_search_run("orthologous")
@@ -18634,6 +19685,15 @@ function(input, output, session) {
             difftime(ortho_timing_lookup_end, ortho_timing_search_start, units = "secs"),
             difftime(ortho_timing_lookup_end, ortho_timing_lookup_start, units = "secs"),
             sum(vapply(lookup_results, function(r) isTRUE(r$found), logical(1)))))
+        local_found <- which(vapply(lookup_results, function(result) isTRUE((result %||% list())$found), logical(1)))
+        local_ambiguous <- any(vapply(lookup_results, function(result) {
+            identical(as.character((((result %||% list())$lookup %||% list())$lookup_stage %||% "")), "alias_index_ambiguous")
+        }, logical(1)))
+        if (isTRUE(orthology_verification_required) &&
+            length(local_found) == 1L &&
+            !isTRUE(local_ambiguous)) {
+            lookup_results <- expand_reference_result_with_one_to_one_orthologs(lookup_results[[local_found[[1L]]]])
+        }
         finish_orthologous_local_phase(lookup_results, lookup_stage_t0, already_processed = FALSE)
     })
     orthoSearchObserverRef(ortho_search_obs)
@@ -18955,7 +20015,7 @@ function(input, output, session) {
                         if (nzchar(alias_used)) {
                             tagList("You searched for ", tags$strong(query_gene), ". The plotted local record was selected through alias evidence.")
                         } else {
-                            tagList("CGV found this record locally. Offline aliases indexed for this gene are listed below.")
+                            tagList("CGeV found this record locally. Offline aliases indexed for this gene are listed below.")
                         }
                     ),
                     tags$dl(
@@ -20212,7 +21272,7 @@ function(input, output, session) {
     }
 
     observeEvent(input$homo_pip_run_alignments, {
-        req(isTRUE(homoLastzModesEnabled()))
+        req(FALSE)
         req(identical(tolower(trimws(as.character(input$homo_visual_mode %||% ""))), "pip_blocks"))
         shinyjs::disable("homo_pip_run_alignments")
         set_popup_loading(
@@ -20243,7 +21303,7 @@ function(input, output, session) {
     }, ignoreInit = TRUE)
 
     observeEvent(input$homo_multipip_run_alignments, {
-        req(isTRUE(homoLastzModesEnabled()))
+        req(FALSE)
         req(identical(tolower(trimws(as.character(input$homo_visual_mode %||% ""))), "pip_multipip"))
         shinyjs::disable("homo_multipip_run_alignments")
         set_popup_loading(
@@ -20617,7 +21677,7 @@ function(input, output, session) {
 
     output$homo_special_cards_ui <- renderUI({
         mode <- tolower(trimws(as.character(input$homo_visual_mode %||% "compact")))
-        allowed_special_modes <- if (isTRUE(homoLastzModesEnabled())) c("aligned", "pip_blocks", "pip_multipip") else "aligned"
+        allowed_special_modes <- "aligned"
         if (!mode %in% allowed_special_modes) {
             return(NULL)
         }
@@ -20658,7 +21718,7 @@ function(input, output, session) {
             div(
                 class = "card-header",
                 style = paste0("background:linear-gradient(135deg,", cc$header_gene, ",#34495E); color:white; padding:12px 18px; font-weight:bold; display:flex; align-items:center; justify-content:space-between;"),
-                div(style = "display:flex; align-items:center; gap:10px;", tags$i(class = "fa fa-dna", style = "font-size:16px;"), span("Transcript Alignment View")),
+                div(style = "display:flex; align-items:center; gap:10px;", tags$i(class = "fa fa-dna", style = "font-size:16px;"), span("Transcript Synteny View")),
                 div(
                     style = "display:flex; align-items:center; gap:8px;",
                     tags$button(
@@ -20688,7 +21748,7 @@ function(input, output, session) {
                     ),
                     div(
                         class = "ortho-aligned-control ortho-aligned-control--select",
-                        tags$label("Alignment mode:", `for` = "homo_aligned_mode", class = "ortho-aligned-control-label"),
+                        tags$label("Sequence basis:", `for` = "homo_aligned_mode", class = "ortho-aligned-control-label"),
                         shiny::selectInput(
                             inputId = "homo_aligned_mode",
                             label = NULL,
@@ -20727,13 +21787,13 @@ function(input, output, session) {
                     ),
                     div(class = "ortho-aligned-mode-hint", uiOutput("homo_aligned_mode_hint"))
                 ),
-                uiOutput("homo_aligned_interpretation_help")
+                uiOutput("homo_aligned_interpretation_help"),
+                div(style = "margin-top:8px;", uiOutput("homo_aligned_visual_legend"))
             ),
             div(class = "card-body", style = body_style, ggiraph::girafeOutput("homo_aligned_plot_out", width = "100%", height = "auto")),
             div(
                 class = "card-footer",
                 style = footer_style,
-                uiOutput("homo_aligned_visual_legend"),
                 uiOutput("homo_aligned_footer")
             )
         )
@@ -20766,44 +21826,118 @@ function(input, output, session) {
     })
     outputOptions(output, "homo_aligned_mode_hint", suspendWhenHidden = FALSE)
 
-    output$homo_aligned_visual_legend <- renderUI({
-        theme_mode <- tolower(as.character(input$app_theme %||% "light"))
-        if (!theme_mode %in% c("light", "dark")) theme_mode <- "light"
-        is_dark_theme <- identical(theme_mode, "dark")
+    synteny_relationship_palette <- function() {
+        list(
+            fill = c(
+                "1:1" = "#2F6B9A",
+                "1:n" = "#00897B",
+                "n:1" = "#6F5BD3",
+                "partial" = "#6B7280",
+                "fallback" = "#9AA7B2"
+            ),
+            outline = c(
+                "1:1" = "#214E70",
+                "1:n" = "#00695C",
+                "n:1" = "#5140A8",
+                "partial" = "#4B5563",
+                "fallback" = "#73818D"
+            ),
+            linetype = c(
+                "1:1" = "solid",
+                "1:n" = "longdash",
+                "n:1" = "dotdash",
+                "partial" = "dotted",
+                "fallback" = "solid"
+            )
+        )
+    }
+
+    build_synteny_visual_legend <- function(is_dark_theme = FALSE, include_chain = FALSE) {
         chip_border <- if (is_dark_theme) "#5A738A" else "#C9D6DE"
         chip_text <- if (is_dark_theme) "#E7F1FB" else "#405466"
         sub_text <- if (is_dark_theme) "#C7D7E7" else "#657786"
         chip_bg <- if (is_dark_theme) "rgba(255,255,255,0.04)" else "#FFFFFF"
-        build_chip <- function(color, label) {
+        panel_bg <- if (is_dark_theme) "rgba(8,26,42,0.36)" else "rgba(255,255,255,0.62)"
+        panel_border <- if (is_dark_theme) "#36536B" else "#D6E1E8"
+        rel <- synteny_relationship_palette()
+        feature_palette <- get_transcript_feature_palette(
+            is_dark_theme = is_dark_theme,
+            is_colorblind_mode = isTRUE(input$colorblind_mode),
+            custom_overrides = get_custom_color_palette()
+        )
+        build_feature_chip <- function(color, label) {
             tags$span(
                 style = paste0(
-                    "display:inline-flex; align-items:center; gap:5px; padding:3px 8px; border:1px solid ", chip_border,
-                    "; border-radius:999px; background:", chip_bg, "; color:", chip_text, "; font-size:11px;"
+                    "display:inline-flex; align-items:center; gap:6px; padding:4px 8px; border:1px solid ", chip_border,
+                    "; border-radius:7px; background:", chip_bg, "; color:", chip_text, "; font-size:11px;"
                 ),
-                tags$span(
-                    style = paste0(
-                        "display:inline-block; width:9px; height:9px; border-radius:999px; background:", color,
-                        "; border:1px solid rgba(0,0,0,0.12); flex-shrink:0;"
-                    )
+                tags$span(style = paste0(
+                    "display:inline-block; width:13px; height:9px; border-radius:2px; background:", color,
+                    "; border:1px solid rgba(0,0,0,0.22); flex-shrink:0;"
+                )),
+                label
+            )
+        }
+        build_relation_chip <- function(event_type, label, border_style = "solid") {
+            tags$span(
+                style = paste0(
+                    "display:inline-flex; align-items:center; gap:6px; padding:4px 8px; border:1px solid ", chip_border,
+                    "; border-radius:7px; background:", chip_bg, "; color:", chip_text, "; font-size:11px;"
                 ),
+                tags$span(style = paste0(
+                    "display:inline-block; width:20px; height:0; border-top:3px ", border_style, " ",
+                    unname(rel$fill[[event_type]]), "; flex-shrink:0;"
+                )),
                 label
             )
         }
         div(
-            style = "display:flex; flex-wrap:wrap; align-items:flex-start; gap:6px 12px; margin-bottom:4px;",
-            div(
-                style = "display:flex; flex-wrap:wrap; align-items:center; gap:6px;",
-                tags$span(style = paste0("font-size:11px; font-weight:700; color:", chip_text, ";"), "Events:"),
-                build_chip("#5D8FB8", "1:1 direct"),
-                build_chip("#E07B39", "1:n / n:1 correspondence"),
-                build_chip("#8E6BB5", "partial / ambiguous")
+            class = "synteny-visual-legend",
+            style = paste0(
+                "display:grid; gap:8px; margin-bottom:7px; padding:9px 10px; border:1px solid ", panel_border,
+                "; border-radius:9px; background:", panel_bg, ";"
             ),
             div(
-                style = paste0("font-size:11px; color:", sub_text, "; line-height:1.35;"),
-                tags$b(style = paste0("color:", chip_text, ";"), "Hover score"),
-                " any ribbon to inspect identity, support length, GC context, and event details."
+                style = "display:flex; flex-wrap:wrap; align-items:center; gap:6px;",
+                tags$span(style = paste0("min-width:112px; font-size:11px; font-weight:800; color:", chip_text, ";"), "Feature boxes:"),
+                build_feature_chip(unname(feature_palette[["gene"]] %||% "#AAB7C4"), "Gene"),
+                build_feature_chip(unname(feature_palette[["exon"]] %||% "#F45D75"), "Exon"),
+                build_feature_chip(unname(feature_palette[["cds"]] %||% "#E8A44F"), "CDS"),
+                build_feature_chip(unname(feature_palette[["utr"]] %||% "#5BC0EB"), "UTR"),
+                tags$span(
+                    style = paste0("font-size:10.5px; color:", sub_text, "; line-height:1.3;"),
+                    "These colors identify annotation regions—not identity or warnings. By default, red/pink is exon and gold/yellow is CDS."
+                )
+            ),
+            div(
+                style = "display:flex; flex-wrap:wrap; align-items:center; gap:6px;",
+                tags$span(style = paste0("min-width:112px; font-size:11px; font-weight:800; color:", chip_text, ";"), "Relationship ribbons:"),
+                build_relation_chip("1:1", "1:1 direct", "solid"),
+                build_relation_chip("1:n", "1:n split", "dashed"),
+                build_relation_chip("n:1", "n:1 merge", "dashed"),
+                build_relation_chip("partial", "Partial / ambiguous", "dotted")
+            ),
+            div(
+                style = paste0("font-size:11px; color:", sub_text, "; line-height:1.42;"),
+                tags$b(style = paste0("color:", chip_text, ";"), "Read from the upper track to the next lower track: "),
+                tags$b("1:1"), " = one block connects to one block; ",
+                tags$b("1:n"), " = one upper block connects to several lower blocks; ",
+                tags$b("n:1"), " = several upper blocks connect to one lower block; ",
+                tags$b("partial"), " = no clean one-to-one/split/merge assignment. The letter n means “several”; it is not an identity score."
+            ),
+            div(
+                style = paste0("font-size:11px; color:", sub_text, "; line-height:1.4;"),
+                tags$b(style = paste0("color:", chip_text, ";"), "Identity is not encoded by ribbon color. "),
+                "Hover a ribbon for its identity percentage and aligned support; the Min. block identity control filters ribbons by that score.",
+                if (isTRUE(include_chain)) tags$span(" Each track is compared with the next displayed track in the current chain.", style = "margin-left:4px;") else NULL
             )
         )
+    }
+
+    output$homo_aligned_visual_legend <- renderUI({
+        theme_mode <- tolower(as.character(input$app_theme %||% "light"))
+        if (!theme_mode %in% c("light", "dark")) theme_mode <- "light"
+        build_synteny_visual_legend(is_dark_theme = identical(theme_mode, "dark"), include_chain = FALSE)
     })
     outputOptions(output, "homo_aligned_visual_legend", suspendWhenHidden = FALSE)
 
@@ -20817,7 +21951,7 @@ function(input, output, session) {
         heading_color <- if (is_dark_theme) "#EAF3FB" else "#24394B"
         tags$details(
             style = paste0("margin-top:8px; border:1px solid ", box_border, "; border-radius:10px; background:", box_bg, "; padding:8px 10px;"),
-            tags$summary(style = paste0("cursor:pointer; font-weight:700; color:", heading_color, ";"), "How to interpret this transcript aligned view"),
+            tags$summary(style = paste0("cursor:pointer; font-weight:700; color:", heading_color, ";"), "Color and relationship guide: 1:1, 1:n, n:1 and partial"),
             tags$div(
                 style = paste0("margin-top:8px; color:", text_color, "; font-size:12px; line-height:1.45;"),
                 tags$ul(
@@ -20825,7 +21959,11 @@ function(input, output, session) {
                     tags$li("The x-axis is a comparative transcript space. Every transcript is drawn left-to-right in transcription order (5' -> 3')."),
                     tags$li(tags$strong("Display basis"), ": protein and CDS modes use a CDS-anchored layout when coding features are available; exon mode uses full exon geometry including UTR extent."),
                     tags$li(tags$strong("1:1 direct"), ": one transcript block maps preferentially to one block in the next displayed transcript."),
-                    tags$li(tags$strong("1:n / n:1 correspondence"), ": one block maps to multiple blocks, or multiple blocks map to one block, reflecting isoform structure changes."),
+                    tags$li(tags$strong("Feature-box colors"), ": red/pink marks exon extent, gold/yellow marks CDS, cyan/blue marks UTR, and grey marks the gene span. They do not indicate good/bad identity."),
+                    tags$li(tags$strong("Ribbon colors"), ": blue is 1:1, teal is 1:n, violet is n:1, and grey dotted is partial/ambiguous. Color describes mapping topology, not identity percentage."),
+                    tags$li(tags$strong("1:n split"), ": one block in the upper transcript connects to several blocks in the next lower transcript."),
+                    tags$li(tags$strong("n:1 merge"), ": several blocks in the upper transcript connect to one block in the next lower transcript."),
+                    tags$li(tags$strong("Partial / ambiguous"), ": aligned support exists, but it does not form a clean 1:1, split, or merge assignment."),
                     tags$li(tags$strong("Min. block identity"), ": hides ribbons below the selected identity threshold while preserving the transcript layout.")
                 )
             )
@@ -21094,16 +22232,11 @@ function(input, output, session) {
         combined_df <- do.call(rbind,  Filter(Negate(is.null), all_genes))
         req(!is.null(combined_df) && nrow(combined_df) > 0L, cancelOutput = TRUE)
 
-        event_fill_map <- c(
-            "1:1" = "#5D8FB8",
-            "1:n" = "#E07B39",
-            "n:1" = "#E07B39",
-            "partial" = "#8E6BB5",
-            "fallback" = "#9BB6CC"
-        )
+        relationship_palette <- synteny_relationship_palette()
+        event_fill_map <- relationship_palette$fill
         event_alpha_map <- c("1:1" = 0.10, "1:n" = 0.17, "n:1" = 0.17, "partial" = 0.10, "fallback" = 0.08)
-        event_outline_map <- c("1:1" = "#7BA3C4", "1:n" = "#C0622A", "n:1" = "#C0622A", "partial" = "#7353A0", "fallback" = "#9BB6CC")
-        event_linetype_map <- c("1:1" = "solid", "1:n" = "longdash", "n:1" = "longdash", "partial" = "dotted", "fallback" = "solid")
+        event_outline_map <- relationship_palette$outline
+        event_linetype_map <- relationship_palette$linetype
 
         ribbons <- list()
         ribbon_hover_segments <- list()
@@ -21161,8 +22294,8 @@ function(input, output, session) {
                 )
                 curve_pts <- fast_bezier_ribbon(x1_span[1], x1_span[2], y_top, x2_span[1], x2_span[2], y_bot, n_pts = aligned_ribbon_points)
                 curve_pts$poly_id <- paste0("homo_rib_", valid_idx[k], "_", valid_idx[k + 1L], "_", j)
-                curve_pts$ribbon_fill <- event_fill_map[etype] %||% "#5D8FB8"
-                curve_pts$ribbon_outline <- event_outline_map[etype] %||% "#7BA3C4"
+                curve_pts$ribbon_fill <- event_fill_map[etype] %||% "#2F6B9A"
+                curve_pts$ribbon_outline <- event_outline_map[etype] %||% "#214E70"
                 curve_pts$ribbon_linetype <- event_linetype_map[etype] %||% "solid"
                 curve_pts$ribbon_alpha <- ribbon_style$alpha
                 curve_pts$ribbon_linewidth <- ribbon_style$linewidth
@@ -21596,13 +22729,13 @@ function(input, output, session) {
             tags$span(style = "font-weight:700;", "Multi-gene transcript alignment ready"),
             tags$span(style = "opacity:0.82;", paste0("Gene: ", as.character(group$gene_label %||% "Gene"))),
             tags$span(style = "opacity:0.82;", paste0("Transcripts shown: ", length(as.character(group$ids %||% character(0))))),
-            tags$span(style = "opacity:0.82;", paste0("Alignment mode: ", mode_label))
+            tags$span(style = "opacity:0.82;", paste0("Sequence basis: ", mode_label))
         )
     })
     outputOptions(output, "homo_aligned_footer", suspendWhenHidden = isTRUE(should_suspend_hidden_ortho_outputs()))
 
     output$homo_pip_plot_out <- bindEvent(renderGirafe({
-        req(isTRUE(homoLastzModesEnabled()), cancelOutput = TRUE)
+        req(FALSE, cancelOutput = TRUE)
         req(identical(tolower(trimws(as.character(input$homo_visual_mode %||% ""))), "pip_blocks"), cancelOutput = TRUE)
         theme_mode <- tolower(as.character(input$app_theme %||% "light"))
         min_identity <- suppressWarnings(as.numeric(input$homo_pip_min_identity %||% 65))
@@ -21626,7 +22759,7 @@ function(input, output, session) {
     outputOptions(output, "homo_pip_plot_out", suspendWhenHidden = isTRUE(should_suspend_hidden_ortho_outputs()))
 
     output$homo_multipip_plot_out <- bindEvent(renderGirafe({
-        req(isTRUE(homoLastzModesEnabled()), cancelOutput = TRUE)
+        req(FALSE, cancelOutput = TRUE)
         req(identical(tolower(trimws(as.character(input$homo_visual_mode %||% ""))), "pip_multipip"), cancelOutput = TRUE)
         theme_mode <- tolower(as.character(input$app_theme %||% "light"))
         min_identity <- suppressWarnings(as.numeric(input$homo_multipip_min_identity %||% 70))
@@ -21690,14 +22823,14 @@ function(input, output, session) {
     }
 
     output$homo_pip_footer <- renderUI({
-        req(isTRUE(homoLastzModesEnabled()))
+        req(FALSE)
         req(identical(tolower(trimws(as.character(input$homo_visual_mode %||% ""))), "pip_blocks"))
         build_homo_lastz_footer_ui("blocks", homoPipLocalAlignmentState())
     })
     outputOptions(output, "homo_pip_footer", suspendWhenHidden = isTRUE(should_suspend_hidden_ortho_outputs()))
 
     output$homo_multipip_footer <- renderUI({
-        req(isTRUE(homoLastzModesEnabled()))
+        req(FALSE)
         req(identical(tolower(trimws(as.character(input$homo_visual_mode %||% ""))), "pip_multipip"))
         build_homo_lastz_footer_ui("multipip", homoMultipipLocalAlignmentState())
     })
@@ -22220,7 +23353,7 @@ function(input, output, session) {
 	                div(
 	                    class = "ortho-aligned-control ortho-aligned-control--select",
 	                    tags$label(
-	                        "Alignment mode:",
+	                        "Sequence basis:",
 	                        `for` = "ortho_aligned_mode",
 	                        class = "ortho-aligned-control-label"
 	                    ),
@@ -22280,13 +23413,13 @@ function(input, output, session) {
 	            ),
 	            uiOutput("ortho_aligned_manual_order_ui"),
 	            uiOutput("ortho_aligned_interpretation_help"),
+	            div(style = "padding:0 16px 10px 16px;", uiOutput("ortho_aligned_visual_legend")),
 	            div(
 	                class = "card-body", style = aligned_body_style,
 	                ggiraph::girafeOutput("ortho_aligned_plot_out", width = "100%", height = "auto")
 	            ),
             div(
                 class = "card-footer", style = aligned_footer_style,
-                uiOutput("ortho_aligned_visual_legend"),
                 uiOutput("ortho_aligned_footer")
             )
         )
@@ -23192,7 +24325,7 @@ function(input, output, session) {
                 if (!identical(as.integer(orthoVisibleCount()), as.integer(orthoInitialVisibleCount))) {
                     orthoVisibleCount(orthoInitialVisibleCount)
                 }
-                orthoAutoRenderQueued(FALSE)
+                cancel_ortho_auto_render_queue()
                 if (length(ready_keep) > 0L) {
                     orthoRenderedPlotIds(character(0))
                 }
@@ -23203,7 +24336,7 @@ function(input, output, session) {
                 if (!identical(as.integer(orthoVisibleCount()), ids_n)) {
                     orthoVisibleCount(ids_n)
                 }
-                orthoAutoRenderQueued(FALSE)
+                cancel_ortho_auto_render_queue()
             }
             invisible(NULL)
         },
@@ -23213,6 +24346,14 @@ function(input, output, session) {
 	    observe({
 	        if (!isTRUE(orthoAutoRenderMore) || isTRUE(orthoAutoRenderQueued())) {
 	            return(invisible(NULL))
+	        }
+	        pending_gate <- orthoFirstPaintGate()
+	        if (identical(as.character(pending_gate$release_reason %||% ""), "awaiting_expected_plot")) {
+	            search_state <- searchRunState()
+	            ortho_search_active <- isTRUE((search_state$orthologous %||% list())$active)
+	            if (isTRUE(ortho_search_active)) {
+	                return(invisible(NULL))
+	            }
 	        }
 	        ids <- primaryPlotIdsOrthologous()
 	        ids_n <- length(ids)
@@ -23224,6 +24365,13 @@ function(input, output, session) {
             current_n <- orthoInitialVisibleCount
         }
         if (current_n >= ids_n) {
+            gate_now <- orthoFirstPaintGate()
+            if (isTRUE(gate_now$enabled) && !isTRUE(gate_now$released)) {
+                release_ortho_first_paint_gate(
+                    as.character(gate_now$run_id %||% ""),
+                    reason = "no_secondary_results"
+                )
+            }
             return(invisible(NULL))
         }
         visible_ids <- if (current_n > 0L) as.character(ids[seq_len(current_n)]) else character(0)
@@ -23235,6 +24383,20 @@ function(input, output, session) {
             is.null(meta) || !isFALSE(meta$is_canonical)
         }, visible_ids)
         ready_now <- as.character(orthoRenderedPlotIds() %||% character(0))
+        first_paint_gate <- orthoFirstPaintGate()
+        if (isTRUE(first_paint_gate$enabled) && !isTRUE(first_paint_gate$released)) {
+            timing_tracker <- orthoPlotTimingTracker()
+            timing_run_id <- as.character((timing_tracker$run %||% list())$id %||% "")
+            expected_ready_ids <- intersect(
+                as.character(timing_tracker$gate_expected %||% character(0)),
+                ready_now
+            )
+            if (identical(timing_run_id, as.character(first_paint_gate$run_id %||% "")) &&
+                length(expected_ready_ids) > 0L) {
+                arm_ortho_first_paint_timeout(as.character(first_paint_gate$run_id %||% ""))
+            }
+            return(invisible(NULL))
+        }
         if (length(canonical_visible_ids) == 0L || !all(canonical_visible_ids %in% ready_now)) {
             return(invisible(NULL))
         }
@@ -23242,6 +24404,9 @@ function(input, output, session) {
         if (next_n <= current_n) {
             return(invisible(NULL))
         }
+        scheduled_ids <- as.character(ids)
+        scheduled_gate_token <- as.integer((orthoFirstPaintGate() %||% list())$token %||% 0L)
+        scheduled_generation <- bump_ortho_auto_render_generation()
         orthoAutoRenderQueued(TRUE)
         app_perf_mark(
             app_perf_new_run("ORTHO_UI"),
@@ -23251,8 +24416,30 @@ function(input, output, session) {
         if (requireNamespace("later", quietly = TRUE)) {
             later::later(function() {
                 isolate({
-                    orthoVisibleCount(as.integer(next_n))
-                    orthoAutoRenderQueued(FALSE)
+                    latest_gate <- orthoFirstPaintGate()
+                    same_gate <- identical(
+                        as.integer(latest_gate$token %||% 0L),
+                        as.integer(scheduled_gate_token %||% 0L)
+                    )
+                    same_ids <- identical(
+                        as.character(primaryPlotIdsOrthologous() %||% character(0)),
+                        scheduled_ids
+                    )
+                    same_generation <- identical(
+                        as.integer(orthoAutoRenderGeneration %||% 0L),
+                        as.integer(scheduled_generation %||% 0L)
+                    )
+                    if (isTRUE(same_gate) && isTRUE(same_generation)) {
+                        if (isTRUE(same_ids) &&
+                            !(isTRUE(latest_gate$enabled) && !isTRUE(latest_gate$released))) {
+                            visible_now <- suppressWarnings(as.integer(orthoVisibleCount() %||% current_n))
+                            if (!is.finite(visible_now) || is.na(visible_now) || visible_now < 1L) {
+                                visible_now <- current_n
+                            }
+                            orthoVisibleCount(as.integer(min(length(scheduled_ids), max(visible_now, next_n))))
+                        }
+                        orthoAutoRenderQueued(FALSE)
+                    }
                 })
             }, delay = orthoAutoRenderDelay)
         } else {
@@ -23483,59 +24670,7 @@ function(input, output, session) {
 	    output$ortho_aligned_visual_legend <- renderUI({
 	        theme_mode <- tolower(as.character(input$app_theme %||% "light"))
 	        if (!theme_mode %in% c("light", "dark")) theme_mode <- "light"
-	        is_dark_theme <- identical(theme_mode, "dark")
-	        chip_border <- if (is_dark_theme) "#5A738A" else "#C9D6DE"
-	        chip_text <- if (is_dark_theme) "#E7F1FB" else "#405466"
-	        sub_text <- if (is_dark_theme) "#C7D7E7" else "#657786"
-	        chip_bg <- if (is_dark_theme) "rgba(255,255,255,0.04)" else "#FFFFFF"
-
-	        build_chip <- function(color, label) {
-	            tags$span(
-	                style = paste0(
-	                    "display:inline-flex; align-items:center; gap:5px; padding:3px 8px; border:1px solid ", chip_border,
-	                    "; border-radius:999px; background:", chip_bg, "; color:", chip_text, "; font-size:11px;"
-	                ),
-	                tags$span(
-	                    style = paste0(
-	                        "display:inline-block; width:9px; height:9px; border-radius:999px; background:", color,
-	                        "; border:1px solid rgba(0,0,0,0.12); flex-shrink:0;"
-	                    )
-	                ),
-	                label
-	            )
-	        }
-
-	        div(
-	            style = "display:flex; flex-wrap:wrap; align-items:flex-start; gap:6px 12px; margin-bottom:4px;",
-	            div(
-	                style = "display:flex; flex-wrap:wrap; align-items:center; gap:6px;",
-	                tags$span(style = paste0("font-size:11px; font-weight:700; color:", chip_text, ";"), "Events:"),
-	                build_chip("#5D8FB8", "1:1 direct"),
-	                build_chip("#E07B39", "1:n / n:1 correspondence"),
-	                build_chip("#8E6BB5", "partial / ambiguous")
-	            ),
-	            div(
-	                style = paste0("font-size:11px; color:", sub_text, "; line-height:1.35;"),
-	                tags$b(style = paste0("color:", chip_text, ";"), "Hover score"),
-	                " any ribbon to inspect the identity score block, support length, GC context, and event details.",
-	                tags$span(" Split 1:n / n:1 events also report combined aligned support.", style = "margin-left:4px;")
-	            ),
-	            div(
-	                style = paste0("font-size:11px; color:", sub_text, "; line-height:1.35;"),
-	                tags$b(style = paste0("color:", chip_text, ";"), "Chain:"),
-	                " each track is compared against its nearest displayed neighbor in the current order, prioritizing similarity plus taxonomic proximity."
-	            ),
-	            div(
-	                style = paste0("font-size:11px; color:", sub_text, "; line-height:1.35;"),
-	                tags$b(style = paste0("color:", chip_text, ";"), "Orientation:"),
-	                " aligned tracks are drawn left-to-right in transcript order (5' \u2192 3'). ",
-	                tags$code(
-	                    style = if (is_dark_theme) "color:#c8ddf0; background:rgba(200,221,240,0.12); border:1px solid rgba(100,160,200,0.3);" else "",
-	                    "(+/-)"
-	                ),
-	                " near the gene label shows the original genomic strand."
-	            )
-	        )
+	        build_synteny_visual_legend(is_dark_theme = identical(theme_mode, "dark"), include_chain = TRUE)
 	    })
 
 	    output$ortho_aligned_interpretation_help <- renderUI({
@@ -23557,7 +24692,7 @@ function(input, output, session) {
 	                ),
 	                tags$summary(
 	                    style = paste0("cursor:pointer; font-weight:700; color:", heading_color, ";"),
-	                    "How to interpret this aligned view"
+	                    "Color and relationship guide: 1:1, 1:n, n:1 and partial"
 	                ),
 	                tags$div(
 	                    style = paste0("margin-top:8px; color:", text_color, "; font-size:12px; line-height:1.45;"),
@@ -23566,7 +24701,10 @@ function(input, output, session) {
 	                        tags$li("The x-axis is a comparative transcript space, not raw genomic coordinates. Left is 5', right is 3' for all aligned tracks."),
 	                        tags$li(tags$strong("Display basis"), ": protein and CDS modes use a CDS-anchored layout when coding features are available; exon mode uses full exon geometry, including UTR extent."),
 	                        tags$li(tags$strong("1:1 direct"), ": one exon block in track A maps preferentially to one exon block in track B. This does not imply 100% sequence identity."),
-	                        tags$li(tags$strong("1:n / n:1 correspondence"), ": one-to-many or many-to-one exon mapping. These are fusion/fission-like patterns, but not a formal evolutionary direction call."),
+	                        tags$li(tags$strong("Feature-box colors"), ": red/pink marks exon extent, gold/yellow marks CDS, cyan/blue marks UTR, and grey marks the gene span. These colors do not encode identity or warnings."),
+	                        tags$li(tags$strong("Ribbon colors"), ": blue is 1:1, teal is 1:n, violet is n:1, and grey dotted is partial/ambiguous. Ribbon color encodes relationship topology, not identity percentage."),
+	                        tags$li(tags$strong("1:n split"), ": one exon block in the upper track maps to several exon blocks in the next lower track. This is a split/fission-like pattern, not a formal evolutionary direction call."),
+	                        tags$li(tags$strong("n:1 merge"), ": several exon blocks in the upper track map to one exon block in the next lower track. This is a merge/fusion-like pattern, not a formal evolutionary direction call."),
 	                        tags$li(tags$strong("Partial / ambiguous"), ": significant aligned support is distributed across multiple blocks on both tracks. In practice this is a many-to-many or boundary-uncertain pattern, not a clean split-only event."),
 	                        tags$li(tags$strong("Min. block identity"), ": hides guided ribbons whose block-level identity falls below the selected threshold. The track layout stays fixed; only ribbon connections are filtered."),
 	                        tags$li(tags$strong("Ribbon tooltips"), ": the large green score shows the block-level identity for the hovered ribbon, together with local support and event context."),
@@ -24192,7 +25330,7 @@ function(input, output, session) {
 	                                    df$track_idx <- rep(as.numeric(i), n_rows)
 	                                    geom_mode_i <- as.character(norm_track$geometry_mode %||% if (aligned_mode %in% c("protein", "cds")) "cds" else "exon")
 	                                    df$aligned_geometry_mode <- rep(geom_mode_i, n_rows)
-	                                    track_geometry_modes[i] <<- geom_mode_i
+	                                    track_geometry_modes[i] <- geom_mode_i
 	                                    half <- 0.18
 	                                    df$ymin_feat <- i - half
 	                                    df$ymax_feat <- i + half
@@ -24295,31 +25433,32 @@ function(input, output, session) {
                         }
                     }
 
-                    # Pass 2: compute uncached pairs in parallel via furrr
+                    # Pass 2: compute uncached pairs in-process.  Sending this mapper
+                    # through future/furrr recursively exports the sequence helpers and
+                    # their warm cache environments (multi-GiB in production) before any
+                    # pair is evaluated.  The former error fallback already used this
+                    # exact ordered lapply path, so make it the primary path and avoid the
+                    # failed export without changing correspondence results or caching.
                     if (length(uncached_indices) > 0L) {
                         fn_corr <- compute_protein_guided_correspondence
                         local_aligned_mode <- aligned_mode
-                        computed_list <- tryCatch(
-                            {
-                                if (!requireNamespace("furrr", quietly = TRUE)) stop("furrr not available")
-                                furrr::future_map(uncached_indices, function(k) {
-                                    task <- uncached_tasks[[k]]
-                                    tryCatch(
-                                        fn_corr(task$df1, task$df2, task$df1e, task$df2e, mode = local_aligned_mode),
-                                        error = function(e) NULL
-                                    )
-                                }, .options = furrr::furrr_options(seed = FALSE, packages = c("pwalign", "Biostrings")))
-                            },
-                            error = function(e) {
-                                app_perf_mark(aligned_perf, sprintf("parallel_corr_fallback msg=%s", as.character(e$message %||% "unknown")), "ORTHO_ALIGNED")
-                                lapply(uncached_indices, function(k) {
-                                    task <- uncached_tasks[[k]]
-                                    tryCatch(
-                                        fn_corr(task$df1, task$df2, task$df1e, task$df2e, mode = local_aligned_mode),
-                                        error = function(e) NULL
-                                    )
-                                })
-                            }
+                        corr_compute_t0 <- as.numeric(proc.time()[["elapsed"]])
+                        computed_list <- lapply(uncached_indices, function(k) {
+                            task <- uncached_tasks[[k]]
+                            tryCatch(
+                                fn_corr(task$df1, task$df2, task$df1e, task$df2e, mode = local_aligned_mode),
+                                error = function(e) NULL
+                            )
+                        })
+                        corr_compute_ms <- (as.numeric(proc.time()[["elapsed"]]) - corr_compute_t0) * 1000
+                        app_perf_mark(
+                            aligned_perf,
+                            sprintf(
+                                "aligned_corr_compute_ms=%.1f pairs=%d schedule=in_process",
+                                corr_compute_ms,
+                                as.integer(length(uncached_indices))
+                            ),
+                            "ORTHO_ALIGNED"
                         )
                         for (j in seq_along(uncached_indices)) {
                             k <- uncached_indices[j]
@@ -24385,13 +25524,8 @@ function(input, output, session) {
 	        ribbons <- list()
 	        ribbon_labels <- list()
 	        ribbon_hover_segments <- list()
-                    event_fill_map <- c(
-                        "1:1"     = "#5D8FB8",
-                        "1:n"     = "#E07B39",
-                        "n:1"     = "#E07B39",
-                        "partial" = "#8E6BB5",
-                        "fallback"= "#5D8FB8"
-                    )
+                    relationship_palette <- synteny_relationship_palette()
+                    event_fill_map <- relationship_palette$fill
                     event_alpha_map <- c(
                         "1:1"     = 0.13,
                         "1:n"     = 0.17,
@@ -24399,20 +25533,8 @@ function(input, output, session) {
                         "partial" = 0.10,
                         "fallback"= 0.08
                     )
-                    event_outline_map <- c(
-                        "1:1"     = "#7BA3C4",
-                        "1:n"     = "#C0622A",
-                        "n:1"     = "#C0622A",
-                        "partial" = "#7353A0",
-                        "fallback"= "#9BB6CC"
-                    )
-                    event_linetype_map <- c(
-                        "1:1"     = "solid",
-                        "1:n"     = "longdash",
-                        "n:1"     = "longdash",
-                        "partial" = "dotted",
-                        "fallback"= "solid"
-                    )
+                    event_outline_map <- relationship_palette$outline
+                    event_linetype_map <- relationship_palette$linetype
                     for (k in seq_len(max(0L, length(valid_idx) - 1L))) {
                         ribbon_pairs <- pair_corrs[[k]]
                         df1e <- exon_layouts[[k]]
@@ -24486,8 +25608,8 @@ function(input, output, session) {
                                 base_linewidth = 0.10
                             )
                             curve_pts$poly_id <- paste0("rib_", valid_idx[k], "_", valid_idx[k + 1L], "_", j)
-                            curve_pts$ribbon_fill <- event_fill_map[etype] %||% "#5D8FB8"
-                            curve_pts$ribbon_outline <- event_outline_map[etype] %||% "#7BA3C4"
+                            curve_pts$ribbon_fill <- event_fill_map[etype] %||% "#2F6B9A"
+                            curve_pts$ribbon_outline <- event_outline_map[etype] %||% "#214E70"
                             curve_pts$ribbon_linetype <- event_linetype_map[etype] %||% "solid"
                             curve_pts$ribbon_alpha <- ribbon_style$alpha
                             curve_pts$ribbon_linewidth <- ribbon_style$linewidth
@@ -24722,13 +25844,13 @@ function(input, output, session) {
                     )
 	                    if (nrow(ribbon_df) > 0L) {
                         # Ensure fill/alpha columns exist (defensive: fill in if missing)
-                        if (!"ribbon_fill"  %in% names(ribbon_df)) ribbon_df$ribbon_fill  <- "#5D8FB8"
+                        if (!"ribbon_fill"  %in% names(ribbon_df)) ribbon_df$ribbon_fill  <- "#2F6B9A"
                         if (!"ribbon_alpha" %in% names(ribbon_df)) ribbon_df$ribbon_alpha <- 0.18
                         if (!"ribbon_linetype" %in% names(ribbon_df)) ribbon_df$ribbon_linetype <- "solid"
                         ribbon_df$ribbon_style <- paste(
                             ribbon_df$ribbon_fill,
                             sprintf("%.3f", ribbon_df$ribbon_alpha),
-                            ribbon_df$ribbon_outline %||% "#7BA3C4",
+                            ribbon_df$ribbon_outline %||% "#214E70",
                             ribbon_df$ribbon_linetype %||% "solid",
                             sprintf("%.3f", suppressWarnings(as.numeric(ribbon_df$ribbon_linewidth %||% 0.12))),
                             sep = "|"
@@ -24737,9 +25859,9 @@ function(input, output, session) {
                         # preserving per-event alpha/outline differences.
                         for (.rstyle in unique(ribbon_df$ribbon_style)) {
                             .rdf    <- ribbon_df[ribbon_df$ribbon_style == .rstyle, , drop = FALSE]
-                            .rfill  <- as.character(.rdf$ribbon_fill[1] %||% "#5D8FB8")
+                            .rfill  <- as.character(.rdf$ribbon_fill[1] %||% "#2F6B9A")
                             .ralpha <- suppressWarnings(as.numeric(.rdf$ribbon_alpha[1] %||% 0.08))
-                            .rcol   <- as.character(.rdf$ribbon_outline[1] %||% "#7BA3C4")
+                            .rcol   <- as.character(.rdf$ribbon_outline[1] %||% "#214E70")
                             .rlty   <- as.character(.rdf$ribbon_linetype[1] %||% "solid")
                             .rlwd   <- suppressWarnings(as.numeric(.rdf$ribbon_linewidth[1] %||% 0.12))
 	                            p <- p + ggplot2::geom_polygon(
@@ -25251,10 +26373,11 @@ function(input, output, session) {
         }
         combined_df <- do.call(rbind,  Filter(Negate(is.null), all_genes))
 
-        event_fill_map_leg  <- c("1:1"="#5D8FB8","1:n"="#E07B39","n:1"="#E07B39","partial"="#8E6BB5","fallback"="#5D8FB8")
+        relationship_palette_leg <- synteny_relationship_palette()
+        event_fill_map_leg <- relationship_palette_leg$fill
         event_alpha_map_leg <- c("1:1"=0.13, "1:n"=0.17, "n:1"=0.17, "partial"=0.10, "fallback"=0.08)
-        event_outline_map_leg <- c("1:1"="#7BA3C4","1:n"="#C0622A","n:1"="#C0622A","partial"="#7353A0","fallback"="#9BB6CC")
-        event_linetype_map_leg <- c("1:1"="solid","1:n"="longdash","n:1"="longdash","partial"="dotted","fallback"="solid")
+        event_outline_map_leg <- relationship_palette_leg$outline
+        event_linetype_map_leg <- relationship_palette_leg$linetype
         for (k in seq_len(max(0L, length(valid_idx) - 1L))) {
             ribbon_pairs_leg <- pair_corrs[[k]]
             df1e <- exon_layouts[[k]]
@@ -25328,8 +26451,8 @@ function(input, output, session) {
                     base_linewidth = 0.10
                 )
                 curve_pts$poly_id <- paste0("rib_", valid_idx[k], "_", valid_idx[k + 1L], "_", j)
-                curve_pts$ribbon_fill <- event_fill_map_leg[etype_leg] %||% "#5D8FB8"
-                curve_pts$ribbon_outline <- event_outline_map_leg[etype_leg] %||% "#7BA3C4"
+                curve_pts$ribbon_fill <- event_fill_map_leg[etype_leg] %||% "#2F6B9A"
+                curve_pts$ribbon_outline <- event_outline_map_leg[etype_leg] %||% "#214E70"
                 curve_pts$ribbon_linetype <- event_linetype_map_leg[etype_leg] %||% "solid"
                 curve_pts$ribbon_alpha <- ribbon_style_leg$alpha
                 curve_pts$ribbon_linewidth <- ribbon_style_leg$linewidth
@@ -25532,22 +26655,22 @@ function(input, output, session) {
 
         # Curved ribbons (grouped by fill color to avoid scale_fill conflicts)
         if (nrow(ribbon_df) > 0) {
-            if (!"ribbon_fill"  %in% names(ribbon_df)) ribbon_df$ribbon_fill  <- "#5D8FB8"
+            if (!"ribbon_fill"  %in% names(ribbon_df)) ribbon_df$ribbon_fill  <- "#2F6B9A"
             if (!"ribbon_alpha" %in% names(ribbon_df)) ribbon_df$ribbon_alpha <- 0.18
             if (!"ribbon_linetype" %in% names(ribbon_df)) ribbon_df$ribbon_linetype <- "solid"
             ribbon_df$ribbon_style <- paste(
                 ribbon_df$ribbon_fill,
                 sprintf("%.3f", ribbon_df$ribbon_alpha),
-                ribbon_df$ribbon_outline %||% "#7BA3C4",
+                ribbon_df$ribbon_outline %||% "#214E70",
                 ribbon_df$ribbon_linetype %||% "solid",
                 sprintf("%.3f", suppressWarnings(as.numeric(ribbon_df$ribbon_linewidth %||% 0.12))),
                 sep = "|"
             )
             for (.rstyle_leg in unique(ribbon_df$ribbon_style)) {
                 .rdf_leg    <- ribbon_df[ribbon_df$ribbon_style == .rstyle_leg, , drop = FALSE]
-                .rfill_leg  <- as.character(.rdf_leg$ribbon_fill[1] %||% "#5D8FB8")
+                .rfill_leg  <- as.character(.rdf_leg$ribbon_fill[1] %||% "#2F6B9A")
                 .ralpha_leg <- suppressWarnings(as.numeric(.rdf_leg$ribbon_alpha[1] %||% 0.08))
-                .rcol_leg   <- as.character(.rdf_leg$ribbon_outline[1] %||% "#7BA3C4")
+                .rcol_leg   <- as.character(.rdf_leg$ribbon_outline[1] %||% "#214E70")
                 .rlty_leg   <- as.character(.rdf_leg$ribbon_linetype[1] %||% "solid")
                 .rlwd_leg   <- suppressWarnings(as.numeric(.rdf_leg$ribbon_linewidth[1] %||% 0.12))
                 p <- p + ggplot2::geom_polygon(
@@ -28674,7 +29797,7 @@ function(input, output, session) {
                             found_alias = "The gene was resolved from the local precomputed alias index.",
                             found_external = "The gene was recovered after checking external databases.",
                             found = "The gene is available in this organism.",
-                            local_search = "CGV is checking the local annotation first.",
+                            local_search = "CGeV is checking the local annotation first.",
                             external_pending = "No local match yet. External databases will be checked in the background.",
                             external_search = "No local match yet. External databases are being checked.",
                             not_found = "No local or external match was found for this organism.",
@@ -28724,7 +29847,11 @@ function(input, output, session) {
                                 span("Comparison scope")
                             ),
                             tags$p(
-                                "Cross-Species shows the selected gene when the same gene name or a resolved alias is found in at least two selected organisms."
+                                if (isTRUE(cross_species_requires_verified_orthology())) {
+                                    "Cross-Species first resolves local loci, then shows only a group supported by explicit one-to-one Ensembl Compara orthology in at least two selected organisms. Matching names or aliases alone are never treated as biological equivalence."
+                                } else {
+                                    "Cross-Species compares unambiguous loci matched independently in each organism's local annotation. By default, these local matches are not a claim of verified one-to-one orthology."
+                                }
                             ),
                             tags$p(
                                 class = "summary-cross-species-scope-takeaway",
@@ -29254,9 +30381,16 @@ function(input, output, session) {
     # Toggle toolbar controls when plots are visible
     observe({
         ids <- sortedPlotIdsHomologous()
+        groups <- homoMultiTranscriptGeneGroups()
         shinyjs::toggle("btn_download_all_homo_svg", condition = length(ids) > 1)
         shinyjs::toggle("toggle_homo_analytics", condition = length(ids) > 0)
         shinyjs::toggle("btn_download_all_homo_analytics_svg", condition = length(ids) > 0)
+        shinyjs::toggleState("homo_workspace_alignment", condition = length(groups) > 0L)
+        shinyjs::toggleState("homo_workspace_analytics", condition = length(ids) > 0L)
+        shinyjs::toggleState("homo_workspace_table", condition = length(ids) > 0L)
+        shinyjs::toggleState("homo_workspace_view_trigger", condition = length(ids) > 0L)
+        shinyjs::toggleState("homo_workspace_sort_trigger", condition = length(ids) > 0L)
+        shinyjs::toggleState("homo_workspace_download_trigger", condition = length(ids) > 0L)
         shinyjs::runjs(paste0(
             "document.getElementById('homo-zoom-control').style.display='",
             if (length(ids) > 0) "inline-flex" else "none", "';"
@@ -29268,6 +30402,12 @@ function(input, output, session) {
         shinyjs::toggle("btn_download_all_ortho_svg", condition = length(ids) > 1)
         shinyjs::toggle("toggle_ortho_analytics", condition = length(ids) > 0)
         shinyjs::toggle("btn_download_all_ortho_analytics_svg", condition = length(ids) > 0)
+        shinyjs::toggleState("ortho_workspace_alignment", condition = length(ids) >= 2L)
+        shinyjs::toggleState("ortho_workspace_analytics", condition = length(ids) > 0L)
+        shinyjs::toggleState("ortho_workspace_table", condition = length(ids) > 0L)
+        shinyjs::toggleState("ortho_workspace_view_trigger", condition = length(ids) > 0L)
+        shinyjs::toggleState("ortho_workspace_sort_trigger", condition = length(ids) > 0L)
+        shinyjs::toggleState("ortho_workspace_download_trigger", condition = length(ids) > 0L)
         shinyjs::runjs(paste0(
             "document.getElementById('ortho-zoom-control').style.display='",
             if (length(ids) > 0) "inline-flex" else "none", "';"
@@ -29279,7 +30419,7 @@ function(input, output, session) {
 
     observeEvent(input$homo_visual_mode, {
         mode <- tolower(trimws(as.character(input$homo_visual_mode %||% "compact")))
-        if (mode %in% c("pip_blocks", "pip_multipip") && !isTRUE(homoLastzModesEnabled())) {
+        if (mode %in% c("pip_blocks", "pip_multipip")) {
             groups <- homoMultiTranscriptGeneGroups()
             updateRadioButtons(session, "homo_visual_mode", selected = if (length(groups) > 0L) "aligned" else "compact")
             return(invisible(NULL))
@@ -29301,7 +30441,7 @@ function(input, output, session) {
         if (identical(pick, "pip")) pick <- "pip_blocks"
         groups <- homoMultiTranscriptGeneGroups()
         align_available <- length(groups) > 0L
-        homo_alignment_modes <- if (isTRUE(homoLastzModesEnabled())) c("aligned", "pip_blocks", "pip_multipip") else "aligned"
+        homo_alignment_modes <- "aligned"
         next_mode <- if (pick %in% c("compact", "detailed")) {
             pick
         } else if (identical(pick, "visualize")) {
@@ -29365,15 +30505,8 @@ function(input, output, session) {
     output$homo_header_mode_switch <- renderUI({
         groups <- homoMultiTranscriptGeneGroups()
         homo_align_choices <- c("Synteny" = "aligned")
-        if (isTRUE(homoLastzModesEnabled())) {
-            homo_align_choices <- c(
-                homo_align_choices,
-                "LASTZ" = "pip_blocks",
-                "MultiPIP" = "pip_multipip"
-            )
-        }
         current_mode <- tolower(trimws(as.character(input$homo_visual_mode %||% "compact")))
-        if (current_mode %in% c("pip_blocks", "pip_multipip") && !isTRUE(homoLastzModesEnabled())) {
+        if (current_mode %in% c("pip_blocks", "pip_multipip")) {
             current_mode <- "aligned"
         }
         build_header_mode_switch(
@@ -29550,7 +30683,7 @@ function(input, output, session) {
             titles_map = titlesHomologous(),
             organism_map = organismInfoHomologous(),
             gene_meta_map = plotGeneMetaHomologous(),
-            mode_control = uiOutput("homo_header_mode_switch"),
+            mode_control = NULL,
             draft_organisms = draft_organisms,
             draft_genes = if (length(ids) == 0L) build_draft_context_genes("homologous") else NULL
         )
@@ -29566,7 +30699,7 @@ function(input, output, session) {
             titles_map = titlesOrthologous(),
             organism_map = organismInfoOrthologous(),
             gene_meta_map = plotGeneMetaOrthologous(),
-            mode_control = uiOutput("ortho_header_mode_switch"),
+            mode_control = NULL,
             draft_organisms = draft_organisms,
             draft_genes = if (length(ids) == 0L) build_draft_context_genes("orthologous") else NULL,
             organism_status = {
@@ -29651,6 +30784,7 @@ function(input, output, session) {
             homoSummaryVisible(FALSE)
             homoAnalyticsVisible(FALSE)
             set_analytics_output_suspension(homo_analytics_output_ids, suspend = TRUE)
+            shinyjs::runjs("if(window.CGVResultWorkspace){window.CGVResultWorkspace.setView('homo','visualization',{notify:false,restoreScroll:false});}")
             shinyjs::runjs("document.getElementById('homo_summary_section').style.display='none';")
             shinyjs::runjs("document.getElementById('homo_summary_body').style.display='none';")
             shinyjs::runjs("document.getElementById('homo_analytics_section').style.display='none';")
@@ -29685,6 +30819,7 @@ function(input, output, session) {
             orthoSummaryVisible(FALSE)
             orthoAnalyticsVisible(FALSE)
             set_analytics_output_suspension(ortho_analytics_output_ids, suspend = TRUE)
+            shinyjs::runjs("if(window.CGVResultWorkspace){window.CGVResultWorkspace.setView('ortho','visualization',{notify:false,restoreScroll:false});}")
             shinyjs::runjs("document.getElementById('ortho_summary_section').style.display='none';")
             shinyjs::runjs("document.getElementById('ortho_summary_body').style.display='none';")
             shinyjs::runjs("document.getElementById('ortho_analytics_section').style.display='none';")
@@ -29703,6 +30838,73 @@ function(input, output, session) {
             shinyjs::runjs("if(window.resetPlotZoom)window.resetPlotZoom('ortho');")
         }
     })
+
+    set_result_workspace_panel <- function(scope, view = "visualization") {
+        scope <- if (identical(as.character(scope), "ortho")) "ortho" else "homo"
+        view <- tolower(trimws(as.character(view %||% "visualization")))
+        ids <- if (identical(scope, "ortho")) activePlotIdsOrthologous() else activePlotIdsHomologous()
+        if (length(ids) == 0L) view <- "visualization"
+
+        show_table <- identical(view, "table")
+        show_analytics <- identical(view, "analytics")
+        if (identical(scope, "ortho")) {
+            orthoSummaryVisible(show_table)
+            orthoAnalyticsVisible(show_analytics)
+        } else {
+            homoSummaryVisible(show_table)
+            homoAnalyticsVisible(show_analytics)
+        }
+
+        shinyjs::runjs(sprintf(
+            "var s=document.getElementById('%1$s_summary_body');if(s){s.style.display='%2$s';}var a=document.getElementById('%1$s_analytics_body');if(a){a.style.display='%3$s';}",
+            scope,
+            if (show_table) "block" else "none",
+            if (show_analytics) "block" else "none"
+        ))
+
+        if (show_analytics) {
+            activate_analytics_tab(scope)
+        } else {
+            set_analytics_output_suspension(
+                if (identical(scope, "ortho")) ortho_analytics_output_ids else homo_analytics_output_ids,
+                suspend = TRUE
+            )
+        }
+
+        if (show_table) {
+            shinyjs::runjs(sprintf(
+                "setTimeout(function(){var $tb=$('#%s_summary_dt table.dataTable');if($tb.length&&$.fn.dataTable&&$.fn.dataTable.isDataTable($tb)){$tb.DataTable().columns.adjust().draw(false);}},80);",
+                scope
+            ))
+        }
+        invisible(NULL)
+    }
+
+    observeEvent(input$homo_workspace_analytics, {
+        set_result_workspace_panel("homo", "analytics")
+    }, ignoreInit = TRUE)
+    observeEvent(input$homo_workspace_table, {
+        set_result_workspace_panel("homo", "table")
+    }, ignoreInit = TRUE)
+    observeEvent(input$homo_workspace_view, {
+        set_result_workspace_panel("homo", input$homo_workspace_view)
+    }, ignoreInit = TRUE)
+    observeEvent(list(input$homo_workspace_visualization, input$homo_workspace_alignment), {
+        set_result_workspace_panel("homo", "visualization")
+    }, ignoreInit = TRUE)
+
+    observeEvent(input$ortho_workspace_analytics, {
+        set_result_workspace_panel("ortho", "analytics")
+    }, ignoreInit = TRUE)
+    observeEvent(input$ortho_workspace_table, {
+        set_result_workspace_panel("ortho", "table")
+    }, ignoreInit = TRUE)
+    observeEvent(input$ortho_workspace_view, {
+        set_result_workspace_panel("ortho", input$ortho_workspace_view)
+    }, ignoreInit = TRUE)
+    observeEvent(list(input$ortho_workspace_visualization, input$ortho_workspace_alignment), {
+        set_result_workspace_panel("ortho", "visualization")
+    }, ignoreInit = TRUE)
 
     observeEvent(input$toggle_homo_summary,
         {
@@ -33669,6 +34871,12 @@ function(input, output, session) {
         server = TRUE
     )
 
+    # The workspace switches these panels with client-side view classes. Keep
+    # the tables reactive while hidden so opening Table always paints the
+    # already-requested data instead of waiting for a visibility rescan.
+    outputOptions(output, "homo_summary_dt", suspendWhenHidden = FALSE)
+    outputOptions(output, "ortho_summary_dt", suspendWhenHidden = FALSE)
+
     output$download_homo_summary_csv <- downloadHandler(
         filename = function() {
             paste0("multi_gene_summary_", format(Sys.time(), "%Y%m%d_%H%M%S"), ".csv")
@@ -33690,6 +34898,12 @@ function(input, output, session) {
             write.csv(df, file, row.names = FALSE)
         }
     )
+
+    # Table downloads live inside a view-specific menu that is hidden until the
+    # user opens it. Keep the handlers active so their links are ready as soon
+    # as the Table download option becomes visible.
+    outputOptions(output, "download_homo_summary_csv", suspendWhenHidden = FALSE)
+    outputOptions(output, "download_ortho_summary_csv", suspendWhenHidden = FALSE)
 
 
     observe({
@@ -34690,7 +35904,7 @@ function(input, output, session) {
         payload <- list(
             name = full_name,
             email = email,
-            subject = sprintf("[CGV %s] %s", if (is_bug) "Bug" else "Suggestion", title),
+            subject = sprintf("[CGeV %s] %s", if (is_bug) "Bug" else "Suggestion", title),
             feedback_type = feedback_label,
             full_name = full_name,
             reporter_email = email,
@@ -34729,7 +35943,7 @@ function(input, output, session) {
                     state = "not_attempted",
                     status = NA_integer_,
                     provider_id = "",
-                    error = "Primary CGV inbox delivery was not accepted."
+                    error = "Primary CGeV inbox delivery was not accepted."
                 )
             }
             payload$delivery <- c(
@@ -34761,7 +35975,7 @@ function(input, output, session) {
                 reset_feedback_form(is_bug)
                 if (identical(receipt_delivery$state, "disabled")) {
                     notify_feedback(
-                        "Thanks. Your feedback was sent to the CGV inbox. Replies will go to the email you provided.",
+                        "Thanks. Your feedback was sent to the CGeV inbox. Replies will go to the email you provided.",
                         tone = "success"
                     )
                 } else if (isTRUE(receipt_delivery$ok)) {
@@ -34773,7 +35987,7 @@ function(input, output, session) {
                         ")."
                     )
                     notify_feedback(
-                        "Thanks. Your feedback was sent to CGV, and a confirmation copy is on its way to your email.",
+                        "Thanks. Your feedback was sent to CGeV, and a confirmation copy is on its way to your email.",
                         tone = "success"
                     )
                 } else {
@@ -34786,7 +36000,7 @@ function(input, output, session) {
                         receipt_delivery$error
                     )
                     notify_feedback(
-                        "Your feedback was sent to CGV, but we could not send the confirmation copy. We can still reply to the email you provided.",
+                        "Your feedback was sent to CGeV, but we could not send the confirmation copy. We can still reply to the email you provided.",
                         tone = "warning"
                     )
                 }
@@ -34814,7 +36028,7 @@ function(input, output, session) {
                     )
                 } else {
                     notify_feedback(
-                        "Your feedback was saved, but the email could not be delivered to the CGV inbox. Please try again shortly.",
+                        "Your feedback was saved, but the email could not be delivered to the CGeV inbox. Please try again shortly.",
                         tone = "error"
                     )
                 }
@@ -34868,40 +36082,21 @@ function(input, output, session) {
             ortho_summary_fn = function() get_ortho_summary_df(perf_context = "ORTHO_SHARE"),
             pip_runs_fn = function() {
                 ortho_runs <- pipLocalAlignmentRunsOrthologous() %||% list()
-                homo_runs <- (homoPipLocalAlignmentState() %||% list())$runs %||% list()
                 ortho_ids <- names(ortho_runs)
-                homo_ids <- names(homo_runs)
                 if (is.null(ortho_ids)) ortho_ids <- as.character(seq_along(ortho_runs))
-                if (is.null(homo_ids)) homo_ids <- as.character(seq_along(homo_runs))
                 names(ortho_runs) <- paste0("cross_species_", ortho_ids)
-                names(homo_runs) <- paste0("multi_gene_", homo_ids)
-                c(ortho_runs, homo_runs)
+                ortho_runs
             },
             multipip_runs_fn = function() {
                 ortho_runs <- multipipLocalAlignmentRunsOrthologous() %||% list()
-                homo_runs <- (homoMultipipLocalAlignmentState() %||% list())$runs %||% list()
                 ortho_ids <- names(ortho_runs)
-                homo_ids <- names(homo_runs)
                 if (is.null(ortho_ids)) ortho_ids <- as.character(seq_along(ortho_runs))
-                if (is.null(homo_ids)) homo_ids <- as.character(seq_along(homo_runs))
                 names(ortho_runs) <- paste0("cross_species_", ortho_ids)
-                names(homo_runs) <- paste0("multi_gene_", homo_ids)
-                c(ortho_runs, homo_runs)
+                ortho_runs
             },
             run_lastz_fn = function(contexts) {
                 contexts <- unique(as.character(contexts %||% character(0)))
                 jobs <- list()
-
-                if ("homo" %in% contexts) {
-                    homo_blocks_span <- as.character(input$homo_pip_span %||% "gene")
-                    homo_multipip_span <- as.character(input$homo_multipip_span %||% "gene")
-                    jobs$homo_blocks <- run_homo_local_lastz_async("blocks", span_mode = homo_blocks_span)
-                    jobs$homo_multipip <- if (identical(homo_blocks_span, homo_multipip_span)) {
-                        jobs$homo_blocks
-                    } else {
-                        run_homo_local_lastz_async("multipip", span_mode = homo_multipip_span)
-                    }
-                }
 
                 if ("ortho" %in% contexts) {
                     ortho_blocks_contexts <- tryCatch(pipWindowTracksOrthologous() %||% list(), error = function(e) list())
@@ -34941,25 +36136,6 @@ function(input, output, session) {
                     states <- as.list(states %||% list())
                     missing_async <- character(0)
                     completed_for_report_async <- list()
-
-                    if ("homo" %in% contexts) {
-                        homo_blocks_state <- states$homo_blocks %||% list(status = "error", runs = list())
-                        homo_multipip_state <- states$homo_multipip %||% list(status = "error", runs = list())
-                        homoPipLocalAlignmentState(homo_blocks_state)
-                        homoMultipipLocalAlignmentState(homo_multipip_state)
-                        completed_homo <- cgv_completed_alignment_runs(homo_blocks_state$runs %||% list())
-                        if (length(completed_homo)) {
-                            homo_ids <- names(completed_homo)
-                            if (is.null(homo_ids)) homo_ids <- as.character(seq_along(completed_homo))
-                            names(completed_homo) <- paste0("multi_gene_", homo_ids)
-                            completed_for_report_async <- c(completed_for_report_async, completed_homo)
-                        } else {
-                            missing_async <- c(missing_async, "Multi-Gene LASTZ: no compatible alignment result was completed.")
-                        }
-                        if (!length(cgv_completed_alignment_runs(homo_multipip_state$runs %||% list()))) {
-                            missing_async <- c(missing_async, "Multi-Gene MultiPIP: no compatible alignment result was completed.")
-                        }
-                    }
 
                     if ("ortho" %in% contexts) {
                         ortho_blocks_state <- states$ortho_blocks %||% list(status = "error", runs = list())

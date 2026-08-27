@@ -23,6 +23,100 @@ app_perf_enabled <- function() {
     !raw %in% c("", "0", "false", "no", "off")
 }
 
+# Optional persistent capture for manual before/after comparisons.
+# Nothing is written unless APP_PERF_TIMING is enabled and APP_PERF_LOG_DIR is set.
+# Each R process gets its own file so concurrent ShinyProxy sessions never append
+# to the same log.
+.app_perf_log_path <- NULL
+.app_perf_log_pid <- NA_integer_
+
+app_perf_log_file <- function() {
+    if (!isTRUE(app_perf_enabled())) {
+        return("")
+    }
+    current_pid <- as.integer(Sys.getpid())
+    if (!is.null(.app_perf_log_path) && identical(.app_perf_log_pid, current_pid)) {
+        return(.app_perf_log_path)
+    }
+
+    log_root <- trimws(as.character(Sys.getenv("APP_PERF_LOG_DIR", "") %||% ""))
+    if (!nzchar(log_root)) {
+        .app_perf_log_path <<- ""
+        .app_perf_log_pid <<- current_pid
+        return("")
+    }
+
+    safe_token <- function(x, fallback) {
+        out <- trimws(as.character(x %||% ""))[1L]
+        out <- gsub("[^A-Za-z0-9._-]+", "_", out)
+        out <- gsub("^_+|_+$", "", out)
+        if (nzchar(out)) out else fallback
+    }
+
+    run_label <- safe_token(Sys.getenv("APP_PERF_RUN_LABEL", "manual"), "manual")
+    node_name <- safe_token(Sys.info()[["nodename"]] %||% "host", "host")
+    log_dir <- file.path(log_root, run_label)
+    dir_ok <- tryCatch({
+        dir.create(log_dir, recursive = TRUE, showWarnings = FALSE)
+        dir.exists(log_dir) && file.access(log_dir, mode = 2L) == 0L
+    }, error = function(e) FALSE)
+    if (!isTRUE(dir_ok)) {
+        .app_perf_log_path <<- ""
+        .app_perf_log_pid <<- current_pid
+        return("")
+    }
+
+    started_tag <- format(Sys.time(), "%Y%m%dT%H%M%OS3Z", tz = "UTC")
+    started_tag <- gsub("[^0-9TZ]", "", started_tag)
+    path <- file.path(
+        log_dir,
+        sprintf(
+            "perf_%s_%s_%s_pid%s.log",
+            run_label,
+            started_tag,
+            node_name,
+            as.character(current_pid)
+        )
+    )
+
+    meta_keys <- c(
+        "CGV_IMAGE", "APP_BUILD_REVISION",
+        "APP_FUTURE_MODE", "APP_FUTURE_WORKERS",
+        "APP_LASTZ_WORKERS", "APP_LASTZ_GLOBAL_WORKERS",
+        "APP_MEMORY_CACHE_BUDGET_MB", "APP_MEMORY_CACHE_PROCESS_COUNT",
+        "APP_GFF_CACHE_MAX_MB", "APP_GFF_GENE_INDEX_CACHE_MAX_MB",
+        "APP_GFF_GENE_LIGHT_CACHE_MAX_MB", "APP_IDENTITY_DEBOUNCE_MS",
+        "APP_SEQ_EXTRACT_CACHE_MAX_MB", "APP_SPLICED_SEQ_CACHE_MAX_MB",
+        "APP_ALIAS_SQLITE_CACHE_MB", "APP_ALIAS_SQLITE_MAX_CONNECTIONS",
+        "APP_GIRAFE_COMPACT_SVG", "APP_GIRAFE_SVG_DECIMALS",
+        "APP_ORTHO_RENDER_CHUNK_SIZE", "APP_ORTHO_AUTO_RENDER_MORE",
+        "APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY"
+    )
+    meta_values <- Sys.getenv(meta_keys, unset = "")
+    meta_lines <- sprintf("# meta %s=%s", meta_keys, gsub("[\r\n]+", " ", meta_values))
+    header <- c(
+        "# CGV_PERF_LOG_V1",
+        sprintf("# run_label=%s", run_label),
+        sprintf("# started_utc=%s", format(Sys.time(), "%Y-%m-%dT%H:%M:%OS3Z", tz = "UTC")),
+        sprintf("# process_id=%s", as.character(current_pid)),
+        sprintf("# host=%s", node_name),
+        sprintf("# r_version=%s", gsub("[\r\n]+", " ", R.version.string)),
+        meta_lines,
+        sprintf("# capture_id=%s", started_tag)
+    )
+    wrote_header <- tryCatch({
+        writeLines(header, con = path, useBytes = TRUE)
+        TRUE
+    }, error = function(e) FALSE)
+
+    .app_perf_log_path <<- if (isTRUE(wrote_header)) path else ""
+    .app_perf_log_pid <<- current_pid
+    if (isTRUE(wrote_header)) {
+        message("[PERF_LOG] ", path)
+    }
+    .app_perf_log_path
+}
+
 app_debug_log <- function(..., .sep = "") {
     if (!isTRUE(app_debug_enabled())) {
         return(invisible(FALSE))
@@ -64,7 +158,12 @@ app_perf_mark <- function(run = NULL, step = "", context = "APP") {
     if (!nzchar(msg)) {
         msg <- "tick"
     }
-    message(head, " ", msg)
+    line <- paste0(head, " ", msg)
+    message(line)
+    log_path <- app_perf_log_file()
+    if (nzchar(log_path)) {
+        try(cat(line, "\n", file = log_path, append = TRUE), silent = TRUE)
+    }
     invisible(elapsed)
 }
 
@@ -84,6 +183,10 @@ app_env_flag <- function(name, default = FALSE) {
     default_raw <- if (isTRUE(default)) "1" else "0"
     raw <- tolower(trimws(as.character(Sys.getenv(as.character(name %||% ""), default_raw) %||% default_raw)))
     !raw %in% c("", "0", "false", "no", "off")
+}
+
+cross_species_requires_verified_orthology <- function() {
+    app_env_flag("APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY", FALSE)
 }
 
 app_env_int <- function(name, default = 0L, min_value = NULL, max_value = NULL) {
@@ -612,6 +715,9 @@ resolve_genome_fasta <- function(det_info = NULL, uploaded_fasta_path = NULL, ge
 .gff_autocomplete_cache_version <- 1L
 
 .cache_meta_hidden_key <- ".__cache_meta__"
+.cache_access_counter <- 0
+.coordinated_memory_cache_state <- new.env(parent = emptyenv())
+.coordinated_memory_cache_state$bytes <- 0
 
 clear_preloaded_species_registry_cache <- function() {
     rm(list = ls(envir = .preloaded_registry_cache, all.names = TRUE), envir = .preloaded_registry_cache)
@@ -684,18 +790,48 @@ cache_env_meta_set <- function(env, meta) {
     invisible(meta)
 }
 
+cache_meta_named_number <- function(values, key, default = NA_real_) {
+    key_txt <- as.character(key %||% "")[1L]
+    value_names <- names(values)
+    if (!is.numeric(values) || is.na(key_txt) || !nzchar(key_txt) ||
+        is.null(value_names) || !key_txt %in% value_names) {
+        return(as.numeric(default))
+    }
+    out <- suppressWarnings(as.numeric(unname(values[key_txt][1L])))
+    if (length(out) == 0L) as.numeric(default) else out[[1L]]
+}
+
 cache_env_drop <- function(env, key) {
     key_txt <- as.character(key %||% "")
     if (!nzchar(key_txt)) {
         return(invisible(FALSE))
     }
-    if (exists(key_txt, envir = env, inherits = FALSE)) {
+    coordinated <- isTRUE(is_coordinated_memory_cache_env(env))
+    meta <- cache_env_meta_get(env)
+    has_entry <- exists(key_txt, envir = env, inherits = FALSE)
+    entry_bytes <- cache_meta_named_number(meta$bytes, key_txt)
+    if (!is.finite(entry_bytes) || is.na(entry_bytes) || entry_bytes < 0) {
+        # A legacy/direct assignment is absent from both metadata and the O(1)
+        # tracker. Reconcile before subtracting it so unrelated tracked entries
+        # are not accidentally charged for this removal.
+        if (isTRUE(coordinated) && isTRUE(has_entry)) {
+            coordinated_memory_cache_tracked_bytes(recalculate = TRUE)
+        }
+        entry_bytes <- if (isTRUE(has_entry)) {
+            as.numeric(utils::object.size(get(key_txt, envir = env, inherits = FALSE)))
+        } else {
+            0
+        }
+    }
+    if (isTRUE(has_entry)) {
         rm(list = key_txt, envir = env)
     }
-    meta <- cache_env_meta_get(env)
     meta$access <- meta$access[setdiff(names(meta$access), key_txt)]
     meta$bytes <- meta$bytes[setdiff(names(meta$bytes), key_txt)]
     cache_env_meta_set(env, meta)
+    if (isTRUE(coordinated)) {
+        coordinated_memory_cache_adjust_bytes(-entry_bytes)
+    }
     invisible(TRUE)
 }
 
@@ -707,15 +843,27 @@ cache_env_touch <- function(env, key, bytes = NA_real_) {
     meta <- cache_env_meta_get(env)
     access <- meta$access
     bytes_map <- meta$bytes
-    access[key_txt] <- as.numeric(proc.time()[["elapsed"]])
+    discovered_legacy_bytes <- FALSE
+    next_access <- suppressWarnings(as.numeric(.cache_access_counter %||% 0))
+    if (!is.finite(next_access) || is.na(next_access) || next_access < 0) {
+        next_access <- 0
+    }
+    next_access <- next_access + 1
+    .cache_access_counter <<- next_access
+    access[key_txt] <- next_access
     if (is.finite(bytes)) {
         bytes_map[key_txt] <- as.numeric(bytes)
     } else if (!key_txt %in% names(bytes_map) && exists(key_txt, envir = env, inherits = FALSE)) {
         bytes_map[key_txt] <- as.numeric(utils::object.size(get(key_txt, envir = env, inherits = FALSE)))
+        discovered_legacy_bytes <- TRUE
     }
     meta$access <- access
     meta$bytes <- bytes_map
     cache_env_meta_set(env, meta)
+    if (isTRUE(discovered_legacy_bytes) && isTRUE(is_coordinated_memory_cache_env(env))) {
+        # The direct/legacy value was not part of the incremental tracker.
+        coordinated_memory_cache_tracked_bytes(recalculate = TRUE)
+    }
     invisible(NULL)
 }
 
@@ -734,9 +882,31 @@ cache_env_set <- function(env, key, value, max_size = NULL, max_bytes = NULL) {
     if (!nzchar(key_txt)) {
         return(invisible(value))
     }
+    coordinated <- isTRUE(is_coordinated_memory_cache_env(env))
+    old_bytes <- 0
+    if (isTRUE(coordinated) && exists(key_txt, envir = env, inherits = FALSE)) {
+        old_meta <- cache_env_meta_get(env)
+        old_bytes <- cache_meta_named_number(old_meta$bytes, key_txt)
+        if (!is.finite(old_bytes) || is.na(old_bytes) || old_bytes < 0) {
+            # Direct assignments pre-dating the coordinated helper were never
+            # added to the incremental tracker. Reconcile once before replacing.
+            coordinated_memory_cache_tracked_bytes(recalculate = TRUE)
+            old_bytes <- as.numeric(utils::object.size(get(key_txt, envir = env, inherits = FALSE)))
+        }
+    }
+    value_bytes <- as.numeric(utils::object.size(value))
     assign(key_txt, value, envir = env)
-    cache_env_touch(env, key_txt, bytes = as.numeric(utils::object.size(value)))
+    cache_env_touch(env, key_txt, bytes = value_bytes)
+    if (isTRUE(coordinated)) {
+        # Account for the replacement before local trimming. If the just-written
+        # entry (or another entry) is then evicted, trim_cache_env subtracts the
+        # corresponding bytes exactly once.
+        coordinated_memory_cache_adjust_bytes(value_bytes - old_bytes)
+    }
     trim_cache_env(env, max_size = max_size %||% Inf, max_bytes = max_bytes)
+    if (isTRUE(coordinated)) {
+        enforce_coordinated_memory_cache_budget()
+    }
     invisible(value)
 }
 
@@ -799,10 +969,14 @@ trim_cache_env <- function(env, max_size = 1000L, max_bytes = NULL) {
             keep_bytes <- keep_bytes - as.numeric(bytes_map[[idx]] %||% 0)
         }
         if (length(drop_keys) > 0L) {
+            dropped_bytes <- sum(as.numeric(bytes_map[drop_keys]), na.rm = TRUE)
             rm(list = drop_keys, envir = env)
             entries <- setdiff(entries, drop_keys)
             access <- access[setdiff(names(access), drop_keys)]
             bytes_map <- bytes_map[setdiff(names(bytes_map), drop_keys)]
+            if (isTRUE(is_coordinated_memory_cache_env(env))) {
+                coordinated_memory_cache_adjust_bytes(-dropped_bytes)
+            }
         }
     }
 
@@ -810,6 +984,379 @@ trim_cache_env <- function(env, max_size = 1000L, max_bytes = NULL) {
     bytes_map <- bytes_map[entries]
     cache_env_meta_set(env, list(access = access, bytes = bytes_map))
     invisible(NULL)
+}
+
+# Process-wide share of the coordinated cache budget. The web configuration treats
+# APP_MEMORY_CACHE_BUDGET_MB as a total for the main R process and its persistent
+# future workers; each process enforces its propagated share independently.
+# Session-local caches, file handles and SQLite connections remain outside it.
+coordinated_memory_cache_envs <- function() {
+    list(
+        gff = .gff_cache,
+        gene_index = .gff_gene_index_cache,
+        gene_light = .gff_gene_light_index_cache,
+        genes_table = .gff_genes_table_cache,
+        genes_chr = .gff_genes_chr_index_cache,
+        seq_extract = .seq_extract_cache,
+        spliced_seq = .spliced_seq_cache,
+        fasta_fallback = .fasta_fallback_seq_cache,
+        transcript_composition = .transcript_composition_cache,
+        orthologous_local = .orthologous_local_lookup_cache
+    )
+}
+
+is_coordinated_memory_cache_env <- function(env, cache_envs = coordinated_memory_cache_envs()) {
+    if (!is.environment(env) || !is.list(cache_envs) || length(cache_envs) == 0L) {
+        return(FALSE)
+    }
+    any(vapply(cache_envs, function(candidate) {
+        is.environment(candidate) && identical(env, candidate)
+    }, logical(1)))
+}
+
+coordinated_memory_cache_adjust_bytes <- function(delta) {
+    current <- suppressWarnings(as.numeric(.coordinated_memory_cache_state$bytes %||% NA_real_))
+    if (!is.finite(current) || is.na(current) || current < 0) {
+        current <- sum(vapply(coordinated_memory_cache_envs(), cache_env_usage_bytes, numeric(1)), na.rm = TRUE)
+    }
+    delta_num <- suppressWarnings(as.numeric(delta %||% 0))
+    if (!is.finite(delta_num) || is.na(delta_num)) delta_num <- 0
+    .coordinated_memory_cache_state$bytes <- max(0, current + delta_num)
+    invisible(.coordinated_memory_cache_state$bytes)
+}
+
+coordinated_memory_cache_tracked_bytes <- function(recalculate = FALSE) {
+    current <- suppressWarnings(as.numeric(.coordinated_memory_cache_state$bytes %||% NA_real_))
+    if (isTRUE(recalculate) || !is.finite(current) || is.na(current) || current < 0) {
+        current <- sum(vapply(coordinated_memory_cache_envs(), cache_env_usage_bytes, numeric(1)), na.rm = TRUE)
+        .coordinated_memory_cache_state$bytes <- current
+    }
+    as.numeric(current)
+}
+
+get_coordinated_memory_cache_total_budget_mb <- function(
+    runtime = Sys.getenv("CGV_RUNTIME", ""),
+    raw_value = Sys.getenv("APP_MEMORY_CACHE_BUDGET_MB", "")
+) {
+    runtime_txt <- tolower(trimws(as.character(runtime %||% ""))[1L])
+    default_mb <- if (identical(runtime_txt, "desktop")) 1024 else 384
+    parsed <- suppressWarnings(as.numeric(trimws(as.character(raw_value %||% ""))[1L]))
+    if (!is.finite(parsed) || is.na(parsed) || parsed <= 0) {
+        parsed <- default_mb
+    }
+    # Prevent accidental values that either disable useful caching or let cache
+    # payloads consume essentially all memory on a large workstation.
+    min(8192, max(32, parsed))
+}
+
+get_coordinated_memory_cache_process_count <- function(
+    runtime = Sys.getenv("CGV_RUNTIME", ""),
+    future_mode = Sys.getenv("APP_FUTURE_MODE", "sequential"),
+    raw_process_count = Sys.getenv("APP_MEMORY_CACHE_PROCESS_COUNT", ""),
+    raw_workers = Sys.getenv("APP_FUTURE_WORKERS", "2")
+) {
+    runtime_txt <- tolower(trimws(as.character(runtime %||% ""))[1L])
+    if (identical(runtime_txt, "desktop")) return(1L)
+
+    mode_txt <- tolower(trimws(as.character(future_mode %||% "sequential"))[1L])
+    if (!identical(mode_txt, "multisession")) return(1L)
+
+    process_count <- suppressWarnings(as.integer(trimws(as.character(raw_process_count %||% ""))[1L]))
+    if (!is.finite(process_count) || is.na(process_count) || process_count < 1L) {
+        workers <- suppressWarnings(as.integer(trimws(as.character(raw_workers %||% "2"))[1L]))
+        if (!is.finite(workers) || is.na(workers) || workers < 1L) workers <- 2L
+        workers <- as.integer(min(32L, max(1L, workers)))
+        process_count <- workers + 1L
+    }
+    as.integer(min(33L, max(1L, process_count)))
+}
+
+get_coordinated_memory_cache_budget_mb <- function(
+    runtime = Sys.getenv("CGV_RUNTIME", ""),
+    raw_value = Sys.getenv("APP_MEMORY_CACHE_BUDGET_MB", ""),
+    future_mode = Sys.getenv("APP_FUTURE_MODE", "sequential"),
+    raw_process_count = Sys.getenv("APP_MEMORY_CACHE_PROCESS_COUNT", ""),
+    raw_workers = Sys.getenv("APP_FUTURE_WORKERS", "2")
+) {
+    total_mb <- get_coordinated_memory_cache_total_budget_mb(
+        runtime = runtime,
+        raw_value = raw_value
+    )
+    runtime_txt <- tolower(trimws(as.character(runtime %||% ""))[1L])
+    if (identical(runtime_txt, "desktop")) return(total_mb)
+    process_count <- get_coordinated_memory_cache_process_count(
+        runtime = runtime,
+        future_mode = future_mode,
+        raw_process_count = raw_process_count,
+        raw_workers = raw_workers
+    )
+    as.numeric(total_mb) / as.numeric(process_count)
+}
+
+get_coordinated_memory_cache_budget_bytes <- function(...) {
+    as.numeric(get_coordinated_memory_cache_budget_mb(...)) * 1024^2
+}
+
+cache_env_usage_rows <- function(env, cache_name = "cache") {
+    if (!is.environment(env)) {
+        return(data.frame(
+            cache = character(0), key = character(0), access = numeric(0),
+            bytes = numeric(0), stringsAsFactors = FALSE
+        ))
+    }
+    entries <- cache_env_entry_keys(env)
+    if (length(entries) == 0L) {
+        return(data.frame(
+            cache = character(0), key = character(0), access = numeric(0),
+            bytes = numeric(0), stringsAsFactors = FALSE
+        ))
+    }
+    meta <- cache_env_meta_get(env)
+    access <- suppressWarnings(as.numeric(meta$access[entries]))
+    bytes <- suppressWarnings(as.numeric(meta$bytes[entries]))
+    missing_bytes <- !is.finite(bytes) | is.na(bytes) | bytes < 0
+    if (any(missing_bytes)) {
+        bytes[missing_bytes] <- vapply(entries[missing_bytes], function(key) {
+            if (!exists(key, envir = env, inherits = FALSE)) return(0)
+            as.numeric(utils::object.size(get(key, envir = env, inherits = FALSE)))
+        }, numeric(1))
+    }
+    # Entries written outside cache_env_set have no access metadata. Treat them
+    # as oldest so they cannot make coordinated caches grow without bound.
+    access[!is.finite(access) | is.na(access)] <- -Inf
+    data.frame(
+        cache = rep(as.character(cache_name %||% "cache"), length(entries)),
+        key = entries,
+        access = access,
+        bytes = bytes,
+        stringsAsFactors = FALSE
+    )
+}
+
+cache_env_usage_bytes <- function(env) {
+    if (!is.environment(env)) return(0)
+    entries <- cache_env_entry_keys(env)
+    if (length(entries) == 0L) return(0)
+    meta <- cache_env_meta_get(env)
+    bytes <- suppressWarnings(as.numeric(meta$bytes[entries]))
+    missing_bytes <- !is.finite(bytes) | is.na(bytes) | bytes < 0
+    if (any(missing_bytes)) {
+        bytes[missing_bytes] <- vapply(entries[missing_bytes], function(key) {
+            if (!exists(key, envir = env, inherits = FALSE)) return(0)
+            as.numeric(utils::object.size(get(key, envir = env, inherits = FALSE)))
+        }, numeric(1))
+    }
+    sum(bytes, na.rm = TRUE)
+}
+
+coordinated_memory_cache_stats <- function(
+    cache_envs = coordinated_memory_cache_envs(),
+    budget_bytes = get_coordinated_memory_cache_budget_bytes()
+) {
+    if (!is.list(cache_envs)) cache_envs <- list()
+    cache_names <- names(cache_envs)
+    if (is.null(cache_names)) cache_names <- rep("", length(cache_envs))
+    blank_names <- is.na(cache_names) | !nzchar(cache_names)
+    cache_names[blank_names] <- paste0("cache_", which(blank_names))
+    rows <- lapply(seq_along(cache_envs), function(i) {
+        cache_env_usage_rows(cache_envs[[i]], cache_name = cache_names[[i]])
+    })
+    nonempty_rows <- rows[vapply(rows, nrow, integer(1)) > 0L]
+    entries <- if (length(nonempty_rows) > 0L) {
+        do.call(rbind, nonempty_rows)
+    } else {
+        data.frame(
+            cache = character(0), key = character(0), access = numeric(0),
+            bytes = numeric(0), stringsAsFactors = FALSE
+        )
+    }
+    by_cache <- data.frame(
+        cache = cache_names,
+        entries = vapply(cache_envs, function(env) {
+            if (is.environment(env)) length(cache_env_entry_keys(env)) else 0L
+        }, integer(1)),
+        bytes = vapply(seq_along(cache_envs), function(i) {
+            if (nrow(rows[[i]]) == 0L) 0 else sum(rows[[i]]$bytes, na.rm = TRUE)
+        }, numeric(1)),
+        stringsAsFactors = FALSE
+    )
+    list(
+        budget_bytes = suppressWarnings(as.numeric(budget_bytes %||% NA_real_)),
+        total_bytes = sum(entries$bytes, na.rm = TRUE),
+        total_entries = nrow(entries),
+        by_cache = by_cache,
+        entries = entries
+    )
+}
+
+enforce_coordinated_memory_cache_budget <- function(
+    budget_bytes = get_coordinated_memory_cache_budget_bytes(),
+    cache_envs = NULL
+) {
+    budget <- suppressWarnings(as.numeric(budget_bytes %||% NA_real_))
+    is_default_registry <- is.null(cache_envs)
+    if (isTRUE(is_default_registry)) cache_envs <- coordinated_memory_cache_envs()
+    total_bytes <- if (isTRUE(is_default_registry)) {
+        coordinated_memory_cache_tracked_bytes()
+    } else if (is.list(cache_envs) && length(cache_envs) > 0L) {
+        sum(vapply(cache_envs, cache_env_usage_bytes, numeric(1)), na.rm = TRUE)
+    } else {
+        0
+    }
+    if (!is.finite(budget) || is.na(budget) || budget <= 0 || total_bytes <= budget) {
+        return(invisible(list(
+            evicted = data.frame(cache = character(0), key = character(0), bytes = numeric(0), stringsAsFactors = FALSE),
+            before_bytes = total_bytes,
+            after_bytes = total_bytes,
+            budget_bytes = budget
+        )))
+    }
+
+    # Building the cross-cache entry ranking is intentionally deferred until
+    # the cheap byte sum above proves that eviction is necessary.
+    before <- coordinated_memory_cache_stats(cache_envs = cache_envs, budget_bytes = budget)
+    if (isTRUE(is_default_registry)) {
+        .coordinated_memory_cache_state$bytes <- before$total_bytes
+    }
+    entries <- before$entries
+    entries$.row_order <- seq_len(nrow(entries))
+    entries <- entries[order(entries$access, entries$.row_order, na.last = TRUE), , drop = FALSE]
+    cache_names <- names(cache_envs)
+    if (is.null(cache_names)) cache_names <- rep("", length(cache_envs))
+    blank_names <- is.na(cache_names) | !nzchar(cache_names)
+    cache_names[blank_names] <- paste0("cache_", which(blank_names))
+    names(cache_envs) <- cache_names
+
+    remaining <- before$total_bytes
+    evicted <- list()
+    evicted_n <- 0L
+    for (i in seq_len(nrow(entries))) {
+        if (remaining <= budget) break
+        cache_name <- entries$cache[[i]]
+        key <- entries$key[[i]]
+        env <- cache_envs[[cache_name]]
+        if (!is.environment(env) || !exists(key, envir = env, inherits = FALSE)) next
+        cache_env_drop(env, key)
+        entry_bytes <- suppressWarnings(as.numeric(entries$bytes[[i]] %||% 0))
+        if (!is.finite(entry_bytes) || is.na(entry_bytes) || entry_bytes < 0) entry_bytes <- 0
+        remaining <- max(0, remaining - entry_bytes)
+        evicted_n <- evicted_n + 1L
+        evicted[[evicted_n]] <- data.frame(
+            cache = cache_name,
+            key = key,
+            bytes = entry_bytes,
+            stringsAsFactors = FALSE
+        )
+    }
+    evicted_df <- if (length(evicted) > 0L) do.call(rbind, evicted) else data.frame(
+        cache = character(0), key = character(0), bytes = numeric(0), stringsAsFactors = FALSE
+    )
+    if (isTRUE(is_default_registry)) {
+        # cache_env_drop already performs the incremental subtraction. Reconcile
+        # with the independently computed remainder to avoid cumulative drift.
+        .coordinated_memory_cache_state$bytes <- remaining
+    }
+    invisible(list(
+        evicted = evicted_df,
+        before_bytes = before$total_bytes,
+        after_bytes = remaining,
+        budget_bytes = budget
+    ))
+}
+
+read_memory_control_text <- function(path) {
+    p <- as.character(path %||% "")[1L]
+    if (!nzchar(p) || !file.exists(p) || file.access(p, mode = 4L) != 0L) return("")
+    out <- tryCatch(readLines(p, n = 1L, warn = FALSE), error = function(e) character(0))
+    if (length(out) == 0L) "" else trimws(as.character(out[[1L]] %||% ""))
+}
+
+parse_memory_control_bytes <- function(value) {
+    txt <- trimws(as.character(value %||% "")[1L])
+    if (!grepl("^[0-9]+$", txt)) return(NA_real_)
+    parsed <- suppressWarnings(as.numeric(txt))
+    if (!is.finite(parsed) || is.na(parsed) || parsed < 0) NA_real_ else parsed
+}
+
+read_cgroup_memory_stats <- function(
+    v2_current_path = "/sys/fs/cgroup/memory.current",
+    v2_max_path = "/sys/fs/cgroup/memory.max",
+    v1_usage_path = "/sys/fs/cgroup/memory/memory.usage_in_bytes",
+    v1_limit_path = "/sys/fs/cgroup/memory/memory.limit_in_bytes"
+) {
+    current_v2_txt <- read_memory_control_text(v2_current_path)
+    limit_v2_txt <- read_memory_control_text(v2_max_path)
+    current_v2 <- parse_memory_control_bytes(current_v2_txt)
+    v2_unlimited <- identical(tolower(limit_v2_txt), "max")
+    limit_v2 <- if (isTRUE(v2_unlimited)) NA_real_ else parse_memory_control_bytes(limit_v2_txt)
+    if (is.finite(current_v2) || is.finite(limit_v2) || isTRUE(v2_unlimited)) {
+        ratio <- if (is.finite(current_v2) && is.finite(limit_v2) && limit_v2 > 0) current_v2 / limit_v2 else NA_real_
+        return(list(
+            version = "v2", current_bytes = current_v2, limit_bytes = limit_v2,
+            unlimited = isTRUE(v2_unlimited), usage_ratio = ratio
+        ))
+    }
+
+    current_v1 <- parse_memory_control_bytes(read_memory_control_text(v1_usage_path))
+    limit_v1 <- parse_memory_control_bytes(read_memory_control_text(v1_limit_path))
+    # Linux commonly exposes a very large sentinel instead of infinity in v1.
+    v1_unlimited <- is.finite(limit_v1) && limit_v1 >= 2^60
+    if (isTRUE(v1_unlimited)) limit_v1 <- NA_real_
+    if (is.finite(current_v1) || is.finite(limit_v1) || isTRUE(v1_unlimited)) {
+        ratio <- if (is.finite(current_v1) && is.finite(limit_v1) && limit_v1 > 0) current_v1 / limit_v1 else NA_real_
+        return(list(
+            version = "v1", current_bytes = current_v1, limit_bytes = limit_v1,
+            unlimited = isTRUE(v1_unlimited), usage_ratio = ratio
+        ))
+    }
+    list(version = "none", current_bytes = NA_real_, limit_bytes = NA_real_, unlimited = FALSE, usage_ratio = NA_real_)
+}
+
+read_process_rss_bytes <- function(status_path = "/proc/self/status", allow_ps_fallback = TRUE) {
+    p <- as.character(status_path %||% "")[1L]
+    if (nzchar(p) && file.exists(p) && file.access(p, mode = 4L) == 0L) {
+        lines <- tryCatch(readLines(p, warn = FALSE), error = function(e) character(0))
+        rss_line <- lines[grepl("^VmRSS:[[:space:]]*[0-9]+[[:space:]]+kB", lines)]
+        if (length(rss_line) > 0L) {
+            rss_kb <- suppressWarnings(as.numeric(sub(
+                "^VmRSS:[[:space:]]*([0-9]+)[[:space:]]+kB.*$", "\\1", rss_line[[1L]]
+            )))
+            if (is.finite(rss_kb) && !is.na(rss_kb) && rss_kb >= 0) return(rss_kb * 1024)
+        }
+    }
+    if (!isTRUE(allow_ps_fallback)) return(NA_real_)
+    rss_kb <- tryCatch({
+        out <- suppressWarnings(system2(
+            "ps", c("-o", "rss=", "-p", as.character(Sys.getpid())),
+            stdout = TRUE, stderr = FALSE
+        ))
+        suppressWarnings(as.numeric(trimws(as.character(out[[1L]] %||% ""))))
+    }, error = function(e) NA_real_)
+    if (!is.finite(rss_kb) || is.na(rss_kb) || rss_kb < 0) NA_real_ else rss_kb * 1024
+}
+
+app_memory_telemetry_snapshot <- function(
+    cache_envs = coordinated_memory_cache_envs(),
+    budget_bytes = get_coordinated_memory_cache_budget_bytes(),
+    ...
+) {
+    cache <- coordinated_memory_cache_stats(cache_envs = cache_envs, budget_bytes = budget_bytes)
+    cgroup <- read_cgroup_memory_stats(...)
+    list(
+        pid = as.integer(Sys.getpid()),
+        runtime = tolower(trimws(as.character(Sys.getenv("CGV_RUNTIME", "web") %||% "web"))[1L]),
+        rss_bytes = read_process_rss_bytes(),
+        cgroup_version = cgroup$version,
+        cgroup_current_bytes = cgroup$current_bytes,
+        cgroup_limit_bytes = cgroup$limit_bytes,
+        cgroup_usage_ratio = cgroup$usage_ratio,
+        cache_bytes = cache$total_bytes,
+        cache_entries = cache$total_entries,
+        cache_budget_bytes = cache$budget_bytes,
+        cache_total_budget_bytes = get_coordinated_memory_cache_total_budget_mb() * 1024^2,
+        cache_process_count = get_coordinated_memory_cache_process_count(),
+        cache_by_name = cache$by_cache
+    )
 }
 
 annotation_memory_cache_limits <- list(
@@ -823,6 +1370,16 @@ annotation_memory_cache_limits <- list(
     genes_table_max_bytes = parse_positive_bytes_env_mb("APP_GFF_GENES_TABLE_CACHE_MAX_MB", 300),
     genes_chr_index_max_entries = parse_positive_int_env("APP_GFF_GENES_CHR_INDEX_CACHE_MAX_ENTRIES", 48L),
     genes_chr_index_max_bytes = parse_positive_bytes_env_mb("APP_GFF_GENES_CHR_INDEX_CACHE_MAX_MB", 160),
+    seq_extract_max_entries = 1000L,
+    seq_extract_max_bytes = parse_positive_bytes_env_mb(
+        "APP_SEQ_EXTRACT_CACHE_MAX_MB",
+        if (identical(tolower(trimws(Sys.getenv("CGV_RUNTIME", ""))), "desktop")) 256 else 96
+    ),
+    spliced_seq_max_entries = 1200L,
+    spliced_seq_max_bytes = parse_positive_bytes_env_mb(
+        "APP_SPLICED_SEQ_CACHE_MAX_MB",
+        if (identical(tolower(trimws(Sys.getenv("CGV_RUNTIME", ""))), "desktop")) 192 else 64
+    ),
     fasta_fallback_seq_max_entries = parse_positive_int_env("APP_FASTA_FALLBACK_SEQ_CACHE_MAX_ENTRIES", 8L),
     fasta_fallback_seq_max_bytes = parse_positive_bytes_env_mb("APP_FASTA_FALLBACK_SEQ_CACHE_MAX_MB", 96),
     fasta_fallback_seq_max_bp = parse_positive_int_env("APP_FASTA_FALLBACK_SEQ_CACHE_MAX_BP", 5000000L)
@@ -3063,6 +3620,163 @@ normalize_partial_gene_query <- function(x) {
     trimws(comp)
 }
 
+alias_sqlite_prefix_upper_bound <- function(prefix) {
+    prefix <- as.character(prefix %||% "")
+    if (length(prefix) == 0L || is.na(prefix[[1L]])) return("")
+    prefix <- prefix[[1L]]
+    chars <- utf8ToInt(prefix)
+    if (length(chars) == 0L) return("")
+    intToUtf8(c(chars[-length(chars)], chars[[length(chars)]] + 1L))
+}
+
+partial_alias_sqlite_index_row <- function(indexes, index_name) {
+    if (!is.data.frame(indexes) || !("name" %in% names(indexes))) {
+        return(data.frame())
+    }
+    indexes[as.character(indexes$name) == as.character(index_name), , drop = FALSE]
+}
+
+partial_alias_sqlite_has_column_index <- function(con, indexes, index_name, column_name) {
+    index_row <- partial_alias_sqlite_index_row(indexes, index_name)
+    if (nrow(index_row) != 1L ||
+        ("partial" %in% names(index_row) && !identical(as.integer(index_row$partial), 0L))) {
+        return(FALSE)
+    }
+    safe_name <- gsub("'", "''", as.character(index_name), fixed = TRUE)
+    info <- tryCatch(
+        DBI::dbGetQuery(con, sprintf("PRAGMA index_xinfo('%s')", safe_name)),
+        error = function(e) data.frame()
+    )
+    if (!is.data.frame(info) || !all(c("name", "key") %in% names(info))) {
+        return(FALSE)
+    }
+    key_rows <- info[as.integer(info$key) == 1L, , drop = FALSE]
+    if (!identical(as.character(key_rows$name), as.character(column_name))) {
+        return(FALSE)
+    }
+    if ("coll" %in% names(key_rows) &&
+        !identical(toupper(as.character(key_rows$coll)), "BINARY")) {
+        return(FALSE)
+    }
+    !("desc" %in% names(key_rows)) || identical(as.integer(key_rows$desc), 0L)
+}
+
+partial_alias_sqlite_has_symbol_upper_index <- function(con, indexes) {
+    index_name <- "idx_local_symbol_upper"
+    index_row <- partial_alias_sqlite_index_row(indexes, index_name)
+    if (nrow(index_row) != 1L ||
+        ("partial" %in% names(index_row) && !identical(as.integer(index_row$partial), 0L))) {
+        return(FALSE)
+    }
+    info <- tryCatch(
+        DBI::dbGetQuery(con, "PRAGMA index_xinfo('idx_local_symbol_upper')"),
+        error = function(e) data.frame()
+    )
+    if (!is.data.frame(info) || !("key" %in% names(info))) {
+        return(FALSE)
+    }
+    key_rows <- info[as.integer(info$key) == 1L, , drop = FALSE]
+    if (nrow(key_rows) != 1L ||
+        ("cid" %in% names(key_rows) && !identical(as.integer(key_rows$cid), -2L)) ||
+        ("coll" %in% names(key_rows) && !identical(toupper(as.character(key_rows$coll)), "BINARY")) ||
+        ("desc" %in% names(key_rows) && !identical(as.integer(key_rows$desc), 0L))) {
+        return(FALSE)
+    }
+    index_sql <- tryCatch(
+        DBI::dbGetQuery(
+            con,
+            "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = 'idx_local_symbol_upper' LIMIT 1"
+        )$sql[1],
+        error = function(e) ""
+    )
+    normalized_sql <- toupper(gsub("[^A-Za-z0-9_()]+", "", as.character(index_sql %||% "")))
+    identical(
+        normalized_sql,
+        "CREATEINDEXIDX_LOCAL_SYMBOL_UPPERONALIAS_INDEX(UPPER(LOCAL_SYMBOL))"
+    )
+}
+
+query_partial_alias_rows_sqlite <- function(con, like_value, type_sql, row_limit_sql = "",
+                                            prefix_value = NULL) {
+    select_sql <- paste(
+        "SELECT query_term_original, query_term_clean_strict, query_term_upper,",
+        "local_gene_id, local_symbol, term_type, confidence, source_db"
+    )
+    order_sql <- paste(
+        "ORDER BY CASE confidence WHEN 'HIGH' THEN 1 WHEN 'MEDIUM' THEN 2 ELSE 3 END,",
+        "LENGTH(query_term_original), query_term_original"
+    )
+    like_sql <- paste(
+        "(query_term_clean_strict LIKE ?1 OR query_term_upper LIKE ?1 OR",
+        "UPPER(local_symbol) LIKE ?1)"
+    )
+    legacy_sql <- sprintf(
+        "%s FROM alias_index WHERE term_type IN (%s) AND LENGTH(query_term_original) <= 100 AND %s %s%s",
+        select_sql,
+        type_sql,
+        like_sql,
+        order_sql,
+        row_limit_sql
+    )
+    prefix <- trimws(as.character(prefix_value %||% ""))
+    has_prefix_indexes <- FALSE
+    if (nzchar(prefix) && !is.null(con) && requireNamespace("DBI", quietly = TRUE)) {
+        has_prefix_indexes <- isTRUE(tryCatch({
+            indexes <- DBI::dbGetQuery(con, "PRAGMA index_list('alias_index')")
+            partial_alias_sqlite_has_column_index(
+                con, indexes, "idx_clean_strict", "query_term_clean_strict"
+            ) &&
+                partial_alias_sqlite_has_column_index(
+                    con, indexes, "idx_upper", "query_term_upper"
+                ) &&
+                partial_alias_sqlite_has_symbol_upper_index(con, indexes)
+        }, error = function(e) FALSE))
+    }
+    if (isTRUE(has_prefix_indexes)) {
+        legacy_plan <- tryCatch(
+            DBI::dbGetQuery(con, paste("EXPLAIN QUERY PLAN", legacy_sql), params = list(like_value)),
+            error = function(e) data.frame()
+        )
+        legacy_uses_term_type_index <- is.data.frame(legacy_plan) &&
+            "detail" %in% names(legacy_plan) &&
+            any(grepl("USING INDEX idx_term_type", as.character(legacy_plan$detail), fixed = TRUE))
+        optimized_order_sql <- paste0(
+            order_sql,
+            if (isTRUE(legacy_uses_term_type_index)) ", term_type, a.rowid" else ", a.rowid"
+        )
+        sql <- sprintf(
+            paste0(
+                "WITH candidate_rowids AS (",
+                "SELECT rowid FROM alias_index INDEXED BY idx_clean_strict ",
+                "WHERE query_term_clean_strict >= ?2 AND query_term_clean_strict < ?3 UNION ",
+                "SELECT rowid FROM alias_index INDEXED BY idx_upper ",
+                "WHERE query_term_upper >= ?2 AND query_term_upper < ?3 UNION ",
+                "SELECT rowid FROM alias_index INDEXED BY idx_local_symbol_upper ",
+                "WHERE UPPER(local_symbol) >= ?2 AND UPPER(local_symbol) < ?3) ",
+                "%s FROM candidate_rowids c CROSS JOIN alias_index a ON a.rowid = c.rowid ",
+                "WHERE term_type IN (%s) AND LENGTH(query_term_original) <= 100 AND %s %s%s"
+            ),
+            select_sql,
+            type_sql,
+            like_sql,
+            optimized_order_sql,
+            row_limit_sql
+        )
+        optimized_result <- tryCatch(
+            DBI::dbGetQuery(
+                con,
+                sql,
+                params = list(like_value, prefix, alias_sqlite_prefix_upper_bound(prefix))
+            ),
+            error = function(e) e
+        )
+        if (!inherits(optimized_result, "error")) {
+            return(optimized_result)
+        }
+    }
+    tryCatch(DBI::dbGetQuery(con, legacy_sql, params = list(like_value)), error = function(e) data.frame())
+}
+
 extract_partial_gene_display_name <- function(attr) {
     attrs <- parse_gff_attributes(attr %||% "")
     vals <- c(
@@ -3138,6 +3852,101 @@ normalize_partial_gene_suggestions_df <- function(df, source_labels = FALSE, sou
     df
 }
 
+collapse_partial_gene_suggestions_by_locus <- function(df, query = "") {
+    if (is.null(df) || !is.data.frame(df) || nrow(df) == 0L) {
+        out <- normalize_partial_gene_suggestions_df(df)
+        out$alias_names <- character(0)
+        return(out)
+    }
+    has_source_labels <- "source_labels" %in% names(df)
+    has_source_preview <- "source_label_preview" %in% names(df)
+    out <- normalize_partial_gene_suggestions_df(
+        df,
+        source_labels = has_source_labels,
+        source_label_preview = has_source_preview
+    )
+    out$alias_names <- rep("", nrow(out))
+
+    query_key <- normalize_partial_gene_query(query)
+    gene_key <- normalize_partial_gene_query(out$gene_name)
+    file_key <- tolower(trimws(as.character(out$file_label %||% "")))
+    local_ids <- trimws(as.character(out$local_gene_id %||% ""))
+    local_symbols <- trimws(as.character(out$local_symbol %||% ""))
+
+    # Direct annotation-name matches may not carry a locus ID, while alias rows do.
+    # Infer the missing ID only when the same official symbol maps unambiguously to
+    # one locus inside the same organism/annotation source.
+    known <- nzchar(local_ids) & nzchar(local_symbols)
+    if (any(known)) {
+        symbol_map <- split(local_ids[known], paste(file_key[known], normalize_partial_gene_query(local_symbols[known]), sep = "\r"))
+        symbol_map <- lapply(symbol_map, function(ids) unique(ids[nzchar(ids)]))
+        missing <- which(!nzchar(local_ids))
+        for (idx in missing) {
+            ids <- symbol_map[[paste(file_key[[idx]], gene_key[[idx]], sep = "\r")]] %||% character(0)
+            if (length(ids) == 1L) {
+                local_ids[[idx]] <- ids[[1L]]
+                out$local_gene_id[[idx]] <- ids[[1L]]
+            }
+        }
+    }
+
+    identity_key <- ifelse(
+        nzchar(local_ids),
+        paste(file_key, "locus", local_ids, sep = "\r"),
+        paste(file_key, "name", gene_key, sep = "\r")
+    )
+    groups <- split(seq_len(nrow(out)), identity_key)
+    collapsed <- lapply(groups, function(idx) {
+        rows <- out[idx, , drop = FALSE]
+        row_gene_keys <- normalize_partial_gene_query(rows$gene_name)
+        exact <- nzchar(query_key) & row_gene_keys == query_key
+        match_exact <- tolower(as.character(rows$match_type %||% "")) == "exact"
+        score <- suppressWarnings(as.numeric(rows$score %||% 0))
+        score[!is.finite(score)] <- 0
+        ord <- order(!(exact | match_exact), -score, nchar(as.character(rows$gene_name)), tolower(as.character(rows$gene_name)))
+        best <- rows[ord[[1L]], , drop = FALSE]
+
+        symbols <- unique(trimws(as.character(rows$local_symbol %||% "")))
+        symbols <- symbols[nzchar(symbols)]
+        preferred_symbols <- symbols[!grepl("^LOC[0-9]+$", symbols, ignore.case = TRUE)]
+        canonical <- if (length(preferred_symbols) > 0L) preferred_symbols[[1L]] else ""
+        if (nzchar(canonical)) {
+            canonical_rows <- which(normalize_partial_gene_query(rows$gene_name) == normalize_partial_gene_query(canonical))
+            if (length(canonical_rows) > 0L) {
+                best <- rows[canonical_rows[[1L]], , drop = FALSE]
+            }
+            best$gene_name <- canonical
+            best$local_symbol <- canonical
+        }
+
+        all_names <- unique(trimws(as.character(rows$gene_name %||% "")))
+        all_names <- all_names[nzchar(all_names)]
+        aliases <- all_names[normalize_partial_gene_query(all_names) != normalize_partial_gene_query(best$gene_name[[1L]])]
+        best$alias_names <- paste(aliases, collapse = " | ")
+        ids <- unique(trimws(as.character(rows$local_gene_id %||% "")))
+        ids <- ids[nzchar(ids)]
+        if (length(ids) > 0L) best$local_gene_id <- ids[[1L]]
+        best$score <- max(score, na.rm = TRUE)
+        best$match_type <- if (any(exact | match_exact)) {
+            "exact"
+        } else if (any(as.character(rows$match_type %||% "") == "prefix")) {
+            "prefix"
+        } else {
+            "contains"
+        }
+        counts <- suppressWarnings(as.integer(rows$source_count %||% 1L))
+        counts[!is.finite(counts) | counts < 1L] <- 1L
+        best$source_count <- max(counts)
+        best$requires_confirmation <- all(as.logical(rows$requires_confirmation %||% FALSE), na.rm = TRUE)
+        best
+    })
+    collapsed <- do.call(rbind, collapsed)
+    collapsed_exact <- tolower(as.character(collapsed$match_type %||% "")) == "exact"
+    collapsed <- collapsed[order(!collapsed_exact, -suppressWarnings(as.numeric(collapsed$score %||% 0)), tolower(as.character(collapsed$gene_name))), , drop = FALSE]
+    rownames(collapsed) <- NULL
+    collapsed
+}
+
 is_verified_local_description_alias_match <- function(match_row) {
     if (is.null(match_row) || !is.data.frame(match_row) || nrow(match_row) == 0L) return(FALSE)
     row <- match_row[1, , drop = FALSE]
@@ -3207,8 +4016,8 @@ find_partial_gene_suggestions_from_choices <- function(choices, query, file_labe
     if (nchar(q_comp) < min_query_chars) {
         return(empty_partial_gene_suggestions_df())
     }
-    max_suggestions <- suppressWarnings(as.integer(max_suggestions %||% 10L))
-    if (!is.finite(max_suggestions) || is.na(max_suggestions) || max_suggestions < 1L) {
+    max_suggestions <- suppressWarnings(as.numeric(max_suggestions %||% 10L))
+    if (is.na(max_suggestions) || max_suggestions < 1) {
         max_suggestions <- 10L
     }
     display <- trimws(as.character(choices %||% character(0)))
@@ -3220,15 +4029,16 @@ find_partial_gene_suggestions_from_choices <- function(choices, query, file_labe
     exact_hit <- comp == q_comp
     hit_prefix <- !exact_hit & startsWith(comp, q_comp)
     hit_contains <- !exact_hit & !hit_prefix & grepl(q_comp, comp, fixed = TRUE)
-    hit <- hit_prefix | hit_contains
+    hit <- exact_hit | hit_prefix | hit_contains
     if (!any(hit)) {
         return(empty_partial_gene_suggestions_df())
     }
     out <- data.frame(
         gene_name = display[hit],
         file_label = rep(as.character(file_label %||% ""), sum(hit)),
-        match_type = ifelse(hit_prefix[hit], "prefix", "contains"),
-        score = ifelse(hit_prefix[hit], 100, 60) - pmax(0, nchar(comp[hit]) - nchar(q_comp)),
+        match_type = ifelse(exact_hit[hit], "exact", ifelse(hit_prefix[hit], "prefix", "contains")),
+        score = ifelse(exact_hit[hit], 160, ifelse(hit_prefix[hit], 100, 60)) -
+            pmax(0, nchar(comp[hit]) - nchar(q_comp)),
         source_count = rep(1L, sum(hit)),
         stringsAsFactors = FALSE
     )
@@ -3237,7 +4047,9 @@ find_partial_gene_suggestions_from_choices <- function(choices, query, file_labe
     out <- out[!duplicated(out$key), , drop = FALSE]
     out$key <- NULL
     out <- out[order(-out$score, nchar(out$gene_name), tolower(out$gene_name)), , drop = FALSE]
-    if (nrow(out) > max_suggestions) out <- out[seq_len(max_suggestions), , drop = FALSE]
+    if (is.finite(max_suggestions) && nrow(out) > max_suggestions) {
+        out <- out[seq_len(as.integer(max_suggestions)), , drop = FALSE]
+    }
     rownames(out) <- NULL
     normalize_partial_gene_suggestions_df(out)
 }
@@ -3306,8 +4118,8 @@ find_partial_gene_alias_suggestions_sqlite <- function(annotation_paths, query, 
     }
     labels <- as.character(file_labels %||% basename(paths))
     if (length(labels) != length(paths)) labels <- basename(paths)
-    max_per_file <- suppressWarnings(as.integer(max_per_file %||% 20L))
-    if (!is.finite(max_per_file) || is.na(max_per_file) || max_per_file < 1L) max_per_file <- 20L
+    max_per_file <- suppressWarnings(as.numeric(max_per_file %||% 20L))
+    if (is.na(max_per_file) || max_per_file < 1) max_per_file <- 20L
     dets <- det_list
     if (!is.list(dets)) dets <- vector("list", length(paths))
     if (length(dets) < length(paths)) length(dets) <- length(paths)
@@ -3333,27 +4145,34 @@ find_partial_gene_alias_suggestions_sqlite <- function(annotation_paths, query, 
         if (is.null(con)) return(NULL)
 
         query_alias_rows <- function(like_value) {
-            sql <- sprintf(
-                paste0(
-                    "SELECT query_term_original, query_term_clean_strict, query_term_upper, local_gene_id, local_symbol, term_type, confidence, source_db ",
-                    "FROM alias_index WHERE term_type IN (%s) AND LENGTH(query_term_original) <= 100 AND ",
-                    "(query_term_clean_strict LIKE ?1 OR query_term_upper LIKE ?1 OR UPPER(local_symbol) LIKE ?1) ",
-                    "ORDER BY CASE confidence WHEN 'HIGH' THEN 1 WHEN 'MEDIUM' THEN 2 ELSE 3 END, LENGTH(query_term_original), query_term_original ",
-                    "LIMIT %d"
-                ),
-                type_sql,
-                as.integer(max_per_file * 4L)
+            row_limit_sql <- if (is.finite(max_per_file)) {
+                sprintf(" LIMIT %d", as.integer(min(.Machine$integer.max, max_per_file * 4)))
+            } else {
+                ""
+            }
+            query_partial_alias_rows_sqlite(
+                con = con,
+                like_value = like_value,
+                type_sql = type_sql,
+                row_limit_sql = row_limit_sql,
+                prefix_value = if (identical(like_value, q_like_prefix)) toupper(q_comp) else NULL
             )
-            tryCatch(DBI::dbGetQuery(con, sql, params = list(like_value)), error = function(e) data.frame())
         }
 
-        alias_rows <- query_alias_rows(q_like_prefix)
-        match_type <- "prefix"
-        if (!is.data.frame(alias_rows) || nrow(alias_rows) == 0L) {
-            alias_rows <- query_alias_rows(q_like_contains)
-            match_type <- "contains"
+        prefix_rows <- normalize_alias_index_df(query_alias_rows(q_like_prefix))
+        contains_rows <- normalize_alias_index_df(query_alias_rows(q_like_contains))
+        prefix_rows$.partial_match_type <- rep("prefix", nrow(prefix_rows))
+        contains_rows$.partial_match_type <- rep("contains", nrow(contains_rows))
+        alias_rows <- rbind(prefix_rows, contains_rows)
+        if (nrow(alias_rows) > 0L) {
+            alias_key <- paste(
+                normalize_partial_gene_query(alias_rows$query_term_original),
+                trimws(as.character(alias_rows$local_gene_id %||% "")),
+                trimws(as.character(alias_rows$local_symbol %||% "")),
+                sep = "\r"
+            )
+            alias_rows <- alias_rows[!duplicated(alias_key), , drop = FALSE]
         }
-        alias_rows <- normalize_alias_index_df(alias_rows)
         if (!is.data.frame(alias_rows) || nrow(alias_rows) == 0L) return(NULL)
 
         display <- trimws(as.character(alias_rows$local_symbol %||% ""))
@@ -3382,14 +4201,16 @@ find_partial_gene_alias_suggestions_sqlite <- function(annotation_paths, query, 
         display[use_term] <- term_token[use_term]
         display[!nzchar(display)] <- trimws(as.character(alias_rows$local_gene_id[!nzchar(display)] %||% ""))
 
-        keep <- nzchar(display) & normalize_partial_gene_query(display) != q_comp
+        keep <- nzchar(display)
         if (!any(keep)) return(NULL)
         alias_rows <- alias_rows[keep, , drop = FALSE]
         display <- display[keep]
+        row_match_type <- as.character(alias_rows$.partial_match_type %||% "contains")
         conf <- toupper(trimws(as.character(alias_rows$confidence %||% "")))
         cr <- unname(confidence_rank[conf])
         cr[is.na(cr)] <- 1L
-        score <- cr + if (identical(match_type, "prefix")) 70 else 35
+        exact_display <- normalize_partial_gene_query(display) == q_comp
+        score <- cr + ifelse(exact_display, 140, ifelse(row_match_type == "prefix", 70, 35))
         score <- score - pmax(0, nchar(normalize_partial_gene_query(display)) - nchar(q_comp))
         src <- trimws(as.character(alias_rows$source_db %||% ""))
         ev <- tolower(trimws(as.character(alias_rows$evidence_source %||% "")))
@@ -3403,7 +4224,7 @@ find_partial_gene_alias_suggestions_sqlite <- function(annotation_paths, query, 
         out <- data.frame(
             gene_name = display,
             file_label = rep(labels[[i]], length(display)),
-            match_type = rep(match_type, length(display)),
+            match_type = ifelse(exact_display, "exact", row_match_type),
             score = score,
             source_count = rep(1L, length(display)),
             local_gene_id = trimws(as.character(alias_rows$local_gene_id %||% "")),
@@ -3421,7 +4242,9 @@ find_partial_gene_alias_suggestions_sqlite <- function(annotation_paths, query, 
         out <- out[!duplicated(out$key), , drop = FALSE]
         out$display_preference <- NULL
         out$key <- NULL
-        if (nrow(out) > max_per_file) out <- out[seq_len(max_per_file), , drop = FALSE]
+        if (is.finite(max_per_file) && nrow(out) > max_per_file) {
+            out <- out[seq_len(as.integer(max_per_file)), , drop = FALSE]
+        }
         normalize_partial_gene_suggestions_df(out)
     })
     rows <- rows[vapply(rows, function(x) is.data.frame(x) && nrow(x) > 0L, logical(1))]
@@ -3449,10 +4272,10 @@ find_deterministic_partial_gene_suggestions <- function(annotation_paths, query,
     }
     labels <- as.character(file_labels %||% basename(paths))
     if (length(labels) != length(paths)) labels <- basename(paths)
-    max_per_file <- suppressWarnings(as.integer(max_per_file %||% 20L))
-    if (!is.finite(max_per_file) || is.na(max_per_file) || max_per_file < 1L) max_per_file <- 20L
-    max_total <- suppressWarnings(as.integer(max_total %||% 20L))
-    if (!is.finite(max_total) || is.na(max_total) || max_total < 1L) max_total <- 20L
+    max_per_file <- suppressWarnings(as.numeric(max_per_file %||% 20L))
+    if (is.na(max_per_file) || max_per_file < 1) max_per_file <- 20L
+    max_total <- suppressWarnings(as.numeric(max_total %||% 20L))
+    if (is.na(max_total) || max_total < 1) max_total <- 20L
     min_shared <- suppressWarnings(as.integer(min_shared_organisms %||% 1L))
     if (!is.finite(min_shared) || is.na(min_shared) || min_shared < 1L) min_shared <- 1L
 
@@ -3482,7 +4305,13 @@ find_deterministic_partial_gene_suggestions <- function(annotation_paths, query,
             best$source_labels <- best$file_label
             best$source_count <- length(labels_u)
             best$score <- max(suppressWarnings(as.numeric(df$score %||% 0)), na.rm = TRUE) + best$source_count * 5
-            best$match_type <- if (any(as.character(df$match_type %||% "") == "prefix")) "prefix" else "contains"
+            best$match_type <- if (any(as.character(df$match_type %||% "") == "exact")) {
+                "exact"
+            } else if (any(as.character(df$match_type %||% "") == "prefix")) {
+                "prefix"
+            } else {
+                "contains"
+            }
             best
         }))
         grouped$gene_key <- NULL
@@ -3508,7 +4337,9 @@ find_deterministic_partial_gene_suggestions <- function(annotation_paths, query,
             if (length(labels_u) <= source_label_preview) return(paste(labels_u, collapse = ", "))
             paste0(paste(labels_u[seq_len(source_label_preview)], collapse = ", "), sprintf(" +%d more", length(labels_u) - source_label_preview))
         }, character(1))
-        if (nrow(grouped) > max_total) grouped <- grouped[seq_len(max_total), , drop = FALSE]
+        if (is.finite(max_total) && nrow(grouped) > max_total) {
+            grouped <- grouped[seq_len(as.integer(max_total)), , drop = FALSE]
+        }
         rownames(grouped) <- NULL
         normalize_partial_gene_suggestions_df(grouped, source_labels = TRUE, source_label_preview = TRUE)
     }
@@ -4063,8 +4894,8 @@ find_cross_species_alias_family_suggestions <- function(annotation_paths, query,
     if (length(labels) != length(paths)) {
         labels <- basename(paths)
     }
-    max_per_file <- suppressWarnings(as.integer(max_per_file %||% 12L))
-    if (!is.finite(max_per_file) || is.na(max_per_file) || max_per_file < 1L) {
+    max_per_file <- suppressWarnings(as.numeric(max_per_file %||% 12L))
+    if (is.na(max_per_file) || max_per_file < 1) {
         max_per_file <- 12L
     }
 
@@ -4098,13 +4929,19 @@ find_cross_species_alias_family_suggestions <- function(annotation_paths, query,
                 return(NULL)
             }
             like_param <- paste0("%", q_comp, "%")
+            alias_limit_sql <- if (is.finite(max_per_file)) {
+                sprintf(" LIMIT %d", as.integer(min(.Machine$integer.max, max_per_file * 8)))
+            } else {
+                ""
+            }
             tryCatch(
                 DBI::dbGetQuery(
                     idx,
                     paste0(
                         "SELECT * FROM alias_index WHERE ",
                         "(LOWER(query_term_clean_strict) LIKE ?1 OR LOWER(local_symbol) LIKE ?1 OR LOWER(description) LIKE ?1) ",
-                        "AND LENGTH(query_term_original) <= 180 LIMIT 250"
+                        "AND LENGTH(query_term_original) <= 180",
+                        alias_limit_sql
                     ),
                     params = list(like_param)
                 ),
@@ -4170,8 +5007,8 @@ find_cross_species_alias_family_suggestions <- function(annotation_paths, query,
         alias_rows$.gene_key <- gene_key
         alias_rows <- alias_rows[order(-alias_rows$.score, nchar(alias_rows$display_gene), tolower(alias_rows$display_gene)), , drop = FALSE]
         alias_rows <- alias_rows[!duplicated(alias_rows$.gene_key), , drop = FALSE]
-        if (nrow(alias_rows) > max_per_file) {
-            alias_rows <- alias_rows[seq_len(max_per_file), , drop = FALSE]
+        if (is.finite(max_per_file) && nrow(alias_rows) > max_per_file) {
+            alias_rows <- alias_rows[seq_len(as.integer(max_per_file)), , drop = FALSE]
         }
         data.frame(
             gene_name = alias_rows$display_gene,
@@ -4226,12 +5063,12 @@ find_cross_species_alias_family_suggestions <- function(annotation_paths, query,
         paste0(paste(labels_u[seq_len(source_label_preview)], collapse = ", "), sprintf(" +%d more", length(labels_u) - source_label_preview))
     }, character(1))
 
-    max_total <- suppressWarnings(as.integer(max_total %||% 20L))
-    if (!is.finite(max_total) || is.na(max_total) || max_total < 1L) {
+    max_total <- suppressWarnings(as.numeric(max_total %||% 20L))
+    if (is.na(max_total) || max_total < 1) {
         max_total <- 20L
     }
-    if (nrow(grouped) > max_total) {
-        grouped <- grouped[seq_len(max_total), , drop = FALSE]
+    if (is.finite(max_total) && nrow(grouped) > max_total) {
+        grouped <- grouped[seq_len(as.integer(max_total)), , drop = FALSE]
     }
     rownames(grouped) <- NULL
     grouped
@@ -6282,14 +7119,25 @@ get_seq_extract_cache_key <- function(fasta_path, seqid, start_pos, end_pos) {
 cache_sequence_extract_result <- function(fasta_path, seqid, start_pos, end_pos, seq_txt, resolved_seqname = NULL) {
     seq_val <- as.character(seq_txt %||% "")
     raw_key <- get_seq_extract_cache_key(fasta_path, seqid, start_pos, end_pos)
-    assign(raw_key, seq_val, envir = .seq_extract_cache)
+    cache_env_set(
+        .seq_extract_cache,
+        raw_key,
+        seq_val,
+        max_size = annotation_memory_cache_limits$seq_extract_max_entries,
+        max_bytes = annotation_memory_cache_limits$seq_extract_max_bytes
+    )
     resolved_txt <- trimws(as.character(resolved_seqname %||% ""))
     raw_seqid <- trimws(as.character(seqid %||% ""))
     if (nzchar(resolved_txt) && !identical(resolved_txt, raw_seqid)) {
         resolved_key <- get_seq_extract_cache_key(fasta_path, resolved_txt, start_pos, end_pos)
-        assign(resolved_key, seq_val, envir = .seq_extract_cache)
+        cache_env_set(
+            .seq_extract_cache,
+            resolved_key,
+            seq_val,
+            max_size = annotation_memory_cache_limits$seq_extract_max_entries,
+            max_bytes = annotation_memory_cache_limits$seq_extract_max_bytes
+        )
     }
-    trim_cache_env(.seq_extract_cache, max_size = 1000L)
     invisible(seq_val)
 }
 
@@ -6505,8 +7353,9 @@ extract_sequence_from_fasta <- function(fasta_path, seqid, start_pos, end_pos) {
     start_pos <- as.integer(start_pos)
     end_pos <- as.integer(end_pos)
     seq_cache_key <- get_seq_extract_cache_key(fasta_path, seqid, start_pos, end_pos)
-    if (exists(seq_cache_key, envir = .seq_extract_cache, inherits = FALSE)) {
-        return(get(seq_cache_key, envir = .seq_extract_cache, inherits = FALSE))
+    cached_exact <- cache_env_get(.seq_extract_cache, seq_cache_key, default = NULL)
+    if (!is.null(cached_exact)) {
+        return(cached_exact)
     }
 
     # Buscar en caché una región más amplia que cubra el rango solicitado.
@@ -6514,7 +7363,7 @@ extract_sequence_from_fasta <- function(fasta_path, seqid, start_pos, end_pos) {
     seqid_txt <- as.character(seqid %||% "")
     if (nzchar(norm_path) && nzchar(seqid_txt)) {
         prefix <- paste0(norm_path, "::", seqid_txt, "::")
-        cache_keys <- ls(envir = .seq_extract_cache, all.names = TRUE)
+        cache_keys <- cache_env_entry_keys(.seq_extract_cache)
         matching <- cache_keys[startsWith(cache_keys, prefix)]
         for (ck in matching) {
             parts <- strsplit(ck, "::", fixed = TRUE)[[1]]
@@ -6523,12 +7372,18 @@ extract_sequence_from_fasta <- function(fasta_path, seqid, start_pos, end_pos) {
                 ck_end <- suppressWarnings(as.integer(parts[4L]))
                 if (is.finite(ck_start) && is.finite(ck_end) &&
                     ck_start <= start_pos && ck_end >= end_pos) {
-                    cached_seq <- get(ck, envir = .seq_extract_cache, inherits = FALSE)
+                    cached_seq <- cache_env_get(.seq_extract_cache, ck, default = NULL)
                     if (is.character(cached_seq) && nzchar(cached_seq) && nchar(cached_seq) >= (end_pos - ck_start + 1L)) {
                         rel_start <- start_pos - ck_start + 1L
                         rel_end <- end_pos - ck_start + 1L
                         sub_seq <- substr(cached_seq, rel_start, rel_end)
-                        assign(seq_cache_key, sub_seq, envir = .seq_extract_cache)
+                        cache_env_set(
+                            .seq_extract_cache,
+                            seq_cache_key,
+                            sub_seq,
+                            max_size = annotation_memory_cache_limits$seq_extract_max_entries,
+                            max_bytes = annotation_memory_cache_limits$seq_extract_max_bytes
+                        )
                         return(sub_seq)
                     }
                 }
@@ -6595,11 +7450,18 @@ extract_sequence_from_fasta <- function(fasta_path, seqid, start_pos, end_pos) {
         return("")
     }
     resolved_cache_key <- get_seq_extract_cache_key(fasta_path, resolved_seqname, start_pos, end_pos)
-    if (!identical(resolved_cache_key, seq_cache_key) && exists(resolved_cache_key, envir = .seq_extract_cache, inherits = FALSE)) {
-        cached_resolved <- get(resolved_cache_key, envir = .seq_extract_cache, inherits = FALSE)
-        assign(seq_cache_key, cached_resolved, envir = .seq_extract_cache)
-        trim_cache_env(.seq_extract_cache, max_size = 1000L)
-        return(cached_resolved)
+    if (!identical(resolved_cache_key, seq_cache_key)) {
+        cached_resolved <- cache_env_get(.seq_extract_cache, resolved_cache_key, default = NULL)
+        if (!is.null(cached_resolved)) {
+            cache_env_set(
+                .seq_extract_cache,
+                seq_cache_key,
+                cached_resolved,
+                max_size = annotation_memory_cache_limits$seq_extract_max_entries,
+                max_bytes = annotation_memory_cache_limits$seq_extract_max_bytes
+            )
+            return(cached_resolved)
+        }
     }
     fallback_seq_key <- get_fasta_fallback_seq_cache_key(fasta_path, resolved_seqname)
     fallback_full_seq <- cache_env_get(.fasta_fallback_seq_cache, fallback_seq_key, default = NULL)
@@ -6728,8 +7590,9 @@ extract_spliced_exon_sequence <- function(fasta_path, seqid, exon_ranges, strand
         paste0(ex$start, "-", ex$end, collapse = ";"),
         sep = "::"
     )
-    if (exists(splice_key, envir = .spliced_seq_cache, inherits = FALSE)) {
-        return(as.character(get(splice_key, envir = .spliced_seq_cache, inherits = FALSE) %||% ""))
+    cached_spliced <- cache_env_get(.spliced_seq_cache, splice_key, default = NULL)
+    if (!is.null(cached_spliced)) {
+        return(as.character(cached_spliced %||% ""))
     }
 
     sp_perf <- app_perf_new_run("SEQ_SPLICE")
@@ -6755,8 +7618,13 @@ extract_spliced_exon_sequence <- function(fasta_path, seqid, exon_ranges, strand
         if (identical(strand_one, "-")) {
             seq_one <- reverse_complement_dna(seq_one)
         }
-        assign(splice_key, seq_one, envir = .spliced_seq_cache)
-        trim_cache_env(.spliced_seq_cache, max_size = 1200L)
+        cache_env_set(
+            .spliced_seq_cache,
+            splice_key,
+            seq_one,
+            max_size = annotation_memory_cache_limits$spliced_seq_max_entries,
+            max_bytes = annotation_memory_cache_limits$spliced_seq_max_bytes
+        )
         app_perf_mark(sp_perf, sprintf("single-exon done len=%d", as.integer(nchar(seq_one))), "SEQ_SPLICE")
         return(seq_one)
     }
@@ -6787,11 +7655,21 @@ extract_spliced_exon_sequence <- function(fasta_path, seqid, exon_ranges, strand
                         sep = "::"
                     )
                     # Reuse single-span genomic extraction in later feature-level GC computations.
-                    assign(seq_cache_key, span_seq, envir = .seq_extract_cache)
-                    trim_cache_env(.seq_extract_cache, max_size = 1000L)
+                    cache_env_set(
+                        .seq_extract_cache,
+                        seq_cache_key,
+                        span_seq,
+                        max_size = annotation_memory_cache_limits$seq_extract_max_entries,
+                        max_bytes = annotation_memory_cache_limits$seq_extract_max_bytes
+                    )
                     if (identical(strand_local, "-")) seq_spliced_local <- reverse_complement_dna(seq_spliced_local)
-                    assign(splice_key, seq_spliced_local, envir = .spliced_seq_cache)
-                    trim_cache_env(.spliced_seq_cache, max_size = 1200L)
+                    cache_env_set(
+                        .spliced_seq_cache,
+                        splice_key,
+                        seq_spliced_local,
+                        max_size = annotation_memory_cache_limits$spliced_seq_max_entries,
+                        max_bytes = annotation_memory_cache_limits$spliced_seq_max_bytes
+                    )
                     app_perf_mark(
                         sp_perf,
                         sprintf("single-span done len=%d span=%d", as.integer(nchar(seq_spliced_local)), as.integer(span_width)),
@@ -6911,8 +7789,13 @@ extract_spliced_exon_sequence <- function(fasta_path, seqid, exon_ranges, strand
     seq_spliced <- paste0(parts, collapse = "")
     strand <- toupper(trimws(as.character(strand %||% "+")))
     if (identical(strand, "-")) seq_spliced <- reverse_complement_dna(seq_spliced)
-    assign(splice_key, seq_spliced, envir = .spliced_seq_cache)
-    trim_cache_env(.spliced_seq_cache, max_size = 1200L)
+    cache_env_set(
+        .spliced_seq_cache,
+        splice_key,
+        seq_spliced,
+        max_size = annotation_memory_cache_limits$spliced_seq_max_entries,
+        max_bytes = annotation_memory_cache_limits$spliced_seq_max_bytes
+    )
     app_perf_mark(sp_perf, sprintf("done len=%d", as.integer(nchar(seq_spliced))), "SEQ_SPLICE")
     seq_spliced
 }
@@ -7567,6 +8450,45 @@ split_gene_data_by_transcript <- function(data_df) {
     out
 }
 
+prepare_orthologous_transcript_splits_once <- function(results, split_fun = split_gene_data_by_transcript) {
+    if (!is.function(split_fun)) {
+        stop("split_fun must be a function", call. = FALSE)
+    }
+
+    prepared <- vector("list", length(results))
+    if (length(results) == 0L) {
+        return(prepared)
+    }
+
+    for (result_idx in seq_along(results)) {
+        result <- results[[result_idx]]
+        if (is.null(result) || !isTRUE(result$found)) {
+            next
+        }
+        data <- result$data
+        if (!is.data.frame(data) || nrow(data) == 0L) {
+            next
+        }
+
+        split_t0 <- app_perf_now()
+        split_attempt <- tryCatch(
+            list(reusable = TRUE, blocks = split_fun(data)),
+            error = function(e) list(reusable = FALSE, blocks = list())
+        )
+        blocks <- split_attempt$blocks
+        if (length(blocks) == 0L) {
+            blocks <- list(data)
+        }
+        prepared[[result_idx]] <- list(
+            blocks = blocks,
+            reusable = isTRUE(split_attempt$reusable),
+            elapsed_ms = app_perf_elapsed_ms(split_t0)
+        )
+    }
+
+    prepared
+}
+
 # --- 5. BÚSQUEDA DE GENES (ACTUALIZADA: CONTROL PARALELO) ---
 
 order_external_alias_sources_for_speed <- function(sources) {
@@ -7819,6 +8741,260 @@ search_gene_in_file <- function(file_path, gene_names, show_diagnostics = TRUE, 
     )
 }
 
+orthology_identity_from_lookup_result <- function(result, base_dir = ".") {
+    result <- result %||% list()
+    lookup <- result$lookup %||% list()
+    det <- result$det %||% lookup$det_resolved %||% list()
+    match_row <- lookup$alias_index_match
+    local_gene_id <- trimws(as.character(lookup$matched_gene_id %||% ""))
+    local_feature_id <- ""
+    local_symbol <- trimws(as.character(lookup$matched_gene_name %||% ""))
+    if (is.data.frame(match_row) && nrow(match_row) > 0L) {
+        local_gene_id <- trimws(as.character(match_row$local_gene_id[1] %||% local_gene_id))
+        local_feature_id <- trimws(as.character(match_row$local_feature_id[1] %||% ""))
+        local_symbol <- trimws(as.character(match_row$local_symbol[1] %||% local_symbol))
+    }
+    organism <- trimws(as.character(det$organism %||% result$file_label %||% ""))
+    species <- if (exists("normalize_ensembl_species_name", mode = "function")) {
+        normalize_ensembl_species_name(
+            organism = organism,
+            ensembl_species = det$ensembl_species %||% det$ensembl_name %||% ""
+        )
+    } else {
+        ""
+    }
+    ids <- if (exists("ensembl_gene_ids_for_alias_locus", mode = "function")) {
+        tryCatch(
+            ensembl_gene_ids_for_alias_locus(
+                local_gene_id = local_gene_id,
+                local_feature_id = local_feature_id,
+                local_symbol = local_symbol,
+                organism_id = as.character(det$species_id %||% det$preloaded_id %||% ""),
+                annotation_path = as.character(result$file_path %||% ""),
+                organism_name = organism,
+                taxid = as.character(det$taxid %||% ""),
+                base_dir = base_dir
+            ),
+            error = function(e) character(0)
+        )
+    } else {
+        character(0)
+    }
+    list(
+        file_idx = suppressWarnings(as.integer(result$file_idx %||% NA_integer_)),
+        file_label = as.character(result$file_label %||% organism),
+        organism = organism,
+        species = species,
+        local_gene_id = local_gene_id,
+        local_symbol = local_symbol,
+        ensembl_gene_ids = unique(as.character(ids %||% character(0))),
+        kingdom = as.character(det$kingdom %||% "")
+    )
+}
+
+validate_cross_species_orthology_results <- function(results, fetch_fun = NULL, base_dir = ".") {
+    found_positions <- which(vapply(results, function(result) isTRUE((result %||% list())$found), logical(1)))
+    if (length(found_positions) < 2L) {
+        return(list(
+            status = "insufficient_matches",
+            approved_positions = integer(0),
+            rejected_positions = found_positions,
+            identities = list(),
+            evidence = list(),
+            message = "Fewer than two organisms have resolvable local loci."
+        ))
+    }
+    if (is.null(fetch_fun)) {
+        if (!exists("fetch_ensembl_orthologs", mode = "function")) {
+            return(list(
+                status = "evidence_unavailable",
+                approved_positions = integer(0),
+                rejected_positions = found_positions,
+                identities = list(),
+                evidence = list(),
+                message = "The Ensembl Compara evidence resolver is unavailable."
+            ))
+        }
+        fetch_fun <- fetch_ensembl_orthologs
+    }
+
+    identities <- lapply(found_positions, function(pos) orthology_identity_from_lookup_result(results[[pos]], base_dir = base_dir))
+    names(identities) <- as.character(found_positions)
+    usable <- which(vapply(identities, function(identity) {
+        nzchar(as.character(identity$species %||% "")) &&
+            length(as.character(identity$ensembl_gene_ids %||% character(0))) == 1L
+    }, logical(1)))
+    if (length(usable) < 2L) {
+        return(list(
+            status = "unresolved_identifiers",
+            approved_positions = integer(0),
+            rejected_positions = found_positions,
+            identities = identities,
+            evidence = list(),
+            message = "At least two loci need one unambiguous Ensembl gene identifier."
+        ))
+    }
+
+    adjacency <- matrix(FALSE, nrow = length(identities), ncol = length(identities))
+    diag(adjacency) <- TRUE
+    evidence <- list()
+    pair_index <- utils::combn(usable, 2L, simplify = FALSE)
+    for (pair in pair_index) {
+        left_idx <- pair[[1L]]
+        right_idx <- pair[[2L]]
+        left <- identities[[left_idx]]
+        right <- identities[[right_idx]]
+        compara <- if (exists("ensembl_compara_division", mode = "function")) {
+            ensembl_compara_division(kingdom = left$kingdom, organism = left$organism)
+        } else {
+            ""
+        }
+        fetched <- tryCatch(
+            fetch_fun(
+                source_gene_id = left$ensembl_gene_ids[[1L]],
+                source_species = left$species,
+                target_species = right$species,
+                compara = compara
+            ),
+            error = function(e) list(status = "unavailable", rows = NULL, error = conditionMessage(e))
+        )
+        verdict <- if (exists("evaluate_ensembl_orthology_pair", mode = "function")) {
+            evaluate_ensembl_orthology_pair(
+                source_gene_id = left$ensembl_gene_ids[[1L]],
+                target_gene_id = right$ensembl_gene_ids[[1L]],
+                target_species = right$species,
+                homology_result = fetched
+            )
+        } else {
+            list(verified = FALSE, status = "evidence_unavailable", homology_type = "")
+        }
+        evidence[[length(evidence) + 1L]] <- list(
+            left_position = found_positions[[left_idx]],
+            right_position = found_positions[[right_idx]],
+            left = left,
+            right = right,
+            fetch_status = as.character(fetched$status %||% "unavailable"),
+            verdict = verdict
+        )
+        if (isTRUE(verdict$verified)) {
+            adjacency[left_idx, right_idx] <- TRUE
+            adjacency[right_idx, left_idx] <- TRUE
+        }
+    }
+
+    # Connected components represent sets joined by explicit one-to-one
+    # Ensembl Compara relationships. A tie is intentionally rejected because
+    # choosing one biological group would require user intent.
+    remaining <- usable
+    components <- list()
+    while (length(remaining) > 0L) {
+        component <- remaining[[1L]]
+        repeat {
+            expanded <- unique(c(component, which(apply(adjacency[component, , drop = FALSE], 2L, any))))
+            if (setequal(expanded, component)) break
+            component <- expanded
+        }
+        component <- intersect(component, usable)
+        components[[length(components) + 1L]] <- component
+        remaining <- setdiff(remaining, component)
+    }
+    sizes <- vapply(components, length, integer(1))
+    best_size <- if (length(sizes) > 0L) max(sizes) else 0L
+    best <- which(sizes == best_size & sizes >= 2L)
+    if (length(best) != 1L) {
+        return(list(
+            status = if (best_size >= 2L) "ambiguous_orthology_groups" else "no_verified_pair",
+            approved_positions = integer(0),
+            rejected_positions = found_positions,
+            identities = identities,
+            evidence = evidence,
+            message = if (best_size >= 2L) {
+                "More than one equally supported orthology group was found; a reference locus must be selected."
+            } else {
+                "The same or similar gene name did not produce a verified one-to-one ortholog pair."
+            }
+        ))
+    }
+    approved <- found_positions[components[[best[[1L]]]]]
+    list(
+        status = "verified",
+        approved_positions = approved,
+        rejected_positions = setdiff(found_positions, approved),
+        identities = identities,
+        evidence = evidence,
+        message = sprintf("Verified one-to-one orthology across %d organisms.", length(approved))
+    )
+}
+
+select_cross_species_results_by_orthology_policy <- function(
+        results,
+        require_verified = cross_species_requires_verified_orthology(),
+        fetch_fun = NULL,
+        base_dir = ".") {
+    if (isTRUE(require_verified)) {
+        validated <- validate_cross_species_orthology_results(
+            results,
+            fetch_fun = fetch_fun,
+            base_dir = base_dir
+        )
+        validated$verification_required <- TRUE
+        return(validated)
+    }
+
+    found_positions <- which(vapply(results, function(result) {
+        isTRUE((result %||% list())$found)
+    }, logical(1)))
+    list(
+        status = if (length(found_positions) > 0L) "local_matches" else "no_local_matches",
+        approved_positions = found_positions,
+        rejected_positions = setdiff(seq_along(results), found_positions),
+        identities = list(),
+        evidence = list(),
+        verification_required = FALSE,
+        message = if (length(found_positions) > 0L) {
+            sprintf("Accepted unambiguous local matches in %d organism(s).", length(found_positions))
+        } else {
+            "No unambiguous local matches were found."
+        }
+    )
+}
+
+apply_cross_species_reference_anchor <- function(lookup_jobs, reference_anchor) {
+    jobs <- lookup_jobs %||% list()
+    anchor <- reference_anchor %||% list()
+    scalar_text <- function(value) {
+        values <- trimws(as.character(value %||% ""))
+        if (length(values) == 0L || is.na(values[[1L]])) "" else values[[1L]]
+    }
+    local_gene_id <- scalar_text(anchor$local_gene_id)
+    if (!nzchar(local_gene_id) || length(jobs) == 0L) {
+        return(list(jobs = jobs, reference_idx = integer(0), applied = FALSE))
+    }
+
+    anchor_org_id <- scalar_text(anchor$organism_id)
+    reference_idx <- which(vapply(jobs, function(job) {
+        det <- (job %||% list())$det %||% list()
+        job_org_id <- scalar_text(det$species_id %||% det$preloaded_id)
+        nzchar(anchor_org_id) && identical(job_org_id, anchor_org_id)
+    }, logical(1)))
+    if (length(reference_idx) == 0L) {
+        anchor_org <- tolower(scalar_text(anchor$organism_name))
+        reference_idx <- which(vapply(jobs, function(job) {
+            det <- (job %||% list())$det %||% list()
+            job_org <- tolower(scalar_text(det$organism))
+            nzchar(anchor_org) && identical(job_org, anchor_org)
+        }, logical(1)))
+    }
+    if (length(reference_idx) != 1L) {
+        return(list(jobs = jobs, reference_idx = integer(0), applied = FALSE))
+    }
+
+    idx <- reference_idx[[1L]]
+    jobs[[idx]]$gene_name <- local_gene_id
+    jobs[[idx]]$allow_partial_suggestions <- FALSE
+    list(jobs = jobs, reference_idx = as.integer(idx), applied = TRUE)
+}
+
 run_lookup_pipeline_pure <- function(file_path, input_gene, det_info = NULL, diagnostics = FALSE,
                                      use_parallel = FALSE, file_label = NULL,
                                      enabled_external_sources = c("mygene", "ncbi", "uniprot", "ensembl"),
@@ -7828,6 +9004,36 @@ run_lookup_pipeline_pure <- function(file_path, input_gene, det_info = NULL, dia
     enabled_external_sources <- unique(tolower(trimws(as.character(enabled_external_sources %||% character(0)))))
     enabled_external_sources <- enabled_external_sources[enabled_external_sources %in% c("mygene", "ncbi", "uniprot", "ensembl")]
 
+    operation_alias_index_lookup <- NULL
+    if (exists("make_operation_alias_index_lookup", mode = "function") &&
+        exists("search_alias_index_for_context", mode = "function")) {
+        operation_alias_index_lookup <- tryCatch(
+            make_operation_alias_index_lookup(
+                query = input_gene,
+                file_path = file_path,
+                file_label = file_label,
+                base_dir = ".",
+                lookup_fun = get("search_alias_index_for_context", mode = "function")
+            ),
+            error = function(e) NULL
+        )
+    }
+    lookup_alias_index_for_operation <- function(det_resolved) {
+        if (is.function(operation_alias_index_lookup)) {
+            return(operation_alias_index_lookup(det_resolved))
+        }
+        list(
+            result = search_alias_index_for_context(
+                query = input_gene,
+                file_path = file_path,
+                det_info = det_resolved,
+                file_label = file_label,
+                base_dir = "."
+            ),
+            reused = FALSE
+        )
+    }
+
     alias_index_preflight <- function(det_resolved) {
         det <- det_resolved %||% list()
         org_id <- trimws(as.character(det$species_id %||% det$preloaded_id %||% ""))
@@ -7836,16 +9042,11 @@ run_lookup_pipeline_pure <- function(file_path, input_gene, det_info = NULL, dia
             !exists("alias_index_match_to_lookup", mode = "function")) {
             return(NULL)
         }
-        alias_index_res <- tryCatch(
-            search_alias_index_for_context(
-                query = input_gene,
-                file_path = file_path,
-                det_info = det,
-                file_label = file_label,
-                base_dir = "."
-            ),
+        alias_index_attempt <- tryCatch(
+            lookup_alias_index_for_operation(det),
             error = function(e) NULL
         )
+        alias_index_res <- (alias_index_attempt %||% list())$result
         alias_index_status <- as.character((alias_index_res %||% list())$status %||% "no_match")
         alias_index_matches <- (alias_index_res %||% list())$matches
         if (startsWith(alias_index_status, "multiple") &&
@@ -7985,16 +9186,11 @@ run_lookup_pipeline_pure <- function(file_path, input_gene, det_info = NULL, dia
     if (exists("search_alias_index_for_context", mode = "function") &&
         exists("alias_index_match_to_lookup", mode = "function")) {
         alias_index_checked <- TRUE
-        alias_index_res <- tryCatch(
-            search_alias_index_for_context(
-                query = input_gene,
-                file_path = file_path,
-                det_info = det_resolved,
-                file_label = file_label,
-                base_dir = "."
-            ),
+        alias_index_attempt <- tryCatch(
+            lookup_alias_index_for_operation(det_resolved),
             error = function(e) NULL
         )
+        alias_index_res <- (alias_index_attempt %||% list())$result
         alias_index_status <- as.character((alias_index_res %||% list())$status %||% "no_match")
         alias_index_matches <- (alias_index_res %||% list())$matches
         if (startsWith(alias_index_status, "multiple") &&
@@ -8089,16 +9285,11 @@ run_lookup_pipeline_pure <- function(file_path, input_gene, det_info = NULL, dia
     if (!isTRUE(alias_index_checked) &&
         exists("search_alias_index_for_context", mode = "function") &&
         exists("alias_index_match_to_lookup", mode = "function")) {
-        alias_index_res <- tryCatch(
-            search_alias_index_for_context(
-                query = input_gene,
-                file_path = file_path,
-                det_info = det_resolved,
-                file_label = file_label,
-                base_dir = "."
-            ),
+        alias_index_attempt <- tryCatch(
+            lookup_alias_index_for_operation(det_resolved),
             error = function(e) NULL
         )
+        alias_index_res <- (alias_index_attempt %||% list())$result
         alias_index_status <- as.character((alias_index_res %||% list())$status %||% "no_match")
         alias_index_matches <- (alias_index_res %||% list())$matches
         if (startsWith(alias_index_status, "multiple") &&

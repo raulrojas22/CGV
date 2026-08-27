@@ -183,7 +183,7 @@
     var card = container && container.closest ? container.closest(".card, .plot-transcript-card, article") : null;
     var heading = card && card.querySelector ? card.querySelector("h2, h3, h4, .card-title, .plot-card-title") : null;
     var text = heading ? String(heading.textContent || "").replace(/\s+/g, " ").trim() : "";
-    if (!text) text = String(id || "CGV visualization").replace(/[_-]+/g, " ");
+    if (!text) text = String(id || "CGeV visualization").replace(/[_-]+/g, " ");
     return text.slice(0, 180);
   }
 
@@ -552,6 +552,42 @@
   }
 
   function captureForServer(message) {
+    var captureContexts = asArray(message && message.capture_contexts).map(function (context) {
+      return String(context || "").toLowerCase();
+    });
+    var wantsFigureStudio = captureContexts.indexOf("figure_studio") >= 0;
+    var studioStateInput = document.getElementById("figure_studio_state");
+    var hasStudioState = !!String((studioStateInput && studioStateInput.value) || "").trim();
+    var studioLoader = window.CGVFigureStudioLoader;
+    var hasQueuedStudioRestore = !!(
+      studioLoader &&
+      typeof studioLoader.pendingRestoreCount === "function" &&
+      studioLoader.pendingRestoreCount() > 0
+    );
+    if (
+      wantsFigureStudio &&
+      !(message && message.__cgv_figure_studio_capture_ready) &&
+      (hasStudioState || hasQueuedStudioRestore) &&
+      studioLoader &&
+      (typeof studioLoader.whenReady === "function" || typeof studioLoader.load === "function")
+    ) {
+      var resumedMessage = Object.assign({}, message, {
+        __cgv_figure_studio_capture_ready: true
+      });
+      var studioReady = typeof studioLoader.whenReady === "function"
+        ? studioLoader.whenReady()
+        : studioLoader.load();
+      studioReady.then(function () {
+        captureForServer(resumedMessage);
+      }).catch(function (error) {
+        resumedMessage.__cgv_figure_studio_capture_error = error && error.message
+          ? String(error.message)
+          : "module load failed";
+        captureForServer(resumedMessage);
+      });
+      return;
+    }
+
     var captureStartedAt = Date.now();
     var requestId = String((message && message.request_id) || "");
     var limit = Number((message && message.max_total_bytes) || (24 * 1024 * 1024));
@@ -566,6 +602,11 @@
         message && message.capture_contexts,
         captureMode
       );
+      if (message && message.__cgv_figure_studio_capture_error) {
+        captured.missing.push(
+          "Figure Studio: " + String(message.__cgv_figure_studio_capture_error)
+        );
+      }
       var preCaptures = [preSyntenyCaptureByRequest[requestId], preLastzCaptureByRequest[requestId]];
       var preSyntenyMs = Number(preCaptures[0] && preCaptures[0].duration_ms || 0);
       var preLastzMs = Number(preCaptures[1] && preCaptures[1].duration_ms || 0);
@@ -1138,6 +1179,27 @@
     document.body.classList.add("cgv-report-capture-active");
   }
 
+  function syncShareDeliveryAction() {
+    var button = document.getElementById("publish_shared_analysis");
+    if (!button) return;
+    var label = button.querySelector(".cgv-share-submit-label");
+    if (!label) return;
+    var delivery = document.querySelector("input[name='share_delivery_mode']:checked");
+    var emailDelivery = !!(delivery && delivery.value === "email");
+    var text = emailDelivery ? "Queue email report" : "Create secret link";
+    label.textContent = text;
+    button.setAttribute("aria-label", text);
+    button.title = emailDelivery ?
+      "Freeze this analysis and place it in the email report queue" :
+      "Create the report in this session";
+  }
+
+  document.addEventListener("change", function (event) {
+    if (event.target && event.target.name === "share_delivery_mode") {
+      syncShareDeliveryAction();
+    }
+  });
+
   // Keep the share modal progress and result blocks in view: they render at
   // the top of the modal body, so make sure the user never has to scroll to
   // notice them after starting a publication or when it finishes.
@@ -1165,6 +1227,7 @@
   if (typeof window.MutationObserver === "function") {
     shareModalObserver = new window.MutationObserver(function (mutations) {
       window.requestAnimationFrame(syncReportCaptureCurtain);
+      window.requestAnimationFrame(syncShareDeliveryAction);
       for (var i = 0; i < mutations.length; i++) {
         var added = mutations[i].addedNodes;
         for (var j = 0; j < added.length; j++) {
@@ -1186,10 +1249,12 @@
     if (document.body) {
       observeShareModal();
       syncReportCaptureCurtain();
+      syncShareDeliveryAction();
     } else {
       document.addEventListener("DOMContentLoaded", function () {
         observeShareModal();
         syncReportCaptureCurtain();
+        syncShareDeliveryAction();
       }, { once: true });
     }
   }

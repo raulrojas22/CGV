@@ -3,7 +3,7 @@
   "label": "Brachypodium distachyon",
   "speciesId": "brachypodium_distachyon_gcf_000005505_3_brachypodium_distachyon_v3_0_genomic",
   "version": "2026.09",
-  "description": "Brachypodium distachyon CGV Desktop dataset package.",
+  "description": "Brachypodium distachyon CGeV Desktop dataset package.",
   "downloadable": true,
   "sizeBytes": 101514209,
   "package": {

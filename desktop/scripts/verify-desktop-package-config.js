@@ -7,9 +7,12 @@ const packageJsonPath = path.join(desktopRoot, "package.json");
 const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, "utf8"));
 const mainJsPath = path.join(desktopRoot, "src", "main.js");
 const mainJs = fs.readFileSync(mainJsPath, "utf8");
+const legacyUserDataPath = path.join(desktopRoot, "src", "legacy-user-data.js");
+const legacyUserData = fs.readFileSync(legacyUserDataPath, "utf8");
 const downloadJsPath = path.join(repoRoot, "www", "js", "cgv_desktop_downloads.js");
 const downloadUiPath = path.join(repoRoot, "R", "ui_desktop_downloads.R");
 const installerScriptPath = path.join(repoRoot, "regenerar-instalables.sh");
+const storeConfigPath = path.join(desktopRoot, "electron-builder.store.js");
 
 const extraResources = (((packageJson || {}).build || {}).extraResources || []);
 const afterPack = (((packageJson || {}).build || {}).afterPack || "");
@@ -22,6 +25,31 @@ const publish = build.publish || {};
 const appResource = extraResources.find((entry) => entry && entry.to === "app");
 const windowIconResource = extraResources.find((entry) => entry && entry.to === "icon.png");
 const filters = Array.isArray(appResource && appResource.filter) ? appResource.filter : [];
+
+if (packageJson.name !== "cgv-desktop" || build.appId !== "org.cgv.desktop") {
+  throw new Error("The internal package name and appId must remain cgv-desktop and org.cgv.desktop for upgrade compatibility.");
+}
+if (build.productName !== "CGeV Desktop") {
+  throw new Error("The operating-system-visible product name must be CGeV Desktop.");
+}
+const storeConfig = fs.readFileSync(storeConfigPath, "utf8");
+for (const fragment of [
+  'applicationId: "CGVDesktop"',
+  'displayName: "CGeV Desktop"',
+  'artifactName: "CGeV-Desktop-${version}-Windows-${arch}-Store.${ext}"'
+]) {
+  if (!storeConfig.includes(fragment)) {
+    throw new Error(`Microsoft Store identity configuration is missing: ${fragment}`);
+  }
+}
+if (
+  !mainJs.includes('const DESKTOP_APP_ID = "org.cgv.desktop"') ||
+  !mainJs.includes("app.setAppUserModelId(DESKTOP_APP_ID)") ||
+  !mainJs.includes('electronApp.setPath("userData", legacyUserDataPath({') ||
+  !legacyUserData.includes('LEGACY_USER_DATA_DIRECTORY = "CGV Desktop"')
+) {
+  throw new Error("CGeV Desktop must keep the stable Windows app ID and historical user-data directory.");
+}
 
 if (filters.includes("cache/annotation_index/**")) {
   throw new Error("Lite Desktop builds must not embed a developer-machine annotation cache; dataset packages install their own precomputed indexes.");
@@ -58,11 +86,11 @@ if (
 if (publish.releaseType !== "draft") {
   throw new Error("Desktop packaging must create draft releases so installers can be reviewed before publication.");
 }
-if (mac.artifactName !== "CGV-Desktop-${version}-macOS-${arch}.${ext}") {
-  throw new Error("macOS artifacts must use the stable CGV Desktop release filename.");
+if (mac.artifactName !== "CGeV-Desktop-${version}-macOS-${arch}.${ext}") {
+  throw new Error("New macOS artifacts must use the CGeV Desktop release filename.");
 }
-if (linux.artifactName !== "CGV-Desktop-${version}-Linux-${arch}.${ext}") {
-  throw new Error("Linux artifacts must use the stable CGV Desktop release filename.");
+if (linux.artifactName !== "CGeV-Desktop-${version}-Linux-${arch}.${ext}") {
+  throw new Error("New Linux artifacts must use the CGeV Desktop release filename.");
 }
 if (
   !windowIconResource ||
@@ -79,6 +107,11 @@ for (const requiredMainFragment of [
   "findRscript(preparedRuntimeRoot)",
   "APP_LASTZ_WORKERS: process.env.APP_LASTZ_WORKERS || String(Math.max(1, Math.min(2, os.cpus().length - 1)))",
   "APP_LASTZ_TIMEOUT_SECONDS: process.env.APP_LASTZ_TIMEOUT_SECONDS || \"90\"",
+  "APP_MEMORY_CACHE_BUDGET_MB: process.env.APP_MEMORY_CACHE_BUDGET_MB || \"1024\"",
+  "APP_SEQ_EXTRACT_CACHE_MAX_MB: process.env.APP_SEQ_EXTRACT_CACHE_MAX_MB || \"256\"",
+  "APP_SPLICED_SEQ_CACHE_MAX_MB: process.env.APP_SPLICED_SEQ_CACHE_MAX_MB || \"192\"",
+  "APP_ALIAS_SQLITE_CACHE_MB: process.env.APP_ALIAS_SQLITE_CACHE_MB || \"16\"",
+  "APP_ALIAS_SQLITE_MAX_CONNECTIONS: process.env.APP_ALIAS_SQLITE_MAX_CONNECTIONS || \"8\"",
   "env.FONTCONFIG_FILE = fontconfigFile",
   "env.FONTCONFIG_PATH = fontconfigPath"
 ]) {
@@ -129,6 +162,9 @@ if (!mainJs.includes("autoUpdater.checkForUpdatesAndNotify()") || !mainJs.includ
 if (!/CGV_RUNTIME:\s*[\"']desktop[\"']/.test(mainJs)) {
   throw new Error("The local Shiny process must be marked as CGV Desktop so report exports never publish a Web URL.");
 }
+if (!mainJs.includes("CGV_RELEASE_VERSION: app.getVersion()")) {
+  throw new Error("The embedded CGeV UI must display the Desktop package version.");
+}
 if (!mainJs.includes('exportDownloadSession.on("will-download"') || !mainJs.includes("setSaveDialogOptions")) {
   throw new Error("Desktop exports must use the operating-system save dialog.");
 }
@@ -144,7 +180,7 @@ if (win.requestedExecutionLevel !== "asInvoker" || nsis.oneClick !== false || ns
 if (nsis.allowToChangeInstallationDirectory !== true || nsis.deleteAppDataOnUninstall !== false) {
   throw new Error("Windows NSIS must allow an install-directory choice and preserve app data on uninstall.");
 }
-if (!String(nsis.artifactName || "").includes("Windows-${arch}-Setup")) {
+if (nsis.artifactName !== "CGeV-Desktop-${version}-Windows-${arch}-Setup.${ext}") {
   throw new Error("Windows NSIS artifact name must be stable and architecture-specific.");
 }
 if (
@@ -268,12 +304,16 @@ for (const requiredFragment of [
     throw new Error(`Windows signed release workflow is missing required safeguard: ${requiredFragment}`);
   }
 }
+if (!signedWorkflow.includes('installer=CGeV-Desktop-$Version-Windows-x64-Setup.exe')) {
+  throw new Error("Windows signed releases must use the new CGeV installer filename.");
+}
 const signPathArtifactConfig = path.join(desktopRoot, "signing", "signpath-windows-installer.xml");
 if (!fs.existsSync(signPathArtifactConfig)) throw new Error("Missing SignPath Windows artifact configuration.");
 const signPathArtifactXml = fs.readFileSync(signPathArtifactConfig, "utf8");
 for (const requiredFragment of [
   "<zip-file>",
-  'product-name="CGV Desktop"',
+  'path="CGeV-Desktop-${version}-Windows-x64-Setup.exe"',
+  'product-name="CGeV Desktop"',
   'product-version="${version}"',
   'file-version="${version}"',
   "<authenticode-sign"
@@ -300,9 +340,9 @@ for (const requiredFragment of [
   "*-Linux-amd64.deb",
   "id: release",
   "node -p \"require('./package.json').version\"",
-  "CGV-Desktop-Linux-x64-${{ steps.release.outputs.version }}",
-  "CGV-Desktop-${{ steps.release.outputs.version }}-Linux-x86_64.AppImage",
-  "CGV-Desktop-${{ steps.release.outputs.version }}-Linux-amd64.deb",
+  "CGeV-Desktop-Linux-x64-${{ steps.release.outputs.version }}",
+  "CGeV-Desktop-${{ steps.release.outputs.version }}-Linux-x86_64.AppImage",
+  "CGeV-Desktop-${{ steps.release.outputs.version }}-Linux-amd64.deb",
   "--appimage-extract",
   "SHA256SUMS-linux-x64.txt",
   "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"
@@ -336,6 +376,7 @@ const expectedDesktopDefaults = {
   APP_ORTHO_PREFLIGHT_SUGGESTIONS: "0",
   APP_ORTHO_PREWARM_LOCAL_HANDLES: "1",
   APP_ORTHO_PREFER_MAIN_CACHE: "1",
+  APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY: "0",
   APP_SESSION_METRICS: "0",
   APP_PERF_TIMING: "0",
   APP_TRANSPORT_TIMING: "0",

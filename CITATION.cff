@@ -1,19 +1,18 @@
 cff-version: 1.2.0
-title: "CGV: Comparative Gene Viewer"
-message: "If you use CGV in your research, please cite the software using this metadata and the archived release DOI once available."
+title: "CGeV: Comparative Gene Viewer"
+message: "If you use CGeV, cite this software version and the associated manuscript when available."
 type: software
 version: 1.1.0
 date-released: 2026-07-24
 license: MIT
-url: "https://cgvapp.com"
-repository-code: "https://github.com/raulrojas22/CGV"
+url: "https://github.com/raulrojas22/CGeV"
+repository-code: "https://github.com/raulrojas22/CGeV"
 abstract: >-
-  CGV (Comparative Gene Viewer) is an interactive R/Shiny web application for
-  comparative gene visualization and functional analysis across species. It
+  Comparative Gene Viewer (CGeV) is an interactive R/Shiny web application for
+  gene-centered structural comparison and functional context across species. It
   combines local indexed genomes, annotations, and Gene Ontology resources with
-  live public API queries to support homologous and orthologous exploration,
-  structural comparison, analytics, sequence extraction, and functional context
-  in a single web interface.
+  optional public services to support multi-gene and cross-species comparison,
+  sequence alignment and extraction, analytical summaries, and figure export.
 keywords:
   - comparative genomics
   - gene visualization
@@ -22,12 +21,12 @@ keywords:
   - bioinformatics
 authors:
   - family-names: "Rojas-Espinoza"
-    given-names: "Raul"
+    given-names: "Raúl"
     email: "raul.rojas@utalca.cl"
-    affiliation: "Center for Bioinformatics, Simulation and Modeling (CBSM), University of Talca, Chile; JaninLab, University of Talca, Chile"
+    affiliation: "Center for Bioinformatics, Simulation and Modeling (CBSM), Faculty of Engineering, University of Talca, Chile"
   - family-names: "Riedelsberger"
     given-names: "Janin"
-    affiliation: "Center for Bioinformatics, Simulation and Modeling (CBSM), University of Talca, Chile; JaninLab, University of Talca, Chile"
+    affiliation: "Center for Bioinformatics, Simulation and Modeling (CBSM), Faculty of Engineering, University of Talca, Chile"
   - family-names: "Riadi"
     given-names: "Gonzalo"
-    affiliation: "Center for Bioinformatics, Simulation and Modeling (CBSM), University of Talca, Chile; Mobilomics / RiadiLab, University of Talca, Chile"
+    affiliation: "Center for Bioinformatics, Simulation and Modeling (CBSM), Faculty of Engineering, University of Talca, Chile"

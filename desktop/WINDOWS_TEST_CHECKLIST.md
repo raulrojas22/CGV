@@ -1,10 +1,10 @@
-# CGV Desktop Windows release checklist
+# CGeV Desktop Windows release checklist
 
 Use this checklist for both Windows 10 x64 and Windows 11 x64. Test with a standard user account that does not have R, Docker, WSL, MSYS2, samtools, tabix, or LASTZ installed.
 
 ## Automated gate
 
-- [ ] `CGV Desktop Windows x64 beta` workflow completes.
+- [ ] `CGeV Desktop Windows x64 beta` workflow completes.
 - [ ] Runtime lock verifies R 4.4.3, Bioconductor 3.20, package versions, and source/index hashes.
 - [ ] LASTZ native build passes its upstream known alignment and the copied-runtime alignment test.
 - [ ] NSIS silent install starts CGV, logs `CGV is ready`, and returns HTTP 200 from `127.0.0.1`.
@@ -27,6 +27,8 @@ Use this checklist for both Windows 10 x64 and Windows 11 x64. Test with a stand
 - [ ] `File > Change data folder` restarts into the new folder without moving or deleting the old folder.
 - [ ] Direct-build update downloads and applies; Microsoft Store package uses Store updates only.
 - [ ] Upgrade installation preserves datasets, caches, settings, and saved sessions.
+- [ ] Upgrade from CGV Desktop 1.1.0 installs `CGeV Desktop.exe` and still reads `%LOCALAPPDATA%\CGV Desktop`.
+- [ ] The Start menu, desktop shortcut, Programs list, installer, and uninstaller display `CGeV Desktop`.
 - [ ] Uninstall removes the app and shortcuts but preserves the selected storage folder.
 - [ ] Firewall inspection confirms the Shiny listener is bound only to `127.0.0.1`.
 
