@@ -32,6 +32,8 @@ CHECK OK: no se realizaron cambios en Colors.
 La línea `Sesión` informa además la telemetría efectiva (`perf=0` o `perf=1`)
 que recibió el contenedor público. El check compara ese valor con el
 `application.yml` activo; no lo deduce del valor por defecto del comando local.
+La línea `Eager` verifica también que la sesión recibió composición inmediata,
+sin segunda renderización, sin lotes automáticos y con 64 tarjetas iniciales.
 
 El script aborta si detecta cualquiera de estas condiciones:
 
@@ -92,8 +94,8 @@ COLORS_PERF_TIMING=0 ./deploy-colors-shinyproxy.sh
 3. Respalda la configuración y el estado actual.
 4. Sincroniza solamente código de aplicación, excluyendo secretos, datos,
    cachés y archivos de trabajo locales. La configuración de ShinyProxy se
-   respalda y sólo recibe las tres variables permitidas para reportes y el
-   semáforo global de LASTZ.
+   respalda y recibe las variables permitidas para reportes, el semáforo global
+   de LASTZ y el perfil de render eager validado.
 5. Construye una imagen inmutable como:
 
    ```text
@@ -107,6 +109,23 @@ COLORS_PERF_TIMING=0 ./deploy-colors-shinyproxy.sh
    públicos, con usuario no privilegiado, sistema de archivos de sólo lectura,
    4 GB de memoria y acceso únicamente a los datasets y caché compartidos.
 9. Comprueba socket proxy, HTTP interno, instancia CGV, worker y URL pública.
+
+El perfil de render de Colors se escribe como valores literales para que una
+configuración antigua del servidor no pueda reactivar las regresiones:
+
+```text
+APP_HOMO_INITIAL_VISIBLE=64
+APP_ORTHO_INITIAL_VISIBLE=64
+APP_ORTHO_RENDER_CHUNK_SIZE=64
+APP_ORTHO_AUTO_RENDER_MORE=0
+APP_ORTHO_AUTO_RENDER_DELAY_MS=0
+APP_ORTHO_SERVER_RENDER_NUDGE=0
+APP_HOMO_DEFER_SEQUENCE=0
+APP_ORTHO_DEFER_SEQUENCE=0
+APP_FOOTER_DEFER_SEQUENCE=0
+APP_DEFER_FEATURE_GC=0
+APP_ORTHO_SUSPEND_HIDDEN=1
+```
 
 Las sesiones abiertas se cierran durante la conmutación. El tiempo de corte
 normal es el necesario para reiniciar ShinyProxy y crear la primera instancia

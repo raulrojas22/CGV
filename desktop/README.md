@@ -68,20 +68,23 @@ folder and installed datasets.
 
 ## Desktop Performance Defaults
 
-CGeV Desktop starts the Shiny app with a conservative resource profile. It keeps
-the first result responsive by rendering one card initially, auto-rendering
-orthologous cards in small chunks, deferring sequence-heavy footer work until
-after the first plot render, calculating feature-GC tooltips in the same
-background pass, and disabling background lookup-worker prewarm and verbose
-performance logging unless explicitly requested. Small cross-species searches
-also stay sequential by default to avoid R worker startup overhead.
+CGeV Desktop starts the Shiny app with the eager result profile used by local
+Docker: up to 64 selected Multi-Gene or Cross-Species cards are registered
+together, sequence composition and feature-GC details are calculated in the
+normal render, and no artificial inter-card delay is added. Outputs belonging to
+Alignment and other inactive views remain suspended until those views are opened.
+Background lookup-worker prewarm and verbose performance logging remain disabled
+unless explicitly requested.
 
-These defaults do not remove features; they delay heavier work until the first
-plot is visible, then complete the remaining cards and sequence statistics
-progressively. Power users can restore eager behavior when launching:
+For constrained hardware, users can opt into the former one-card-first profile
+when launching:
 
 ```bash
 APP_ORTHO_AUTO_RENDER_MORE=1 \
+APP_ORTHO_RENDER_CHUNK_SIZE=2 \
+APP_ORTHO_AUTO_RENDER_DELAY_MS=250 \
+APP_HOMO_INITIAL_VISIBLE=1 \
+APP_ORTHO_INITIAL_VISIBLE=1 \
 APP_ORTHO_WORKER_PREWARM=0 \
 APP_ORTHO_BACKGROUND_CACHE_WARM=0 \
 APP_ORTHO_PREFLIGHT_SUGGESTIONS=0 \
@@ -90,10 +93,10 @@ APP_ORTHO_PREFER_MAIN_CACHE=1 \
 APP_ORTHO_LOOKUP_PARALLEL_MIN_JOBS=2 \
 APP_HOMO_UPFRONT_ISOFORMS=0 \
 APP_ORTHO_UPFRONT_ISOFORMS=0 \
-APP_HOMO_DEFER_SEQUENCE=0 \
-APP_ORTHO_DEFER_SEQUENCE=0 \
-APP_FOOTER_DEFER_SEQUENCE=0 \
-APP_DEFER_FEATURE_GC=0 \
+APP_HOMO_DEFER_SEQUENCE=1 \
+APP_ORTHO_DEFER_SEQUENCE=1 \
+APP_FOOTER_DEFER_SEQUENCE=1 \
+APP_DEFER_FEATURE_GC=1 \
 npm start
 ```
 
