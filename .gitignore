@@ -20,6 +20,7 @@ cache/*
 !cache/.gitkeep
 logs/
 outputs/
+reviewer-results/
 tmp/
 _incoming_*/
 

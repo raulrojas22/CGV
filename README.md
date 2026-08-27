@@ -1,231 +1,139 @@
 # CGeV
 
-**Comparative Gene Viewer (CGeV)** is an interactive R/Shiny web application for comparative gene visualization and functional analysis across species. It combines local indexed genomes and annotations with live queries to public resources so researchers can move from a gene symbol to structural, comparative, and functional context in a single interface.
+**CGeV (Comparative Gene Viewer)** is an open-source R/Shiny application for
+gene-centered structural comparison and functional context across species. It
+combines indexed genome annotations, sequence retrieval, transcript and
+cross-species comparison, alignment views, analytical summaries, and
+publication-ready export in one web and desktop interface.
 
-> **Identity transition:** CGeV was previously displayed as CGV. The full project name, repositories, URLs, environment variables, data locations, and integration identifiers remain compatible.
+[![Reviewer package](https://github.com/raulrojas22/CGeV/actions/workflows/reviewer-package.yml/badge.svg)](https://github.com/raulrojas22/CGeV/actions/workflows/reviewer-package.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-111827.svg)](LICENSE)
+[![R/Shiny](https://img.shields.io/badge/R-Shiny-276DC3.svg)](https://shiny.posit.co/)
 
-[![Website](https://img.shields.io/badge/Web-cgv.mobilomics.org-0f766e?style=flat-square)](https://cgv.mobilomics.org)
-[![Language](https://img.shields.io/badge/R-Shiny-276DC3?style=flat-square)](https://www.r-project.org/)
-[![License](https://img.shields.io/badge/License-MIT-black?style=flat-square)](LICENSE)
-
-## Code signing policy
-
-Windows release signing follows the [CGeV Desktop code signing policy](desktop/legal/CODE_SIGNING_POLICY.md). Free code signing is intended to be provided by [SignPath.io](https://about.signpath.io/), certificate by [SignPath Foundation](https://signpath.org/), once the project is accepted. See also the [privacy policy](desktop/legal/PRIVACY.md) and [third-party notices](desktop/legal/THIRD_PARTY_NOTICES.md).
+> **Publication status (27 August 2026):** the manuscript has not yet been
+> assigned a DOI. The source repository is public; the hosted service link is
+> being checked before manuscript submission.
 
 ![CGeV architecture](paper/figure1_panel_A_architecture.svg)
 
-## Why CGeV
+## Try the manuscript examples
 
-CGeV was designed to reduce the fragmented workflow common in comparative genomics. Instead of switching between genome browsers, orthology resources, Gene Ontology portals, promoter utilities, and protein-network tools, users can explore these layers from one web application.
+The repository includes reviewer-ready inputs and expected outputs for both
+case studies reported in the manuscript:
 
-Completed analyses can also be preserved as a portable, versioned
-reproducibility ZIP. Web deployments can publish the same snapshot as an
-expiring secret read-only report with interactive SVGs and sortable tables;
-Desktop exports an equivalent self-contained HTML file without uploading data.
+- multi-gene comparison of seven *Oryza sativa* ssp. *japonica* HKT loci;
+- cross-species comparison of TP53 across seven vertebrates.
 
-Key capabilities include:
-
-- gene-centered search without requiring prior genomic coordinates
-- homologous and orthologous visualization workflows
-- local rendering from indexed `GFF3 + Tabix` and genome `2bit` files
-- Gene Ontology lookup from local GO annotations
-- promoter extraction and sequence retrieval
-- integrated comparative analytics and exportable figures
-- containerized deployment with datasets mounted as external volumes
-
-## Repository Scope
-
-This GitHub repository is intended to host the **application source code, configuration, documentation, and lightweight registries**.
-
-Large biological resources are **not versioned in GitHub**:
-
-- reference genomes (`genomes/`)
-- annotation files (`annotations/`)
-- GO annotation files and ontology assets (`go_annotations/`)
-- generated caches (`cache/`)
-
-This separation keeps the repository lightweight, reproducible, and aligned with GitHub's file and repository size recommendations.
-
-For the data-management policy used by the project, see [DATA_AVAILABILITY.md](DATA_AVAILABILITY.md).
-
-<details>
-<summary><strong>What is tracked in GitHub?</strong></summary>
-
-- application source code
-- Docker and deployment configuration
-- documentation and figures
-- scripts used to build registries and caches
-- lightweight registry files describing supported organisms and resources
-
-</details>
-
-<details>
-<summary><strong>What is intentionally kept out of GitHub?</strong></summary>
-
-- production genome files
-- compressed annotation datasets and indexes
-- raw GO annotation archives
-- generated runtime caches
-- machine-specific local environment files
-
-</details>
-
-## Data Strategy
-
-CGeV is built around a code/data split:
-
-- GitHub: source code, Docker files, scripts, registries, documentation
-- Zenodo or institutional repository: frozen release snapshots, software DOI, optional curated small example dataset
-- external/local storage: full production genomes, annotations, GO resources, and caches
-
-In practice, the recommended publication workflow is:
-
-1. Keep the public GitHub repository focused on code and small metadata files.
-2. Archive each software release in Zenodo to obtain a DOI for citation.
-3. Archive full heavy datasets separately only if the journal or funder requires redistribution.
-4. Provide machine-readable registries and clear download/rebuild instructions for any data not redistributed directly.
-
-<details>
-<summary><strong>Recommended publication package</strong></summary>
-
-1. GitHub repository with code and documentation
-2. Zenodo-linked software release DOI
-3. optional lightweight demo dataset for reviewers
-4. manuscript-ready citation metadata
-
-</details>
-
-## Quick Start
-
-### Docker
+Start with the [reviewer walkthrough](examples/manuscript-cases/README.md).
+The package can be checked without installing R or downloading genome files:
 
 ```bash
+python3 scripts/validate_reviewer_package.py
+```
+
+The command validates the case-study schemas, the 14 requested organism/query
+pairs, their expected resolved labels, and their references to the versioned
+dataset registry. A successful run ends with:
+
+```text
+PASS: reviewer package is internally consistent (2 cases, 14 queries, 25 registered datasets).
+```
+
+This lightweight check verifies the published test package. The scientific
+views themselves are reproduced in CGeV using the fixed assemblies and
+settings described in the walkthrough.
+
+## Main capabilities
+
+- identifier-aware gene search using symbols, accessions, and aliases;
+- multi-gene transcript comparison within one organism;
+- cross-species gene-structure comparison;
+- exon-aware translated CDS, CDS, and complete-exon alignment;
+- LASTZ blocks and MultiPIP-style conservation views;
+- Gene Ontology, STRING, literature, neighborhood, and promoter context;
+- strand-aware sequence and table export;
+- Figure Studio compositions and read-only interactive reports;
+- web deployment and offline desktop packages.
+
+## Run locally with Docker
+
+Requirements: Git, Docker Engine 24+ and Docker Compose v2.
+
+```bash
+git clone https://github.com/raulrojas22/CGeV.git
+cd CGeV
 cp .env.example .env
 docker compose build
 docker compose up -d
 ```
 
-Then open `http://localhost:3838`.
+Open `http://localhost:3838`. Stop the service with:
 
-### Required mounted data
-
-The application expects the following directories to be available at runtime:
-
-- `annotations/`
-- `genomes/`
-- `go_annotations/`
-- `cache/`
-
-By default, `docker-compose.yml` mounts them as volumes:
-
-```yaml
-volumes:
-  - ${CGV_ANNOTATIONS_DIR:-./annotations}:/app/annotations:ro
-  - ${CGV_GENOMES_DIR:-./genomes}:/app/genomes:ro
-  - ${CGV_GO_ANNOTATIONS_DIR:-./go_annotations}:/app/go_annotations:ro
-  - ${CGV_DATA_DIR:-./data}:/app/data:ro
-  - ${CGV_CACHE_DIR:-./cache}:/app/cache
+```bash
+docker compose down
 ```
 
-For deployment details, see [DOCKER_DEPLOY.md](DOCKER_DEPLOY.md).
+Production biological resources are intentionally not stored in Git history.
+The application expects genome, annotation, GO, data, and cache directories;
+their default mounts are defined in `docker-compose.yml`. See
+[Data availability](DATA_AVAILABILITY.md) and the reconstruction notes in
+[annotations](annotations/README.md), [genomes](genomes/README.md), and
+[GO annotations](go_annotations/README.md).
 
-### LASTZ resource and cache policy
+For server deployment details, see [Docker deployment](DOCKER_DEPLOY.md). For
+the packaged application, see [CGeV Desktop](desktop/README.md).
 
-- Web containers run at most one LASTZ job concurrently (`APP_LASTZ_WORKERS=1`); Desktop uses up to two when the machine has enough CPUs.
-- ShinyProxy sessions and the detached report worker also share a filesystem semaphore. Colors uses `APP_LASTZ_GLOBAL_WORKERS=2`; other deployments default to one unless explicitly tuned, so excess alignments wait instead of competing without a bound.
-- LASTZ Blocks and MultiPIP share one General+CIGARX alignment for the same reference, loci, window, binary, and arguments. Changing the alignment window creates a new exact alignment instead of cropping a larger approximation.
-- The in-memory cache is bounded by both entry count and bytes. Successful alignments for preloaded genomes may also use the shared `cache/lastz_alignments` disk cache, bounded by size and TTL.
-- Uploaded/private genome paths are excluded from the persistent cache. Timeouts and engine errors are never cached.
-
-The main controls are `APP_LASTZ_CACHE_MAX_ENTRIES`, `APP_LASTZ_CACHE_MAX_MB`, `APP_LASTZ_DISK_CACHE_MAX_MB`, and `APP_LASTZ_DISK_CACHE_TTL_DAYS`.
-
-### Background interactive reports
-
-Web users can choose **Email me** in Share analysis or **Email full report**
-beside the Multi-Gene and Cross-Species LASTZ/MultiPIP controls. CGeV stores an
-immutable work-session snapshot in the shared cache, and the serial
-`background-report-worker` restores it in an internal Shiny session. Google
-Chrome headless drives the existing complete capture pipeline, so the emailed secret
-URL opens the same interactive, read-only report produced in the foreground.
-The user may continue working or close the original ShinyProxy session after
-the job is queued; later changes create a separate snapshot and do not alter the
-queued report. Background delivery initially accepts portable/preloaded data,
-not session-private uploads.
-
-<details>
-<summary><strong>First-time deployment checklist</strong></summary>
-
-1. clone the repository
-2. create `.env` from `.env.example`
-3. point the volume variables to your local dataset directories
-4. build and start with Docker Compose
-5. optionally prewarm cache/indexes for faster first use
-
-</details>
-
-## Minimal Reproducible Layout
+## Repository contents
 
 ```text
-.
-├── R/
-├── annotations/
-│   ├── README.md
-│   └── registry.tsv
-├── genomes/
-│   ├── README.md
-│   └── registry.tsv
-├── go_annotations/
-│   ├── README.md
-│   └── registry.tsv
-├── data/
-│   └── alias_index/
-├── scripts/
-├── www/
-├── Dockerfile
-├── docker-compose.yml
-├── global.R
-├── server.R
-└── ui.R
+R/                         Shiny modules and application helpers
+annotations/registry.tsv   versioned annotation dataset registry
+genomes/registry.tsv       versioned genome dataset registry
+go_annotations/            GO registry and reconstruction notes
+examples/manuscript-cases/ reviewer inputs and expected outputs
+scripts/                    validation, build, and maintenance scripts
+tests/                      automated regression tests
+desktop/                    Electron desktop wrapper and packaging
+global.R, ui.R, server.R    Shiny application entry points
 ```
 
-## Reproducibility Notes
+Large genomes, annotations, generated caches, local environment files,
+credentials, logs, and installers are excluded through `.gitignore` and
+`.dockerignore`. The repository contains lightweight registries and
+reconstruction instructions instead.
 
-- Production deployments mount large datasets as external volumes instead of baking them into the image.
-- `.dockerignore` excludes heavy biological directories from image builds.
-- Registry files document which organisms and resources are expected by the app.
-- Cache files can be precomputed, but they are generated artifacts and should not be committed.
+## Reproducibility and testing
+
+- Reviewer package: [examples/manuscript-cases](examples/manuscript-cases/README.md)
+- Data policy and provenance: [DATA_AVAILABILITY.md](DATA_AVAILABILITY.md)
+- Automated regression tests: `scripts/test_*.R`, `tests/testthat/`, and
+  `tests/js/`
+- Desktop tests: `npm --prefix desktop test`
+- Citation metadata: [CITATION.cff](CITATION.cff)
+
+Network-backed layers such as STRING, Europe PMC, and external alias services
+are optional and can change as their upstream databases evolve. The reviewer
+cases therefore define acceptance criteria around the fixed local assemblies,
+resolved gene models, and reproducibility metadata.
+
+## Data and privacy
+
+CGeV processes preloaded or user-supplied genome resources. Private uploads,
+runtime caches, exported reports, and local configuration are not committed to
+this repository. Desktop analyses remain local unless a user explicitly opens
+an external resource. Web deployments may configure external services; consult
+the deployment operator's policy before uploading unpublished data.
 
 ## Citation
 
-If you use CGeV in research, please cite the associated manuscript and the software release DOI once the archival record is published.
+The manuscript citation and archival DOI will be added when they are assigned.
+Until then, cite the repository version or commit used for the analysis. The
+machine-readable authorship and repository metadata are in [CITATION.cff](CITATION.cff).
 
-Planned repository metadata for publication:
+## License and contact
 
-- `CITATION.cff`
-- optional `.zenodo.json`
-- GitHub release tags linked to Zenodo
+CGeV is distributed under the [MIT License](LICENSE).
 
-Repository citation metadata is provided in [CITATION.cff](CITATION.cff).
-
-<details>
-<summary><strong>Planned citation workflow</strong></summary>
-
-- create a tagged GitHub release
-- let Zenodo archive that release automatically
-- cite the manuscript and the DOI corresponding to the archived release
-
-</details>
-
-## Availability
-
-- Source code: this repository
-- Web deployment: `https://cgv.mobilomics.org`
-- Release archive / DOI: Zenodo record to be added
-
-## License
-
-Distributed under the [MIT License](LICENSE).
-
-## Contact
-
-For questions about deployment, reproducibility, or scientific use, please open an issue in this repository once the public release is finalized.
+For reproducibility questions or software issues, use
+[GitHub Issues](https://github.com/raulrojas22/CGeV/issues). Software contact:
+`cgvviewer@gmail.com`.
