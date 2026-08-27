@@ -351,5 +351,7 @@ assert(!grepl("REPORT_FROM_EMAIL:", deploy, fixed = TRUE),
        "Public app sessions must not receive report sender configuration.")
 assert(!grepl("--tmpfs /var/run:", deploy, fixed = TRUE),
        "The nginx syntax check must mount /run, where nginx.pid is created.")
+assert(!grepl("'\\${APP_DIR}/shinyproxy/application.yml'", deploy, fixed = TRUE),
+       "Colors final guards must expand APP_DIR instead of sending it literally over SSH.")
 
 message("Colors ShinyProxy immutable-static deployment contract is guarded.")
