@@ -24,7 +24,7 @@ assert_true(
     identical(config$send_receipt, TRUE),
     "reporter confirmation defaults on for the verified CGeV sending domain"
 )
-config$public_url <- "https://cgv.mobilomics.org"
+config$public_url <- "https://cgev.mobilomics.org"
 config$backup_url <- "https://cgvapp.com"
 config$logo_path <- ""
 config$send_receipt <- TRUE
@@ -82,7 +82,7 @@ assert_true(
     "confirmation copy includes the branded receipt heading"
 )
 assert_true(
-    grepl("https://cgv.mobilomics.org", receipt_body$html, fixed = TRUE) &&
+    grepl("https://cgev.mobilomics.org", receipt_body$html, fixed = TRUE) &&
         grepl("https://cgvapp.com", receipt_body$html, fixed = TRUE),
     "confirmation identifies the official CGeV site and its backup"
 )

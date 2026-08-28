@@ -1325,6 +1325,7 @@ function(input, output, session) {
     }
     orthoRenderedPlotIds <- reactiveVal(character())
     orthoInsertedCardIds <- reactiveVal(character())
+    orthoHydratedIsoformIds <- reactiveVal(character())
     orthoFooterOutputsBound <- reactiveVal(character())
     orthoSecondaryBindingsQueued <- reactiveVal(character())
     orthoDownloadOutputsBound <- reactiveVal(character())
@@ -23072,7 +23073,7 @@ function(input, output, session) {
         as.character(isoform_ids %||% character(0))
     }
 
-    build_orthologous_plot_card_ui <- function(id_local, snapshots = NULL) {
+    build_orthologous_plot_card_ui <- function(id_local, snapshots = NULL, defer_isoform_body = FALSE) {
         id_chr <- as.character(id_local %||% "")
         if (!nzchar(id_chr)) return(NULL)
 
@@ -23094,10 +23095,28 @@ function(input, output, session) {
         chr_title  <- trimws(as.character(extract_title_field(titulo, "Chr") %||% ""))
         if (!nzchar(gene_title)) gene_title <- "Gene"
         if (!nzchar(tx_title))   tx_title   <- "N/A"
+        total_tx_card <- as.integer(gene_meta_card$total_transcripts %||% 1L)
+        if (!is.finite(total_tx_card) || total_tx_card < 1L) total_tx_card <- 1L
+        is_multi_tx <- total_tx_card > 1L
+        tx_group_key <- paste0("ortho--", gsub("[^A-Za-z0-9]", "_", gene_title),
+                               "--", gsub("[^A-Za-z0-9]", "_", org_name))
+        is_canonical_card <- isTRUE(gene_meta_card$is_canonical)
+        if (isTRUE(defer_isoform_body) && !is_canonical_card && is_multi_tx) {
+            return(div(
+                id = sprintf("ortho-card-%s", id_chr),
+                class = "card-isoform card-isoform-placeholder",
+                style = "display:none;",
+                `data-isoform-group` = tx_group_key,
+                `data-canonical` = "false",
+                `data-transcript-id` = tx_title,
+                `data-gene-name` = gene_title,
+                `data-organism-name` = org_name,
+                `aria-hidden` = "true"
+            ))
+        }
         gene_label  <- gene_title
         chr_map_ui  <- build_chr_schematic_ui(plot_data, ann_path, gene_label = gene_label)
         org_kingdom <- as.character(org_info$kingdom %||% "")
-        is_canonical_card <- isTRUE(gene_meta_card$is_canonical)
         alias_evidence_ui <- build_lookup_alias_evidence_ui(gene_meta_card, plot_id = id_chr, plot_context = "orthologous")
         db_links_ui <- build_db_links_ui(
             plot_data, gene_label, org_name,
@@ -23106,12 +23125,6 @@ function(input, output, session) {
             annotation_path = ann_path,
             prefix_ui = NULL
         )
-        total_tx_card     <- as.integer(gene_meta_card$total_transcripts %||% 1L)
-        if (!is.finite(total_tx_card) || total_tx_card < 1L) total_tx_card <- 1L
-        is_multi_tx  <- total_tx_card > 1L
-        tx_group_key <- paste0("ortho--", gsub("[^A-Za-z0-9]", "_", gene_title),
-                               "--", gsub("[^A-Za-z0-9]", "_", org_name))
-
         # ── Shared helper: compact transcript card header ───────────────────────
         make_tx_header_ortho <- function(badge_ui, bg_col = "#E7E7E8", fg_col = "black") {
             div(
@@ -23762,6 +23775,7 @@ function(input, output, session) {
             ),
             silent = TRUE
         )
+        orthoHydratedIsoformIds(character())
         shinyjs::runjs("if(window.scheduleGgiraphNudge){ window.scheduleGgiraphNudge(260); }")
         invisible(NULL)
     }
@@ -23865,7 +23879,16 @@ function(input, output, session) {
             }
         }
         expanded_ids <- unique(expanded_ids)
-        cards <- lapply(expanded_ids, function(id) build_orthologous_plot_card_ui(id, snapshots = card_snapshots_o))
+        initial_ids <- Filter(should_render_initial_ortho, ids_chr)
+        isoform_ids <- setdiff(expanded_ids, initial_ids)
+        MAX_UPFRONT_ISOFORMS <- max(0L, min(10L, parse_positive_int_env("APP_ORTHO_UPFRONT_ISOFORMS", 0L)))
+        upfront_isoform_ids <- head(isoform_ids, MAX_UPFRONT_ISOFORMS)
+        deferred_isoform_ids <- setdiff(isoform_ids, upfront_isoform_ids)
+        cards <- lapply(expanded_ids, function(id) build_orthologous_plot_card_ui(
+            id,
+            snapshots = card_snapshots_o,
+            defer_isoform_body = id %in% deferred_isoform_ids
+        ))
         cards <- Filter(Negate(is.null), cards)
         if (length(cards) == 0L) {
             return(invisible(NULL))
@@ -23876,10 +23899,6 @@ function(input, output, session) {
             ui = do.call(tagList, cards),
             immediate = TRUE
         )
-        initial_ids <- Filter(should_render_initial_ortho, ids_chr)
-        isoform_ids <- setdiff(expanded_ids, initial_ids)
-        MAX_UPFRONT_ISOFORMS <- max(0L, min(10L, parse_positive_int_env("APP_ORTHO_UPFRONT_ISOFORMS", 0L)))
-        upfront_isoform_ids <- head(isoform_ids, MAX_UPFRONT_ISOFORMS)
         instantiate_ids <- c(initial_ids, upfront_isoform_ids)
         invisible(lapply(instantiate_ids, instantiate_orthologous_plot_module))
         invisible(lapply(instantiate_ids, bind_orthologous_footer_output))
@@ -23966,6 +23985,21 @@ function(input, output, session) {
             return(invisible(NULL))
         }
         if (identical(ctx, "orthologous")) {
+            hydrated_ids <- isolate(as.character(orthoHydratedIsoformIds() %||% character(0)))
+            pending_hydration <- setdiff(ids_chr, hydrated_ids)
+            for (pid in pending_hydration) {
+                replacement <- build_orthologous_plot_card_ui(pid)
+                if (!is.null(replacement)) {
+                    replaceUI(
+                        selector = paste0("#ortho-card-", pid),
+                        ui = replacement,
+                        immediate = TRUE
+                    )
+                }
+            }
+            if (length(pending_hydration) > 0L) {
+                orthoHydratedIsoformIds(unique(c(hydrated_ids, pending_hydration)))
+            }
             expanded_iso_ids <- unique(c(ids_chr, unlist(lapply(ids_chr, function(id) {
                 meta <- tryCatch(plotGeneMetaOrthologous()[[id]], error = function(e) NULL)
                 total_tx <- suppressWarnings(as.integer(meta$total_transcripts %||% 1L))
@@ -23992,9 +24026,11 @@ function(input, output, session) {
                 tryCatch(handle$nudge_render(), error = function(e) NULL)
             }
         }
-        shinyjs::runjs(
-            "try{if(window.Shiny&&Shiny.bindAll){var cards=document.querySelectorAll('.plot-transcript-card.card-isoform'); for(var i=0;i<cards.length;i++){if(cards[i].style.display!=='none'){Shiny.bindAll(cards[i]);}}} if(window.scheduleGgiraphNudge){window.scheduleGgiraphNudge(250); window.scheduleGgiraphNudge(900);}}catch(e){}"
-        )
+        group_json <- jsonlite::toJSON(as.character(evt$group %||% ""), auto_unbox = TRUE)
+        shinyjs::runjs(sprintf(
+            "try{var group=%s;var cards=document.querySelectorAll('[data-isoform-group=\\\"'+group+'\\\"]');for(var i=0;i<cards.length;i++){cards[i].style.display='flex';cards[i].setAttribute('aria-hidden','false');if(window.Shiny&&Shiny.bindAll){Shiny.bindAll(cards[i]);}}if(window.scheduleGgiraphNudge){window.scheduleGgiraphNudge(250);window.scheduleGgiraphNudge(900);}}catch(e){}",
+            group_json
+        ))
         invisible(NULL)
     }, ignoreInit = TRUE)
 
@@ -24022,6 +24058,24 @@ function(input, output, session) {
         }
 
         if (is_ortho) {
+            hydrated_ids <- isolate(as.character(orthoHydratedIsoformIds() %||% character(0)))
+            pending_hydration <- setdiff(ids_chr, hydrated_ids)
+            for (pid in pending_hydration) {
+                meta <- tryCatch(isolate(plotGeneMetaOrthologous()[[pid]]), error = function(e) NULL)
+                if (!is.null(meta) && !isTRUE(meta$is_canonical)) {
+                    replacement <- build_orthologous_plot_card_ui(pid)
+                    if (!is.null(replacement)) {
+                        replaceUI(
+                            selector = paste0("#ortho-card-", pid),
+                            ui = replacement,
+                            immediate = TRUE
+                        )
+                    }
+                }
+            }
+            if (length(pending_hydration) > 0L) {
+                orthoHydratedIsoformIds(unique(c(hydrated_ids, pending_hydration)))
+            }
             invisible(lapply(ids_chr, instantiate_orthologous_plot_module))
             handles <- tryCatch(isolate(existingPlotsOrthologous()), error = function(e) list())
             card_prefix <- "ortho-card-"
@@ -36040,7 +36094,7 @@ function(input, output, session) {
                     notify_feedback(
                         paste(
                             "Your feedback was saved locally, but this Desktop build cannot send it yet.",
-                            "Please use Feedback at cgv.mobilomics.org",
+                            "Please use Feedback at cgev.mobilomics.org",
                             "(or cgvapp.com while the official server is unavailable),",
                             "or email cgvviewer@gmail.com."
                         ),

@@ -12,7 +12,7 @@
     "type": "git",
     "url": "https://github.com/raulrojas22/CGV"
   },
-  "homepage": "https://cgv.mobilomics.org",
+  "homepage": "https://cgev.mobilomics.org",
   "scripts": {
     "start": "electron .",
     "test": "node --test test/*.test.js",
