@@ -355,5 +355,7 @@ assert(!grepl("'\\${APP_DIR}/shinyproxy/application.yml'", deploy, fixed = TRUE)
        "Colors final guards must expand APP_DIR instead of sending it literally over SSH.")
 assert(!grepl("=\\${COLORS_", deploy, fixed = TRUE),
        "Colors final guards must compare expanded eager-profile values, not literal variable names.")
+assert(grepl("s|^        CGV_PUBLIC_BASE_URL:.*|        CGV_PUBLIC_BASE_URL:", deploy, fixed = TRUE),
+       "Colors deploy must migrate the server-owned public base URL to the configured hostname.")
 
 message("Colors ShinyProxy immutable-static deployment contract is guarded.")

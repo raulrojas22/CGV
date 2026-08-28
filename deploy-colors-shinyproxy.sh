@@ -559,13 +559,18 @@ rssh "set -e
   sed -i -E 's|^        APP_PERF_TIMING:.*|        APP_PERF_TIMING: \"${COLORS_PERF_TIMING}\"|' \"\$config\"
   sed -i -E 's|^        APP_PERF_RUN_LABEL:.*|        APP_PERF_RUN_LABEL: \"${PERF_RUN_LABEL}\"|' \"\$config\"
   sed -i -E 's|^        APP_BUILD_REVISION:.*|        APP_BUILD_REVISION: \"${NEW_IMAGE}\"|' \"\$config\"
+  if grep -q '^        CGV_PUBLIC_BASE_URL:' \"\$config\"; then
+    sed -i -E 's|^        CGV_PUBLIC_BASE_URL:.*|        CGV_PUBLIC_BASE_URL: \"https://${PUBLIC_HOSTNAME}\"|' \"\$config\"
+  else
+    sed -i '/APP_BUILD_REVISION:/a\        CGV_PUBLIC_BASE_URL: \"https://${PUBLIC_HOSTNAME}\"' \"\$config\"
+  fi
   grep -q 'APP_BACKGROUND_REPORTS_ENABLED: \"\${SP_BACKGROUND_REPORTS_ENABLED:1}\"' \"\$config\"
   grep -q 'APP_LASTZ_GLOBAL_WORKERS:' \"\$config\"
   test \"\$(grep -c '^        APP_PERF_TIMING: \"${COLORS_PERF_TIMING}\"$' \"\$config\")\" = 1
   grep -q 'APP_PERF_LOG_DIR: \"/app/cache/perf_runs\"' \"\$config\"
   grep -q 'APP_PERF_RUN_LABEL: \"${PERF_RUN_LABEL}\"' \"\$config\"
   grep -q 'APP_BUILD_REVISION: \"${NEW_IMAGE}\"' \"\$config\"
-  grep -q 'CGV_PUBLIC_BASE_URL: \"https://${PUBLIC_HOSTNAME}\"' \"\$config\"
+  test \"\$(grep -c '^        CGV_PUBLIC_BASE_URL: \"https://${PUBLIC_HOSTNAME}\"$' \"\$config\")\" = 1
   grep -Fq 'title: CGeV - Comparative Gene Viewer' \"\$config\"
   grep -Fq 'display-name: CGeV - Comparative Gene Viewer' \"\$config\"
 " || die "falló la preparación del application.yml server-owned"
