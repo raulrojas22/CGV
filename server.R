@@ -23103,7 +23103,7 @@ function(input, output, session) {
         is_canonical_card <- isTRUE(gene_meta_card$is_canonical)
         if (isTRUE(defer_isoform_body) && !is_canonical_card && is_multi_tx) {
             return(div(
-                id = sprintf("ortho-card-%s", id_chr),
+                id = sprintf("ortho-placeholder-%s", id_chr),
                 class = "card-isoform card-isoform-placeholder",
                 style = "display:none;",
                 `data-isoform-group` = tx_group_key,
@@ -23990,11 +23990,14 @@ function(input, output, session) {
             for (pid in pending_hydration) {
                 replacement <- build_orthologous_plot_card_ui(pid)
                 if (!is.null(replacement)) {
-                    replaceUI(
-                        selector = paste0("#ortho-card-", pid),
+                    placeholder_selector <- paste0("#ortho-placeholder-", pid)
+                    insertUI(
+                        selector = placeholder_selector,
+                        where = "beforeBegin",
                         ui = replacement,
                         immediate = TRUE
                     )
+                    removeUI(selector = placeholder_selector, immediate = TRUE)
                 }
             }
             if (length(pending_hydration) > 0L) {
@@ -24065,11 +24068,14 @@ function(input, output, session) {
                 if (!is.null(meta) && !isTRUE(meta$is_canonical)) {
                     replacement <- build_orthologous_plot_card_ui(pid)
                     if (!is.null(replacement)) {
-                        replaceUI(
-                            selector = paste0("#ortho-card-", pid),
+                        placeholder_selector <- paste0("#ortho-placeholder-", pid)
+                        insertUI(
+                            selector = placeholder_selector,
+                            where = "beforeBegin",
                             ui = replacement,
                             immediate = TRUE
                         )
+                        removeUI(selector = placeholder_selector, immediate = TRUE)
                     }
                 }
             }
