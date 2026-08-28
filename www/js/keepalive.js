@@ -302,6 +302,29 @@
   // groupKey: data-isoform-group value shared by all isoform cards for that gene
   // data-count on btn: TOTAL transcript count (canonical + isoforms)
   // ---------------------------------------------------------------------------
+  function syncIsoformToggleButtons() {
+    var buttons = document.querySelectorAll('.isoform-toggle-btn[data-group]');
+    for (var i = 0; i < buttons.length; i++) {
+      var btn = buttons[i];
+      var groupKey = btn.dataset.group || '';
+      if (!groupKey) continue;
+      var cards = document.querySelectorAll('[data-isoform-group="' + groupKey + '"]');
+      if (!cards.length) continue;
+      var expanded = false;
+      for (var j = 0; j < cards.length; j++) {
+        if (cards[j].style.display !== 'none' && cards[j].style.display !== '') {
+          expanded = true;
+          break;
+        }
+      }
+      var count = parseInt(btn.dataset.count || '0', 10);
+      if (!isFinite(count)) count = cards.length;
+      var label = count === 1 ? 'transcript' : 'transcripts';
+      btn.innerHTML = (expanded ? '&#x25B2; ' : '&#x25BC; ') + count + ' ' + label;
+    }
+  }
+  window.syncIsoformToggleButtons = syncIsoformToggleButtons;
+
   window.toggleIsoformCards = function (btn, groupKey) {
     if (!groupKey) return;
     // Selects only the isoform cards (canonical card does NOT have data-isoform-group)
@@ -355,6 +378,7 @@
     } else {
       btn.innerHTML = '&#x25BC; ' + count + ' ' + label;
     }
+    syncIsoformToggleButtons();
   };
   var _girafe_repair_timers = Object.create(null);
   function scheduleGirafeRepair(delayMs, rootEl) {
@@ -635,6 +659,7 @@
    */
   var _girafe_nudge_timer = null;
   document.addEventListener('shiny:value', function (e) {
+    syncIsoformToggleButtons();
     var name = (e && e.name) ? String(e.name) : '';
     if (!name) return;
     if (

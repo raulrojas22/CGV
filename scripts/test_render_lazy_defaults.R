@@ -49,6 +49,11 @@ expect_pattern(
     "orthologous placeholder IDs are normalized before the expand request"
 )
 expect_pattern(
+    keepalive_txt,
+    'function syncIsoformToggleButtons\\(\\)[\\s\\S]*document.addEventListener\\(\'shiny:value\'[\\s\\S]*syncIsoformToggleButtons\\(\\)',
+    "isoform toggle labels resync after Shiny replaces a footer"
+)
+expect_pattern(
     server_txt,
     'orthoHydratedIsoformIds\\(character\\(\\)\\)',
     "orthologous lazy hydration state resets when cards are cleared"
