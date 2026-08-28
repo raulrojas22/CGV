@@ -34,13 +34,19 @@ expect_pattern(
 )
 expect_pattern(
     server_txt,
-    'pending_hydration <- setdiff\\(ids_chr, hydrated_ids\\)[\\s\\S]*replaceUI\\(',
+    'pending_hydration <- setdiff\\(ids_chr, hydrated_ids\\)[\\s\\S]*insertUI\\([\\s\\S]*removeUI\\(',
     "orthologous isoform bodies hydrate on the first expand request"
 )
 expect_pattern(
     server_txt,
     'figure_studio_plot_render_request[\\s\\S]*pending_hydration <- setdiff\\(ids_chr, hydrated_ids\\)[\\s\\S]*instantiate_orthologous_plot_module',
     "Figure Studio hydrates an orthologous isoform body before background rendering"
+)
+keepalive_txt <- paste(readLines(file.path("www", "js", "keepalive.js"), warn = FALSE), collapse = "\n")
+expect_pattern(
+    keepalive_txt,
+    'replace\\(\\/\\^ortho-placeholder-\\/[^;]*\\)',
+    "orthologous placeholder IDs are normalized before the expand request"
 )
 expect_pattern(
     server_txt,

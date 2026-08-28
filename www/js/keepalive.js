@@ -320,7 +320,7 @@
           var ids = [];
           for (var k = 0; k < cards.length; k++) {
             var rawId = cards[k].id || '';
-            rawId = rawId.replace(/^homo-card-/, '').replace(/^ortho-card-/, '');
+            rawId = rawId.replace(/^homo-card-/, '').replace(/^ortho-card-/, '').replace(/^ortho-placeholder-/, '');
             if (rawId) ids.push(rawId);
           }
           Shiny.setInputValue('isoform_expand_request', {
