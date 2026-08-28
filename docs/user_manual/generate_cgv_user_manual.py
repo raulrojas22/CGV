@@ -385,7 +385,7 @@ def draw_cover(canvas, doc):
     canvas.setFont(FONT, 8.6)
     canvas.drawString(27 * mm, 33 * mm, MANUAL_VERSION)
     canvas.drawString(77 * mm, 33 * mm, REVISION_DISPLAY)
-    canvas.drawString(133 * mm, 33 * mm, "cgv.mobilomics.org")
+    canvas.drawString(133 * mm, 33 * mm, "cgev.mobilomics.org")
     canvas.restoreState()
 
 

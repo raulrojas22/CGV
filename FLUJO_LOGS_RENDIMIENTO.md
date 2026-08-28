@@ -57,7 +57,7 @@ Colors conserva su configuración endurecida de ShinyProxy en el servidor. El
 modo normal deja la telemetría desactivada; `COLORS_PERF_TIMING=1` habilita esta
 captura de forma explícita y propaga la etiqueta y la identificación de la
 imagen a las sesiones nuevas. Después se realiza el recorrido manual en
-`cgv.mobilomics.org`. `./deploy-colors-shinyproxy.sh --check` muestra el valor
+`cgev.mobilomics.org`. `./deploy-colors-shinyproxy.sh --check` muestra el valor
 efectivo como `perf=0` o `perf=1`.
 
 Los archivos quedan en Colors:

@@ -3,7 +3,7 @@
 Producción está publicada en:
 
 ```text
-https://cgv.mobilomics.org
+https://cgev.mobilomics.org
   -> 127.0.0.1:3838
   -> nginx sin privilegios
   -> ShinyProxy 3.2.4
@@ -167,7 +167,7 @@ REBUILD_R_DEPS=1 ./deploy-colors-shinyproxy.sh
 
 Al escoger **Email me**, la sesión guarda un snapshot inmutable en el caché de
 Colors. El worker restaura ese snapshot, genera el mismo reporte interactivo y
-envía el enlace bajo `https://cgv.mobilomics.org/share/...` usando la
+envía el enlace bajo `https://cgev.mobilomics.org/share/...` usando la
 configuración existente de feedback. El usuario puede continuar trabajando o
 cerrar la sesión; otro alineamiento crea un trabajo separado.
 

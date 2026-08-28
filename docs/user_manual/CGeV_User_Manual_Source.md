@@ -1806,7 +1806,7 @@ submission reference is sent to the reporter; failure of that copy does not
 discard feedback already delivered to the CGeV inbox.
 
 If Desktop reports that the message was saved locally but cannot be sent, use
-the Feedback page at `cgv.mobilomics.org`, use `cgvapp.com` while the official
+the Feedback page at `cgev.mobilomics.org`, use `cgvapp.com` while the official
 server is unavailable, or email `cgvviewer@gmail.com`. Repeated or duplicate
 submissions can be temporarily rate-limited; follow the notification message
 before retrying.
@@ -1994,7 +1994,7 @@ Fallback logic supports several transcript and non-coding RNA feature names, but
 
 **Manual revision:** {{REVISION_DISPLAY}}
 
-**Primary application:** https://cgv.mobilomics.org
+**Primary application:** https://cgev.mobilomics.org
 
 **Source repository:** https://github.com/raulrojas22/CGV
 

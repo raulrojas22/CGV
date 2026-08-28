@@ -2,7 +2,7 @@
 set -euo pipefail
 
 TARGET="${TARGET:-colors}"
-URL="${URL:-https://cgv.mobilomics.org}"
+URL="${URL:-https://cgev.mobilomics.org}"
 N="${N:-5}"
 INTERVAL="${INTERVAL:-5}"
 DURATION="${DURATION:-300}"
@@ -23,7 +23,7 @@ Examples:
 
 Env overrides:
   TARGET=colors
-  URL=https://cgv.mobilomics.org
+  URL=https://cgev.mobilomics.org
   BROWSER_APP="Google Chrome"
 EOF
 }

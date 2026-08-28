@@ -73,7 +73,7 @@ for (const [dependency, version] of Object.entries(expectedVersions)) {
 if (packageJson.repository?.url !== "https://github.com/raulrojas22/CGV") {
   throw new Error("Desktop source metadata must continue to point to the public CGV source repository.");
 }
-if (packageJson.homepage !== "https://cgv.mobilomics.org") {
+if (packageJson.homepage !== "https://cgev.mobilomics.org") {
   throw new Error("Desktop homepage metadata must point to the official CGV Web deployment.");
 }
 if (

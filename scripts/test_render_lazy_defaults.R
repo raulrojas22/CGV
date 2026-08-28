@@ -23,6 +23,31 @@ expect_pattern(
     "orthologous hidden isoforms are not instantiated upfront by default"
 )
 expect_pattern(
+    server_txt,
+    'class = "card-isoform card-isoform-placeholder"',
+    "orthologous isoforms use lightweight DOM placeholders before expansion"
+)
+expect_pattern(
+    server_txt,
+    'defer_isoform_body = id %in% deferred_isoform_ids',
+    "orthologous card insertion defers non-visible isoform bodies"
+)
+expect_pattern(
+    server_txt,
+    'pending_hydration <- setdiff\\(ids_chr, hydrated_ids\\)[\\s\\S]*replaceUI\\(',
+    "orthologous isoform bodies hydrate on the first expand request"
+)
+expect_pattern(
+    server_txt,
+    'figure_studio_plot_render_request[\\s\\S]*pending_hydration <- setdiff\\(ids_chr, hydrated_ids\\)[\\s\\S]*instantiate_orthologous_plot_module',
+    "Figure Studio hydrates an orthologous isoform body before background rendering"
+)
+expect_pattern(
+    server_txt,
+    'orthoHydratedIsoformIds\\(character\\(\\)\\)',
+    "orthologous lazy hydration state resets when cards are cleared"
+)
+expect_pattern(
     modules_txt,
     'APP_ORTHO_SUSPEND_HIDDEN",\\s*"1"',
     "orthologous girafe outputs suspend while hidden by default"

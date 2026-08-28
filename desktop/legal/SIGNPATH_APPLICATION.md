@@ -19,13 +19,13 @@ This document is the prepared application packet for CGeV Desktop. Do not submit
 
 - **Project Name:** CGeV — Comparative Gene Viewer
 - **Repository URL:** https://github.com/raulrojas22/CGV
-- **Homepage URL:** https://cgv.mobilomics.org
+- **Homepage URL:** https://cgev.mobilomics.org
 - **Download URL:** https://github.com/raulrojas22/CGV-Desktop-Releases
 - **Privacy Policy URL:** https://github.com/raulrojas22/CGV-Desktop-Releases/blob/master/PRIVACY.md
 - **Wikipedia URL:** leave empty
 - **Tagline:** A guided, gene-first workspace for comparing gene structures, transcripts, alignments, and genomic context across species.
 - **Description:** Comparative Gene Viewer is an open-source bioinformatics application for interactive gene-structure analysis within and across species. Its web and desktop interfaces combine gene discovery, transcript comparison, cross-species alignments, genomic context, analytics, and publication-ready exports in one guided workspace. CGeV Desktop runs the analysis service locally and stores reference datasets and user work on the user's computer.
-- **Reputation:** CGeV operates as a public web application at https://cgv.mobilomics.org, publishes its MIT-licensed source and versioned releases on GitHub, and provides its curated CGeV Desktop organism dataset collection through Zenodo at https://zenodo.org/records/20453645. The project is maintained by Raúl Rojas-Espinoza at Universidad de Talca for research and education in comparative genomics.
+- **Reputation:** CGeV operates as a public web application at https://cgev.mobilomics.org, publishes its MIT-licensed source and versioned releases on GitHub, and provides its curated CGeV Desktop organism dataset collection through Zenodo at https://zenodo.org/records/20453645. The project is maintained by Raúl Rojas-Espinoza at Universidad de Talca for research and education in comparative genomics.
 - **Maintainer Type:** select the closest available option to individual academic/open-source maintainer.
 - **Build System:** GitHub Actions
 - **First Name:** Raúl

@@ -25,7 +25,7 @@ cgv_desktop_downloads_page <- function() {
     id = "cgv-desktop-downloads-page",
     class = "content-wrapper app-main-pane cgv-download-page",
     `data-cgv-runtime` = "web",
-    `data-cgv-web-url` = "https://cgv.mobilomics.org",
+    `data-cgv-web-url` = "https://cgev.mobilomics.org",
     section(
       class = "cgv-download-hero",
       div(class = "cgv-download-hero-glow cgv-download-hero-glow-one", `aria-hidden` = "true"),
@@ -453,7 +453,7 @@ cgv_desktop_downloads_page <- function() {
       ),
       tags$a(
         class = "cgv-download-button cgv-download-button-secondary",
-        href = "https://cgv.mobilomics.org",
+        href = "https://cgev.mobilomics.org",
         target = "_blank",
         rel = "noopener noreferrer",
         tags$i(class = "fas fa-arrow-up-right-from-square"),

@@ -12,7 +12,7 @@
       company-name="Raul Rojas">
       <authenticode-sign
         description="CGeV Desktop"
-        description-url="https://cgv.mobilomics.org" />
+        description-url="https://cgev.mobilomics.org" />
     </pe-file>
   </zip-file>
 </artifact-configuration>
