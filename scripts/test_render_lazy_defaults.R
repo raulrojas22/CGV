@@ -39,6 +39,11 @@ expect_pattern(
 )
 expect_pattern(
     server_txt,
+    'requested_primary_ids <- ids_chr[\\s\\S]*groups_snap <- isolate\\(homoMultiTranscriptGeneGroups\\(\\)\\)[\\s\\S]*matched_group\\[\\[1L\\]\\]\\$ids',
+    "visible canonical genes retain every hidden transcript card for on-demand expansion"
+)
+expect_pattern(
+    server_txt,
     'output\\$homo_load_more_banner <- renderUI\\([\\s\\S]*ids <- primaryPlotIdsHomologous\\(\\)',
     "Multi-Gene progress counts canonical gene cards only"
 )
