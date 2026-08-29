@@ -185,6 +185,13 @@ app_env_flag <- function(name, default = FALSE) {
     !raw %in% c("", "0", "false", "no", "off")
 }
 
+# Gene Catalog is intentionally kept as a future-release feature. The code may
+# ship with the application, but no UI, browser handlers, or server observers are
+# registered unless the release explicitly opts in.
+gene_catalog_enabled <- function() {
+    app_env_flag("APP_GENE_CATALOG_ENABLED", default = FALSE)
+}
+
 cross_species_requires_verified_orthology <- function() {
     app_env_flag("APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY", FALSE)
 }

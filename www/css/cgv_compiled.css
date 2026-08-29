@@ -13525,6 +13525,271 @@ html[data-app-theme="dark"] .metrics-popup-close:hover {
   }
 }
 
+.gene-catalog-summary-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(110px, 1fr));
+  gap: 1px;
+  margin: 2px 0 14px;
+  overflow: hidden;
+  border: 1px solid var(--app-panel-border, #dbe5e8);
+  border-radius: 12px;
+  background: var(--app-panel-border, #dbe5e8);
+}
+.gene-catalog-summary-item {
+  display: flex;
+  min-height: 62px;
+  padding: 11px 14px;
+  flex-direction: column;
+  justify-content: center;
+  background: var(--app-panel-bg, #fff);
+  color: var(--app-muted-color, #627786);
+  font-size: 11px;
+}
+.gene-catalog-summary-item--shown { background: rgba(24, 188, 156, .075); }
+.gene-catalog-summary-value {
+  color: var(--app-text-color, #243746);
+  font-size: 20px;
+  font-weight: 780;
+  line-height: 1.05;
+}
+.gene-catalog-filterbar {
+  display: flex;
+  align-items: flex-end;
+  gap: 9px;
+  padding: 11px;
+  margin-bottom: 10px;
+  border: 1px solid var(--app-panel-border, #dbe5e8);
+  border-radius: 12px;
+  background: rgba(238, 244, 248, .5);
+}
+.gene-catalog-filterbar .form-group { min-width: 150px; margin: 0; }
+.gene-catalog-filterbar .control-label {
+  margin-bottom: 4px;
+  color: var(--app-muted-color, #627786);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .055em;
+  text-transform: uppercase;
+}
+.gene-catalog-filterbar .form-control,
+.gene-catalog-filterbar .selectize-input {
+  min-height: 34px;
+  border-color: rgba(58, 95, 116, .2);
+  border-radius: 8px;
+  box-shadow: none;
+  font-size: 12px;
+}
+.gene-catalog-filterbar .checkbox {
+  margin: 0 0 7px auto;
+  color: var(--app-text-color, #243746);
+  font-size: 12px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+.gene-catalog-table thead th {
+  padding: 11px 10px !important;
+  border-bottom: 1px solid var(--app-panel-border, #dbe5e8) !important;
+  background: rgba(238, 244, 248, .62);
+  color: var(--app-muted-color, #627786);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .055em;
+  text-transform: uppercase;
+}
+.gene-catalog-table tbody td {
+  padding: 11px 10px !important;
+  border-bottom: 1px solid rgba(219, 229, 232, .72) !important;
+  vertical-align: middle;
+}
+.gene-catalog-table tbody tr {
+  background: transparent !important;
+  transition: background .14s ease, box-shadow .14s ease;
+}
+.gene-catalog-table tbody tr:hover { background: rgba(24, 188, 156, .045) !important; }
+.gene-catalog-table tbody tr.selected {
+  background: rgba(24, 188, 156, .11) !important;
+  box-shadow: inset 3px 0 #18bc9c;
+}
+.catalog-organism-cell,
+.catalog-gene-cell,
+.catalog-term-cell,
+.catalog-source-cell { display: flex; min-width: 0; }
+.catalog-organism-cell { align-items: center; gap: 10px; }
+.catalog-organism-cell > span:last-child,
+.catalog-gene-cell,
+.catalog-term-cell,
+.catalog-source-cell { display: flex; flex-direction: column; }
+.catalog-organism-icon {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 34px;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid rgba(58, 95, 116, .16);
+  border-radius: 10px;
+  background: #f2f7f8;
+}
+.catalog-organism-icon img { width: 29px; height: 29px; object-fit: contain; }
+.catalog-organism-cell strong,
+.catalog-gene-cell strong,
+.catalog-term-cell strong,
+.catalog-source-cell strong {
+  overflow: hidden;
+  color: var(--app-text-color, #243746);
+  font-size: 12px;
+  font-weight: 720;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.catalog-organism-cell small,
+.catalog-gene-cell small,
+.catalog-term-cell small,
+.catalog-source-cell small {
+  overflow: hidden;
+  margin-top: 3px;
+  color: var(--app-muted-color, #718591);
+  font-size: 10px;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.catalog-badge,
+.catalog-confidence {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 750;
+  white-space: nowrap;
+}
+.catalog-badge { padding: 5px 8px; border: 1px solid transparent; }
+.catalog-badge--exact {
+  border-color: rgba(24, 188, 156, .34);
+  background: rgba(24, 188, 156, .11);
+  color: #117b6c;
+}
+.catalog-badge--normalized_basic,
+.catalog-badge--normalized_strict {
+  border-color: rgba(52, 120, 246, .25);
+  background: rgba(52, 120, 246, .09);
+  color: #2d67c7;
+}
+.catalog-badge--prefix {
+  border-color: rgba(226, 156, 38, .3);
+  background: rgba(245, 174, 49, .11);
+  color: #9a6410;
+}
+.catalog-badge--contains {
+  border-color: rgba(126, 91, 194, .25);
+  background: rgba(126, 91, 194, .09);
+  color: #6e4dad;
+}
+.catalog-confidence { gap: 6px; color: var(--app-muted-color, #627786); }
+.catalog-confidence-heading { display: inline-flex; align-items: center; gap: 6px; }
+.catalog-column-help {
+  position: relative;
+  display: inline-grid;
+  width: 16px;
+  height: 16px;
+  place-items: center;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  font-size: 9px;
+  line-height: 1;
+  opacity: .78;
+  cursor: help;
+}
+.catalog-confidence i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #9aa9b2;
+  box-shadow: 0 0 0 3px rgba(154, 169, 178, .12);
+}
+.catalog-confidence--high i { background: #18a781; box-shadow: 0 0 0 3px rgba(24, 167, 129, .13); }
+.catalog-confidence--medium i { background: #e4a126; box-shadow: 0 0 0 3px rgba(228, 161, 38, .13); }
+.catalog-confidence--low i { background: #9aa9b2; }
+.catalog-description {
+  display: block;
+  max-width: 330px;
+  overflow: hidden;
+  color: var(--app-text-color, #405564);
+  font-size: 11px;
+  line-height: 1.42;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gene-catalog-results-card .catalog-table-top,
+.gene-catalog-results-card .catalog-table-bottom {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--app-muted-color, #627786);
+  font-size: 11px;
+}
+.gene-catalog-results-card .catalog-table-top { margin: 3px 0 9px; }
+.gene-catalog-results-card .catalog-table-bottom { margin-top: 11px; }
+.gene-catalog-results-card .dataTables_filter input,
+.gene-catalog-results-card .dataTables_length select {
+  min-height: 31px;
+  border: 1px solid rgba(58, 95, 116, .2);
+  border-radius: 8px;
+  background: var(--app-panel-bg, #fff);
+  color: var(--app-text-color, #243746);
+}
+.catalog-floating-tooltip { position: fixed; z-index: 10050; width: 310px; max-width: calc(100vw - 24px); padding: 10px 12px; border-radius: 9px; background: #243746; box-shadow: 0 10px 28px rgba(24, 42, 58, .24); color: #fff; font-size: 11px; font-weight: 500; line-height: 1.45; pointer-events: none; }
+.catalog-row-action {
+  min-height: 30px;
+  padding: 5px 8px;
+  border: 1px solid rgba(58, 95, 116, .2);
+  border-radius: 8px;
+  background: var(--app-panel-bg, #fff);
+  color: var(--app-text-color, #405564);
+  font-size: 10px;
+  font-weight: 720;
+  white-space: nowrap;
+}
+.catalog-row-action:hover,
+.catalog-row-action:focus-visible { border-color: #18bc9c; color: #117b6c; outline: none; }
+.catalog-selection-bar {
+  display: flex;
+  min-height: 46px;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 11px;
+  margin-bottom: 10px;
+  border: 1px solid var(--app-panel-border, #dbe5e8);
+  border-radius: 11px;
+  background: rgba(24, 188, 156, .045);
+}
+.catalog-selection-bar.is-empty { color: var(--app-muted-color, #627786); font-size: 11px; }
+.catalog-selection-copy { display: flex; margin-right: auto; flex-direction: column; color: var(--app-muted-color, #627786); font-size: 10px; }
+.catalog-selection-copy strong { color: var(--app-text-color, #243746); font-size: 12px; }
+.catalog-cross-action { border-color: rgba(24, 188, 156, .3); background: rgba(24, 188, 156, .1); color: #117b6c; }
+.catalog-cross-action.disabled { opacity: .48; }
+.catalog-selection-note { max-width: 310px; color: var(--app-muted-color, #627786); font-size: 10px; }
+.catalog-selection-note.is-warning { color: #9a6410; }
+
+html[data-app-theme="dark"] .gene-catalog-filterbar,
+html[data-app-theme="dark"] .gene-catalog-table thead th { background: rgba(255, 255, 255, .035); }
+html[data-app-theme="dark"] .catalog-organism-icon { background: rgba(255, 255, 255, .06); }
+html[data-app-theme="dark"] .catalog-badge--exact { color: #72dac5; }
+html[data-app-theme="dark"] .catalog-badge--normalized_basic,
+html[data-app-theme="dark"] .catalog-badge--normalized_strict { color: #8bb2ff; }
+html[data-app-theme="dark"] .catalog-badge--prefix { color: #f0bd65; }
+html[data-app-theme="dark"] .catalog-badge--contains { color: #c4a8fa; }
+@media (max-width: 900px) {
+  .gene-catalog-summary-strip { grid-template-columns: repeat(2, minmax(120px, 1fr)); }
+  .gene-catalog-filterbar { align-items: stretch; flex-wrap: wrap; }
+  .gene-catalog-filterbar .form-group { flex: 1 1 145px; }
+  .gene-catalog-filterbar .checkbox { width: 100%; margin: 3px 0 0; }
+}
+
+
 html[data-colorblind-mode="true"][data-app-theme="dark"] {
   /* Focus states in dark mode */
 }
@@ -22955,5 +23220,172 @@ html[data-app-theme="dark"] .result-workspace-table-body {
   }
   .result-workspace-view-back {
     justify-self: start;
+  }
+}
+
+.app-catalog-open-link {
+  width: 100%;
+  margin-top: 2px;
+  padding: 7px 8px;
+  border: 1px solid rgba(24, 188, 156, 0.28);
+  border-radius: 9px;
+  background: rgba(24, 188, 156, 0.08);
+  color: #177f73;
+  font-size: 11px;
+  font-weight: 700;
+  text-align: left;
+  transition: background .15s ease, border-color .15s ease, color .15s ease;
+}
+
+.app-catalog-open-link:hover,
+.app-catalog-open-link:focus-visible {
+  background: rgba(24, 188, 156, 0.16);
+  border-color: rgba(24, 188, 156, 0.56);
+  color: #12675d;
+  outline: none;
+}
+
+.gene-catalog-pane {
+  padding: clamp(18px, 2.4vw, 32px);
+}
+
+.gene-catalog-shell {
+  max-width: 1500px;
+  margin: 0 auto;
+}
+
+.gene-catalog-hero,
+.gene-catalog-results-card {
+  border: 1px solid var(--app-panel-border, #dbe5e8);
+  border-radius: 18px;
+  background: var(--app-panel-bg, #fff);
+  box-shadow: 0 14px 34px rgba(24, 42, 58, 0.07);
+}
+
+.gene-catalog-hero {
+  padding: clamp(20px, 2.8vw, 32px);
+  background: linear-gradient(135deg, rgba(24, 188, 156, 0.13), rgba(48, 104, 160, 0.055) 58%, transparent 78%), var(--app-panel-bg, #fff);
+}
+
+.gene-catalog-kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 8px;
+  color: #177f73;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .075em;
+  text-transform: uppercase;
+}
+
+.gene-catalog-heading h2 {
+  margin: 0;
+  color: var(--app-text-color, #243746);
+  font-size: clamp(26px, 3vw, 36px);
+  font-weight: 760;
+  letter-spacing: -.035em;
+}
+
+.gene-catalog-heading p {
+  max-width: 720px;
+  margin: 8px 0 0;
+  color: var(--app-muted-color, #627786);
+  font-size: 14px;
+}
+
+.gene-catalog-search-row {
+  display: flex;
+  gap: 10px;
+  align-items: flex-end;
+  max-width: 820px;
+  margin-top: 22px;
+}
+
+.gene-catalog-search-row .form-group {
+  flex: 1 1 auto;
+  margin: 0;
+}
+
+.gene-catalog-search-row .form-control {
+  height: 43px;
+  border-color: rgba(58, 95, 116, 0.28);
+  border-radius: 10px;
+  box-shadow: none;
+}
+
+.gene-catalog-search-row .form-control:focus {
+  border-color: #18bc9c;
+  box-shadow: 0 0 0 3px rgba(24, 188, 156, 0.14);
+}
+
+.gene-catalog-search-btn {
+  min-height: 43px;
+  border-radius: 10px;
+  white-space: nowrap;
+}
+
+.gene-catalog-meta {
+  min-height: 19px;
+  margin-top: 12px;
+  color: var(--app-muted-color, #627786);
+  font-size: 12px;
+}
+
+.gene-catalog-results-card {
+  margin-top: 16px;
+  padding: 16px;
+}
+
+.gene-catalog-results-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.gene-catalog-results-toolbar > div {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 8px;
+  color: var(--app-muted-color, #627786);
+  font-size: 12px;
+}
+
+.gene-catalog-results-toolbar strong {
+  color: var(--app-text-color, #243746);
+  font-size: 16px;
+}
+
+.gene-catalog-results-card .dataTables_wrapper {
+  font-size: 12px;
+}
+
+html[data-app-theme="dark"] .gene-catalog-hero,
+html[data-app-theme="dark"] .gene-catalog-results-card {
+  box-shadow: none;
+}
+
+html[data-app-theme="dark"] .app-catalog-open-link {
+  color: #78dcc9;
+  background: rgba(24, 188, 156, 0.12);
+}
+
+@media (max-width: 720px) {
+  .gene-catalog-pane {
+    padding: 10px;
+  }
+  .gene-catalog-search-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .gene-catalog-search-btn {
+    width: 100%;
+  }
+  .gene-catalog-results-toolbar {
+    align-items: flex-start;
+    flex-direction: column;
   }
 }
