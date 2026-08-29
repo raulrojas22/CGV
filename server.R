@@ -985,6 +985,13 @@ function(input, output, session) {
         get_preloaded_species_registry(registry_path = file.path("annotations", "registry.tsv"), base_dir = "."),
         error = function(e) data.frame()
     ))
+    catalogFeatureEnabled <-
+        exists("gene_catalog_enabled", mode = "function") &&
+        isTRUE(gene_catalog_enabled())
+    catalogSearchResults <- if (catalogFeatureEnabled) reactiveVal(if (exists("empty_alias_catalog_results", mode = "function")) empty_alias_catalog_results() else data.frame()) else NULL
+    catalogSearchStatus <- if (catalogFeatureEnabled) reactiveVal("Enter at least 3 characters to search every installed organism index.") else NULL
+    catalogSearchLastTerm <- if (catalogFeatureEnabled) reactiveVal("") else NULL
+    catalogSearchEpoch <- if (catalogFeatureEnabled) reactiveVal(0L) else NULL
     # These are intentionally non-reactive state cells: autocomplete updates can be frequent
     # and should not invalidate unrelated Shiny reactives or trigger broad UI rerenders.
     geneAutocompleteCache <- make_state_cell(list())
@@ -1257,10 +1264,9 @@ function(input, output, session) {
         ready <- as.character(orthoRenderedPlotIds() %||% character(0))
         all(ids %in% ready)
     })
-    # Register every normal primary card together. The progressive one-card-first
-    # profile remains available as an explicit environment override, but it is
-    # not the production default because it adds a browser-paint gate and a
-    # second reactive render wave after the search has already finished.
+    # Register every normal primary card together. The eager default of 64 covers
+    # normal organism selections, while the larger safety cap protects a session
+    # from an accidentally unbounded environment override.
     eagerCardRegistrationDefault <- 64L
     eagerCardRegistrationSafetyCap <- 256L
     homoRenderChunkSize <- eagerCardRegistrationDefault
@@ -1294,7 +1300,8 @@ function(input, output, session) {
             parse_positive_int_env("APP_ORTHO_INITIAL_VISIBLE", eagerCardRegistrationDefault)
         )
     )
-    # When explicitly enabled, progressive rendering still starts with one card.
+    # One-card-first rendering remains available as an explicit opt-in. With the
+    # default AUTO_RENDER_MORE=0 all selected primary cards register together.
     orthoInitialVisibleCount <- if (isTRUE(orthoAutoRenderMore)) 1L else configuredOrthoInitialVisibleCount
     orthoAutoRenderDelay <- {
         raw <- suppressWarnings(as.numeric(Sys.getenv("APP_ORTHO_AUTO_RENDER_DELAY_MS", "0")))
@@ -7461,7 +7468,7 @@ function(input, output, session) {
     }
 
     should_suspend_hidden_ortho_outputs <- function() {
-        raw <- tolower(trimws(as.character(Sys.getenv("APP_ORTHO_SUSPEND_HIDDEN", "0") %||% "0")))
+        raw <- tolower(trimws(as.character(Sys.getenv("APP_ORTHO_SUSPEND_HIDDEN", "1") %||% "1")))
         !raw %in% c("", "0", "false", "no", "off")
     }
 
@@ -10248,6 +10255,13 @@ function(input, output, session) {
         if (length(ids) == 0L) {
             return(character(0))
         }
+        current_mode <- tolower(trimws(as.character(input$ortho_visual_mode %||% "compact")))
+        if (!identical(current_mode, "aligned")) {
+            # Representative selection is only consumed by Alignment.  Keep the
+            # hidden shell cheap; switching modes invalidates this reactive and
+            # runs the exact same selection algorithm on demand.
+            return(ids)
+        }
 
         titles_map <- tryCatch(titlesOrthologous(), error = function(e) list())
         org_map <- tryCatch(organismInfoOrthologous(), error = function(e) list())
@@ -10869,6 +10883,12 @@ function(input, output, session) {
 	        if (length(ids) <= 1L) {
 	            return(ids)
 	        }
+	        current_mode <- tolower(trimws(as.character(input$ortho_visual_mode %||% "compact")))
+	        if (!identical(current_mode, "aligned")) {
+	            # Similarity-chain ordering extracts spliced sequences.  Never do
+	            # that work for the hidden Alignment output while Compact is active.
+	            return(ids)
+	        }
 
 	        order_mode <- tolower(trimws(as.character(input$ortho_aligned_track_order %||% "similarity_chain")))
 	        if (!order_mode %in% c("similarity_chain", "load", "organism", "reverse", "manual")) {
@@ -11053,6 +11073,10 @@ function(input, output, session) {
 	            ids <- ids_all
 	        }
 	        if (length(ids) <= 1L) {
+	            return(ids)
+	        }
+	        current_mode <- tolower(trimws(as.character(input$ortho_visual_mode %||% "compact")))
+	        if (!identical(current_mode, "aligned")) {
 	            return(ids)
 	        }
 	        order_mode <- tolower(trimws(as.character(input$ortho_aligned_track_order %||% "similarity_chain")))
@@ -14040,7 +14064,7 @@ function(input, output, session) {
     observeEvent(input$app_nav_click,
         {
             target <- as.character(input$app_nav_click %||% "")
-            if (!target %in% c("guide", "home", "homologous", "orthologous", "figure-studio", "desktop-app", "settings", "feedback")) {
+            if (!target %in% c("guide", "home", "catalog", "homologous", "orthologous", "figure-studio", "desktop-app", "settings", "feedback")) {
                 return(invisible(NULL))
             }
             updateTabsetPanel(session, "navtabs", selected = target)
@@ -14686,6 +14710,332 @@ function(input, output, session) {
         )
         invisible(NULL)
     }, ignoreInit = TRUE)
+
+    if (isTRUE(catalogFeatureEnabled)) {
+    run_installed_catalog_search <- function(query = NULL, force = FALSE) {
+        term <- trimws(as.character(query %||% input$catalog_gene_query %||% ""))
+        if (nchar(term) < 3L) {
+            catalogSearchEpoch(isolate(catalogSearchEpoch()) + 1L)
+            catalogSearchResults(empty_alias_catalog_results())
+            catalogSearchStatus("Enter at least 3 characters to search every installed organism index.")
+            catalogSearchLastTerm("")
+            return(invisible(NULL))
+        }
+        if (!isTRUE(force) && identical(tolower(term), tolower(catalogSearchLastTerm()))) {
+            return(invisible(catalogSearchResults()))
+        }
+        registry <- tryCatch(isolate(preloadedRegistry()), error = function(e) data.frame())
+        if (!is.data.frame(registry)) registry <- data.frame()
+        ready <- if (nrow(registry) > 0L && "ready" %in% names(registry)) !is.na(registry$ready) & as.logical(registry$ready) else rep(TRUE, nrow(registry))
+        registry <- registry[ready, , drop = FALSE]
+        ready_count <- nrow(registry)
+        kingdom <- if ("kingdom" %in% names(registry)) trimws(as.character(registry$kingdom)) else rep("Other", ready_count)
+        kingdom[!nzchar(kingdom)] <- "Other"
+        kingdom_order <- unique(c(intersect(c("Plantae", "Animalia", "Fungi"), kingdom), kingdom))
+        registry_groups <- lapply(kingdom_order, function(value) registry[kingdom == value, , drop = FALSE])
+        names(registry_groups) <- kingdom_order
+        registry_groups <- Filter(function(x) is.data.frame(x) && nrow(x) > 0L, registry_groups)
+
+        token <- isolate(catalogSearchEpoch()) + 1L
+        catalogSearchEpoch(token)
+        catalogSearchResults(empty_alias_catalog_results())
+        catalogSearchLastTerm(term)
+        catalogSearchStatus(sprintf("Searching %d local organism indexes in %d group(s)…", ready_count, length(registry_groups)))
+        started <- proc.time()[["elapsed"]]
+
+        sort_catalog_rows <- function(results) {
+            if (!is.data.frame(results) || nrow(results) == 0L) return(empty_alias_catalog_results())
+            match_rank <- c(exact = 5L, normalized_basic = 4L, normalized_strict = 3L, prefix = 2L, contains = 1L)
+            confidence_rank <- c(HIGH = 3L, MEDIUM = 2L, LOW = 1L)
+            rank <- unname(match_rank[tolower(results$match_type)]) * 10L + unname(confidence_rank[toupper(results$confidence)])
+            rank[is.na(rank)] <- 0L
+            results[order(-rank, results$organism, results$resolved_gene, results$matched_term), , drop = FALSE]
+        }
+
+        process_group <- function(group_index = 1L, accumulated = empty_alias_catalog_results()) {
+            if (!identical(isolate(catalogSearchEpoch()), token)) return(invisible(NULL))
+            if (group_index > length(registry_groups)) {
+                elapsed <- proc.time()[["elapsed"]] - started
+                results <- accumulated
+                results <- sort_catalog_rows(results)
+                catalogSearchResults(results)
+                if (nrow(results) == 0L) {
+                    catalogSearchStatus(sprintf("No local alias matches for ‘%s’ across %d installed organism(s) (%.1fs).", term, ready_count, elapsed))
+                } else {
+                    organism_count <- length(unique(as.character(results$organism_id)))
+                    catalogSearchStatus(sprintf(
+                        "%d candidate genes across %d installed organism(s), searched in %.1fs.",
+                        nrow(results), organism_count, elapsed
+                    ))
+                }
+                return(invisible(results))
+            }
+
+            group_name <- names(registry_groups)[group_index]
+            group_results <- tryCatch(
+                search_installed_alias_catalog(term, registry = registry_groups[[group_index]], base_dir = "."),
+                error = function(e) {
+                    app_debug_log("[GeneCatalog] ", group_name, " search failed: ", e$message)
+                    empty_alias_catalog_results()
+                }
+            )
+            combined <- if (nrow(accumulated) > 0L && nrow(group_results) > 0L) {
+                rbind(accumulated, group_results)
+            } else if (nrow(group_results) > 0L) {
+                group_results
+            } else {
+                accumulated
+            }
+            combined <- sort_catalog_rows(combined)
+            catalogSearchResults(combined)
+            catalogSearchStatus(sprintf(
+                "%s complete · %d/%d groups · %d candidate gene(s) found so far…",
+                group_name, group_index, length(registry_groups), nrow(combined)
+            ))
+            continue_search <- function() process_group(group_index + 1L, combined)
+            if (requireNamespace("later", quietly = TRUE)) later::later(continue_search, delay = 0.03) else continue_search()
+            invisible(combined)
+        }
+
+        launch_search <- function() process_group(1L, empty_alias_catalog_results())
+        if (requireNamespace("later", quietly = TRUE)) later::later(launch_search, delay = 0.03) else launch_search()
+        invisible(NULL)
+    }
+
+    catalog_debounced_query <- shiny::debounce(reactive(trimws(as.character(input$catalog_gene_query %||% ""))), 350)
+    observeEvent(catalog_debounced_query(), {
+        if (identical(as.character(input$navtabs %||% ""), "catalog")) {
+            run_installed_catalog_search(catalog_debounced_query())
+        }
+    }, ignoreInit = TRUE)
+
+    observeEvent(input$catalog_search_go, {
+        run_installed_catalog_search(force = TRUE)
+    }, ignoreInit = TRUE)
+
+    output$catalog_search_status <- renderText(catalogSearchStatus())
+
+    catalog_filtered_results <- reactive({
+        df <- catalogSearchResults()
+        if (!is.data.frame(df) || nrow(df) == 0L) return(df)
+        kingdom_filter <- as.character(input$catalog_kingdom_filter %||% "all")
+        match_filter <- as.character(input$catalog_match_filter %||% "all")
+        confidence_filter <- toupper(as.character(input$catalog_confidence_filter %||% "all"))
+        if (!identical(kingdom_filter, "all")) df <- df[as.character(df$kingdom) == kingdom_filter, , drop = FALSE]
+        if (identical(match_filter, "exact")) {
+            df <- df[as.character(df$match_type) %in% c("exact", "normalized_basic", "normalized_strict"), , drop = FALSE]
+        } else if (identical(match_filter, "prefix")) {
+            df <- df[as.character(df$match_type) == "prefix", , drop = FALSE]
+        } else if (identical(match_filter, "contains")) {
+            df <- df[as.character(df$match_type) == "contains", , drop = FALSE]
+        }
+        if (!identical(confidence_filter, "ALL")) {
+            df <- df[toupper(as.character(df$confidence)) == confidence_filter, , drop = FALSE]
+        }
+        if (isTRUE(input$catalog_best_per_organism) && nrow(df) > 0L) {
+            df <- df[!duplicated(as.character(df$organism_id)), , drop = FALSE]
+        }
+        rownames(df) <- NULL
+        df
+    })
+
+    output$catalog_search_summary <- renderUI({
+        all_df <- catalogSearchResults()
+        shown_df <- catalog_filtered_results()
+        if (!is.data.frame(all_df) || nrow(all_df) == 0L) return(NULL)
+        exact_n <- sum(as.character(all_df$match_type) %in% c("exact", "normalized_basic", "normalized_strict"))
+        partial_n <- sum(as.character(all_df$match_type) %in% c("prefix", "contains"))
+        div(
+            class = "gene-catalog-summary-strip",
+            div(class = "gene-catalog-summary-item", span(class = "gene-catalog-summary-value", length(unique(all_df$organism_id))), span("Organisms")),
+            div(class = "gene-catalog-summary-item", span(class = "gene-catalog-summary-value", exact_n), span("Exact / normalized")),
+            div(class = "gene-catalog-summary-item", span(class = "gene-catalog-summary-value", partial_n), span("Family candidates")),
+            div(class = "gene-catalog-summary-item gene-catalog-summary-item--shown", span(class = "gene-catalog-summary-value", nrow(shown_df)), span("Shown"))
+        )
+    })
+
+    output$catalog_selection_actions <- renderUI({
+        selected <- suppressWarnings(as.integer(input$catalog_results_dt_rows_selected %||% integer(0)))
+        df <- catalog_filtered_results()
+        selected <- selected[!is.na(selected) & selected >= 1L & selected <= nrow(df)]
+        if (!length(selected)) {
+            return(div(class = "catalog-selection-bar is-empty", icon("check-square"), span("Select installed rows to open candidate genes in a visualization workflow.")))
+        }
+        chosen <- df[selected, , drop = FALSE]
+        organism_count <- length(unique(as.character(chosen$organism_id)))
+        can_cross <- nrow(chosen) >= 2L && organism_count >= 2L
+        div(
+            class = "catalog-selection-bar",
+            div(
+                class = "catalog-selection-copy",
+                strong(sprintf("%d selected", nrow(chosen))),
+                span(sprintf("%d installed organism(s)", organism_count))
+            ),
+            tags$button(
+                id = "catalog_open_selected_cross",
+                type = "button",
+                class = paste("btn btn-sm catalog-cross-action", if (!can_cross) "disabled"),
+                disabled = if (!can_cross) "disabled" else NULL,
+                icon("sitemap"),
+                span("Open in Cross-Species")
+            ),
+            if (!can_cross) span(class = "catalog-selection-note", "Requires installed rows from at least two organisms.") else
+                span(class = "catalog-selection-note is-warning", "Candidate loci — CGeV will verify orthology before plotting.")
+        )
+    })
+
+    output$catalog_results_dt <- DT::renderDataTable({
+        df <- catalog_filtered_results()
+        shiny::validate(shiny::need(is.data.frame(df) && nrow(df) > 0L, "Search the catalog to see local gene and alias matches."))
+        esc <- function(x, attribute = FALSE) htmltools::htmlEscape(as.character(x %||% ""), attribute = attribute)
+        compact_text <- function(x, n = 112L) {
+            x <- trimws(gsub("[[:space:]]+", " ", as.character(x %||% "")))
+            ifelse(nchar(x) > n, paste0(substr(x, 1L, n - 1L), "…"), x)
+        }
+        pretty_match <- c(exact = "Exact", normalized_basic = "Normalized", normalized_strict = "Normalized", prefix = "Prefix / family", contains = "Contains")
+        match_key <- tolower(as.character(df$match_type))
+        match_label <- unname(pretty_match[match_key])
+        match_label[is.na(match_label)] <- "Candidate"
+        organism_cell <- paste0(
+            "<div class='catalog-organism-cell'><span class='catalog-organism-icon'><img src='", esc(df$icon_url, attribute = TRUE), "' alt='' loading='lazy'></span>",
+            "<span><strong><em>", esc(df$organism), "</em></strong><small>", esc(df$kingdom), "</small></span></div>"
+        )
+        gene_label <- ifelse(nzchar(trimws(as.character(df$resolved_symbol))), as.character(df$resolved_symbol), as.character(df$resolved_gene))
+        gene_cell <- paste0("<div class='catalog-gene-cell'><strong>", esc(gene_label), "</strong><small>", esc(df$resolved_gene), "</small></div>")
+        term_cell <- paste0("<div class='catalog-term-cell'><strong>", esc(df$matched_term), "</strong><small>", esc(gsub("_", " ", df$term_type)), "</small></div>")
+        match_cell <- paste0("<span class='catalog-badge catalog-badge--", esc(match_key), "'>", esc(match_label), "</span>")
+        conf_key <- tolower(as.character(df$confidence))
+        confidence_help <- paste(
+            "High: stable identifier or authoritative symbol in the local index.",
+            "Medium: gene name, alias, synonym, locus tag, or cross-reference.",
+            "Low: other annotation evidence.",
+            "Match type is scored separately, and confidence is not evidence of orthology."
+        )
+        confidence_cell <- paste0("<span class='catalog-confidence catalog-confidence--", esc(conf_key), "'><i></i>", esc(tools::toTitleCase(conf_key)), "</span>")
+        description_full <- compact_text(df$description, 1000L)
+        description_cell <- paste0("<span class='catalog-description' title='", esc(description_full, attribute = TRUE), "'>", esc(compact_text(df$description)), "</span>")
+        source_cell <- paste0("<div class='catalog-source-cell'><strong>", esc(df$source_db), "</strong><small>", esc(df$source_release), "</small></div>")
+        action_cell <- paste0(
+            "<button type='button' class='catalog-row-action catalog-row-action--open' data-catalog-action='multigene' data-species-id='",
+            esc(df$organism_id, attribute = TRUE), "' data-gene='", esc(df$resolved_gene, attribute = TRUE), "'>Open in Multi-Gene</button>"
+        )
+        display <- data.frame(
+            Organism = organism_cell,
+            Gene = gene_cell,
+            `Matched term` = term_cell,
+            Match = match_cell,
+            Confidence = confidence_cell,
+            Description = description_cell,
+            Source = source_cell,
+            Action = action_cell,
+            check.names = FALSE,
+            stringsAsFactors = FALSE
+        )
+        names(display)[5] <- paste0(
+            "<span class='catalog-confidence-heading'>Confidence",
+            "<span class='catalog-column-help' tabindex='0' title='", esc(confidence_help, attribute = TRUE),
+            "' aria-label='", esc(confidence_help, attribute = TRUE),
+            "' data-tooltip='", esc(confidence_help, attribute = TRUE), "'>?</span></span>"
+        )
+        DT::datatable(
+            display,
+            rownames = FALSE,
+            escape = FALSE,
+            selection = "multiple",
+            class = "display compact hover gene-catalog-table",
+            options = list(
+                pageLength = 12,
+                lengthMenu = list(c(12, 24, 48), c("12", "24", "48")),
+                scrollX = TRUE,
+                autoWidth = FALSE,
+                order = list(),
+                dom = "<'catalog-table-top'lf>t<'catalog-table-bottom'ip>",
+                language = list(search = "Find in results:", lengthMenu = "Show _MENU_", info = "_START_–_END_ of _TOTAL_ candidates"),
+                columnDefs = list(
+                    list(className = "dt-left", targets = seq_len(8) - 1L),
+                    list(width = "205px", targets = 0),
+                    list(width = "205px", targets = 1),
+                    list(width = "180px", targets = 2),
+                    list(width = "120px", targets = 3),
+                    list(width = "105px", targets = 4),
+                    list(width = "330px", targets = 5),
+                    list(width = "145px", targets = 6),
+                    list(width = "150px", targets = 7, orderable = FALSE)
+                )
+            )
+        )
+    }, server = FALSE)
+    outputOptions(output, "catalog_results_dt", suspendWhenHidden = FALSE)
+
+    output$download_catalog_csv <- downloadHandler(
+        filename = function() paste0("gene_catalog_", format(Sys.time(), "%Y%m%d_%H%M%S"), ".csv"),
+        content = function(file) {
+            export <- catalogSearchResults()
+            hidden_coordinates <- intersect(c("chromosome", "start", "end"), names(export))
+            if (length(hidden_coordinates)) export[hidden_coordinates] <- NULL
+            write.csv(export, file, row.names = FALSE, na = "")
+        }
+    )
+    outputOptions(output, "download_catalog_csv", suspendWhenHidden = FALSE)
+
+    observeEvent(input$catalog_open_multigene, {
+        payload <- input$catalog_open_multigene %||% list()
+        species_id <- trimws(as.character(payload$species_id %||% ""))
+        gene <- trimws(as.character(payload$gene %||% ""))
+        if (!nzchar(species_id) || !nzchar(gene)) return(invisible(NULL))
+        updateTabsetPanel(session, "navtabs", selected = "homologous")
+        updateRadioButtons(session, "homo_data_mode", selected = "preloaded")
+        updateTextInput(session, "filter1", value = gene)
+        launch <- function() session$sendCustomMessage("cgv:catalog-open-multigene", list(species_id = species_id, gene = gene))
+        if (requireNamespace("later", quietly = TRUE)) later::later(launch, delay = 0.12) else launch()
+        invisible(TRUE)
+    }, ignoreInit = TRUE, ignoreNULL = TRUE)
+
+    observeEvent(input$catalog_multigene_ready, {
+        payload <- input$catalog_multigene_ready %||% list()
+        species_id <- trimws(as.character(payload$species_id %||% ""))
+        gene <- trimws(as.character(payload$gene %||% ""))
+        if (!nzchar(species_id) || !nzchar(gene)) return(invisible(NULL))
+        updateTextInput(session, "filter1", value = gene)
+        execute_homologous_search(gene_override = gene, origin = "gene_catalog")
+        invisible(TRUE)
+    }, ignoreInit = TRUE, ignoreNULL = TRUE)
+
+    observeEvent(input$catalog_open_selected_cross, {
+        selected <- suppressWarnings(as.integer(input$catalog_results_dt_rows_selected %||% integer(0)))
+        df <- isolate(catalog_filtered_results())
+        selected <- selected[!is.na(selected) & selected >= 1L & selected <= nrow(df)]
+        if (!length(selected)) return(invisible(NULL))
+        chosen <- df[selected, , drop = FALSE]
+        if (any(as.character(chosen$availability) != "installed") || length(unique(chosen$organism_id)) < 2L) {
+            showNotification("Cross-Species requires installed candidates from at least two organisms.", type = "warning", duration = 5)
+            return(invisible(NULL))
+        }
+        species_ids <- unique(as.character(chosen$organism_id))
+        gene <- trimws(as.character(isolate(catalogSearchLastTerm()) %||% ""))
+        updateTabsetPanel(session, "navtabs", selected = "orthologous")
+        updateRadioButtons(session, "ortho_data_mode", selected = "preloaded")
+        updateTextInput(session, "gene_name", value = gene)
+        launch <- function() session$sendCustomMessage("cgv:catalog-open-cross", list(species_ids = species_ids, gene = gene))
+        if (requireNamespace("later", quietly = TRUE)) later::later(launch, delay = 0.12) else launch()
+        invisible(TRUE)
+    }, ignoreInit = TRUE, ignoreNULL = TRUE)
+
+    observeEvent(input$catalog_cross_ready, {
+        payload <- input$catalog_cross_ready %||% list()
+        gene <- trimws(as.character(payload$gene %||% ""))
+        species_ids <- unique(trimws(as.character(payload$species_ids %||% character(0))))
+        if (!nzchar(gene) || length(species_ids) < 2L) return(invisible(NULL))
+        emit_popup_status(
+            "Cross-Species Gene Search",
+            "Candidate loci were transferred from Gene Catalog. Matching names or aliases are not orthology evidence; CGeV will keep the verification gate before plotting.",
+            tone = "info",
+            clear = TRUE
+        )
+        execute_orthologous_search(gene_override = gene, origin = "gene_catalog")
+        invisible(TRUE)
+    }, ignoreInit = TRUE, ignoreNULL = TRUE)
+    }
 
     run_global_search <- function(query_override = NULL) {
         active_panel <- as.character(input$navtabs %||% "home")
@@ -26915,10 +27265,13 @@ function(input, output, session) {
 
     # Footer with summary statistics for aligned view
     output$ortho_aligned_footer <- bindEvent(renderUI({
+        mode <- tolower(trimws(as.character(input$ortho_visual_mode %||% "compact")))
+        if (!identical(mode, "aligned")) {
+            return(NULL)
+        }
         ids_all <- as.character(sortedPlotIdsOrthologous() %||% integer(0))
         ids <- as.character(alignedOrderedPlotIdsOrthologous() %||% character(0))
-        mode <- tolower(trimws(as.character(input$ortho_visual_mode %||% "compact")))
-        if (length(ids) == 0 || !identical(mode, "aligned")) {
+        if (length(ids) == 0) {
             return(NULL)
         }
 	        rep_strategy <- tolower(trimws(as.character(input$ortho_aligned_representative %||% "longest_cds")))

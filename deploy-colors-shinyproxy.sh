@@ -397,6 +397,9 @@ if [[ "$SKIP_TESTS" == "0" ]]; then
     Rscript scripts/test_background_report_jobs.R
     Rscript scripts/test_renderer_prewarm_scheduling.R
     Rscript scripts/test_plot_paint_timing_static.R
+    Rscript scripts/test_render_lazy_defaults.R
+    Rscript scripts/test_gene_catalog_feature_flag.R
+    Rscript scripts/test_gene_catalog_search.R
     node tests/js/test_plot_paint_gate.js
     Rscript scripts/test_colors_shinyproxy_static_assets.R
     python3 -B scripts/test_colors_shinyproxy_candidates.py

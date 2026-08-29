@@ -551,7 +551,9 @@ rank_alias_index_hits <- function(hits, qn) {
     hits$confidence[!hits$confidence %in% c("HIGH", "MEDIUM", "LOW")] <- "LOW"
 
     conf_rank <- c(HIGH = 3L, MEDIUM = 2L, LOW = 1L)
-    match_rank <- c(exact = 3L, normalized_basic = 2L, normalized_strict = 1L)
+    # Preserve the established ranking values for all manuscript-era searches.
+    # The lower prefix/contains scores are consumed only by the opt-in catalog.
+    match_rank <- c(exact = 3L, normalized_basic = 2L, normalized_strict = 1L, prefix = 0L, contains = -1L)
     role_rank <- c(stable_id = 5L, official_symbol = 4L, official_name = 3L, synonym = 2L, other = 1L)
     hits$.rank <- unname(role_rank[hits$match_role]) * 1000L +
         unname(conf_rank[hits$confidence]) * 100L +
@@ -564,6 +566,82 @@ rank_alias_index_hits <- function(hits, qn) {
     hits$recommended <- FALSE
     if (nrow(hits) > 0L) hits$recommended[1L] <- TRUE
     hits
+}
+
+search_alias_index_partial <- function(query, alias_index, organism_id = "", limit = 80L) {
+    qn <- normalize_gene_query(query)
+    if (nchar(qn$clean_strict) < 3L) {
+        return(list(status = "no_match", query = qn, matches = alias_index_empty(), selected_match = NULL))
+    }
+
+    org <- trimws(as.character(organism_id %||% ""))
+    limit <- max(1L, suppressWarnings(as.integer(limit %||% 80L)))
+    like_key <- gsub("!", "!!", qn$upper, fixed = TRUE)
+    like_key <- gsub("%", "!%", like_key, fixed = TRUE)
+    like_key <- gsub("_", "!_", like_key, fixed = TRUE)
+    prefix_pattern <- paste0(like_key, "%")
+    contains_pattern <- paste0("%", like_key, "%")
+
+    if (inherits(alias_index, "SQLiteConnection")) {
+        org_sql <- if (nzchar(org)) "AND (organism_id = ? OR organism_id = '')" else ""
+        sql <- paste0(
+            "SELECT * FROM alias_index WHERE ",
+            "query_term_upper LIKE ? ESCAPE '!' AND LOWER(term_type) NOT IN ('description', 'product', 'note') ",
+            org_sql,
+            " UNION ALL SELECT * FROM alias_index WHERE ",
+            "query_term_upper LIKE ? ESCAPE '!' AND LOWER(term_type) NOT IN ('description', 'product', 'note', 'gene_name') ",
+            org_sql,
+            " LIMIT ?"
+        )
+        params <- if (nzchar(org)) {
+            list(prefix_pattern, org, contains_pattern, org, limit)
+        } else {
+            list(prefix_pattern, contains_pattern, limit)
+        }
+        hits <- tryCatch(
+            DBI::dbGetQuery(alias_index, sql, params = params),
+            error = function(e) {
+                app_debug_log("[AliasIndex] SQLite partial query failed: ", e$message)
+                alias_index_empty()
+            }
+        )
+    } else {
+        idx <- normalize_alias_index_df(alias_index)
+        if (nzchar(org) && nrow(idx) > 0L) {
+            idx <- idx[!nzchar(idx$organism_id) | idx$organism_id == org, , drop = FALSE]
+        }
+        term_key <- toupper(as.character(idx$query_term_upper %||% idx$query_term_original %||% ""))
+        allowed_term <- !tolower(as.character(idx$term_type %||% "")) %in% c("description", "product", "note")
+        prefix_hit <- startsWith(term_key, qn$upper)
+        contains_allowed <- allowed_term & tolower(as.character(idx$term_type %||% "")) != "gene_name"
+        contains_hit <- grepl(qn$upper, term_key, fixed = TRUE)
+        hits <- utils::head(idx[(allowed_term & prefix_hit) | (contains_allowed & contains_hit), , drop = FALSE], limit)
+    }
+
+    if (is.null(hits) || !is.data.frame(hits) || nrow(hits) == 0L) {
+        return(list(status = "no_match", query = qn, matches = alias_index_empty(), selected_match = NULL))
+    }
+    hits <- normalize_alias_index_df(hits)
+    term_key <- toupper(as.character(hits$query_term_upper %||% hits$query_term_original %||% ""))
+    has_token_boundary <- vapply(term_key, function(term) {
+        positions <- gregexpr(qn$upper, term, fixed = TRUE)[[1]]
+        positions <- positions[positions > 0L]
+        if (length(positions) == 0L) return(FALSE)
+        any(positions == 1L | !grepl("[A-Z0-9]", substr(term, positions - 1L, positions - 1L)))
+    }, logical(1))
+    hits <- hits[has_token_boundary, , drop = FALSE]
+    term_key <- term_key[has_token_boundary]
+    if (nrow(hits) == 0L) {
+        return(list(status = "no_match", query = qn, matches = alias_index_empty(), selected_match = NULL))
+    }
+    is_prefix <- startsWith(term_key, qn$upper)
+    hits$match_type <- ifelse(is_prefix, "prefix", "contains")
+    hits$input_match <- hits$query_term_original
+    hits <- rank_alias_index_hits(hits, qn)
+    hits <- hits[!duplicated(paste(hits$local_gene_id, hits$local_feature_id, sep = "\r")), , drop = FALSE]
+    hits <- utils::head(hits, limit)
+
+    list(status = "partial_matches", query = qn, matches = hits[, setdiff(names(hits), ".rank"), drop = FALSE], selected_match = NULL)
 }
 
 search_alias_index_sqlite <- function(query, con, organism_id = "") {
@@ -712,6 +790,132 @@ search_alias_index_for_context <- function(query, file_path, det_info = NULL, fi
         allow_gff_fallback = !nzchar(org_id)
     )
     search_alias_index(query, idx, organism_id = org_id)
+}
+
+# ── Installed-organism catalog search ─────────────────────────────────────
+#
+# A catalog search deliberately consults only indexes bundled with (or installed
+# into) CGeV.  It never falls back to parsing the GFF files: that would make a
+# simple discovery query unexpectedly expensive and its result dependent on
+# transient uploaded files.  The helper remains UI-agnostic so callers can use
+# it for the Gene Catalog page, reports, or a future API.
+empty_alias_catalog_results <- function() {
+    data.frame(
+        organism_id = character(),
+        organism = character(),
+        icon_url = character(),
+        kingdom = character(),
+        taxid = character(),
+        resolved_gene = character(),
+        resolved_symbol = character(),
+        matched_term = character(),
+        term_type = character(),
+        match_type = character(),
+        match_role = character(),
+        confidence = character(),
+        chromosome = character(),
+        start = numeric(),
+        end = numeric(),
+        description = character(),
+        source_db = character(),
+        source_release = character(),
+        availability = character(),
+        installable = logical(),
+        stringsAsFactors = FALSE
+    )
+}
+
+search_installed_alias_catalog <- function(query, registry, base_dir = ".",
+                                           max_per_organism = 25L,
+                                           max_total = 400L) {
+    query <- trimws(as.character(query %||% ""))
+    if (!nzchar(query) || is.null(registry) || !is.data.frame(registry) || nrow(registry) == 0L) {
+        return(empty_alias_catalog_results())
+    }
+
+    required <- c("species_id", "organism")
+    if (!all(required %in% names(registry))) return(empty_alias_catalog_results())
+    ready <- if ("ready" %in% names(registry)) as.logical(registry$ready) else rep(TRUE, nrow(registry))
+    rows <- registry[!is.na(ready) & ready, , drop = FALSE]
+    rows <- rows[!is.na(rows$species_id) & nzchar(trimws(as.character(rows$species_id))), , drop = FALSE]
+    if (nrow(rows) == 0L) return(empty_alias_catalog_results())
+
+    max_per_organism <- max(1L, suppressWarnings(as.integer(max_per_organism %||% 25L)))
+    max_total <- max(1L, suppressWarnings(as.integer(max_total %||% 400L)))
+    result_rows <- lapply(seq_len(nrow(rows)), function(i) {
+        entry <- rows[i, , drop = FALSE]
+        species_id <- trimws(as.character(entry$species_id[1] %||% ""))
+        annotation_path <- as.character(entry$annotation_path[1] %||% entry$annotation[1] %||% "")
+        index <- tryCatch(
+            load_alias_index(
+                organism_id = species_id,
+                annotation_path = annotation_path,
+                organism_name = as.character(entry$organism[1] %||% entry$label[1] %||% species_id),
+                taxid = as.character(entry$taxid[1] %||% ""),
+                base_dir = base_dir,
+                allow_gff_fallback = FALSE
+            ),
+            error = function(e) NULL
+        )
+        if (is.null(index)) return(NULL)
+        found <- tryCatch(search_alias_index(query, index, organism_id = species_id), error = function(e) NULL)
+        partial <- tryCatch(search_alias_index_partial(query, index, organism_id = species_id, limit = max_per_organism * 4L), error = function(e) NULL)
+        hit_parts <- Filter(function(x) is.data.frame(x) && nrow(x) > 0L, list(
+            (found %||% list())$matches,
+            (partial %||% list())$matches
+        ))
+        if (length(hit_parts) == 0L) return(NULL)
+        hit_names <- unique(unlist(lapply(hit_parts, names), use.names = FALSE))
+        hit_parts <- lapply(hit_parts, function(x) {
+            for (nm in setdiff(hit_names, names(x))) x[[nm]] <- NA
+            x[, hit_names, drop = FALSE]
+        })
+        hits <- do.call(rbind, hit_parts)
+        if (is.null(hits) || !is.data.frame(hits) || nrow(hits) == 0L) return(NULL)
+        match_rank <- c(exact = 5L, normalized_basic = 4L, normalized_strict = 3L, prefix = 2L, contains = 1L)
+        confidence_rank <- c(HIGH = 3L, MEDIUM = 2L, LOW = 1L)
+        hits$.catalog_rank <- unname(match_rank[tolower(hits$match_type)]) * 10L +
+            unname(confidence_rank[toupper(hits$confidence)])
+        hits$.catalog_rank[is.na(hits$.catalog_rank)] <- 0L
+        hits <- hits[order(-hits$.catalog_rank, hits$local_gene_id, hits$query_term_original), , drop = FALSE]
+        hits <- hits[!duplicated(paste(hits$local_gene_id, hits$local_feature_id, sep = "\r")), , drop = FALSE]
+        hits <- utils::head(hits, max_per_organism)
+        data.frame(
+            organism_id = species_id,
+            organism = as.character(entry$organism[1] %||% entry$label[1] %||% species_id),
+            icon_url = as.character(entry$icon_url[1] %||% "/icons/DNA.ico"),
+            kingdom = as.character(entry$kingdom[1] %||% "Other"),
+            taxid = as.character(entry$taxid[1] %||% ""),
+            resolved_gene = as.character(hits$local_gene_id %||% ""),
+            resolved_symbol = as.character(hits$local_symbol %||% ""),
+            matched_term = as.character(hits$query_term_original %||% ""),
+            term_type = as.character(hits$term_type %||% ""),
+            match_type = as.character(hits$match_type %||% ""),
+            match_role = as.character(hits$match_role %||% ""),
+            confidence = as.character(hits$confidence %||% "LOW"),
+            chromosome = as.character(hits$chromosome %||% ""),
+            start = suppressWarnings(as.numeric(hits$start %||% NA_real_)),
+            end = suppressWarnings(as.numeric(hits$end %||% NA_real_)),
+            description = as.character(hits$description %||% ""),
+            source_db = as.character(hits$source_db %||% ""),
+            source_release = as.character(hits$source_release %||% ""),
+            availability = "installed",
+            installable = FALSE,
+            stringsAsFactors = FALSE
+        )
+    })
+    result_rows <- Filter(Negate(is.null), result_rows)
+    if (length(result_rows) == 0L) return(empty_alias_catalog_results())
+    out <- do.call(rbind, result_rows)
+    match_rank <- c(exact = 5L, normalized_basic = 4L, normalized_strict = 3L, prefix = 2L, contains = 1L)
+    confidence_rank <- c(HIGH = 3L, MEDIUM = 2L, LOW = 1L)
+    out$.rank <- unname(match_rank[tolower(out$match_type)]) * 10L +
+        unname(confidence_rank[toupper(out$confidence)])
+    out$.rank[is.na(out$.rank)] <- 0L
+    out <- out[order(-out$.rank, out$organism, out$resolved_gene, out$matched_term), , drop = FALSE]
+    out$.rank <- NULL
+    rownames(out) <- NULL
+    utils::head(out, max_total)
 }
 
 # Reuse a successful alias-index result only within one lookup operation. A

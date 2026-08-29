@@ -16,6 +16,10 @@ analytics_chart_order_choices <- c(
   "Label (Z-A)" = "label_desc"
 )
 
+cgv_gene_catalog_enabled <-
+  exists("gene_catalog_enabled", mode = "function") &&
+  isTRUE(gene_catalog_enabled())
+
 analytics_arch_order_choices <- c(
   "Load order" = "load",
   "Gene length (longest first)" = "gene_len_desc",
@@ -828,7 +832,7 @@ fluidPage(
       tags$script(src = versioned_asset_path("js/mobile_enhancements.js"), defer = NA),
       tags$script(HTML("
       (function () {
-        var validTargets = ['home', 'homologous', 'orthologous', 'guide', 'settings', 'help', 'feedback'];
+        var validTargets = ['home', 'catalog', 'homologous', 'orthologous', 'guide', 'settings', 'help', 'feedback'];
         var suggestionState = { items: [], activeIndex: -1 };
         var collapsedSuggestionState = { items: [], activeIndex: -1 };
         var suggestionObserver = null;
@@ -3188,6 +3192,15 @@ fluidPage(
             icon = icon("search"),
             class = "btn-primary app-action-btn app-sidebar-primary-btn"
           ),
+          if (isTRUE(cgv_gene_catalog_enabled)) {
+            tags$button(
+              id = "catalog_open",
+              type = "button",
+              class = "app-catalog-open-link",
+              icon("table"),
+              span("Search all installed organisms")
+            )
+          } else NULL,
           div(
             id = "global-search-batch-count",
             class = "app-search-batch-count is-empty",
@@ -3464,7 +3477,7 @@ fluidPage(
               if (window.__cgvHomeIframeBridgeBound) return;
               window.__cgvHomeIframeBridgeBound = true;
 
-              var allowedTargets = ['home', 'homologous', 'orthologous', 'guide', 'settings', 'help', 'feedback'];
+              var allowedTargets = ['home', 'catalog', 'homologous', 'orthologous', 'guide', 'settings', 'help', 'feedback'];
 
               function activateTarget(target) {
                 if (allowedTargets.indexOf(target) === -1) return;
@@ -3501,6 +3514,51 @@ fluidPage(
             })();
           "))
         ),
+        if (isTRUE(cgv_gene_catalog_enabled)) tabPanel(
+          title = "Gene Catalog",
+          value = "catalog",
+          div(
+            class = "content-wrapper app-main-pane gene-catalog-pane",
+            div(
+              class = "gene-catalog-shell",
+              div(
+                class = "gene-catalog-hero",
+                div(
+                  class = "gene-catalog-heading",
+                  span(class = "gene-catalog-kicker", icon("database"), "Installed data"),
+                  h2("Gene Catalog"),
+                  p("Search a gene symbol, stable ID, or alias across every organism installed in this CGV workspace.")
+                ),
+                div(
+                  class = "gene-catalog-search-row",
+                  textInput(
+                    inputId = "catalog_gene_query",
+                    label = NULL,
+                    placeholder = "e.g. TP53, BRCA1, actin..."
+                  ),
+                  actionButton(
+                    inputId = "catalog_search_go",
+                    label = span(icon("search"), "Search catalog"),
+                    class = "btn-primary gene-catalog-search-btn"
+                  )
+                ),
+                div(class = "gene-catalog-meta", textOutput("catalog_search_status"))
+              ),
+              div(
+                class = "gene-catalog-results-card",
+                div(
+                  class = "gene-catalog-results-toolbar",
+                  div(
+                    tags$strong("Matches"),
+                    span("Local alias indexes only — no external database calls.")
+                  ),
+                  downloadButton("download_catalog_csv", span(icon("download"), "Download CSV"), class = "btn-sm btn-download")
+                ),
+                DT::dataTableOutput("catalog_results_dt")
+              )
+            )
+          )
+        ) else NULL,
         tabPanel(
           title = "Multi-Gene Search",
           value = "homologous",
