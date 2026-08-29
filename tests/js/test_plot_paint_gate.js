@@ -18,6 +18,7 @@ function createHarness(perfTimingEnabled) {
   let now = 100;
 
   const cardRoot = { id: 'ortho-plot-cards-container' };
+  const homoCardRoot = { id: 'homo-plot-cards-container' };
   const documentElement = {
     id: 'document-root',
     contains(node) { return !!node; }
@@ -29,6 +30,7 @@ function createHarness(perfTimingEnabled) {
     },
     getElementById(id) {
       if (id === cardRoot.id) return cardRoot;
+      if (id === homoCardRoot.id) return homoCardRoot;
       return outputs[id] || null;
     },
     querySelectorAll() { return Object.keys(outputs).map((id) => outputs[id]); }
@@ -98,7 +100,7 @@ function createHarness(perfTimingEnabled) {
     rafQueue.shift()();
   }
 
-  return { handlers, inputs, outputs, observers, clickListeners, cardRoot, documentElement, addSvg, drainFrames, runNextFrame };
+  return { handlers, inputs, outputs, observers, clickListeners, cardRoot, homoCardRoot, documentElement, addSvg, drainFrames, runNextFrame };
 }
 
 {
@@ -122,6 +124,35 @@ function createHarness(perfTimingEnabled) {
   h.drainFrames();
   assert.equal(h.inputs.length, 1, 'a stale double-RAF callback must not consume the one-shot run');
   assert.equal(h.inputs[0].payload.output_id, 'plot_ortho_B-plot');
+}
+
+{
+  const h = createHarness(false);
+  h.handlers.cgv_plot_timing_start({
+    run_id: 'HOMO_PROGRESSIVE',
+    context: 'homologous',
+    first_paint_only: false,
+    functional_only: true
+  });
+  h.handlers.cgv_plot_timing_expect({
+    run_id: 'HOMO_PROGRESSIVE',
+    context: 'homologous',
+    output_ids: ['plot_homo_1-plot', 'plot_homo_2-plot'],
+    functional_only: true
+  });
+  assert.equal(h.observers.length, 1);
+  assert.equal(h.observers[0].root, h.homoCardRoot, 'progressive Multi-Gene observer must stay scoped to its cards');
+  h.addSvg('plot_homo_1-plot');
+  h.observers[0].callback();
+  h.drainFrames();
+  h.addSvg('plot_homo_2-plot');
+  h.observers[0].callback();
+  h.drainFrames();
+  assert.deepEqual(
+    h.inputs.map((entry) => entry.payload.output_id),
+    ['plot_homo_1-plot', 'plot_homo_2-plot'],
+    'progressive Multi-Gene paint tracking must acknowledge every card'
+  );
 }
 
 {

@@ -125,7 +125,7 @@ test_that("functional gate targets stay separate from full performance telemetry
     expect_match(server_txt, "tr$gate_expected <- gate_ids_chr", fixed = TRUE)
     expect_match(
         server_txt,
-        "browser_expected_ids <- if (isTRUE(app_perf_enabled())) ids_chr else gate_ids_chr",
+        "browser_expected_ids <- if (isTRUE(app_perf_enabled()) || isTRUE(functional_progressive)) ids_chr else gate_ids_chr",
         fixed = TRUE
     )
     expect_match(server_txt, "timing_tracker$gate_expected", fixed = TRUE)
@@ -142,7 +142,7 @@ test_that("a single visible result does not enable a gate with no secondary work
     expect_match(server_txt, "functional_gate_active <- FALSE", fixed = TRUE)
     expect_match(
         server_txt,
-        "if (isTRUE(app_perf_enabled()) || isTRUE(functional_gate_active))",
+        "if (isTRUE(app_perf_enabled()) || isTRUE(functional_gate_active) || isTRUE(functional_progressive))",
         fixed = TRUE
     )
     expect_match(server_txt, 'reason = "activation_timeout"', fixed = TRUE)

@@ -48,8 +48,8 @@ expect_fixed(server_txt, "tr$expected <- ids_chr", "historical telemetry expecta
 expect_fixed(server_txt, "tr$gate_expected <- gate_ids_chr", "functional first-paint expectation set")
 expect_fixed(
     server_txt,
-    "browser_expected_ids <- if (isTRUE(app_perf_enabled())) ids_chr else gate_ids_chr",
-    "full telemetry remains separate from the functional one-shot gate"
+    "browser_expected_ids <- if (isTRUE(app_perf_enabled()) || isTRUE(functional_progressive)) ids_chr else gate_ids_chr",
+    "Multi-Gene progressive paint watches all expected cards while the orthologous gate stays one-shot"
 )
 
 initial_plot_ids_fixture <- function(ids, visible_count, meta = NULL, primary_only = FALSE) {
@@ -98,8 +98,10 @@ expect_fixed(paint_js, "var collectMetrics = perfTimingEnabled && !run.firstPain
 expect_fixed(paint_js, "if (run.firstPaintOnly) {", "one-shot paint completion")
 expect_fixed(paint_js, "delete runs[run.runId];", "one-shot run cleanup")
 expect_fixed(paint_js, "stopObserverIfIdle();", "idle mutation observer disconnect")
-expect_fixed(paint_js, "document.getElementById('ortho-plot-cards-container')", "functional watch is scoped to the Cross-Species card container")
-expect_fixed(paint_js, "without installing an expensive document-wide watch", "functional mode never falls back to a global observer")
+expect_fixed(paint_js, "'ortho-plot-cards-container'", "functional watch is scoped to the Cross-Species card container")
+expect_fixed(paint_js, "'homo-plot-cards-container'", "progressive Multi-Gene watch is scoped to its card container")
+expect_fixed(paint_js, "without installing an expensive document-wide functional watch", "functional mode never falls back to a global observer")
+expect_fixed(server_txt, "homoRenderedPlotIds(c(ready_now, plot_id))", "a browser-painted Multi-Gene card releases the next progressive batch")
 expect_fixed(paint_js, "cgv_plot_timing_stop", "server timeout cancels the one-shot browser watch")
 expect_fixed(paint_js, "run.expectGeneration !== expectGeneration", "stale double-frame paint callbacks are rejected")
 expect_fixed(paint_js, "runs[run.runId] !== run", "replaced one-shot runs cannot publish stale paint")

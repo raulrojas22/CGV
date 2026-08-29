@@ -446,11 +446,15 @@ function(input, output, session) {
             browser_context <- if (grepl("^HOMO", context)) "homologous" else if (grepl("^ORTHO", context)) "orthologous" else ""
             functional_first_paint <- identical(browser_context, "orthologous") &&
                 isTRUE(get0("orthoAutoRenderMore", envir = environment(), inherits = TRUE, ifnotfound = FALSE))
-            if (isTRUE(app_perf_enabled()) || isTRUE(functional_first_paint)) {
+            functional_progressive <- identical(browser_context, "homologous") &&
+                isTRUE(get0("homoProgressiveRender", envir = environment(), inherits = TRUE, ifnotfound = FALSE))
+            if (isTRUE(app_perf_enabled()) || isTRUE(functional_first_paint) || isTRUE(functional_progressive)) {
                 session$sendCustomMessage("cgv_plot_timing_start", list(
                     run_id = as.character(run$id %||% ""),
                     context = browser_context,
-                    first_paint_only = !isTRUE(app_perf_enabled()) && isTRUE(functional_first_paint)
+                    first_paint_only = !isTRUE(app_perf_enabled()) && isTRUE(functional_first_paint),
+                    functional_only = !isTRUE(app_perf_enabled()) &&
+                        (isTRUE(functional_first_paint) || isTRUE(functional_progressive))
                 ))
             }
         }
@@ -497,6 +501,8 @@ function(input, output, session) {
             browser_context <- if (grepl("^HOMO", context)) "homologous" else if (grepl("^ORTHO", context)) "orthologous" else ""
             functional_first_paint <- identical(browser_context, "orthologous") &&
                 isTRUE(get0("orthoAutoRenderMore", envir = environment(), inherits = TRUE, ifnotfound = FALSE))
+            functional_progressive <- identical(browser_context, "homologous") &&
+                isTRUE(get0("homoProgressiveRender", envir = environment(), inherits = TRUE, ifnotfound = FALSE))
             functional_gate_active <- FALSE
             gate_candidates <- unique(as.character(gate_candidate_ids %||% character(0)))
             gate_candidates <- gate_candidates[nzchar(gate_candidates)]
@@ -512,14 +518,16 @@ function(input, output, session) {
                     functional_gate_active <- isTRUE(activate_gate(as.character(run$id %||% "")))
                 }
             }
-            if (isTRUE(app_perf_enabled()) || isTRUE(functional_gate_active)) {
+            if (isTRUE(app_perf_enabled()) || isTRUE(functional_gate_active) || isTRUE(functional_progressive)) {
                 output_prefix <- if (identical(browser_context, "homologous")) "plot_homo_" else if (identical(browser_context, "orthologous")) "plot_ortho_" else "plot_"
-                browser_expected_ids <- if (isTRUE(app_perf_enabled())) ids_chr else gate_ids_chr
+                browser_expected_ids <- if (isTRUE(app_perf_enabled()) || isTRUE(functional_progressive)) ids_chr else gate_ids_chr
                 session$sendCustomMessage("cgv_plot_timing_expect", list(
                     run_id = as.character(run$id %||% ""),
                     context = browser_context,
                     output_ids = paste0(output_prefix, browser_expected_ids, "-plot"),
-                    first_paint_only = !isTRUE(app_perf_enabled()) && isTRUE(functional_gate_active)
+                    first_paint_only = !isTRUE(app_perf_enabled()) && isTRUE(functional_gate_active),
+                    functional_only = !isTRUE(app_perf_enabled()) &&
+                        (isTRUE(functional_gate_active) || isTRUE(functional_progressive))
                 ))
             }
             app_perf_mark(run, sprintf("expected_plots=%d", as.integer(length(ids_chr))), context)
@@ -1281,6 +1289,7 @@ function(input, output, session) {
             parse_positive_int_env("APP_HOMO_INITIAL_VISIBLE", 1L)
         )
     )
+    homoProgressiveRender <- homoInitialVisibleCount == 1L && homoRenderChunkSize >= 1L
     homoAutoRenderDelay <- {
         raw <- suppressWarnings(as.numeric(Sys.getenv("APP_HOMO_AUTO_RENDER_DELAY_MS", "120")))
         if (!is.finite(raw) || is.na(raw)) raw <- 120
@@ -1553,7 +1562,15 @@ function(input, output, session) {
         homo_run <- (homoPlotTimingTracker()$run %||% list())$id %||% ""
         ortho_run <- (orthoPlotTimingTracker()$run %||% list())$id %||% ""
         if (identical(run_id, as.character(homo_run))) {
-            handle_browser_plot_paint(homoPlotTimingTracker, payload, "HOMO_TIMING")
+            handled <- handle_browser_plot_paint(homoPlotTimingTracker, payload, "HOMO_TIMING")
+            output_id <- trimws(as.character(payload$output_id %||% ""))
+            if (isTRUE(handled) && grepl("^plot_homo_.+-plot$", output_id)) {
+                plot_id <- sub("^plot_homo_(.+)-plot$", "\\1", output_id)
+                ready_now <- as.character(homoRenderedPlotIds() %||% character(0))
+                if (nzchar(plot_id) && !(plot_id %in% ready_now)) {
+                    homoRenderedPlotIds(c(ready_now, plot_id))
+                }
+            }
         } else if (identical(run_id, as.character(ortho_run))) {
             handled <- handle_browser_plot_paint(orthoPlotTimingTracker, payload, "ORTHO_TIMING")
             expected_outputs <- paste0(
