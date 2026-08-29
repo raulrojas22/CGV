@@ -1264,20 +1264,45 @@ function(input, output, session) {
         ready <- as.character(orthoRenderedPlotIds() %||% character(0))
         all(ids %in% ready)
     })
-    # Register every normal primary card together. The eager default of 64 covers
-    # normal organism selections, while the larger safety cap protects a session
-    # from an accidentally unbounded environment override.
-    eagerCardRegistrationDefault <- 64L
-    eagerCardRegistrationSafetyCap <- 256L
-    homoRenderChunkSize <- eagerCardRegistrationDefault
+    # Stream primary cards in small batches. The safety cap still protects a
+    # session from an accidentally unbounded environment override.
+    cardRegistrationSafetyCap <- 256L
+    homoRenderChunkSize <- max(
+        1L,
+        min(
+            cardRegistrationSafetyCap,
+            parse_positive_int_env("APP_HOMO_RENDER_CHUNK_SIZE", 1L)
+        )
+    )
     homoInitialVisibleCount <- max(
         1L,
         min(
-            eagerCardRegistrationSafetyCap,
-            parse_positive_int_env("APP_HOMO_INITIAL_VISIBLE", eagerCardRegistrationDefault)
+            cardRegistrationSafetyCap,
+            parse_positive_int_env("APP_HOMO_INITIAL_VISIBLE", 1L)
         )
     )
+    homoAutoRenderDelay <- {
+        raw <- suppressWarnings(as.numeric(Sys.getenv("APP_HOMO_AUTO_RENDER_DELAY_MS", "120")))
+        if (!is.finite(raw) || is.na(raw)) raw <- 120
+        min(1000, max(0, raw)) / 1000
+    }
     homoVisibleCount <- reactiveVal(homoInitialVisibleCount)
+    homoAutoRenderQueued <- reactiveVal(FALSE)
+    homoAutoRenderGeneration <- 0L
+    bump_homo_auto_render_generation <- function() {
+        next_generation <- suppressWarnings(as.integer(homoAutoRenderGeneration %||% 0L))
+        if (!is.finite(next_generation) || is.na(next_generation) || next_generation < 0L ||
+            next_generation >= .Machine$integer.max) {
+            next_generation <- 0L
+        }
+        homoAutoRenderGeneration <<- as.integer(next_generation + 1L)
+        homoAutoRenderGeneration
+    }
+    cancel_homo_auto_render_queue <- function() {
+        bump_homo_auto_render_generation()
+        homoAutoRenderQueued(FALSE)
+        invisible(NULL)
+    }
     homoRenderedPlotIds <- reactiveVal(character())
     homoInsertedCardIds <- reactiveVal(character())
     homoFooterOutputsBound <- reactiveVal(character())
@@ -1285,28 +1310,37 @@ function(input, output, session) {
     orthoRenderChunkSize <- max(
         1L,
         min(
-            eagerCardRegistrationSafetyCap,
-            parse_positive_int_env("APP_ORTHO_RENDER_CHUNK_SIZE", eagerCardRegistrationDefault)
+            cardRegistrationSafetyCap,
+            parse_positive_int_env("APP_ORTHO_RENDER_CHUNK_SIZE", 1L)
         )
     )
     orthoAutoRenderMore <- {
-        raw <- tolower(trimws(as.character(Sys.getenv("APP_ORTHO_AUTO_RENDER_MORE", "0") %||% "0")))
+        raw <- tolower(trimws(as.character(Sys.getenv("APP_ORTHO_AUTO_RENDER_MORE", "1") %||% "1")))
         !raw %in% c("", "0", "false", "no", "off")
     }
     configuredOrthoInitialVisibleCount <- max(
         1L,
         min(
-            eagerCardRegistrationSafetyCap,
-            parse_positive_int_env("APP_ORTHO_INITIAL_VISIBLE", eagerCardRegistrationDefault)
+            cardRegistrationSafetyCap,
+            parse_positive_int_env("APP_ORTHO_INITIAL_VISIBLE", 1L)
         )
     )
-    # One-card-first rendering remains available as an explicit opt-in. With the
-    # default AUTO_RENDER_MORE=0 all selected primary cards register together.
+    # Progressive rendering starts with one card. Operators can still opt out by
+    # disabling AUTO_RENDER_MORE and raising APP_ORTHO_INITIAL_VISIBLE.
     orthoInitialVisibleCount <- if (isTRUE(orthoAutoRenderMore)) 1L else configuredOrthoInitialVisibleCount
     orthoAutoRenderDelay <- {
-        raw <- suppressWarnings(as.numeric(Sys.getenv("APP_ORTHO_AUTO_RENDER_DELAY_MS", "0")))
-        if (!is.finite(raw) || is.na(raw)) raw <- 0
-        min(750, max(0, raw)) / 1000
+        raw <- suppressWarnings(as.numeric(Sys.getenv("APP_ORTHO_AUTO_RENDER_DELAY_MS", "120")))
+        if (!is.finite(raw) || is.na(raw)) raw <- 120
+        min(1000, max(0, raw)) / 1000
+    }
+    isoformRenderBatchSize <- max(
+        1L,
+        min(8L, parse_positive_int_env("APP_ISOFORM_RENDER_BATCH_SIZE", 1L))
+    )
+    isoformRenderBatchDelay <- {
+        raw <- suppressWarnings(as.numeric(Sys.getenv("APP_ISOFORM_RENDER_BATCH_DELAY_MS", "120")))
+        if (!is.finite(raw) || is.na(raw)) raw <- 120
+        min(1000, max(0, raw)) / 1000
     }
     orthoFirstPaintTimeout <- min(
         120000L,
@@ -21211,6 +21245,7 @@ function(input, output, session) {
 
     observeEvent(sortedPlotIdsHomologous(),
         {
+            cancel_homo_auto_render_queue()
             ids <- sortedPlotIdsHomologous()
             ids_chr <- as.character(ids %||% integer(0))
             ids_n <- length(ids)
@@ -21246,7 +21281,7 @@ function(input, output, session) {
 
     observe({
         mode <- tolower(trimws(as.character(input$homo_visual_mode %||% "compact")))
-        if (mode %in% c("aligned", "pip_blocks", "pip_multipip")) {
+        if (mode %in% c("aligned", "pip_blocks", "pip_multipip") || isTRUE(homoAutoRenderQueued())) {
             return(invisible(NULL))
         }
         ids <- sortedPlotIdsHomologous()
@@ -21271,7 +21306,40 @@ function(input, output, session) {
         if (length(canonical_visible_ids) == 0L || !all(canonical_visible_ids %in% ready_now)) {
             return(invisible(NULL))
         }
-        homoVisibleCount(min(ids_n, current_n + homoRenderChunkSize))
+        next_n <- min(ids_n, current_n + homoRenderChunkSize)
+        if (next_n <= current_n) {
+            return(invisible(NULL))
+        }
+        scheduled_ids <- as.character(ids)
+        scheduled_generation <- bump_homo_auto_render_generation()
+        homoAutoRenderQueued(TRUE)
+        if (requireNamespace("later", quietly = TRUE)) {
+            later::later(function() {
+                isolate({
+                    same_ids <- identical(
+                        as.character(sortedPlotIdsHomologous() %||% character(0)),
+                        scheduled_ids
+                    )
+                    same_generation <- identical(
+                        as.integer(homoAutoRenderGeneration %||% 0L),
+                        as.integer(scheduled_generation %||% 0L)
+                    )
+                    if (isTRUE(same_generation)) {
+                        if (isTRUE(same_ids)) {
+                            visible_now <- suppressWarnings(as.integer(homoVisibleCount() %||% current_n))
+                            if (!is.finite(visible_now) || is.na(visible_now) || visible_now < 1L) {
+                                visible_now <- current_n
+                            }
+                            homoVisibleCount(as.integer(min(length(scheduled_ids), max(visible_now, next_n))))
+                        }
+                        homoAutoRenderQueued(FALSE)
+                    }
+                })
+            }, delay = homoAutoRenderDelay)
+        } else {
+            homoVisibleCount(as.integer(next_n))
+            homoAutoRenderQueued(FALSE)
+        }
         invisible(NULL)
     })
 
@@ -24326,6 +24394,60 @@ function(input, output, session) {
         invisible(NULL)
     }, ignoreInit = TRUE)
 
+    schedule_isoform_module_batches <- function(ids_chr, context) {
+        ids_chr <- unique(as.character(ids_chr %||% character(0)))
+        ids_chr <- ids_chr[nzchar(ids_chr)]
+        if (length(ids_chr) == 0L) {
+            return(invisible(NULL))
+        }
+        ctx <- tolower(trimws(as.character(context %||% "")))
+        batches <- split(
+            ids_chr,
+            ceiling(seq_along(ids_chr) / isoformRenderBatchSize)
+        )
+        render_batch <- NULL
+        render_batch <- function(batch_index) {
+            if (!is.null(session) && is.function(session$isClosed) && isTRUE(session$isClosed())) {
+                return(invisible(NULL))
+            }
+            batch_ids <- as.character(batches[[batch_index]] %||% character(0))
+            isolate({
+                if (identical(ctx, "orthologous")) {
+                    invisible(lapply(batch_ids, instantiate_orthologous_plot_module))
+                    invisible(lapply(batch_ids, register_orthologous_download_output))
+                    invisible(lapply(batch_ids, bind_orthologous_footer_output))
+                    handles <- tryCatch(existingPlotsOrthologous(), error = function(e) list())
+                } else {
+                    invisible(lapply(batch_ids, instantiate_homologous_plot_module))
+                    invisible(lapply(batch_ids, register_homologous_download_output))
+                    invisible(lapply(batch_ids, bind_homologous_footer_output))
+                    handles <- tryCatch(existingPlotsHomologous(), error = function(e) list())
+                }
+                for (pid in batch_ids) {
+                    handle <- tryCatch(handles[[pid]], error = function(e) NULL)
+                    if (is.list(handle) && is.function(handle$nudge_render)) {
+                        tryCatch(handle$nudge_render(), error = function(e) NULL)
+                    }
+                }
+                shinyjs::runjs("if(window.scheduleGgiraphNudge){window.scheduleGgiraphNudge(180);}")
+            })
+            next_index <- as.integer(batch_index + 1L)
+            if (next_index <= length(batches)) {
+                if (requireNamespace("later", quietly = TRUE)) {
+                    later::later(
+                        function() render_batch(next_index),
+                        delay = isoformRenderBatchDelay
+                    )
+                } else {
+                    render_batch(next_index)
+                }
+            }
+            invisible(NULL)
+        }
+        render_batch(1L)
+        invisible(NULL)
+    }
+
     observeEvent(input$isoform_expand_request, {
         evt <- input$isoform_expand_request
         ctx <- tolower(trimws(as.character(evt$context %||% "")))
@@ -24358,32 +24480,19 @@ function(input, output, session) {
                 total_tx <- suppressWarnings(as.integer(meta$total_transcripts %||% 1L))
                 if (isTRUE(meta$is_canonical) && is.finite(total_tx) && total_tx > 1L) paste0(id, "_c") else character(0)
             }))))
-            invisible(lapply(expanded_iso_ids, bind_orthologous_footer_output))
-            invisible(lapply(expanded_iso_ids, register_orthologous_download_output))
-            invisible(lapply(expanded_iso_ids, instantiate_orthologous_plot_module))
-            handles <- tryCatch(existingPlotsOrthologous(), error = function(e) list())
         } else {
             expanded_iso_ids <- unique(c(ids_chr, unlist(lapply(ids_chr, function(id) {
                 meta <- tryCatch(plotGeneMetaHomologous()[[id]], error = function(e) NULL)
                 total_tx <- suppressWarnings(as.integer(meta$total_transcripts %||% 1L))
                 if (isTRUE(meta$is_canonical) && is.finite(total_tx) && total_tx > 1L) paste0(id, "_c") else character(0)
             }))))
-            invisible(lapply(expanded_iso_ids, bind_homologous_footer_output))
-            invisible(lapply(expanded_iso_ids, register_homologous_download_output))
-            invisible(lapply(expanded_iso_ids, instantiate_homologous_plot_module))
-            handles <- tryCatch(existingPlotsHomologous(), error = function(e) list())
-        }
-        for (pid in ids_chr) {
-            handle <- tryCatch(handles[[pid]], error = function(e) NULL)
-            if (is.list(handle) && is.function(handle$nudge_render)) {
-                tryCatch(handle$nudge_render(), error = function(e) NULL)
-            }
         }
         group_json <- jsonlite::toJSON(as.character(evt$group %||% ""), auto_unbox = TRUE)
         shinyjs::runjs(sprintf(
             "try{var group=%s;var cards=document.querySelectorAll('[data-isoform-group=\\\"'+group+'\\\"]');for(var i=0;i<cards.length;i++){cards[i].style.display='flex';cards[i].setAttribute('aria-hidden','false');if(window.Shiny&&Shiny.bindAll){Shiny.bindAll(cards[i]);}}if(window.scheduleGgiraphNudge){window.scheduleGgiraphNudge(250);window.scheduleGgiraphNudge(900);}}catch(e){}",
             group_json
         ))
+        schedule_isoform_module_batches(expanded_iso_ids, ctx)
         invisible(NULL)
     }, ignoreInit = TRUE)
 

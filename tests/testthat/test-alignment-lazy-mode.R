@@ -1,4 +1,4 @@
-testthat::test_that("card registration defaults to eager without the former eight-card cap", {
+testthat::test_that("card registration defaults to progressive one-card batches", {
     server_path <- testthat::test_path("..", "..", "server.R")
     env_path <- testthat::test_path("..", "..", ".env.example")
     server_txt <- paste(readLines(server_path, warn = FALSE), collapse = "\n")
@@ -6,40 +6,39 @@ testthat::test_that("card registration defaults to eager without the former eigh
 
     testthat::expect_match(
         server_txt,
-        "eagerCardRegistrationDefault <- 64L",
+        "cardRegistrationSafetyCap <- 256L",
         fixed = TRUE
     )
     testthat::expect_match(
         server_txt,
-        "eagerCardRegistrationSafetyCap <- 256L",
+        'parse_positive_int_env("APP_HOMO_INITIAL_VISIBLE", 1L)',
         fixed = TRUE
     )
     testthat::expect_match(
         server_txt,
-        'parse_positive_int_env("APP_HOMO_INITIAL_VISIBLE", eagerCardRegistrationDefault)',
+        'parse_positive_int_env("APP_ORTHO_RENDER_CHUNK_SIZE", 1L)',
         fixed = TRUE
     )
     testthat::expect_match(
         server_txt,
-        'parse_positive_int_env("APP_ORTHO_RENDER_CHUNK_SIZE", eagerCardRegistrationDefault)',
+        'Sys.getenv("APP_ORTHO_AUTO_RENDER_MORE", "1") %||% "1"',
         fixed = TRUE
     )
     testthat::expect_match(
         server_txt,
-        'Sys.getenv("APP_ORTHO_AUTO_RENDER_MORE", "0") %||% "0"',
+        'Sys.getenv("APP_ORTHO_AUTO_RENDER_DELAY_MS", "120")',
         fixed = TRUE
     )
     testthat::expect_match(
         server_txt,
-        'Sys.getenv("APP_ORTHO_AUTO_RENDER_DELAY_MS", "0")',
+        'parse_positive_int_env("APP_ORTHO_INITIAL_VISIBLE", 1L)',
         fixed = TRUE
     )
     testthat::expect_match(
         server_txt,
-        'parse_positive_int_env("APP_ORTHO_INITIAL_VISIBLE", eagerCardRegistrationDefault)',
+        'parse_positive_int_env("APP_HOMO_RENDER_CHUNK_SIZE", 1L)',
         fixed = TRUE
     )
-    testthat::expect_false(grepl("min(8L, parse_positive_int_env", server_txt, fixed = TRUE))
     testthat::expect_false(grepl(
         'min(orthoRenderChunkSize, parse_positive_int_env("APP_ORTHO_INITIAL_VISIBLE"',
         server_txt,
@@ -47,16 +46,20 @@ testthat::test_that("card registration defaults to eager without the former eigh
     ))
 
     for (expected in c(
-        "APP_ORTHO_RENDER_CHUNK_SIZE=64",
-        "APP_ORTHO_AUTO_RENDER_MORE=0",
-        "APP_ORTHO_AUTO_RENDER_DELAY_MS=0",
+        "APP_HOMO_RENDER_CHUNK_SIZE=1",
+        "APP_HOMO_AUTO_RENDER_DELAY_MS=120",
+        "APP_ORTHO_RENDER_CHUNK_SIZE=1",
+        "APP_ORTHO_AUTO_RENDER_MORE=1",
+        "APP_ORTHO_AUTO_RENDER_DELAY_MS=120",
         "APP_ORTHO_SERVER_RENDER_NUDGE=0",
         "APP_HOMO_DEFER_SEQUENCE=0",
         "APP_ORTHO_DEFER_SEQUENCE=0",
         "APP_FOOTER_DEFER_SEQUENCE=0",
         "APP_DEFER_FEATURE_GC=0",
-        "APP_HOMO_INITIAL_VISIBLE=64",
-        "APP_ORTHO_INITIAL_VISIBLE=64"
+        "APP_HOMO_INITIAL_VISIBLE=1",
+        "APP_ORTHO_INITIAL_VISIBLE=1",
+        "APP_ISOFORM_RENDER_BATCH_SIZE=1",
+        "APP_ISOFORM_RENDER_BATCH_DELAY_MS=120"
     )) {
         testthat::expect_true(expected %in% env_txt, info = expected)
     }
