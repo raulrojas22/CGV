@@ -44,8 +44,8 @@ expect_pattern(
 )
 expect_pattern(
     server_txt,
-    'homoAutoRenderQueued\\(TRUE\\)[\\s\\S]*later::later\\(function\\(\\)[\\s\\S]*homoVisibleCount',
-    "Multi-Gene waits between successive primary-card registrations"
+    'homoAutoRenderQueued\\(TRUE\\)[\\s\\S]*release_next_batch <- function\\(\\)[\\s\\S]*later::later[\\s\\S]*session\\$onFlushed\\(release_next_batch, once = TRUE\\)',
+    "Multi-Gene flushes the current card before scheduling the next registration"
 )
 expect_pattern(
     server_txt,

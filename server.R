@@ -21314,13 +21314,8 @@ function(input, output, session) {
             return(invisible(NULL))
         }
         visible_ids <- if (current_n > 0L) as.character(ids[seq_len(current_n)]) else character(0)
-        gene_meta_map <- tryCatch(plotGeneMetaHomologous(), error = function(e) list())
-        canonical_visible_ids <- Filter(function(pid) {
-            meta <- tryCatch(gene_meta_map[[pid]], error = function(e) NULL)
-            is.null(meta) || !isFALSE(meta$is_canonical)
-        }, visible_ids)
-        ready_now <- as.character(homoRenderedPlotIds() %||% character(0))
-        if (length(canonical_visible_ids) == 0L || !all(canonical_visible_ids %in% ready_now)) {
+        inserted_now <- as.character(homoInsertedCardIds() %||% character(0))
+        if (length(visible_ids) == 0L || !all(visible_ids %in% inserted_now)) {
             return(invisible(NULL))
         }
         next_n <- min(ids_n, current_n + homoRenderChunkSize)
@@ -21330,7 +21325,12 @@ function(input, output, session) {
         scheduled_ids <- as.character(ids)
         scheduled_generation <- bump_homo_auto_render_generation()
         homoAutoRenderQueued(TRUE)
-        if (requireNamespace("later", quietly = TRUE)) {
+        release_next_batch <- function() {
+            if (!requireNamespace("later", quietly = TRUE)) {
+                homoVisibleCount(as.integer(next_n))
+                homoAutoRenderQueued(FALSE)
+                return(invisible(NULL))
+            }
             later::later(function() {
                 isolate({
                     same_ids <- identical(
@@ -21353,9 +21353,12 @@ function(input, output, session) {
                     }
                 })
             }, delay = homoAutoRenderDelay)
+            invisible(NULL)
+        }
+        if (!is.null(session) && is.function(session$onFlushed)) {
+            session$onFlushed(release_next_batch, once = TRUE)
         } else {
-            homoVisibleCount(as.integer(next_n))
-            homoAutoRenderQueued(FALSE)
+            release_next_batch()
         }
         invisible(NULL)
     })
