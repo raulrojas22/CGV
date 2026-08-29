@@ -159,14 +159,23 @@
     if (!window.MutationObserver || !document.documentElement) return;
     var runIds = Object.keys(runs);
     var functionalOnly = runIds.length > 0 && runIds.every(function (runId) {
-      return !!(runs[runId] && runs[runId].firstPaintOnly);
+      return !!(runs[runId] && runs[runId].functionalOnly);
     });
-    var nextRoot = functionalOnly
-      ? document.getElementById('ortho-plot-cards-container')
+    var functionalContexts = runIds.map(function (runId) {
+      return runs[runId] && runs[runId].context;
+    }).filter(Boolean);
+    var oneFunctionalContext = functionalContexts.length > 0 && functionalContexts.every(function (context) {
+      return context === functionalContexts[0];
+    });
+    var functionalRootId = functionalContexts[0] === 'homologous'
+      ? 'homo-plot-cards-container'
+      : 'ortho-plot-cards-container';
+    var nextRoot = functionalOnly && oneFunctionalContext
+      ? document.getElementById(functionalRootId)
       : document.documentElement;
-    // The Cross-Species card container is part of the static UI before a
-    // search can run. If it is unexpectedly absent, the server fail-safe will
-    // release rendering without installing an expensive document-wide watch.
+    // Both result containers are part of the static UI before a search can
+    // run. If one is unexpectedly absent, the server fail-safe prevents a stall
+    // without installing an expensive document-wide functional watch.
     if (!nextRoot) return;
     if (observer && observerRoot === nextRoot) return;
     if (observer) observer.disconnect();
@@ -184,6 +193,7 @@
       var context = normalizeContext(message && message.context);
       var click = claimRecentClick(context, receivedAt);
       var firstPaintOnly = !!(message && message.first_paint_only);
+      var functionalOnly = !!(message && (message.functional_only || message.first_paint_only));
       if (firstPaintOnly) {
         Object.keys(runs).forEach(function (existingRunId) {
           var existing = runs[existingRunId];
@@ -205,6 +215,7 @@
         baselineSvgs: snapshotVisibleSvgs(context),
         reported: Object.create(null),
         firstPaintOnly: firstPaintOnly,
+        functionalOnly: functionalOnly,
         completed: false,
         expectGeneration: 0
       };
@@ -226,12 +237,14 @@
           baselineSvgs: snapshotVisibleSvgs(message && message.context),
           reported: Object.create(null),
           firstPaintOnly: !!(message && message.first_paint_only),
+          functionalOnly: !!(message && (message.functional_only || message.first_paint_only)),
           completed: false,
           expectGeneration: 0
         };
         runs[runId] = run;
       }
       run.firstPaintOnly = run.firstPaintOnly || !!(message && message.first_paint_only);
+      run.functionalOnly = run.functionalOnly || !!(message && (message.functional_only || message.first_paint_only));
       run.expectGeneration += 1;
       run.expectedAt = receivedAt;
       var rawOutputIds = message && message.output_ids;
