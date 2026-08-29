@@ -10118,6 +10118,19 @@ function(input, output, session) {
         )
     })
 
+    primaryPlotIdsHomologous <- reactive({
+        ids <- as.character(sortedPlotIdsHomologous() %||% character(0))
+        ids <- ids[nzchar(ids)]
+        if (length(ids) == 0L) {
+            return(character(0))
+        }
+        meta_map <- tryCatch(plotGeneMetaHomologous(), error = function(e) list())
+        Filter(function(pid) {
+            meta <- tryCatch(meta_map[[pid]], error = function(e) NULL)
+            !identical(meta$is_canonical, FALSE)
+        }, ids)
+    })
+
     primaryPlotIdsOrthologous <- reactive({
         ids <- as.character(sortedPlotIdsOrthologous() %||% character(0))
         ids <- ids[nzchar(ids)]
@@ -21134,7 +21147,7 @@ function(input, output, session) {
             return(NULL)
         }
         ui_perf <- app_perf_new_run("HOMO_UI")
-        ids <- sortedPlotIdsHomologous()
+        ids <- primaryPlotIdsHomologous()
         if (length(ids) == 0) {
             app_perf_mark(ui_perf, "load-more banner no ids", "HOMO_UI")
             return(NULL)
@@ -21192,7 +21205,7 @@ function(input, output, session) {
 
     observe({
         mode <- tolower(trimws(as.character(input$homo_visual_mode %||% "compact")))
-        ids <- as.character(sortedPlotIdsHomologous() %||% integer(0))
+        ids <- as.character(primaryPlotIdsHomologous() %||% integer(0))
         ids_n <- length(ids)
         if (mode %in% c("aligned", "pip_blocks", "pip_multipip")) {
             inserted_now <- isolate(as.character(homoInsertedCardIds() %||% character(0)))
@@ -21254,16 +21267,16 @@ function(input, output, session) {
             if (!is.finite(current_n) || current_n < homoInitialVisibleCount) {
                 current_n <- homoInitialVisibleCount
             }
-            ids_n <- length(sortedPlotIdsHomologous())
+            ids_n <- length(primaryPlotIdsHomologous())
             homoVisibleCount(min(ids_n, current_n + homoRenderChunkSize))
         },
         ignoreInit = TRUE
     )
 
-    observeEvent(sortedPlotIdsHomologous(),
+    observeEvent(primaryPlotIdsHomologous(),
         {
             cancel_homo_auto_render_queue()
-            ids <- sortedPlotIdsHomologous()
+            ids <- primaryPlotIdsHomologous()
             ids_chr <- as.character(ids %||% integer(0))
             ids_n <- length(ids)
             ready_now <- as.character(homoRenderedPlotIds() %||% character(0))
@@ -21301,7 +21314,7 @@ function(input, output, session) {
         if (mode %in% c("aligned", "pip_blocks", "pip_multipip") || isTRUE(homoAutoRenderQueued())) {
             return(invisible(NULL))
         }
-        ids <- sortedPlotIdsHomologous()
+        ids <- primaryPlotIdsHomologous()
         ids_n <- length(ids)
         if (ids_n <= 0L) {
             return(invisible(NULL))
@@ -21334,7 +21347,7 @@ function(input, output, session) {
             later::later(function() {
                 isolate({
                     same_ids <- identical(
-                        as.character(sortedPlotIdsHomologous() %||% character(0)),
+                        as.character(primaryPlotIdsHomologous() %||% character(0)),
                         scheduled_ids
                     )
                     same_generation <- identical(

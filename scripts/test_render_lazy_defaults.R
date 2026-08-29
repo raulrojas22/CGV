@@ -34,6 +34,16 @@ expect_pattern(
 )
 expect_pattern(
     server_txt,
+    'primaryPlotIdsHomologous <- reactive\\([\\s\\S]*!identical\\(meta\\$is_canonical, FALSE\\)',
+    "Multi-Gene primary pagination excludes hidden isoform cards"
+)
+expect_pattern(
+    server_txt,
+    'output\\$homo_load_more_banner <- renderUI\\([\\s\\S]*ids <- primaryPlotIdsHomologous\\(\\)',
+    "Multi-Gene progress counts canonical gene cards only"
+)
+expect_pattern(
+    server_txt,
     'pending_hydration <- setdiff\\(ids_chr, hydrated_ids\\)[\\s\\S]*insertUI\\([\\s\\S]*removeUI\\(',
     "orthologous isoform bodies hydrate on the first expand request"
 )
