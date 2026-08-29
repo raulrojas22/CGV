@@ -18,19 +18,23 @@ BACKGROUND_WORKER_NAME="cgv-background-report-worker"
 BACKGROUND_REPORT_MEMORY="${BACKGROUND_REPORT_MEMORY:-4g}"
 APP_LASTZ_GLOBAL_WORKERS="${APP_LASTZ_GLOBAL_WORKERS:-2}"
 COLORS_INLINE_FAST_SEQUENCE_PREFETCH="${COLORS_INLINE_FAST_SEQUENCE_PREFETCH:-1}"
-# Colors intentionally uses one fixed eager rendering profile. These values are
+# Colors intentionally uses one fixed progressive rendering profile. These values are
 # materialized as literals below so stale SP_* or server-owned values cannot
-# silently reactivate deferred enrichment or progressive card rendering.
+# silently reactivate bulk card rendering.
 COLORS_ORTHO_SUSPEND_HIDDEN="1"
 COLORS_HOMO_DEFER_SEQUENCE="0"
 COLORS_ORTHO_DEFER_SEQUENCE="0"
 COLORS_FOOTER_DEFER_SEQUENCE="0"
 COLORS_DEFER_FEATURE_GC="0"
-COLORS_ORTHO_RENDER_CHUNK_SIZE="64"
-COLORS_ORTHO_AUTO_RENDER_MORE="0"
-COLORS_ORTHO_AUTO_RENDER_DELAY_MS="0"
-COLORS_HOMO_INITIAL_VISIBLE="64"
-COLORS_ORTHO_INITIAL_VISIBLE="64"
+COLORS_HOMO_RENDER_CHUNK_SIZE="1"
+COLORS_HOMO_AUTO_RENDER_DELAY_MS="120"
+COLORS_ORTHO_RENDER_CHUNK_SIZE="1"
+COLORS_ORTHO_AUTO_RENDER_MORE="1"
+COLORS_ORTHO_AUTO_RENDER_DELAY_MS="120"
+COLORS_HOMO_INITIAL_VISIBLE="1"
+COLORS_ORTHO_INITIAL_VISIBLE="1"
+COLORS_ISOFORM_RENDER_BATCH_SIZE="1"
+COLORS_ISOFORM_RENDER_BATCH_DELAY_MS="120"
 COLORS_ORTHO_SERVER_RENDER_NUDGE="0"
 LOCAL_EMAIL_ENV="${SCRIPT_DIR}/.env.local"
 REMOTE_EMAIL_ENV="${APP_DIR}/.env.background-reports"
@@ -71,9 +75,10 @@ Variables opcionales:
   COLORS_PERF_TIMING=1  Activa una captura de telemetría controlada (por defecto: 0).
   PERF_RUN_LABEL=antes_colors_01  Etiqueta usada cuando COLORS_PERF_TIMING=1.
 
-Perfil de render fijo en Colors:
+Perfil de render progresivo fijo en Colors:
   hidden=1, homo-seq=0, ortho-seq=0, footer-seq=0, gc=0,
-  chunk=64, auto-render=0, auto-delay=0ms, homo/ortho-initial=64,
+  homo/ortho chunk=1, auto-render=1, auto-delay=120ms,
+  homo/ortho-initial=1, isoform batch=1/120ms,
   server-render-nudge=0.
 
 El deploy normal exige que Git esté limpio y crea una imagen inmutable con
@@ -109,12 +114,12 @@ for tuning_value in \
   "$COLORS_ORTHO_SERVER_RENDER_NUDGE" \
   "$COLORS_DEFER_FEATURE_GC"; do
   [[ "$tuning_value" == "0" || "$tuning_value" == "1" ]] || \
-    die "Los flags del perfil eager de Colors deben ser 0 o 1"
+    die "Los flags del perfil de render de Colors deben ser 0 o 1"
 done
-[[ "$COLORS_ORTHO_AUTO_RENDER_DELAY_MS" == "0" ]] || \
-  die "El perfil eager de Colors exige auto-render delay=0"
-[[ "$COLORS_ORTHO_RENDER_CHUNK_SIZE" == "64" && "$COLORS_HOMO_INITIAL_VISIBLE" == "64" && "$COLORS_ORTHO_INITIAL_VISIBLE" == "64" ]] || \
-  die "El perfil eager de Colors exige chunk=64 y ambos initial-visible=64"
+[[ "$COLORS_HOMO_AUTO_RENDER_DELAY_MS" == "120" && "$COLORS_ORTHO_AUTO_RENDER_DELAY_MS" == "120" && "$COLORS_ISOFORM_RENDER_BATCH_DELAY_MS" == "120" ]] || \
+  die "El perfil progresivo de Colors exige delays de 120 ms"
+[[ "$COLORS_HOMO_RENDER_CHUNK_SIZE" == "1" && "$COLORS_ORTHO_RENDER_CHUNK_SIZE" == "1" && "$COLORS_HOMO_INITIAL_VISIBLE" == "1" && "$COLORS_ORTHO_INITIAL_VISIBLE" == "1" && "$COLORS_ISOFORM_RENDER_BATCH_SIZE" == "1" ]] || \
+  die "El perfil progresivo de Colors exige lotes e initial-visible de 1"
 [[ "$PERF_RUN_LABEL" =~ ^[A-Za-z0-9._-]+$ ]] || \
   die "PERF_RUN_LABEL solo puede contener letras, numeros, punto, guion y guion bajo"
 [[ "$BACKGROUND_REPORT_MEMORY" =~ ^[1-9][0-9]*[mMgG]$ ]] || \
@@ -338,7 +343,7 @@ if [[ "$MODE" == "check" ]]; then
     die "APP_PERF_TIMING de la sesión (${DELEGATE_PERF_TIMING}) no coincide con application.yml (${APPLICATION_PERF_TIMING})"
 
   APPLICATION_EAGER_PROFILE="$(
-    rssh "sed -n -E 's/^        (APP_ORTHO_SUSPEND_HIDDEN|APP_HOMO_DEFER_SEQUENCE|APP_ORTHO_DEFER_SEQUENCE|APP_FOOTER_DEFER_SEQUENCE|APP_DEFER_FEATURE_GC|APP_ORTHO_RENDER_CHUNK_SIZE|APP_ORTHO_AUTO_RENDER_MORE|APP_ORTHO_AUTO_RENDER_DELAY_MS|APP_HOMO_INITIAL_VISIBLE|APP_ORTHO_INITIAL_VISIBLE|APP_ORTHO_SERVER_RENDER_NUDGE): \"([^\"]+)\"$/\1=\2/p' '${APP_DIR}/shinyproxy/application.yml'"
+    rssh "sed -n -E 's/^        (APP_ORTHO_SUSPEND_HIDDEN|APP_HOMO_DEFER_SEQUENCE|APP_ORTHO_DEFER_SEQUENCE|APP_FOOTER_DEFER_SEQUENCE|APP_DEFER_FEATURE_GC|APP_HOMO_RENDER_CHUNK_SIZE|APP_HOMO_AUTO_RENDER_DELAY_MS|APP_ORTHO_RENDER_CHUNK_SIZE|APP_ORTHO_AUTO_RENDER_MORE|APP_ORTHO_AUTO_RENDER_DELAY_MS|APP_HOMO_INITIAL_VISIBLE|APP_ORTHO_INITIAL_VISIBLE|APP_ISOFORM_RENDER_BATCH_SIZE|APP_ISOFORM_RENDER_BATCH_DELAY_MS|APP_ORTHO_SERVER_RENDER_NUDGE): \"([^\"]+)\"$/\1=\2/p' '${APP_DIR}/shinyproxy/application.yml'"
   )"
   DELEGATE_ENV="$(
     rssh "podman inspect '${CHECK_DELEGATE}' --format '{{range .Config.Env}}{{println .}}{{end}}'"
@@ -361,11 +366,15 @@ if [[ "$MODE" == "check" ]]; then
   check_eager_profile_value APP_ORTHO_DEFER_SEQUENCE "$COLORS_ORTHO_DEFER_SEQUENCE"
   check_eager_profile_value APP_FOOTER_DEFER_SEQUENCE "$COLORS_FOOTER_DEFER_SEQUENCE"
   check_eager_profile_value APP_DEFER_FEATURE_GC "$COLORS_DEFER_FEATURE_GC"
+  check_eager_profile_value APP_HOMO_RENDER_CHUNK_SIZE "$COLORS_HOMO_RENDER_CHUNK_SIZE"
+  check_eager_profile_value APP_HOMO_AUTO_RENDER_DELAY_MS "$COLORS_HOMO_AUTO_RENDER_DELAY_MS"
   check_eager_profile_value APP_ORTHO_RENDER_CHUNK_SIZE "$COLORS_ORTHO_RENDER_CHUNK_SIZE"
   check_eager_profile_value APP_ORTHO_AUTO_RENDER_MORE "$COLORS_ORTHO_AUTO_RENDER_MORE"
   check_eager_profile_value APP_ORTHO_AUTO_RENDER_DELAY_MS "$COLORS_ORTHO_AUTO_RENDER_DELAY_MS"
   check_eager_profile_value APP_HOMO_INITIAL_VISIBLE "$COLORS_HOMO_INITIAL_VISIBLE"
   check_eager_profile_value APP_ORTHO_INITIAL_VISIBLE "$COLORS_ORTHO_INITIAL_VISIBLE"
+  check_eager_profile_value APP_ISOFORM_RENDER_BATCH_SIZE "$COLORS_ISOFORM_RENDER_BATCH_SIZE"
+  check_eager_profile_value APP_ISOFORM_RENDER_BATCH_DELAY_MS "$COLORS_ISOFORM_RENDER_BATCH_DELAY_MS"
   check_eager_profile_value APP_ORTHO_SERVER_RENDER_NUDGE "$COLORS_ORTHO_SERVER_RENDER_NUDGE"
 
   WORKER_STATE="$(rssh "podman inspect '${BACKGROUND_WORKER_NAME}' --format '{{.State.Status}}' 2>/dev/null || true")"
@@ -378,7 +387,7 @@ if [[ "$MODE" == "check" ]]; then
     die "el worker no registró un arranque headless correcto en su marcador"
   echo "  Commit:     ${ACTIVE_IMAGE_REVISION}, coincide con la fuente local"
   echo "  Sesión:     ${CHECK_DELEGATE}, policy=${BROKER_POLICY}, perf=${APPLICATION_PERF_TIMING}"
-  echo "  Eager:      hidden=${COLORS_ORTHO_SUSPEND_HIDDEN}, homo-seq=${COLORS_HOMO_DEFER_SEQUENCE}, ortho-seq=${COLORS_ORTHO_DEFER_SEQUENCE}, footer-seq=${COLORS_FOOTER_DEFER_SEQUENCE}, gc=${COLORS_DEFER_FEATURE_GC}, chunk=${COLORS_ORTHO_RENDER_CHUNK_SIZE}, auto=${COLORS_ORTHO_AUTO_RENDER_MORE}, delay=${COLORS_ORTHO_AUTO_RENDER_DELAY_MS}ms, homo/ortho-initial=${COLORS_HOMO_INITIAL_VISIBLE}/${COLORS_ORTHO_INITIAL_VISIBLE}, nudge=${COLORS_ORTHO_SERVER_RENDER_NUDGE}"
+  echo "  Progressive: hidden=${COLORS_ORTHO_SUSPEND_HIDDEN}, homo-seq=${COLORS_HOMO_DEFER_SEQUENCE}, ortho-seq=${COLORS_ORTHO_DEFER_SEQUENCE}, footer-seq=${COLORS_FOOTER_DEFER_SEQUENCE}, gc=${COLORS_DEFER_FEATURE_GC}, homo/ortho-chunk=${COLORS_HOMO_RENDER_CHUNK_SIZE}/${COLORS_ORTHO_RENDER_CHUNK_SIZE}, auto=${COLORS_ORTHO_AUTO_RENDER_MORE}, delays=${COLORS_HOMO_AUTO_RENDER_DELAY_MS}/${COLORS_ORTHO_AUTO_RENDER_DELAY_MS}ms, homo/ortho-initial=${COLORS_HOMO_INITIAL_VISIBLE}/${COLORS_ORTHO_INITIAL_VISIBLE}, isoform=${COLORS_ISOFORM_RENDER_BATCH_SIZE}/${COLORS_ISOFORM_RENDER_BATCH_DELAY_MS}ms, nudge=${COLORS_ORTHO_SERVER_RENDER_NUDGE}"
   echo "  Worker:     ${WORKER_STATE}, preflight headless OK"
   echo ""
   echo "CHECK OK: no se realizaron cambios en Colors."
@@ -587,7 +596,7 @@ rssh "set -e
   fi
   eager_staged=\"\${config}.eager.\$\$\"
   awk '
-    /^        (APP_ORTHO_SUSPEND_HIDDEN|APP_HOMO_DEFER_SEQUENCE|APP_ORTHO_DEFER_SEQUENCE|APP_FOOTER_DEFER_SEQUENCE|APP_DEFER_FEATURE_GC|APP_ORTHO_RENDER_CHUNK_SIZE|APP_ORTHO_AUTO_RENDER_MORE|APP_ORTHO_AUTO_RENDER_DELAY_MS|APP_HOMO_INITIAL_VISIBLE|APP_ORTHO_INITIAL_VISIBLE|APP_ORTHO_SERVER_RENDER_NUDGE):/ { next }
+    /^        (APP_ORTHO_SUSPEND_HIDDEN|APP_HOMO_DEFER_SEQUENCE|APP_ORTHO_DEFER_SEQUENCE|APP_FOOTER_DEFER_SEQUENCE|APP_DEFER_FEATURE_GC|APP_HOMO_RENDER_CHUNK_SIZE|APP_HOMO_AUTO_RENDER_DELAY_MS|APP_ORTHO_RENDER_CHUNK_SIZE|APP_ORTHO_AUTO_RENDER_MORE|APP_ORTHO_AUTO_RENDER_DELAY_MS|APP_HOMO_INITIAL_VISIBLE|APP_ORTHO_INITIAL_VISIBLE|APP_ISOFORM_RENDER_BATCH_SIZE|APP_ISOFORM_RENDER_BATCH_DELAY_MS|APP_ORTHO_SERVER_RENDER_NUDGE):/ { next }
     { print }
     /^        APP_INLINE_FAST_SEQUENCE_PREFETCH:/ && !inserted {
       print \"        APP_ORTHO_SUSPEND_HIDDEN: \\\"${COLORS_ORTHO_SUSPEND_HIDDEN}\\\"\"
@@ -595,11 +604,15 @@ rssh "set -e
       print \"        APP_ORTHO_DEFER_SEQUENCE: \\\"${COLORS_ORTHO_DEFER_SEQUENCE}\\\"\"
       print \"        APP_FOOTER_DEFER_SEQUENCE: \\\"${COLORS_FOOTER_DEFER_SEQUENCE}\\\"\"
       print \"        APP_DEFER_FEATURE_GC: \\\"${COLORS_DEFER_FEATURE_GC}\\\"\"
+      print \"        APP_HOMO_RENDER_CHUNK_SIZE: \\\"${COLORS_HOMO_RENDER_CHUNK_SIZE}\\\"\"
+      print \"        APP_HOMO_AUTO_RENDER_DELAY_MS: \\\"${COLORS_HOMO_AUTO_RENDER_DELAY_MS}\\\"\"
       print \"        APP_ORTHO_RENDER_CHUNK_SIZE: \\\"${COLORS_ORTHO_RENDER_CHUNK_SIZE}\\\"\"
       print \"        APP_ORTHO_AUTO_RENDER_MORE: \\\"${COLORS_ORTHO_AUTO_RENDER_MORE}\\\"\"
       print \"        APP_ORTHO_AUTO_RENDER_DELAY_MS: \\\"${COLORS_ORTHO_AUTO_RENDER_DELAY_MS}\\\"\"
       print \"        APP_HOMO_INITIAL_VISIBLE: \\\"${COLORS_HOMO_INITIAL_VISIBLE}\\\"\"
       print \"        APP_ORTHO_INITIAL_VISIBLE: \\\"${COLORS_ORTHO_INITIAL_VISIBLE}\\\"\"
+      print \"        APP_ISOFORM_RENDER_BATCH_SIZE: \\\"${COLORS_ISOFORM_RENDER_BATCH_SIZE}\\\"\"
+      print \"        APP_ISOFORM_RENDER_BATCH_DELAY_MS: \\\"${COLORS_ISOFORM_RENDER_BATCH_DELAY_MS}\\\"\"
       print \"        APP_ORTHO_SERVER_RENDER_NUDGE: \\\"${COLORS_ORTHO_SERVER_RENDER_NUDGE}\\\"\"
       inserted=1
     }
@@ -613,24 +626,32 @@ rssh "set -e
   test \"\$(grep -c '^        APP_ORTHO_DEFER_SEQUENCE:' \"\$config\")\" = 1
   test \"\$(grep -c '^        APP_FOOTER_DEFER_SEQUENCE:' \"\$config\")\" = 1
   test \"\$(grep -c '^        APP_DEFER_FEATURE_GC:' \"\$config\")\" = 1
+  test \"\$(grep -c '^        APP_HOMO_RENDER_CHUNK_SIZE:' \"\$config\")\" = 1
+  test \"\$(grep -c '^        APP_HOMO_AUTO_RENDER_DELAY_MS:' \"\$config\")\" = 1
   test \"\$(grep -c '^        APP_ORTHO_RENDER_CHUNK_SIZE:' \"\$config\")\" = 1
   test \"\$(grep -c '^        APP_ORTHO_AUTO_RENDER_MORE:' \"\$config\")\" = 1
   test \"\$(grep -c '^        APP_ORTHO_AUTO_RENDER_DELAY_MS:' \"\$config\")\" = 1
   test \"\$(grep -c '^        APP_HOMO_INITIAL_VISIBLE:' \"\$config\")\" = 1
   test \"\$(grep -c '^        APP_ORTHO_INITIAL_VISIBLE:' \"\$config\")\" = 1
+  test \"\$(grep -c '^        APP_ISOFORM_RENDER_BATCH_SIZE:' \"\$config\")\" = 1
+  test \"\$(grep -c '^        APP_ISOFORM_RENDER_BATCH_DELAY_MS:' \"\$config\")\" = 1
   test \"\$(grep -c '^        APP_ORTHO_SERVER_RENDER_NUDGE:' \"\$config\")\" = 1
   grep -Fqx '        APP_ORTHO_SUSPEND_HIDDEN: \"${COLORS_ORTHO_SUSPEND_HIDDEN}\"' \"\$config\"
   grep -Fqx '        APP_HOMO_DEFER_SEQUENCE: \"${COLORS_HOMO_DEFER_SEQUENCE}\"' \"\$config\"
   grep -Fqx '        APP_ORTHO_DEFER_SEQUENCE: \"${COLORS_ORTHO_DEFER_SEQUENCE}\"' \"\$config\"
   grep -Fqx '        APP_FOOTER_DEFER_SEQUENCE: \"${COLORS_FOOTER_DEFER_SEQUENCE}\"' \"\$config\"
   grep -Fqx '        APP_DEFER_FEATURE_GC: \"${COLORS_DEFER_FEATURE_GC}\"' \"\$config\"
+  grep -Fqx '        APP_HOMO_RENDER_CHUNK_SIZE: \"${COLORS_HOMO_RENDER_CHUNK_SIZE}\"' \"\$config\"
+  grep -Fqx '        APP_HOMO_AUTO_RENDER_DELAY_MS: \"${COLORS_HOMO_AUTO_RENDER_DELAY_MS}\"' \"\$config\"
   grep -Fqx '        APP_ORTHO_RENDER_CHUNK_SIZE: \"${COLORS_ORTHO_RENDER_CHUNK_SIZE}\"' \"\$config\"
   grep -Fqx '        APP_ORTHO_AUTO_RENDER_MORE: \"${COLORS_ORTHO_AUTO_RENDER_MORE}\"' \"\$config\"
   grep -Fqx '        APP_ORTHO_AUTO_RENDER_DELAY_MS: \"${COLORS_ORTHO_AUTO_RENDER_DELAY_MS}\"' \"\$config\"
   grep -Fqx '        APP_HOMO_INITIAL_VISIBLE: \"${COLORS_HOMO_INITIAL_VISIBLE}\"' \"\$config\"
   grep -Fqx '        APP_ORTHO_INITIAL_VISIBLE: \"${COLORS_ORTHO_INITIAL_VISIBLE}\"' \"\$config\"
+  grep -Fqx '        APP_ISOFORM_RENDER_BATCH_SIZE: \"${COLORS_ISOFORM_RENDER_BATCH_SIZE}\"' \"\$config\"
+  grep -Fqx '        APP_ISOFORM_RENDER_BATCH_DELAY_MS: \"${COLORS_ISOFORM_RENDER_BATCH_DELAY_MS}\"' \"\$config\"
   grep -Fqx '        APP_ORTHO_SERVER_RENDER_NUDGE: \"${COLORS_ORTHO_SERVER_RENDER_NUDGE}\"' \"\$config\"
-" || die "falló la materialización del perfil eager en application.yml"
+" || die "falló la materialización del perfil progresivo en application.yml"
 
 rssh "set -e
   config='${COLORS_APPLICATION_CANDIDATE}'
@@ -944,7 +965,7 @@ verify_static_release() {
       echo 'STATIC_GUARD_FAILED: perf-timing-mismatch' >&2
       exit 1
     fi
-    application_eager=\$(sed -n -E 's/^        (APP_ORTHO_SUSPEND_HIDDEN|APP_HOMO_DEFER_SEQUENCE|APP_ORTHO_DEFER_SEQUENCE|APP_FOOTER_DEFER_SEQUENCE|APP_DEFER_FEATURE_GC|APP_ORTHO_RENDER_CHUNK_SIZE|APP_ORTHO_AUTO_RENDER_MORE|APP_ORTHO_AUTO_RENDER_DELAY_MS|APP_HOMO_INITIAL_VISIBLE|APP_ORTHO_INITIAL_VISIBLE|APP_ORTHO_SERVER_RENDER_NUDGE): \"([^\"]+)\"$/\1=\2/p' '${APP_DIR}/shinyproxy/application.yml')
+    application_eager=\$(sed -n -E 's/^        (APP_ORTHO_SUSPEND_HIDDEN|APP_HOMO_DEFER_SEQUENCE|APP_ORTHO_DEFER_SEQUENCE|APP_FOOTER_DEFER_SEQUENCE|APP_DEFER_FEATURE_GC|APP_HOMO_RENDER_CHUNK_SIZE|APP_HOMO_AUTO_RENDER_DELAY_MS|APP_ORTHO_RENDER_CHUNK_SIZE|APP_ORTHO_AUTO_RENDER_MORE|APP_ORTHO_AUTO_RENDER_DELAY_MS|APP_HOMO_INITIAL_VISIBLE|APP_ORTHO_INITIAL_VISIBLE|APP_ISOFORM_RENDER_BATCH_SIZE|APP_ISOFORM_RENDER_BATCH_DELAY_MS|APP_ORTHO_SERVER_RENDER_NUDGE): \"([^\"]+)\"$/\1=\2/p' '${APP_DIR}/shinyproxy/application.yml')
     delegate_env=\$(podman inspect \"\$delegate\" --format '{{range .Config.Env}}{{println .}}{{end}}')
     for expected_env in \
       'APP_ORTHO_SUSPEND_HIDDEN=${COLORS_ORTHO_SUSPEND_HIDDEN}' \
@@ -952,11 +973,15 @@ verify_static_release() {
       'APP_ORTHO_DEFER_SEQUENCE=${COLORS_ORTHO_DEFER_SEQUENCE}' \
       'APP_FOOTER_DEFER_SEQUENCE=${COLORS_FOOTER_DEFER_SEQUENCE}' \
       'APP_DEFER_FEATURE_GC=${COLORS_DEFER_FEATURE_GC}' \
+      'APP_HOMO_RENDER_CHUNK_SIZE=${COLORS_HOMO_RENDER_CHUNK_SIZE}' \
+      'APP_HOMO_AUTO_RENDER_DELAY_MS=${COLORS_HOMO_AUTO_RENDER_DELAY_MS}' \
       'APP_ORTHO_RENDER_CHUNK_SIZE=${COLORS_ORTHO_RENDER_CHUNK_SIZE}' \
       'APP_ORTHO_AUTO_RENDER_MORE=${COLORS_ORTHO_AUTO_RENDER_MORE}' \
       'APP_ORTHO_AUTO_RENDER_DELAY_MS=${COLORS_ORTHO_AUTO_RENDER_DELAY_MS}' \
       'APP_HOMO_INITIAL_VISIBLE=${COLORS_HOMO_INITIAL_VISIBLE}' \
       'APP_ORTHO_INITIAL_VISIBLE=${COLORS_ORTHO_INITIAL_VISIBLE}' \
+      'APP_ISOFORM_RENDER_BATCH_SIZE=${COLORS_ISOFORM_RENDER_BATCH_SIZE}' \
+      'APP_ISOFORM_RENDER_BATCH_DELAY_MS=${COLORS_ISOFORM_RENDER_BATCH_DELAY_MS}' \
       'APP_ORTHO_SERVER_RENDER_NUDGE=${COLORS_ORTHO_SERVER_RENDER_NUDGE}'; do
       env_key=\${expected_env%%=*}
       expected_value=\${expected_env#*=}
@@ -1121,7 +1146,7 @@ rssh "set -e
   delegate_perf=\$(podman inspect \"\$delegate\" --format '{{range .Config.Env}}{{println .}}{{end}}' | sed -n 's/^APP_PERF_TIMING=//p')
   case \"\$delegate_perf\" in 0|1) ;; *) fail_guard delegate-perf-timing ;; esac
   test \"\$delegate_perf\" = \"\$application_perf\" || fail_guard perf-timing-mismatch
-  application_eager=\$(sed -n -E 's/^        (APP_ORTHO_SUSPEND_HIDDEN|APP_HOMO_DEFER_SEQUENCE|APP_ORTHO_DEFER_SEQUENCE|APP_FOOTER_DEFER_SEQUENCE|APP_DEFER_FEATURE_GC|APP_ORTHO_RENDER_CHUNK_SIZE|APP_ORTHO_AUTO_RENDER_MORE|APP_ORTHO_AUTO_RENDER_DELAY_MS|APP_HOMO_INITIAL_VISIBLE|APP_ORTHO_INITIAL_VISIBLE|APP_ORTHO_SERVER_RENDER_NUDGE): \"([^\"]+)\"$/\1=\2/p' '${APP_DIR}/shinyproxy/application.yml')
+  application_eager=\$(sed -n -E 's/^        (APP_ORTHO_SUSPEND_HIDDEN|APP_HOMO_DEFER_SEQUENCE|APP_ORTHO_DEFER_SEQUENCE|APP_FOOTER_DEFER_SEQUENCE|APP_DEFER_FEATURE_GC|APP_HOMO_RENDER_CHUNK_SIZE|APP_HOMO_AUTO_RENDER_DELAY_MS|APP_ORTHO_RENDER_CHUNK_SIZE|APP_ORTHO_AUTO_RENDER_MORE|APP_ORTHO_AUTO_RENDER_DELAY_MS|APP_HOMO_INITIAL_VISIBLE|APP_ORTHO_INITIAL_VISIBLE|APP_ISOFORM_RENDER_BATCH_SIZE|APP_ISOFORM_RENDER_BATCH_DELAY_MS|APP_ORTHO_SERVER_RENDER_NUDGE): \"([^\"]+)\"$/\1=\2/p' '${APP_DIR}/shinyproxy/application.yml')
   delegate_env=\$(podman inspect \"\$delegate\" --format '{{range .Config.Env}}{{println .}}{{end}}')
   for expected_env in \
     'APP_ORTHO_SUSPEND_HIDDEN=${COLORS_ORTHO_SUSPEND_HIDDEN}' \
@@ -1129,11 +1154,15 @@ rssh "set -e
     'APP_ORTHO_DEFER_SEQUENCE=${COLORS_ORTHO_DEFER_SEQUENCE}' \
     'APP_FOOTER_DEFER_SEQUENCE=${COLORS_FOOTER_DEFER_SEQUENCE}' \
     'APP_DEFER_FEATURE_GC=${COLORS_DEFER_FEATURE_GC}' \
+    'APP_HOMO_RENDER_CHUNK_SIZE=${COLORS_HOMO_RENDER_CHUNK_SIZE}' \
+    'APP_HOMO_AUTO_RENDER_DELAY_MS=${COLORS_HOMO_AUTO_RENDER_DELAY_MS}' \
     'APP_ORTHO_RENDER_CHUNK_SIZE=${COLORS_ORTHO_RENDER_CHUNK_SIZE}' \
     'APP_ORTHO_AUTO_RENDER_MORE=${COLORS_ORTHO_AUTO_RENDER_MORE}' \
     'APP_ORTHO_AUTO_RENDER_DELAY_MS=${COLORS_ORTHO_AUTO_RENDER_DELAY_MS}' \
     'APP_HOMO_INITIAL_VISIBLE=${COLORS_HOMO_INITIAL_VISIBLE}' \
     'APP_ORTHO_INITIAL_VISIBLE=${COLORS_ORTHO_INITIAL_VISIBLE}' \
+    'APP_ISOFORM_RENDER_BATCH_SIZE=${COLORS_ISOFORM_RENDER_BATCH_SIZE}' \
+    'APP_ISOFORM_RENDER_BATCH_DELAY_MS=${COLORS_ISOFORM_RENDER_BATCH_DELAY_MS}' \
     'APP_ORTHO_SERVER_RENDER_NUDGE=${COLORS_ORTHO_SERVER_RENDER_NUDGE}'; do
     env_key=\${expected_env%%=*}
     expected_value=\${expected_env#*=}

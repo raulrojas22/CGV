@@ -39,6 +39,16 @@ expect_pattern(
 )
 expect_pattern(
     server_txt,
+    'schedule_isoform_module_batches <- function\\(ids_chr, context\\)[\\s\\S]*ceiling\\(seq_along\\(ids_chr\\) / isoformRenderBatchSize\\)[\\s\\S]*later::later',
+    "expanded isoform plots are instantiated in delayed batches"
+)
+expect_pattern(
+    server_txt,
+    'homoAutoRenderQueued\\(TRUE\\)[\\s\\S]*later::later\\(function\\(\\)[\\s\\S]*homoVisibleCount',
+    "Multi-Gene waits between successive primary-card registrations"
+)
+expect_pattern(
+    server_txt,
     'figure_studio_plot_render_request[\\s\\S]*pending_hydration <- setdiff\\(ids_chr, hydrated_ids\\)[\\s\\S]*instantiate_orthologous_plot_module',
     "Figure Studio hydrates an orthologous isoform body before background rendering"
 )
@@ -137,9 +147,11 @@ expect_pattern(
     "orthologous footer avoids canonical gene sequence extraction while deferred"
 )
 for (env_key in c(
-    "APP_ORTHO_RENDER_CHUNK_SIZE=64",
-    "APP_ORTHO_AUTO_RENDER_MORE=0",
-    "APP_ORTHO_AUTO_RENDER_DELAY_MS=0",
+    "APP_HOMO_RENDER_CHUNK_SIZE=1",
+    "APP_HOMO_AUTO_RENDER_DELAY_MS=120",
+    "APP_ORTHO_RENDER_CHUNK_SIZE=1",
+    "APP_ORTHO_AUTO_RENDER_MORE=1",
+    "APP_ORTHO_AUTO_RENDER_DELAY_MS=120",
     "APP_ORTHO_FIRST_PAINT_TIMEOUT_MS=30000",
     "APP_ORTHO_SUSPEND_HIDDEN=1",
     "APP_HOMO_DEFER_SEQUENCE=0",
@@ -148,10 +160,12 @@ for (env_key in c(
     "APP_DEFER_FEATURE_GC=0",
     "APP_HOMO_UPFRONT_ISOFORMS=0",
     "APP_ORTHO_UPFRONT_ISOFORMS=0",
-    "APP_HOMO_INITIAL_VISIBLE=64",
-    "APP_ORTHO_INITIAL_VISIBLE=64"
+    "APP_HOMO_INITIAL_VISIBLE=1",
+    "APP_ORTHO_INITIAL_VISIBLE=1",
+    "APP_ISOFORM_RENDER_BATCH_SIZE=1",
+    "APP_ISOFORM_RENDER_BATCH_DELAY_MS=120"
 )) {
-    expect_pattern(env_txt, env_key, paste("env example uses eager rendering:", env_key))
+    expect_pattern(env_txt, env_key, paste("env example uses progressive rendering:", env_key))
 }
 expect_pattern(
     desktop_main_txt,
@@ -165,11 +179,15 @@ expect_pattern(
 )
 
 for (runner_default in c(
-    'APP_HOMO_INITIAL_VISIBLE="${APP_HOMO_INITIAL_VISIBLE:-64}"',
-    'APP_ORTHO_INITIAL_VISIBLE="${APP_ORTHO_INITIAL_VISIBLE:-64}"',
-    'APP_ORTHO_RENDER_CHUNK_SIZE="${APP_ORTHO_RENDER_CHUNK_SIZE:-64}"',
-    'APP_ORTHO_AUTO_RENDER_MORE="${APP_ORTHO_AUTO_RENDER_MORE:-0}"',
-    'APP_ORTHO_AUTO_RENDER_DELAY_MS="${APP_ORTHO_AUTO_RENDER_DELAY_MS:-0}"',
+    'APP_HOMO_INITIAL_VISIBLE="${APP_HOMO_INITIAL_VISIBLE:-1}"',
+    'APP_ORTHO_INITIAL_VISIBLE="${APP_ORTHO_INITIAL_VISIBLE:-1}"',
+    'APP_HOMO_RENDER_CHUNK_SIZE="${APP_HOMO_RENDER_CHUNK_SIZE:-1}"',
+    'APP_HOMO_AUTO_RENDER_DELAY_MS="${APP_HOMO_AUTO_RENDER_DELAY_MS:-120}"',
+    'APP_ORTHO_RENDER_CHUNK_SIZE="${APP_ORTHO_RENDER_CHUNK_SIZE:-1}"',
+    'APP_ORTHO_AUTO_RENDER_MORE="${APP_ORTHO_AUTO_RENDER_MORE:-1}"',
+    'APP_ORTHO_AUTO_RENDER_DELAY_MS="${APP_ORTHO_AUTO_RENDER_DELAY_MS:-120}"',
+    'APP_ISOFORM_RENDER_BATCH_SIZE="${APP_ISOFORM_RENDER_BATCH_SIZE:-1}"',
+    'APP_ISOFORM_RENDER_BATCH_DELAY_MS="${APP_ISOFORM_RENDER_BATCH_DELAY_MS:-120}"',
     'APP_ORTHO_SERVER_RENDER_NUDGE="${APP_ORTHO_SERVER_RENDER_NUDGE:-0}"',
     'APP_HOMO_DEFER_SEQUENCE="${APP_HOMO_DEFER_SEQUENCE:-0}"',
     'APP_ORTHO_DEFER_SEQUENCE="${APP_ORTHO_DEFER_SEQUENCE:-0}"',
@@ -177,7 +195,7 @@ for (runner_default in c(
     'APP_DEFER_FEATURE_GC="${APP_DEFER_FEATURE_GC:-0}"'
 )) {
     if (!grepl(runner_default, perf_runner_txt, fixed = TRUE)) {
-        stop(sprintf("Performance runner is not using the eager render default: %s", runner_default))
+        stop(sprintf("Performance runner is not using the progressive render default: %s", runner_default))
     }
 }
 expect_pattern(

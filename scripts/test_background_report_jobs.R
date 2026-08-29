@@ -199,17 +199,21 @@ for (fixed_profile in c(
     'COLORS_ORTHO_DEFER_SEQUENCE="0"',
     'COLORS_FOOTER_DEFER_SEQUENCE="0"',
     'COLORS_DEFER_FEATURE_GC="0"',
-    'COLORS_ORTHO_RENDER_CHUNK_SIZE="64"',
-    'COLORS_ORTHO_AUTO_RENDER_MORE="0"',
-    'COLORS_ORTHO_AUTO_RENDER_DELAY_MS="0"',
-    'COLORS_HOMO_INITIAL_VISIBLE="64"',
-    'COLORS_ORTHO_INITIAL_VISIBLE="64"',
+    'COLORS_HOMO_RENDER_CHUNK_SIZE="1"',
+    'COLORS_HOMO_AUTO_RENDER_DELAY_MS="120"',
+    'COLORS_ORTHO_RENDER_CHUNK_SIZE="1"',
+    'COLORS_ORTHO_AUTO_RENDER_MORE="1"',
+    'COLORS_ORTHO_AUTO_RENDER_DELAY_MS="120"',
+    'COLORS_HOMO_INITIAL_VISIBLE="1"',
+    'COLORS_ORTHO_INITIAL_VISIBLE="1"',
+    'COLORS_ISOFORM_RENDER_BATCH_SIZE="1"',
+    'COLORS_ISOFORM_RENDER_BATCH_DELAY_MS="120"',
     'COLORS_ORTHO_SERVER_RENDER_NUDGE="0"'
 )) {
-    assert(grepl(fixed_profile, colors_deploy_text, fixed = TRUE), paste("Colors fixes eager render profile:", fixed_profile))
+    assert(grepl(fixed_profile, colors_deploy_text, fixed = TRUE), paste("Colors fixes progressive render profile:", fixed_profile))
 }
 assert(!grepl('SP_HOMO_DEFER_SEQUENCE:', colors_deploy_text, fixed = TRUE), "Colors does not allow stale SP_* values to reactivate deferred sequence work")
-assert(grepl('falló la materialización del perfil eager en application.yml', colors_deploy_text, fixed = TRUE), "Colors validates eager profile materialization")
+assert(grepl('falló la materialización del perfil progresivo en application.yml', colors_deploy_text, fixed = TRUE), "Colors validates progressive profile materialization")
 assert(grepl("^browser=Chrome/", colors_deploy_text, fixed = TRUE), "Colors check requires a durable successful headless browser marker")
 assert(!grepl("--chmod=F600", colors_deploy_text, fixed = TRUE), "Colors secret sync stays compatible with macOS openrsync")
 assert(grepl("--chmod=Fu=rw,Fgo=", colors_deploy_text, fixed = TRUE), "Colors secret sync preserves mode 0600 portably")
