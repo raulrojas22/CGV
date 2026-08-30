@@ -34,7 +34,7 @@ COLORS_ORTHO_AUTO_RENDER_DELAY_MS="120"
 COLORS_HOMO_INITIAL_VISIBLE="1"
 COLORS_ORTHO_INITIAL_VISIBLE="1"
 COLORS_ISOFORM_RENDER_BATCH_SIZE="1"
-COLORS_ISOFORM_RENDER_BATCH_DELAY_MS="2500"
+COLORS_ISOFORM_RENDER_BATCH_DELAY_MS="120"
 COLORS_ORTHO_SERVER_RENDER_NUDGE="0"
 LOCAL_EMAIL_ENV="${SCRIPT_DIR}/.env.local"
 REMOTE_EMAIL_ENV="${APP_DIR}/.env.background-reports"
@@ -78,7 +78,7 @@ Variables opcionales:
 Perfil de render progresivo fijo en Colors:
   hidden=1, homo-seq=0, ortho-seq=0, footer-seq=0, gc=0,
   homo/ortho chunk=1, auto-render=1, auto-delay=120ms,
-  homo/ortho-initial=1, isoform batch=1/2500ms,
+  homo/ortho-initial=1, isoform batch=1/120ms,
   server-render-nudge=0.
 
 El deploy normal exige que Git esté limpio y crea una imagen inmutable con
@@ -116,8 +116,8 @@ for tuning_value in \
   [[ "$tuning_value" == "0" || "$tuning_value" == "1" ]] || \
     die "Los flags del perfil de render de Colors deben ser 0 o 1"
 done
-[[ "$COLORS_HOMO_AUTO_RENDER_DELAY_MS" == "120" && "$COLORS_ORTHO_AUTO_RENDER_DELAY_MS" == "120" && "$COLORS_ISOFORM_RENDER_BATCH_DELAY_MS" == "2500" ]] || \
-  die "El perfil progresivo de Colors exige 120 ms entre genes y 2500 ms entre isoformas"
+[[ "$COLORS_HOMO_AUTO_RENDER_DELAY_MS" == "120" && "$COLORS_ORTHO_AUTO_RENDER_DELAY_MS" == "120" && "$COLORS_ISOFORM_RENDER_BATCH_DELAY_MS" == "120" ]] || \
+  die "El perfil progresivo de Colors exige delays de 120 ms"
 [[ "$COLORS_HOMO_RENDER_CHUNK_SIZE" == "1" && "$COLORS_ORTHO_RENDER_CHUNK_SIZE" == "1" && "$COLORS_HOMO_INITIAL_VISIBLE" == "1" && "$COLORS_ORTHO_INITIAL_VISIBLE" == "1" && "$COLORS_ISOFORM_RENDER_BATCH_SIZE" == "1" ]] || \
   die "El perfil progresivo de Colors exige lotes e initial-visible de 1"
 [[ "$PERF_RUN_LABEL" =~ ^[A-Za-z0-9._-]+$ ]] || \
