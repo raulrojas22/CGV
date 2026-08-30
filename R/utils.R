@@ -8363,6 +8363,10 @@ split_gene_data_by_transcript <- function(data_df) {
         return(list())
     }
 
+    split_perf <- app_perf_new_run("TRANSCRIPT_SPLIT")
+    split_total_t0 <- app_perf_now()
+    on.exit(app_perf_mark_ms(split_perf, "split_total_internal_ms", app_perf_elapsed_ms(split_total_t0), "TRANSCRIPT_SPLIT"), add = TRUE)
+    setup_t0 <- app_perf_now()
     df <- as.data.frame(data_df, stringsAsFactors = FALSE)
     if (!all(c("V3", "V9") %in% colnames(df))) {
         return(list(df))
@@ -8390,6 +8394,7 @@ split_gene_data_by_transcript <- function(data_df) {
         "vault_rna", "y_rna", "antisense_lncrna", "lncrna"
     )
     tx_rows <- which(row_types %in% tx_level_types)
+    app_perf_mark_ms(split_perf, "split_setup_ms", app_perf_elapsed_ms(setup_t0), "TRANSCRIPT_SPLIT")
     if (length(tx_rows) == 0) {
         return(list(df))
     }
@@ -8399,6 +8404,7 @@ split_gene_data_by_transcript <- function(data_df) {
     # This splitter needs only ID/transcript_id and Parent. Parsing every GFF/GTF
     # attribute into a list used to dominate large genes even after relationship
     # traversal was indexed. Extract the required fields in vectorised passes.
+    id_extract_t0 <- app_perf_now()
     ids <- stringr::str_match(
         attrs_raw,
         stringr::regex("(?:^|;)\\s*ID=([^;]+)", ignore_case = TRUE)
@@ -8414,7 +8420,9 @@ split_gene_data_by_transcript <- function(data_df) {
     ids[is.na(ids)] <- ""
     nonempty_ids <- nzchar(ids)
     if (any(nonempty_ids)) ids[nonempty_ids] <- safe_url_decode(trimws(ids[nonempty_ids]))
+    app_perf_mark_ms(split_perf, "split_id_extract_ms", app_perf_elapsed_ms(id_extract_t0), "TRANSCRIPT_SPLIT")
 
+    parent_index_t0 <- app_perf_now()
     parent_fields <- stringr::str_extract_all(
         attrs_raw,
         stringr::regex("(?:^|;)\\s*Parent=[^;]*", ignore_case = TRUE)
@@ -8442,7 +8450,9 @@ split_gene_data_by_transcript <- function(data_df) {
     } else {
         rows_by_parent_token <- list()
     }
+    app_perf_mark_ms(split_perf, "split_parent_index_ms", app_perf_elapsed_ms(parent_index_t0), "TRANSCRIPT_SPLIT")
 
+    tx_key_t0 <- app_perf_now()
     tx_ids_raw <- vapply(tx_rows, function(i) {
         tid <- ids[i]
         if (!nzchar(tid)) {
@@ -8469,7 +8479,9 @@ split_gene_data_by_transcript <- function(data_df) {
     tx_num <- suppressWarnings(as.numeric(stringr::str_match(tx_disp_valid, "(?:[-_.]|\\b)(\\d+)$")[, 2]))
     tx_num_ord <- ifelse(is.na(tx_num), Inf, tx_num)
     ord <- order(tx_base, tx_num_ord, tolower(tx_disp_valid), tx_rows_valid)
+    app_perf_mark_ms(split_perf, "split_tx_key_order_ms", app_perf_elapsed_ms(tx_key_t0), "TRANSCRIPT_SPLIT")
 
+    traversal_t0 <- app_perf_now()
     out <- list()
     for (k in ord) {
         tx_row <- tx_rows_valid[k]
@@ -8516,6 +8528,8 @@ split_gene_data_by_transcript <- function(data_df) {
         }
         out[[key_i]] <- sub_df
     }
+    app_perf_mark_ms(split_perf, "split_traversal_copy_ms", app_perf_elapsed_ms(traversal_t0), "TRANSCRIPT_SPLIT")
+    app_perf_mark(split_perf, sprintf("done blocks=%d rows=%d", as.integer(length(out)), as.integer(n)), "TRANSCRIPT_SPLIT")
 
     if (length(out) == 0) {
         return(list(df))

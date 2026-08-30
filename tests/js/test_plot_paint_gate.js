@@ -90,7 +90,12 @@ function createHarness(perfTimingEnabled) {
           querySelector(selector) {
             if (selector === '.footer-composition-inline') return {};
             if (selector === '[data-metrics-payload]') {
-              return { getAttribute() { return '{"sections":[{"title":"Structure"}]}'; } };
+              return {
+                getAttribute(name) {
+                  if (name === 'data-metrics-complete') return 'true';
+                  return '{"sections":[{"title":"Structure"}]}';
+                }
+              };
             }
             return null;
           }

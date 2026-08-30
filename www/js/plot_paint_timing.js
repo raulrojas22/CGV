@@ -107,7 +107,10 @@
     var metricsPayload = metricsButton
       ? String(metricsButton.getAttribute('data-metrics-payload') || '').trim()
       : '';
-    if (!composition || !metricsPayload) return null;
+    var metricsComplete = metricsButton
+      ? String(metricsButton.getAttribute('data-metrics-complete') || '').toLowerCase() === 'true'
+      : false;
+    if (!composition || !metricsPayload || !metricsComplete) return null;
     return {
       hasSequenceComposition: true,
       hasMetrics: true,

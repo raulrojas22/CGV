@@ -6390,6 +6390,7 @@ function(input, output, session) {
             title = if (is_gene_variant) "View gene statistics" else "View transcript info",
             `data-panel-variant` = panel_variant,
             `data-metrics-payload` = metrics_attr,
+            `data-metrics-complete` = if (is.null(metrics_payload)) "false" else "true",
             tags$i(class = "fa fa-chart-bar", `aria-hidden` = "true"),
             span("Info")
         )
@@ -13586,38 +13587,43 @@ function(input, output, session) {
                 is.data.frame(alias_index_matches) && nrow(alias_index_matches) > 0L) {
                 selected_alias_match <- alias_index_matches[1, , drop = FALSE]
                 selected_role <- as.character(selected_alias_match$match_role[1] %||% "")
-                if (identical(selected_role, "stable_id")) {
-                    alias_lookup <- tryCatch(
-                        alias_index_match_to_lookup(selected_alias_match, file_path = file_path, input_gene = input_gene),
-                        error = function(e) NULL
+                alias_fast_t0 <- app_perf_now()
+                alias_lookup <- tryCatch(
+                    alias_index_match_to_lookup(selected_alias_match, file_path = file_path, input_gene = input_gene),
+                    error = function(e) NULL
+                )
+                app_perf_mark_ms(lookup_perf, "lookup_alias_fast_region_ms", app_perf_elapsed_ms(alias_fast_t0), perf_context)
+                app_perf_mark(
+                    lookup_perf,
+                    sprintf("alias fast candidate role=%s rows=%d", selected_role, as.integer(nrow((alias_lookup %||% list())$data %||% data.frame()))),
+                    perf_context
+                )
+                if (!is.null(alias_lookup$data) && is.data.frame(alias_lookup$data) && nrow(alias_lookup$data) > 0L) {
+                    query_candidates_used <<- normalize_lookup_query_candidates(c(
+                        query_candidates_used,
+                        selected_alias_match$query_term_original,
+                        selected_alias_match$local_gene_id,
+                        selected_alias_match$local_symbol
+                    ))
+                    best_res <- attach_lookup_result_meta(
+                        alias_lookup,
+                        query_candidates = query_candidates_used,
+                        best_alias_used = as.character(selected_alias_match$query_term_original[1] %||% ""),
+                        input_gene = input_gene
                     )
-                    if (!is.null(alias_lookup$data) && is.data.frame(alias_lookup$data) && nrow(alias_lookup$data) > 0L) {
-                        query_candidates_used <<- normalize_lookup_query_candidates(c(
-                            query_candidates_used,
-                            selected_alias_match$query_term_original,
-                            selected_alias_match$local_gene_id,
-                            selected_alias_match$local_symbol
-                        ))
-                        best_res <- attach_lookup_result_meta(
-                            alias_lookup,
-                            query_candidates = query_candidates_used,
-                            best_alias_used = as.character(selected_alias_match$query_term_original[1] %||% ""),
-                            input_gene = input_gene
-                        )
-                        best_res$lookup_stage <- "alias_index"
-                        best_res$alias_index_status <- alias_index_status
-                        best_res$alias_index_match <- selected_alias_match
-                        best_res$external_lookup_had_errors <- FALSE
-                        best_res$det_resolved <- det
-                        best_res$lookup_elapsed_ms <- app_perf_elapsed_ms(lookup_t0)
-                        push_progress(sprintf(
-                            "\u2022 CGeV resolved stable ID '%s' as %s using the local alias index.",
-                            input_gene,
-                            as.character(best_res$matched_gene_id %||% best_res$matched_gene_name %||% selected_alias_match$local_gene_id[1] %||% "")
-                        ))
-                        remember_lookup(cache_key_initial, best_res)
-                        return(best_res)
-                    }
+                    best_res$lookup_stage <- "alias_index"
+                    best_res$alias_index_status <- alias_index_status
+                    best_res$alias_index_match <- selected_alias_match
+                    best_res$external_lookup_had_errors <- FALSE
+                    best_res$det_resolved <- det
+                    best_res$lookup_elapsed_ms <- app_perf_elapsed_ms(lookup_t0)
+                    push_progress(sprintf(
+                        "\u2022 CGeV resolved '%s' as %s using the local alias index.",
+                        input_gene,
+                        as.character(best_res$matched_gene_id %||% best_res$matched_gene_name %||% selected_alias_match$local_gene_id[1] %||% "")
+                    ))
+                    remember_lookup(cache_key_initial, best_res)
+                    return(best_res)
                 }
             }
             NULL
