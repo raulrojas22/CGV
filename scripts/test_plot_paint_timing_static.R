@@ -31,7 +31,9 @@ expect_fixed(ui_txt, 'versioned_asset_path("js/plot_paint_timing.js")', "browser
 expect_fixed(server_txt, 'sendCustomMessage("cgv_plot_timing_start"', "server-to-browser timing start")
 expect_fixed(server_txt, 'sendCustomMessage("cgv_plot_timing_expect"', "expected output identifiers")
 expect_fixed(server_txt, 'observeEvent(input$cgv_plot_painted', "browser paint event receiver")
+expect_fixed(server_txt, 'observeEvent(input$cgv_card_complete', "browser complete-card event receiver")
 expect_fixed(server_txt, '"browser_first_plot_painted_ms"', "first browser paint metric")
+expect_fixed(server_txt, '"browser_first_card_complete_ms"', "first complete-card metric")
 expect_fixed(server_txt, '"server_ready_to_browser_paint_ms"', "server-to-paint gap metric")
 expect_fixed(server_txt, 'initial_plot_timing_ids <- function(', "initial visible plot selection")
 expect_pattern(
@@ -90,6 +92,8 @@ expect_pattern(paint_js, "requestAnimationFrame", "paint-frame synchronization")
 expect_pattern(paint_js, "MutationObserver", "render mutation tracking")
 expect_pattern(paint_js, "snapshotVisibleSvgs", "stale SVG protection")
 expect_pattern(paint_js, "cgv_plot_painted", "paint event publication")
+expect_pattern(paint_js, "cgv_card_complete", "complete-card event publication")
+expect_pattern(paint_js, "cardReadiness", "sequence and metrics readiness inspection")
 expect_pattern(paint_js, "svg_bytes", "rendered SVG size")
 expect_fixed(paint_js, "rawOutputIds == null ? [] : [rawOutputIds]", "single-output Shiny message normalization")
 expect_fixed(paint_js, "var perfTimingEnabled = !!window.__cgvPlotPaintTiming;", "functional paint watch remains available without telemetry")
@@ -138,7 +142,10 @@ for (metric in c(
     "browser_first_plot_painted_ms",
     "browser_total_plots_painted_ms",
     "client_click_to_first_paint_ms",
-    "server_ready_to_browser_paint_ms"
+    "server_ready_to_browser_paint_ms",
+    "browser_first_card_complete_ms",
+    "client_click_to_card_complete_ms",
+    "browser_first_paint_to_card_complete_ms"
 )) {
     for (script_name in names(summary_scripts)) {
         expect_fixed(

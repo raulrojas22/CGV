@@ -421,7 +421,10 @@ function(input, output, session) {
             first_painted_logged = FALSE,
             first_painted_ms = NA_real_,
             ready_to_paint_logged = FALSE,
-            total_painted_logged = FALSE
+            total_painted_logged = FALSE,
+            card_complete = character(0),
+            first_card_complete_logged = FALSE,
+            first_card_complete_ms = NA_real_
         )
     }
 
@@ -1658,6 +1661,49 @@ function(input, output, session) {
         if (!isTRUE(tr$total_painted_logged) && length(expected_outputs) > 0L && all(expected_outputs %in% tr$painted)) {
             app_perf_mark_ms(run, "browser_total_plots_painted_ms", elapsed_ms, context)
             tr$total_painted_logged <- TRUE
+        }
+        tracker_rv(tr)
+        invisible(TRUE)
+    }
+
+    handle_browser_card_complete <- function(tracker_rv, payload, context = "APP_TIMING") {
+        tr <- tracker_rv()
+        run <- tr$run
+        run_id <- trimws(as.character(payload$run_id %||% ""))
+        output_id <- trimws(as.character(payload$output_id %||% ""))
+        if (!is.list(run) || !nzchar(run_id) || !identical(run_id, as.character(run$id %||% "")) || !nzchar(output_id)) {
+            return(invisible(FALSE))
+        }
+        if (output_id %in% as.character(tr$card_complete %||% character(0))) {
+            return(invisible(FALSE))
+        }
+        tr$card_complete <- unique(c(as.character(tr$card_complete %||% character(0)), output_id))
+        elapsed_ms <- suppressWarnings(as.numeric(ms_since_run_start(run)))
+        client_click_ms <- suppressWarnings(as.numeric(payload$click_to_complete_ms %||% NA_real_))
+        metrics_bytes <- suppressWarnings(as.numeric(payload$metrics_bytes %||% NA_real_))
+        if (!isTRUE(tr$first_card_complete_logged)) {
+            app_perf_mark_ms(run, "browser_first_card_complete_ms", elapsed_ms, context)
+            if (is.finite(client_click_ms)) {
+                app_perf_mark_ms(run, "client_click_to_card_complete_ms", client_click_ms, context)
+            }
+            if (is.finite(tr$first_painted_ms) && is.finite(elapsed_ms)) {
+                app_perf_mark_ms(run, "browser_first_paint_to_card_complete_ms", max(0, elapsed_ms - tr$first_painted_ms), context)
+            }
+            if (is.finite(metrics_bytes)) {
+                app_perf_mark_ms(run, "browser_card_metrics_bytes", metrics_bytes, context)
+            }
+            app_perf_mark(
+                run,
+                sprintf(
+                    "card_complete output=%s sequence=%s metrics=%s",
+                    output_id,
+                    as.character(isTRUE(payload$has_sequence_composition)),
+                    as.character(isTRUE(payload$has_metrics))
+                ),
+                context
+            )
+            tr$first_card_complete_logged <- TRUE
+            tr$first_card_complete_ms <- elapsed_ms
         }
         tracker_rv(tr)
         invisible(TRUE)
@@ -14940,6 +14986,20 @@ function(input, output, session) {
         invisible(NULL)
     }, ignoreInit = TRUE)
 
+    observeEvent(input$cgv_card_complete, {
+        payload <- input$cgv_card_complete %||% list()
+        run_id <- trimws(as.character(payload$run_id %||% ""))
+        if (!nzchar(run_id)) return(invisible(NULL))
+        homo_run <- (homoPlotTimingTracker()$run %||% list())$id %||% ""
+        ortho_run <- (orthoPlotTimingTracker()$run %||% list())$id %||% ""
+        if (identical(run_id, as.character(homo_run))) {
+            handle_browser_card_complete(homoPlotTimingTracker, payload, "HOMO_TIMING")
+        } else if (identical(run_id, as.character(ortho_run))) {
+            handle_browser_card_complete(orthoPlotTimingTracker, payload, "ORTHO_TIMING")
+        }
+        invisible(NULL)
+    }, ignoreInit = TRUE)
+
     observeEvent(searchPreparationReadyOrtho(), {
         if (!isTRUE(searchPreparationReadyOrtho())) return(invisible(NULL))
         pending <- isolate(pendingPreparedSearchOrtho())
@@ -18031,6 +18091,7 @@ function(input, output, session) {
                 }
 
                 # [HOMÓLOGOS]: Aquí usamos PARALELO (TRUE) porque es un solo proceso y queremos rapidez
+                lookup_total_t0_h <- app_perf_now()
                 lookup <- run_lookup_pipeline(
                     ruta_archivo,
                     filter_text,
@@ -18046,6 +18107,16 @@ function(input, output, session) {
                 )
                 data_n <- if (is.null(lookup$data)) 0L else nrow(lookup$data)
                 app_perf_mark(perf_run, sprintf("lookup done rows=%d", as.integer(data_n)), "HOMO")
+                app_perf_mark_ms(perf_run, "lookup_total_ms", app_perf_elapsed_ms(lookup_total_t0_h), "HOMO")
+                app_perf_mark(
+                    perf_run,
+                    sprintf(
+                        "lookup result stage=%s cache=%s",
+                        as.character(lookup$lookup_stage %||% "local_exact"),
+                        as.character(isTRUE(lookup$cache_hit))
+                    ),
+                    "HOMO"
+                )
 
                 data <- lookup$data
                 if (is.null(data) || nrow(data) == 0) {
@@ -18101,6 +18172,7 @@ function(input, output, session) {
 
                 set_popup_loading(TRUE, context = "Multi-Gene Search", text = sprintf("Plotting gene '%s' in %s...", filter_text, organism_context))
 
+                plot_state_prepare_t0_h <- app_perf_now()
                 result <- tryCatch(
                     {
                         matched_annotation_name <- normalize_display_id(lookup$matched_gene_name %||% lookup$best_alias_used %||% lookup$display_gene_name %||% filter_text)
@@ -18128,6 +18200,7 @@ function(input, output, session) {
                         )
                         app_perf_mark(perf_run, sprintf("split transcripts blocks=%d canonical_idx=%d", as.integer(length(transcript_blocks)), as.integer(canonical_block_idx_homo)), "HOMO")
                         app_perf_mark_ms(perf_run, "split_transcripts_ms", app_perf_elapsed_ms(split_t0), "HOMO")
+                        genome_resolve_t0_h <- app_perf_now()
                         resolved_genome <- if (identical(source_mode, "upload")) {
                             list(path = uploaded_genome_path, source = "uploaded", found = TRUE, organism = det$organism %||% NULL)
                         } else if (!is.null(forced_genome_path) && nzchar(forced_genome_path) && file.exists(forced_genome_path)) {
@@ -18136,6 +18209,7 @@ function(input, output, session) {
                             resolve_genome_fasta(det, NULL, genomes_dir = "genomes")
                         }
                         genome_path <- if (isTRUE(resolved_genome$found)) resolved_genome$path else NULL
+                        app_perf_mark_ms(perf_run, "genome_resolve_ms", app_perf_elapsed_ms(genome_resolve_t0_h), "HOMO")
                         use_preloaded_chr_map <- identical(source_mode, "preloaded") || identical(source_mode, "ncbi")
                         preloaded_report_path <- if (identical(source_mode, "preloaded")) as.character(entry$assembly_report_path[1] %||% "") else ""
 
@@ -18151,6 +18225,7 @@ function(input, output, session) {
                             canonical_block_idx_homo <- 1L
                         }
 
+                        neighbor_prepare_t0_h <- app_perf_now()
                         precomputed_neighbor_context <- tryCatch(
                             compute_neighbor_context_from_plot_data(
                                 annotation_file_path = ruta_archivo,
@@ -18159,6 +18234,7 @@ function(input, output, session) {
                             ),
                             error = function(e) NULL
                         )
+                        app_perf_mark_ms(perf_run, "neighbor_context_prepare_ms", app_perf_elapsed_ms(neighbor_prepare_t0_h), "HOMO")
                         local_alias_t0_h <- app_perf_now()
                         local_alias_terms_h <- collect_local_alias_terms_for_plot(
                             lookup = lookup,
@@ -18170,6 +18246,7 @@ function(input, output, session) {
                         )
                         app_perf_mark_ms(perf_run, "collect_local_alias_terms_ms", app_perf_elapsed_ms(local_alias_t0_h), "HOMO")
 
+                        batch_scale_t0_h <- app_perf_now()
                         batch_tx_lengths <- vapply(transcript_blocks, function(block_data) {
                             tx_span <- tryCatch(compute_transcript_span(block_data), error = function(e) c(start = NA_real_, end = NA_real_))
                             tx_start <- suppressWarnings(as.numeric(tx_span[["start"]]))
@@ -18189,6 +18266,7 @@ function(input, output, session) {
                                 )
                             }
                         }
+                        app_perf_mark_ms(perf_run, "batch_scale_prepare_ms", app_perf_elapsed_ms(batch_scale_t0_h), "HOMO")
 
                         # OPT-1: Local accumulators to batch all reactive writes (mirrors ortho pattern).
                         # Snapshot existing state once, accumulate locally, commit once after the loop.
@@ -18214,6 +18292,7 @@ function(input, output, session) {
                         metrics_transcript_blocks <- list()
                         metrics_plot_signatures <- list()
 
+                        transcript_loop_t0_h <- app_perf_now()
                         for (block_idx in seq_along(transcript_blocks)) {
                             app_perf_mark(perf_run, sprintf("tx %d/%d start", as.integer(block_idx), as.integer(length(transcript_blocks))), "HOMO")
                             tx_loop_t0 <- as.numeric(proc.time()[["elapsed"]])
@@ -18353,6 +18432,7 @@ function(input, output, session) {
                             metrics_transcript_blocks[[length(metrics_transcript_blocks) + 1L]] <- block_data_frozen
                             metrics_plot_signatures[[as.character(next_id)]] <- plot_signature
                         }
+                        app_perf_mark_ms(perf_run, "transcript_state_loop_ms", app_perf_elapsed_ms(transcript_loop_t0_h), "HOMO")
                         # OPT-1: Batch-commit all accumulated state to reactives at once.
                         if (length(local_new_ids) > 0L) {
                             commit_homo_t0 <- app_perf_now()
@@ -18387,6 +18467,7 @@ function(input, output, session) {
                             context = "HOMO_TIMING"
                         )
                         if (length(metrics_plot_ids) > 0L) {
+                            metrics_schedule_t0_h <- app_perf_now()
                             schedule_plot_metrics_payload_build(
                                 context = "homo",
                                 plot_ids = metrics_plot_ids,
@@ -18400,6 +18481,7 @@ function(input, output, session) {
                                 perf_context = "HOMO",
                                 plot_signatures = metrics_plot_signatures
                             )
+                            app_perf_mark_ms(perf_run, "metrics_schedule_ms", app_perf_elapsed_ms(metrics_schedule_t0_h), "HOMO")
                         }
 
                         if (added_count > 0) {
@@ -18430,6 +18512,7 @@ function(input, output, session) {
                         )
                     }
                 )
+                app_perf_mark_ms(perf_run, "plot_state_prepare_total_ms", app_perf_elapsed_ms(plot_state_prepare_t0_h), "HOMO")
 
                 final_msg <- as.character(result$message %||% "Visualization finished.")
                 final_tone <- as.character(result$tone %||% classify_popup_tone(final_msg))
@@ -21027,6 +21110,7 @@ function(input, output, session) {
             last_footer_key <- NULL
             last_footer_ui <- NULL
             output[[output_id]] <- renderUI({
+                footer_render_t0_h <- app_perf_now()
                 plot_data <- tryCatch(fileDataHomologous()[[id_local]], error = function(e) NULL)
                 seq_blob <- tryCatch(genSequencesHomologous()[[id_local]], error = function(e) NULL)
                 metrics_payload <- tryCatch(get_plot_metrics_payload(id_local, "homo"), error = function(e) NULL)
@@ -21126,6 +21210,25 @@ function(input, output, session) {
                     is_canonical      = is_canonical_footer_h,
                     is_canonical_copy = is_canonical_copy_footer_h
                 )
+                footer_run_h <- tryCatch(isolate(homoPlotTimingTracker())$run, error = function(e) NULL)
+                if (is.list(footer_run_h)) {
+                    app_perf_mark_ms(
+                        footer_run_h,
+                        sprintf("footer_render_%s_ms", id_local),
+                        app_perf_elapsed_ms(footer_render_t0_h),
+                        "HOMO_FOOTER"
+                    )
+                    app_perf_mark(
+                        footer_run_h,
+                        sprintf(
+                            "footer_ready plot=%s sequence=%s metrics=%s",
+                            id_local,
+                            as.character(nzchar(trimws(as.character(seq_blob_footer_h %||% "")))),
+                            as.character(!is.null(metrics_payload))
+                        ),
+                        "HOMO_FOOTER"
+                    )
+                }
                 last_footer_key <<- footer_key
                 last_footer_ui <<- footer_ui
                 footer_ui

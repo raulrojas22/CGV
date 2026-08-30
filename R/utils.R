@@ -7298,17 +7298,24 @@ extract_sequence_from_2bit <- function(two_bit_path, seqid, start_pos, end_pos) 
     }
     start_pos <- max(1L, as.integer(start_pos %||% 1L))
     end_pos <- max(start_pos, as.integer(end_pos %||% start_pos))
+    twobit_perf <- app_perf_new_run("SEQ_2BIT")
+    twobit_total_t0 <- app_perf_now()
+    seqnames_t0 <- app_perf_now()
     seq_names <- get_twobit_seqnames(two_bit_path)
     resolved_seqname <- resolve_seqname_in_vector(seqid, seq_names = seq_names) %||% as.character(seqid %||% "")
+    app_perf_mark_ms(twobit_perf, "seqnames_resolve_ms", app_perf_elapsed_ms(seqnames_t0), "SEQ_2BIT")
     if (!nzchar(resolved_seqname)) {
         return("")
     }
 
     res <- tryCatch(
         {
+            namespace_t0 <- app_perf_now()
             if (!requireNamespace("rtracklayer", quietly = TRUE)) {
                 return("")
             }
+            app_perf_mark_ms(twobit_perf, "rtracklayer_namespace_ms", app_perf_elapsed_ms(namespace_t0), "SEQ_2BIT")
+            handle_t0 <- app_perf_now()
             key <- normalizePath(two_bit_path, winslash = "/", mustWork = FALSE)
             tbf <- if (exists(key, envir = .twobit_handle_cache, inherits = FALSE)) {
                 get(key, envir = .twobit_handle_cache, inherits = FALSE)
@@ -7318,19 +7325,29 @@ extract_sequence_from_2bit <- function(two_bit_path, seqid, start_pos, end_pos) 
                 trim_cache_env(.twobit_handle_cache, max_size = 40L)
                 obj
             }
+            app_perf_mark_ms(twobit_perf, "twobit_handle_ms", app_perf_elapsed_ms(handle_t0), "SEQ_2BIT")
+            range_t0 <- app_perf_now()
             gr <- GenomicRanges::GRanges(
                 seqnames = resolved_seqname,
                 ranges = IRanges::IRanges(start = start_pos, end = end_pos)
             )
+            app_perf_mark_ms(twobit_perf, "range_build_ms", app_perf_elapsed_ms(range_t0), "SEQ_2BIT")
+            import_t0 <- app_perf_now()
             seq_set <- rtracklayer::import(
                 con = tbf,
                 format = "2bit",
                 which = gr
             )
-            if (length(seq_set) == 0) "" else as.character(seq_set[[1]])
+            app_perf_mark_ms(twobit_perf, "twobit_import_ms", app_perf_elapsed_ms(import_t0), "SEQ_2BIT")
+            stringify_t0 <- app_perf_now()
+            seq_value <- if (length(seq_set) == 0) "" else as.character(seq_set[[1]])
+            app_perf_mark_ms(twobit_perf, "sequence_stringify_ms", app_perf_elapsed_ms(stringify_t0), "SEQ_2BIT")
+            seq_value
         },
         error = function(e) ""
     )
+    app_perf_mark_ms(twobit_perf, "twobit_total_ms", app_perf_elapsed_ms(twobit_total_t0), "SEQ_2BIT")
+    app_perf_mark(twobit_perf, sprintf("done len=%d", as.integer(nchar(res %||% ""))), "SEQ_2BIT")
     if (nzchar(res)) {
         return(res)
     }
@@ -7607,6 +7624,8 @@ extract_spliced_exon_sequence <- function(fasta_path, seqid, exon_ranges, strand
     }
 
     sp_perf <- app_perf_new_run("SEQ_SPLICE")
+    spliced_total_t0 <- app_perf_now()
+    on.exit(app_perf_mark_ms(sp_perf, "spliced_total_ms", app_perf_elapsed_ms(spliced_total_t0), "SEQ_SPLICE"), add = TRUE)
     app_perf_mark(
         sp_perf,
         sprintf(
@@ -7644,8 +7663,11 @@ extract_spliced_exon_sequence <- function(fasta_path, seqid, exon_ranges, strand
     # This is much faster than random-access per exon for compact transcripts.
     if (is.finite(span_start) && is.finite(span_end) && is.finite(span_width) &&
         span_start >= 1L && span_end >= span_start && span_width > 0L && span_width <= 300000L) {
+        span_fetch_t0 <- app_perf_now()
         span_seq <- extract_sequence_from_fasta(fasta_path, seqid, span_start, span_end)
+        app_perf_mark_ms(sp_perf, "single_span_fetch_ms", app_perf_elapsed_ms(span_fetch_t0), "SEQ_SPLICE")
         if (nzchar(span_seq) && nchar(span_seq) >= span_width) {
+            local_splice_t0 <- app_perf_now()
             rel_starts <- as.integer(round(ex$start)) - span_start + 1L
             rel_ends <- as.integer(round(ex$end)) - span_start + 1L
             keep <- is.finite(rel_starts) & is.finite(rel_ends) &
@@ -7686,6 +7708,7 @@ extract_spliced_exon_sequence <- function(fasta_path, seqid, exon_ranges, strand
                         sprintf("single-span done len=%d span=%d", as.integer(nchar(seq_spliced_local)), as.integer(span_width)),
                         "SEQ_SPLICE"
                     )
+                    app_perf_mark_ms(sp_perf, "local_splice_ms", app_perf_elapsed_ms(local_splice_t0), "SEQ_SPLICE")
                     return(seq_spliced_local)
                 }
             }
@@ -9592,18 +9615,23 @@ run_orthologous_lookup_job_worker <- function(job) {
 
 fetch_gene_data_sync <- function(chr_name, gene_coords, fasta_path = NULL, fasta_id = NULL, exon_ranges = NULL, strand = "+") {
     fetch_perf <- app_perf_new_run("SEQ_FETCH")
+    fetch_total_t0 <- app_perf_now()
+    on.exit(app_perf_mark_ms(fetch_perf, "fetch_gene_total_ms", app_perf_elapsed_ms(fetch_total_t0), "SEQ"), add = TRUE)
     app_perf_mark(fetch_perf, "start", "SEQ")
     out <- tryCatch(
         {
             chr_name <- as.character(chr_name %||% "")
             start_pos <- suppressWarnings(as.numeric(gene_coords$start %||% NA_real_))
             end_pos <- suppressWarnings(as.numeric(gene_coords$end %||% NA_real_))
+            spliced_fetch_t0 <- app_perf_now()
             seq_str <- extract_spliced_exon_sequence(fasta_path, chr_name, exon_ranges = exon_ranges, strand = strand)
+            app_perf_mark_ms(fetch_perf, "spliced_sequence_ms", app_perf_elapsed_ms(spliced_fetch_t0), "SEQ")
             app_perf_mark(fetch_perf, sprintf("after spliced len=%d", as.integer(nchar(seq_str %||% ""))), "SEQ")
             if (!nzchar(seq_str) && is.finite(start_pos) && is.finite(end_pos)) {
                 seq_str <- extract_sequence_from_fasta(fasta_path, chr_name, start_pos, end_pos)
                 app_perf_mark(fetch_perf, sprintf("after fallback len=%d", as.integer(nchar(seq_str %||% ""))), "SEQ")
             }
+            composition_t0 <- app_perf_now()
             comp_info <- NULL
             if (!is.null(fasta_path) && nzchar(as.character(fasta_path %||% "")) && file.exists(fasta_path) &&
                 !is.null(exon_ranges) && nrow(normalize_exon_ranges(exon_ranges)) > 0L) {
@@ -9631,6 +9659,7 @@ fetch_gene_data_sync <- function(chr_name, gene_coords, fasta_path = NULL, fasta
                     sequence_optional = NULL
                 )
             }
+            app_perf_mark_ms(fetch_perf, "composition_prepare_ms", app_perf_elapsed_ms(composition_t0), "SEQ")
 
             fasta_id <- safe_url_decode(as.character(fasta_id %||% ""))
             fasta_id <- trimws(fasta_id)

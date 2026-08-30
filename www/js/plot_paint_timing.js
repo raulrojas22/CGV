@@ -96,6 +96,46 @@
     }
   }
 
+  function cardReadiness(outputId) {
+    var output = document.getElementById(outputId);
+    var card = output && typeof output.closest === 'function'
+      ? output.closest('.plot-transcript-card')
+      : null;
+    if (!card || typeof card.querySelector !== 'function') return null;
+    var composition = card.querySelector('.footer-composition-inline');
+    var metricsButton = card.querySelector('[data-metrics-payload]');
+    var metricsPayload = metricsButton
+      ? String(metricsButton.getAttribute('data-metrics-payload') || '').trim()
+      : '';
+    if (!composition || !metricsPayload) return null;
+    return {
+      hasSequenceComposition: true,
+      hasMetrics: true,
+      metricsBytes: metricsPayload.length
+    };
+  }
+
+  function reportCardComplete(run, outputId, readiness) {
+    if (!run || runs[run.runId] !== run || run.completed || run.reportedComplete[outputId] ||
+        run.outputIds.indexOf(outputId) === -1 || !readiness) return;
+    run.reportedComplete[outputId] = true;
+    var completedAt = nowMs();
+    var payload = {
+      run_id: run.runId,
+      context: run.context,
+      output_id: outputId,
+      click_to_complete_ms: run.clickAt != null ? Math.max(0, completedAt - run.clickAt) : null,
+      start_message_to_complete_ms: Math.max(0, completedAt - run.receivedAt),
+      has_sequence_composition: !!readiness.hasSequenceComposition,
+      has_metrics: !!readiness.hasMetrics,
+      metrics_bytes: readiness.metricsBytes || 0,
+      client_epoch_ms: Date.now()
+    };
+    if (window.Shiny && typeof window.Shiny.setInputValue === 'function') {
+      window.Shiny.setInputValue('cgv_card_complete', payload, { priority: 'event' });
+    }
+  }
+
   function reportPaint(run, outputId, svg) {
     if (!run || runs[run.runId] !== run || run.completed || run.reported[outputId] ||
         run.outputIds.indexOf(outputId) === -1) return;
@@ -127,19 +167,31 @@
     if (!run || !run.outputIds || !run.outputIds.length) return;
     var expectGeneration = run.expectGeneration;
     run.outputIds.forEach(function (outputId) {
-      if (run.reported[outputId]) return;
       var output = document.getElementById(outputId);
       var svg = output && output.querySelector ? output.querySelector('svg') : null;
-      if (!svg) return;
-      if (run.baselineSvgs && run.baselineSvgs[outputId] === svg && !run.firstPaintOnly) return;
-      window.requestAnimationFrame(function () {
+      if (svg && !run.reported[outputId] &&
+          !(run.baselineSvgs && run.baselineSvgs[outputId] === svg && !run.firstPaintOnly)) {
         window.requestAnimationFrame(function () {
-          if (runs[run.runId] !== run || run.expectGeneration !== expectGeneration ||
-              run.outputIds.indexOf(outputId) === -1) return;
-          if (!document.documentElement.contains(svg)) return;
-          reportPaint(run, outputId, svg);
+          window.requestAnimationFrame(function () {
+            if (runs[run.runId] !== run || run.expectGeneration !== expectGeneration ||
+                run.outputIds.indexOf(outputId) === -1) return;
+            if (!document.documentElement.contains(svg)) return;
+            reportPaint(run, outputId, svg);
+          });
         });
-      });
+      }
+      if (perfTimingEnabled && !run.firstPaintOnly && !run.reportedComplete[outputId]) {
+        var readiness = cardReadiness(outputId);
+        if (readiness) {
+          window.requestAnimationFrame(function () {
+            window.requestAnimationFrame(function () {
+              if (runs[run.runId] !== run || run.expectGeneration !== expectGeneration ||
+                  run.outputIds.indexOf(outputId) === -1) return;
+              reportCardComplete(run, outputId, cardReadiness(outputId));
+            });
+          });
+        }
+      }
     });
   }
 
@@ -214,6 +266,7 @@
         outputIds: [],
         baselineSvgs: snapshotVisibleSvgs(context),
         reported: Object.create(null),
+        reportedComplete: Object.create(null),
         firstPaintOnly: firstPaintOnly,
         functionalOnly: functionalOnly,
         completed: false,
@@ -236,6 +289,7 @@
           outputIds: [],
           baselineSvgs: snapshotVisibleSvgs(message && message.context),
           reported: Object.create(null),
+          reportedComplete: Object.create(null),
           firstPaintOnly: !!(message && message.first_paint_only),
           functionalOnly: !!(message && (message.functional_only || message.first_paint_only)),
           completed: false,

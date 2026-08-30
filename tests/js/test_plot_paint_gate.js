@@ -13,6 +13,7 @@ function createHarness(perfTimingEnabled) {
   const inputs = [];
   const rafQueue = [];
   const outputs = Object.create(null);
+  const completeCards = Object.create(null);
   const observers = [];
   const clickListeners = [];
   let now = 100;
@@ -82,8 +83,24 @@ function createHarness(perfTimingEnabled) {
     };
     outputs[outputId] = {
       id: outputId,
-      querySelector(selector) { return selector === 'svg' ? svg : null; }
+      querySelector(selector) { return selector === 'svg' ? svg : null; },
+      closest() {
+        if (!completeCards[outputId]) return null;
+        return {
+          querySelector(selector) {
+            if (selector === '.footer-composition-inline') return {};
+            if (selector === '[data-metrics-payload]') {
+              return { getAttribute() { return '{"sections":[{"title":"Structure"}]}'; } };
+            }
+            return null;
+          }
+        };
+      }
     };
+  }
+
+  function markCardComplete(outputId) {
+    completeCards[outputId] = true;
   }
 
   function drainFrames(limit = 20) {
@@ -100,7 +117,7 @@ function createHarness(perfTimingEnabled) {
     rafQueue.shift()();
   }
 
-  return { handlers, inputs, outputs, observers, clickListeners, cardRoot, homoCardRoot, documentElement, addSvg, drainFrames, runNextFrame };
+  return { handlers, inputs, outputs, observers, clickListeners, cardRoot, homoCardRoot, documentElement, addSvg, markCardComplete, drainFrames, runNextFrame };
 }
 
 {
@@ -259,6 +276,13 @@ function createHarness(perfTimingEnabled) {
   h.drainFrames();
   assert.ok(h.inputs[0].payload.svg_bytes > 0);
   assert.equal(h.inputs[0].payload.svg_nodes, 3);
+  h.markCardComplete('plot_ortho_1-plot');
+  h.observers[0].callback();
+  h.drainFrames();
+  assert.equal(h.inputs[1].name, 'cgv_card_complete');
+  assert.equal(h.inputs[1].payload.has_sequence_composition, true);
+  assert.equal(h.inputs[1].payload.has_metrics, true);
+  assert.ok(h.inputs[1].payload.metrics_bytes > 0);
 }
 
 console.log('plot-paint-gate-js-ok');
