@@ -147,6 +147,16 @@ test_that("transcript splitting preserves encoded IDs and multiple Parent fields
     expect_setequal(names(blocks), c("rna-A.1", "rna-B.1"))
     expect_equal(nrow(blocks[["rna-A.1"]]), 4L)
     expect_equal(nrow(blocks[["rna-B.1"]]), 5L)
+    meta_a <- attr(blocks[["rna-A.1"]], "cgev_transcript_meta", exact = TRUE)
+    expect_identical(meta_a$transcript, "rna-A.1")
+    expect_identical(meta_a$chromosome, "chr1")
+    expect_equal(unname(meta_a$span), c(2, 12))
+    expect_equal(nrow(meta_a$exon_ranges), 1L)
+    expect_equal(nrow(meta_a$cds_ranges), 1L)
+    expect_identical(
+        utils_env$extract_plot_labels(blocks[["rna-A.1"]]),
+        list(transcript = "rna-A.1", chromosome = "chr1")
+    )
 })
 
 test_that("the orthologous processor reuses successful prepass blocks", {

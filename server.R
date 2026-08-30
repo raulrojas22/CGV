@@ -6535,13 +6535,20 @@ function(input, output, session) {
             if (is.null(block_data) || !is.data.frame(block_data) || nrow(block_data) == 0L) {
                 return(list(idx = idx, cds_len = 0, tx_len = 0, exon_n = 0L, tx_label = "", ncbi_priority = 6L))
             }
-            row_types <- tolower(trimws(as.character(block_data$V3 %||% rep("", nrow(block_data)))))
+            cached_meta <- attr(block_data, "cgev_transcript_meta", exact = TRUE)
+            row_types <- as.character((cached_meta %||% list())$row_types %||% character(0))
+            if (length(row_types) != nrow(block_data)) {
+                row_types <- tolower(trimws(as.character(block_data$V3 %||% rep("", nrow(block_data)))))
+            }
             starts    <- suppressWarnings(as.numeric(block_data$V4))
             ends      <- suppressWarnings(as.numeric(block_data$V5))
 
             # CDS length (sum of merged CDS intervals)
-            cds_ranges <- as_feature_ranges(block_data[row_types == "cds", , drop = FALSE])
-            cds_len    <- feature_ranges_union_length(unique_feature_ranges(cds_ranges))
+            cds_ranges <- (cached_meta %||% list())$cds_ranges
+            if (!is.data.frame(cds_ranges)) {
+                cds_ranges <- as_feature_ranges(block_data[row_types == "cds", , drop = FALSE])
+            }
+            cds_len <- feature_ranges_union_length_normalized(cds_ranges)
             if (!is.finite(cds_len) || cds_len < 0) cds_len <- 0
 
             # Exon count (fall back to CDS rows if no exon features)
@@ -6552,15 +6559,24 @@ function(input, output, session) {
             # Transcript span length
             tx_rows <- which(row_types %in% tx_types_local)
             tx_len  <- NA_real_
-            tx_label <- ""
+            tx_label <- as.character((cached_meta %||% list())$transcript %||% "")
+            tx_attr <- as.character((cached_meta %||% list())$tx_attr %||% "")
             if (length(tx_rows) > 0L) {
                 ri     <- tx_rows[1L]
-                tx_len <- suppressWarnings(as.numeric(ends[ri] - starts[ri] + 1))
-                parsed <- tryCatch(parse_gff_attributes(as.character(block_data$V9[ri] %||% "")), error = function(e) list())
-                tx_label <- tryCatch(
-                    as.character(pick_attr(parsed, c("transcript_id", "id", "name", "transcript")) %||% ""),
-                    error = function(e) ""
-                )
+                cached_span <- suppressWarnings(as.numeric((cached_meta %||% list())$span %||% numeric(0)))
+                tx_len <- if (length(cached_span) >= 2L && all(is.finite(cached_span[1:2]))) {
+                    as.numeric(cached_span[2] - cached_span[1] + 1)
+                } else {
+                    suppressWarnings(as.numeric(ends[ri] - starts[ri] + 1))
+                }
+                if (!nzchar(tx_attr)) tx_attr <- as.character(block_data$V9[ri] %||% "")
+                if (!nzchar(tx_label)) {
+                    parsed <- tryCatch(parse_gff_attributes(tx_attr), error = function(e) list())
+                    tx_label <- tryCatch(
+                        as.character(pick_attr(parsed, c("transcript_id", "id", "name", "transcript")) %||% ""),
+                        error = function(e) ""
+                    )
+                }
             }
             if (!is.finite(tx_len) || tx_len <= 0) {
                 tx_span <- tryCatch(compute_transcript_span(block_data), error = function(e) c(start = NA_real_, end = NA_real_))
@@ -6573,11 +6589,13 @@ function(input, output, session) {
             if (length(tx_rows) > 0L) {
                 ri_src     <- tx_rows[1L]
                 source_val <- tolower(trimws(as.character(block_data$V2[ri_src] %||% "")))
-                tag_raw    <- parsed[["tag"]] %||% character(0)
-                tag_vals   <- tryCatch(
-                    tolower(trimws(unlist(strsplit(paste(tag_raw, collapse = ","), ",")))),
-                    error = function(e) character(0)
-                )
+                if (!nzchar(tx_attr)) tx_attr <- as.character(block_data$V9[ri_src] %||% "")
+                tag_matches <- stringr::str_match_all(
+                    tx_attr,
+                    stringr::regex('(?:^|;)\\s*tag(?:=|\\s+")([^;"]+)', ignore_case = TRUE)
+                )[[1]]
+                tag_raw <- if (nrow(tag_matches) > 0L) tag_matches[, 2] else character(0)
+                tag_vals <- tolower(trimws(unlist(strsplit(paste(tag_raw, collapse = ","), ","))))
                 is_nm_nr   <- grepl("^(NM_|NR_)", tx_label, ignore.case = TRUE)
 
                 if (any(tag_vals == "mane select")) {
@@ -6971,8 +6989,12 @@ function(input, output, session) {
             if (is.null(block) || nrow(block) == 0) {
                 block <- df_full
             }
+            cached_meta <- attr(block, "cgev_transcript_meta", exact = TRUE)
             block <- as.data.frame(block, stringsAsFactors = FALSE)
-            row_types <- tolower(trimws(as.character(block$V3 %||% rep("", nrow(block)))))
+            row_types <- as.character((cached_meta %||% list())$row_types %||% character(0))
+            if (length(row_types) != nrow(block)) {
+                row_types <- tolower(trimws(as.character(block$V3 %||% rep("", nrow(block)))))
+            }
             tx_rows <- block[row_types %in% tx_types, , drop = FALSE]
             gene_rows <- block[row_types == "gene", , drop = FALSE]
             stage_t0 <- app_perf_now()
@@ -6995,8 +7017,10 @@ function(input, output, session) {
             stage_ms[["span"]] <- stage_ms[["span"]] + app_perf_elapsed_ms(stage_t0)
 
             stage_t0 <- app_perf_now()
-            tx_attr <- if (nrow(tx_rows) > 0) as.character(tx_rows$V9[1] %||% "") else ""
-            gene_attr_block <- if (nrow(gene_rows) > 0) as.character(gene_rows$V9[1] %||% "") else gene_attr
+            tx_attr <- as.character((cached_meta %||% list())$tx_attr %||% "")
+            if (!nzchar(tx_attr) && nrow(tx_rows) > 0) tx_attr <- as.character(tx_rows$V9[1] %||% "")
+            gene_attr_block <- as.character((cached_meta %||% list())$gene_attr %||% "")
+            if (!nzchar(gene_attr_block)) gene_attr_block <- if (nrow(gene_rows) > 0) as.character(gene_rows$V9[1] %||% "") else gene_attr
             tx_biotype <- extract_biotype_from_attr_text(tx_attr)
             if (!nzchar(tx_biotype)) {
                 tx_biotype <- extract_biotype_from_attr_text(gene_attr_block)
@@ -7006,10 +7030,14 @@ function(input, output, session) {
             stage_ms[["biotype"]] <- stage_ms[["biotype"]] + app_perf_elapsed_ms(stage_t0)
 
             stage_t0 <- app_perf_now()
-            exon_ranges <- as_feature_ranges(block[row_types == "exon", , drop = FALSE])
-            exon_ranges <- unique_feature_ranges(exon_ranges)
-            cds_ranges <- as_feature_ranges(block[row_types == "cds", , drop = FALSE])
-            cds_ranges <- unique_feature_ranges(cds_ranges)
+            exon_ranges <- (cached_meta %||% list())$exon_ranges
+            if (!is.data.frame(exon_ranges)) {
+                exon_ranges <- unique_feature_ranges(as_feature_ranges(block[row_types == "exon", , drop = FALSE]))
+            }
+            cds_ranges <- (cached_meta %||% list())$cds_ranges
+            if (!is.data.frame(cds_ranges)) {
+                cds_ranges <- unique_feature_ranges(as_feature_ranges(block[row_types == "cds", , drop = FALSE]))
+            }
             exon_ranges_for_metrics <- exon_ranges
             if (nrow(exon_ranges_for_metrics) == 0 && nrow(cds_ranges) > 0) {
                 exon_ranges_for_metrics <- cds_ranges
@@ -8243,6 +8271,11 @@ function(input, output, session) {
 	    compute_transcript_span <- function(block_data) {
         if (is.null(block_data) || nrow(block_data) == 0) {
             return(c(start = NA_real_, end = NA_real_))
+        }
+        cached_meta <- attr(block_data, "cgev_transcript_meta", exact = TRUE)
+        cached_span <- suppressWarnings(as.numeric((cached_meta %||% list())$span %||% numeric(0)))
+        if (length(cached_span) >= 2L && all(is.finite(cached_span[1:2]))) {
+            return(stats::setNames(cached_span[1:2], c("start", "end")))
         }
         row_types <- tolower(trimws(as.character(block_data$V3 %||% rep("", nrow(block_data)))))
         tx_level_types <- c(
@@ -18200,10 +18233,13 @@ function(input, output, session) {
                         split_t0 <- app_perf_now()
                         transcript_blocks <- split_gene_data_by_transcript(data)
                         if (length(transcript_blocks) == 0) transcript_blocks <- list(data)
+                        app_perf_mark_ms(perf_run, "split_blocks_only_ms", app_perf_elapsed_ms(split_t0), "HOMO")
+                        canonical_t0_h <- app_perf_now()
                         canonical_block_idx_homo <- tryCatch(
                             compute_canonical_block_idx(transcript_blocks),
                             error = function(e) 1L
                         )
+                        app_perf_mark_ms(perf_run, "canonical_select_ms", app_perf_elapsed_ms(canonical_t0_h), "HOMO")
                         app_perf_mark(perf_run, sprintf("split transcripts blocks=%d canonical_idx=%d", as.integer(length(transcript_blocks)), as.integer(canonical_block_idx_homo)), "HOMO")
                         app_perf_mark_ms(perf_run, "split_transcripts_ms", app_perf_elapsed_ms(split_t0), "HOMO")
                         genome_resolve_t0_h <- app_perf_now()
@@ -18300,15 +18336,24 @@ function(input, output, session) {
 
                         transcript_loop_t0_h <- app_perf_now()
                         for (block_idx in seq_along(transcript_blocks)) {
-                            app_perf_mark(perf_run, sprintf("tx %d/%d start", as.integer(block_idx), as.integer(length(transcript_blocks))), "HOMO")
+                            trace_tx <- block_idx == 1L || block_idx == length(transcript_blocks) || block_idx %% 25L == 0L
+                            if (isTRUE(trace_tx)) {
+                                app_perf_mark(perf_run, sprintf("tx %d/%d start", as.integer(block_idx), as.integer(length(transcript_blocks))), "HOMO")
+                            }
                             tx_loop_t0 <- as.numeric(proc.time()[["elapsed"]])
                             block_data <- transcript_blocks[[block_idx]]
-                            set_popup_loading(
-                                TRUE,
-                                context = "Multi-Gene Search",
-                                text = sprintf("Plotting %s transcript %d/%d...", representative_name, block_idx, length(transcript_blocks))
-                            )
-                            row_types <- tolower(trimws(as.character(block_data$V3 %||% rep("", nrow(block_data)))))
+                            if (block_idx == 1L || block_idx == length(transcript_blocks) || block_idx %% 10L == 0L) {
+                                set_popup_loading(
+                                    TRUE,
+                                    context = "Multi-Gene Search",
+                                    text = sprintf("Plotting %s transcript %d/%d...", representative_name, block_idx, length(transcript_blocks))
+                                )
+                            }
+                            cached_block_meta <- attr(block_data, "cgev_transcript_meta", exact = TRUE)
+                            row_types <- as.character((cached_block_meta %||% list())$row_types %||% character(0))
+                            if (length(row_types) != nrow(block_data)) {
+                                row_types <- tolower(trimws(as.character(block_data$V3 %||% rep("", nrow(block_data)))))
+                            }
                             anchor_idx <- which(row_types %in% c("gene", "mrna", "transcript"))[1]
                             if (!is.finite(anchor_idx)) {
                                 feat_idx <- which(row_types %in% c("exon", "cds", "start_codon", "stop_codon") | grepl("utr", row_types))
@@ -18415,22 +18460,26 @@ function(input, output, session) {
                             local_new_ids <- c(local_new_ids, next_id)
                             state_ms <- round((as.numeric(proc.time()[["elapsed"]]) - t_state) * 1000, 1)
                             total_tx_ms <- round((as.numeric(proc.time()[["elapsed"]]) - tx_loop_t0) * 1000, 1)
-                            app_perf_mark(
-                                perf_run,
-                                sprintf(
-                                    "tx %d/%d prep labels_ms=%.1f sig_ms=%.1f title_ms=%.1f state_ms=%.1f total_ms=%.1f",
-                                    as.integer(block_idx),
-                                    as.integer(length(transcript_blocks)),
-                                    labels_ms,
-                                    sig_ms,
-                                    title_ms,
-                                    state_ms,
-                                    total_tx_ms
-                                ),
-                                "HOMO"
-                            )
+                            if (isTRUE(trace_tx)) {
+                                app_perf_mark(
+                                    perf_run,
+                                    sprintf(
+                                        "tx %d/%d prep labels_ms=%.1f sig_ms=%.1f title_ms=%.1f state_ms=%.1f total_ms=%.1f",
+                                        as.integer(block_idx),
+                                        as.integer(length(transcript_blocks)),
+                                        labels_ms,
+                                        sig_ms,
+                                        title_ms,
+                                        state_ms,
+                                        total_tx_ms
+                                    ),
+                                    "HOMO"
+                                )
+                            }
 
-                            app_perf_mark(perf_run, sprintf("tx %d/%d module wired plot_id=%s", as.integer(block_idx), as.integer(length(transcript_blocks)), as.character(next_id)), "HOMO")
+                            if (isTRUE(trace_tx)) {
+                                app_perf_mark(perf_run, sprintf("tx %d/%d module wired plot_id=%s", as.integer(block_idx), as.integer(length(transcript_blocks)), as.character(next_id)), "HOMO")
+                            }
 
                             added_count <- added_count + 1L
                             added_plot_ids <- c(added_plot_ids, next_id)
@@ -18439,6 +18488,27 @@ function(input, output, session) {
                             metrics_plot_signatures[[as.character(next_id)]] <- plot_signature
                         }
                         app_perf_mark_ms(perf_run, "transcript_state_loop_ms", app_perf_elapsed_ms(transcript_loop_t0_h), "HOMO")
+                        # Build the complete statistics payload before exposing any
+                        # new plot id. This keeps the first visible card atomic:
+                        # SVG, sequence composition and metrics all belong to the
+                        # same render instead of updating after first paint.
+                        if (length(metrics_plot_ids) > 0L) {
+                            metrics_schedule_t0_h <- app_perf_now()
+                            build_plot_metrics_group_payloads(
+                                context = "homo",
+                                plot_ids = metrics_plot_ids,
+                                transcript_blocks = metrics_transcript_blocks,
+                                representative_name = representative_name,
+                                organism_name = homo_org_name,
+                                annotation_path = ruta_archivo,
+                                use_report_map = use_preloaded_chr_map,
+                                report_path = preloaded_report_path,
+                                perf_run = perf_run,
+                                perf_context = "HOMO",
+                                plot_signatures = metrics_plot_signatures
+                            )
+                            app_perf_mark_ms(perf_run, "metrics_schedule_ms", app_perf_elapsed_ms(metrics_schedule_t0_h), "HOMO")
+                        }
                         # OPT-1: Batch-commit all accumulated state to reactives at once.
                         if (length(local_new_ids) > 0L) {
                             commit_homo_t0 <- app_perf_now()
@@ -18472,24 +18542,6 @@ function(input, output, session) {
                             added_plot_ids,
                             context = "HOMO_TIMING"
                         )
-                        if (length(metrics_plot_ids) > 0L) {
-                            metrics_schedule_t0_h <- app_perf_now()
-                            schedule_plot_metrics_payload_build(
-                                context = "homo",
-                                plot_ids = metrics_plot_ids,
-                                transcript_blocks = metrics_transcript_blocks,
-                                representative_name = representative_name,
-                                organism_name = homo_org_name,
-                                annotation_path = ruta_archivo,
-                                use_report_map = use_preloaded_chr_map,
-                                report_path = preloaded_report_path,
-                                perf_run = perf_run,
-                                perf_context = "HOMO",
-                                plot_signatures = metrics_plot_signatures
-                            )
-                            app_perf_mark_ms(perf_run, "metrics_schedule_ms", app_perf_elapsed_ms(metrics_schedule_t0_h), "HOMO")
-                        }
-
                         if (added_count > 0) {
                             list(
                                 message = sprintf("Gene '%s' was plotted in %s (%d transcript visualization%s).", representative_name, organism_context, added_count, ifelse(added_count == 1L, "", "s")),
@@ -19324,10 +19376,12 @@ function(input, output, session) {
                     # shared blocks locally; later commits retain the same frames.
                     phase_transcript_splits[res_idx] <- list(NULL)
                     if (length(transcript_blocks) == 0) transcript_blocks <- list(data)
+                    canonical_t0_o <- app_perf_now()
                     canonical_block_idx_ortho <- tryCatch(
                         compute_canonical_block_idx(transcript_blocks),
                         error = function(e) 1L
                     )
+                    app_perf_mark_ms(perf_run, "canonical_select_ms", app_perf_elapsed_ms(canonical_t0_o), "ORTHO")
                     if (!is.finite(split_elapsed_ms) || is.na(split_elapsed_ms)) {
                         split_elapsed_ms <- app_perf_elapsed_ms(split_t0)
                     }
@@ -19395,7 +19449,11 @@ function(input, output, session) {
                     metrics_plot_signatures <- list()
                     for (block_idx in seq_along(transcript_blocks)) {
                         block_data <- transcript_blocks[[block_idx]]
-                        row_types <- tolower(trimws(as.character(block_data$V3 %||% rep("", nrow(block_data)))))
+                        cached_block_meta <- attr(block_data, "cgev_transcript_meta", exact = TRUE)
+                        row_types <- as.character((cached_block_meta %||% list())$row_types %||% character(0))
+                        if (length(row_types) != nrow(block_data)) {
+                            row_types <- tolower(trimws(as.character(block_data$V3 %||% rep("", nrow(block_data)))))
+                        }
                         anchor_idx <- which(row_types %in% c("gene", "mrna", "transcript"))[1]
                         if (!is.finite(anchor_idx)) {
                             feat_idx <- which(row_types %in% c("exon", "cds", "start_codon", "stop_codon") | grepl("utr", row_types))
@@ -19571,6 +19629,23 @@ function(input, output, session) {
                 }
             }
             if (length(local_new_ids) > 0L) {
+                if (length(pending_metric_jobs) > 0L) {
+                    for (job in pending_metric_jobs) {
+                        build_plot_metrics_group_payloads(
+                            context = "ortho",
+                            plot_ids = job$plot_ids,
+                            transcript_blocks = job$transcript_blocks,
+                            representative_name = job$representative_name,
+                            organism_name = job$organism_name,
+                            annotation_path = job$annotation_path,
+                            use_report_map = job$use_report_map,
+                            report_path = job$report_path,
+                            perf_run = perf_run,
+                            perf_context = "ORTHO",
+                            plot_signatures = job$plot_signatures
+                        )
+                    }
+                }
                 commit_t0 <- app_perf_now()
                 app_perf_mark(
                     perf_run,
@@ -19608,24 +19683,6 @@ function(input, output, session) {
                     ),
                     gate_candidate_ids = added_plot_ids
                 )
-                if (length(pending_metric_jobs) > 0L) {
-                    for (job in pending_metric_jobs) {
-                        schedule_plot_metrics_payload_build(
-                            context = "ortho",
-                            plot_ids = job$plot_ids,
-                            transcript_blocks = job$transcript_blocks,
-                            representative_name = job$representative_name,
-                            organism_name = job$organism_name,
-                            annotation_path = job$annotation_path,
-                            use_report_map = job$use_report_map,
-                            report_path = job$report_path,
-                            perf_run = perf_run,
-                            perf_context = "ORTHO",
-                            plot_signatures = job$plot_signatures
-                        )
-                    }
-                }
-
                 # Clear per-commit buffers; keep counter/signature/timing accumulators.
                 local_titles <- list()
                 local_fileData <- list()

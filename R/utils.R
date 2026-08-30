@@ -1979,7 +1979,7 @@ is_tabix_annotation_file <- function(path_value, index_path = NULL) {
 
 get_tabix_seqnames_cached <- function(file_path) {
     p <- normalizePath(as.character(file_path %||% ""), winslash = "/", mustWork = FALSE)
-    if (!nzchar(p) || !file.exists(p) || !requireNamespace("Rsamtools", quietly = TRUE)) {
+    if (!nzchar(p) || !file.exists(p)) {
         return(character(0))
     }
     idx_override <- get_tabix_index_override(p)
@@ -1995,12 +1995,25 @@ get_tabix_seqnames_cached <- function(file_path) {
     if (!is.null(cached)) {
         return(as.character(cached %||% character(0)))
     }
-    tbx <- if (nzchar(idx_path) && file.exists(idx_path)) {
-        Rsamtools::TabixFile(p, index = idx_path)
+    tabix_bin <- Sys.which("tabix")
+    adjacent_indexes <- normalizePath(c(paste0(p, ".tbi"), paste0(p, ".csi")), winslash = "/", mustWork = FALSE)
+    can_use_cli <- nzchar(tabix_bin) && (!nzchar(idx_path) || normalizePath(idx_path, winslash = "/", mustWork = FALSE) %in% adjacent_indexes)
+    seq_names <- if (isTRUE(can_use_cli)) {
+        tryCatch(
+            as.character(system2(tabix_bin, c("-l", shQuote(p)), stdout = TRUE, stderr = FALSE)),
+            error = function(e) character(0)
+        )
+    } else if (requireNamespace("Rsamtools", quietly = TRUE)) {
+        tbx <- if (nzchar(idx_path) && file.exists(idx_path)) {
+            Rsamtools::TabixFile(p, index = idx_path)
+        } else {
+            Rsamtools::TabixFile(p)
+        }
+        tryCatch(as.character(Rsamtools::seqnamesTabix(tbx)), error = function(e) character(0))
     } else {
-        Rsamtools::TabixFile(p)
+        character(0)
     }
-    seq_names <- tryCatch(as.character(Rsamtools::seqnamesTabix(tbx)), error = function(e) character(0))
+    seq_names <- seq_names[nzchar(seq_names)]
     cache_env_set(.tabix_seqnames_cache, key, seq_names, max_size = 64L)
     seq_names
 }
@@ -3440,7 +3453,7 @@ resolve_seqname_in_vector <- function(seqid, seq_names = character(0)) {
 }
 
 scan_tabix_region_gff <- function(file_path, seqid, start_pos, end_pos) {
-    if (!is_tabix_annotation_file(file_path) || !requireNamespace("Rsamtools", quietly = TRUE)) {
+    if (!is_tabix_annotation_file(file_path)) {
         return(empty_gff_df())
     }
     seqid <- as.character(seqid %||% "")
@@ -3451,25 +3464,37 @@ scan_tabix_region_gff <- function(file_path, seqid, start_pos, end_pos) {
     en <- max(st, as.integer(end_pos %||% st))
 
     idx_override <- get_tabix_index_override(file_path)
-    tbx <- if (nzchar(idx_override) && file.exists(idx_override)) {
-        Rsamtools::TabixFile(file_path, index = idx_override)
-    } else {
-        Rsamtools::TabixFile(file_path)
-    }
     seq_names <- get_tabix_seqnames_cached(file_path)
     resolved_seqname <- resolve_seqname_in_vector(seqid, seq_names = seq_names) %||% seqid
-    region <- GenomicRanges::GRanges(
-        seqnames = resolved_seqname,
-        ranges = IRanges::IRanges(start = st, end = en)
-    )
-
-    lines <- tryCatch(
-        {
-            raw <- Rsamtools::scanTabix(tbx, param = region)
-            if (length(raw) == 0) character(0) else raw[[1]]
-        },
-        error = function(e) character(0)
-    )
+    tabix_bin <- Sys.which("tabix")
+    adjacent_indexes <- normalizePath(c(paste0(file_path, ".tbi"), paste0(file_path, ".csi")), winslash = "/", mustWork = FALSE)
+    can_use_cli <- nzchar(tabix_bin) && (!nzchar(idx_override) || normalizePath(idx_override, winslash = "/", mustWork = FALSE) %in% adjacent_indexes)
+    lines <- if (isTRUE(can_use_cli)) {
+        region_text <- sprintf("%s:%d-%d", resolved_seqname, st, en)
+        tryCatch(
+            as.character(system2(tabix_bin, c(shQuote(file_path), shQuote(region_text)), stdout = TRUE, stderr = FALSE)),
+            error = function(e) character(0)
+        )
+    } else if (requireNamespace("Rsamtools", quietly = TRUE)) {
+        tbx <- if (nzchar(idx_override) && file.exists(idx_override)) {
+            Rsamtools::TabixFile(file_path, index = idx_override)
+        } else {
+            Rsamtools::TabixFile(file_path)
+        }
+        region <- GenomicRanges::GRanges(
+            seqnames = resolved_seqname,
+            ranges = IRanges::IRanges(start = st, end = en)
+        )
+        tryCatch(
+            {
+                raw <- Rsamtools::scanTabix(tbx, param = region)
+                if (length(raw) == 0) character(0) else raw[[1]]
+            },
+            error = function(e) character(0)
+        )
+    } else {
+        character(0)
+    }
     parse_gff_lines_to_df(lines)
 }
 
@@ -8312,6 +8337,14 @@ extract_plot_labels <- function(data_df) {
     if (is.null(data_df) || nrow(data_df) == 0) {
         return(list(transcript = "N/A", chromosome = "N/A"))
     }
+    cached_meta <- attr(data_df, "cgev_transcript_meta", exact = TRUE)
+    if (is.list(cached_meta)) {
+        cached_tx <- trimws(as.character(cached_meta$transcript %||% ""))
+        cached_chr <- trimws(as.character(cached_meta$chromosome %||% ""))
+        if (nzchar(cached_tx) && nzchar(cached_chr)) {
+            return(list(transcript = cached_tx, chromosome = cached_chr))
+        }
+    }
     chromosome <- as.character(data_df$V1[1] %||% "N/A")
     tx_level_types <- c(
         "mrna", "transcript", "lnc_rna", "trna", "rrna", "snorna", "snrna", "mirna",
@@ -8526,6 +8559,41 @@ split_gene_data_by_transcript <- function(data_df) {
             i <- i + 1
             key_i <- paste0(key, "_", i)
         }
+        sub_types <- row_types[selected]
+        sub_starts <- suppressWarnings(as.numeric(sub_df$V4))
+        sub_ends <- suppressWarnings(as.numeric(sub_df$V5))
+        tx_local_rows <- which(sub_types %in% tx_level_types)
+        span_rows <- if (length(tx_local_rows) > 0L) {
+            tx_local_rows
+        } else {
+            feature_rows <- which(sub_types %in% c("exon", "cds", "start_codon", "stop_codon") | grepl("utr", sub_types))
+            if (length(feature_rows) > 0L) feature_rows else which(sub_types == "gene")
+        }
+        if (length(span_rows) == 0L) span_rows <- seq_len(nrow(sub_df))
+        span_start <- suppressWarnings(min(sub_starts[span_rows], na.rm = TRUE))
+        span_end <- suppressWarnings(max(sub_ends[span_rows], na.rm = TRUE))
+        if (!is.finite(span_start)) span_start <- NA_real_
+        if (!is.finite(span_end)) span_end <- NA_real_
+        make_ranges <- function(type_name) {
+            idx <- which(sub_types == type_name & is.finite(sub_starts) & is.finite(sub_ends))
+            if (length(idx) == 0L) {
+                return(data.frame(start = numeric(0), end = numeric(0), stringsAsFactors = FALSE))
+            }
+            unique(data.frame(start = sub_starts[idx], end = sub_ends[idx], stringsAsFactors = FALSE))
+        }
+        attr(sub_df, "cgev_transcript_meta") <- list(
+            transcript = unname(tx_id_display),
+            chromosome = as.character(sub_df$V1[1] %||% "N/A"),
+            row_types = sub_types,
+            span = c(start = span_start, end = span_end),
+            tx_attr = if (length(tx_local_rows) > 0L) as.character(sub_df$V9[tx_local_rows[1L]] %||% "") else "",
+            gene_attr = {
+                gene_local_rows <- which(sub_types == "gene")
+                if (length(gene_local_rows) > 0L) as.character(sub_df$V9[gene_local_rows[1L]] %||% "") else ""
+            },
+            exon_ranges = make_ranges("exon"),
+            cds_ranges = make_ranges("cds")
+        )
         out[[key_i]] <- sub_df
     }
     app_perf_mark_ms(split_perf, "split_traversal_copy_ms", app_perf_elapsed_ms(traversal_t0), "TRANSCRIPT_SPLIT")
