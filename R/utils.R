@@ -8345,17 +8345,15 @@ split_gene_data_by_transcript <- function(data_df) {
         return(list(df))
     }
 
-    normalize_link_tokens <- function(x) {
+    canonical_link_tokens <- function(x) {
         x <- as.character(x %||% "")
         x <- trimws(safe_url_decode(x))
         x <- gsub('["\\\']', "", x)
-        x <- x[nzchar(x)]
-        if (length(x) == 0) {
-            return(character(0))
-        }
-        clean <- trimws(stringr::str_remove(x, stringr::regex("^(transcript|gene)\\s*:\\s*", ignore_case = TRUE)))
-        clean <- clean[nzchar(clean)]
-        unique(c(x, clean, paste0("transcript:", clean), paste0("gene:", clean)))
+        x <- trimws(stringr::str_remove(
+            x,
+            stringr::regex("^(transcript|gene)\\s*:\\s*", ignore_case = TRUE)
+        ))
+        x
     }
 
     n <- nrow(df)
@@ -8398,36 +8396,28 @@ split_gene_data_by_transcript <- function(data_df) {
         attrs_raw,
         stringr::regex("(?:^|;)\\s*Parent=[^;]*", ignore_case = TRUE)
     )
-    parents <- lapply(parent_fields, function(fields) {
-        if (length(fields) == 0L) return(character(0))
-        values <- stringr::str_remove(
-            fields,
+    # Flatten Parent fields once and build the complete relationship index with
+    # vector operations.  Calling URL decoding and regex normalization once per
+    # annotation row was disproportionately expensive on large human genes.
+    parent_field_n <- lengths(parent_fields)
+    parent_field_rows <- rep.int(seq_len(n), parent_field_n)
+    parent_field_values <- unlist(parent_fields, use.names = FALSE)
+    if (length(parent_field_values) > 0L) {
+        parent_field_values <- stringr::str_remove(
+            parent_field_values,
             stringr::regex("^(?:;)?\\s*Parent=", ignore_case = TRUE)
         )
-        values <- safe_url_decode(values)
-        pv <- trimws(unlist(strsplit(values, ",", fixed = TRUE), use.names = FALSE))
-        unique(pv[nzchar(pv)])
-    })
-    parent_tokens <- lapply(parents, normalize_link_tokens)
-
-    # Build the relationship index once.  The previous implementation scanned
-    # every annotation row for every transcript and again for every descendant
-    # level (O(transcripts * rows * depth)); genes with hundreds of annotated
-    # transcripts therefore spent minutes here before the first card existed.
-    # A hashed parent-token -> row index preserves the same graph traversal while
-    # making each breadth-first step proportional to the matching descendants.
-    rows_by_parent_token <- new.env(hash = TRUE, parent = emptyenv())
-    for (row_idx in seq_len(n)) {
-        tokens <- parent_tokens[[row_idx]]
-        if (length(tokens) == 0L) next
-        for (token in tokens) {
-            previous <- get0(token, envir = rows_by_parent_token, inherits = FALSE)
-            assign(
-                token,
-                if (is.null(previous)) as.integer(row_idx) else c(previous, as.integer(row_idx)),
-                envir = rows_by_parent_token
-            )
-        }
+        parent_parts <- strsplit(parent_field_values, ",", fixed = TRUE)
+        parent_part_rows <- rep.int(parent_field_rows, lengths(parent_parts))
+        parent_tokens_flat <- canonical_link_tokens(unlist(parent_parts, use.names = FALSE))
+        parent_token_valid <- nzchar(parent_tokens_flat)
+        rows_by_parent_token <- split(
+            as.integer(parent_part_rows[parent_token_valid]),
+            parent_tokens_flat[parent_token_valid]
+        )
+        rows_by_parent_token <- lapply(rows_by_parent_token, unique)
+    } else {
+        rows_by_parent_token <- list()
     }
 
     tx_ids_raw <- vapply(tx_rows, function(i) {
@@ -8466,26 +8456,27 @@ split_gene_data_by_transcript <- function(data_df) {
         if (length(gene_rows) > 0) selected[gene_rows] <- TRUE
         selected[tx_row] <- TRUE
 
-        frontier <- normalize_link_tokens(tx_id_raw)
-        if (length(frontier) == 0) frontier <- normalize_link_tokens(tx_id_display)
+        frontier <- unique(canonical_link_tokens(tx_id_raw))
+        frontier <- frontier[nzchar(frontier)]
+        if (length(frontier) == 0) {
+            frontier <- unique(canonical_link_tokens(tx_id_display))
+            frontier <- frontier[nzchar(frontier)]
+        }
         visited_tokens <- character(0)
         repeat {
             frontier <- setdiff(frontier, visited_tokens)
             if (length(frontier) == 0L) break
             visited_tokens <- unique(c(visited_tokens, frontier))
-            hit_lists <- mget(
-                frontier,
-                envir = rows_by_parent_token,
-                inherits = FALSE,
-                ifnotfound = rep(list(integer(0)), length(frontier))
-            )
+            hit_lists <- unname(rows_by_parent_token[frontier])
+            hit_lists[vapply(hit_lists, is.null, logical(1))] <- list(integer(0))
             hits <- unique(as.integer(unlist(hit_lists, use.names = FALSE)))
             hits <- hits[is.finite(hits) & hits >= 1L & hits <= n & !selected[hits]]
             if (length(hits) == 0L) break
             selected[hits] <- TRUE
             new_ids <- unique(ids[hits])
             new_ids <- new_ids[nzchar(new_ids)]
-            frontier <- normalize_link_tokens(new_ids)
+            frontier <- unique(canonical_link_tokens(new_ids))
+            frontier <- frontier[nzchar(frontier)]
         }
 
         sub_df <- df[selected, , drop = FALSE]
