@@ -83,6 +83,47 @@ test_that("orthologous split prepass preserves empty and error fallbacks", {
     expect_identical(failed_split$blocks, list(data))
 })
 
+test_that("transcript splitting follows indexed multi-level parent relationships", {
+    transcript_n <- 60L
+    children_per_transcript <- 10L
+    transcript_ids <- sprintf("rna-TX%03d", seq_len(transcript_n))
+    exon_ids <- sprintf("exon-%05d", seq_len(transcript_n * children_per_transcript))
+    exon_transcripts <- rep(transcript_ids, each = children_per_transcript)
+
+    gene <- data.frame(
+        V1 = "chr1", V2 = "fixture", V3 = "gene", V4 = 1L, V5 = 999999L,
+        V6 = ".", V7 = "+", V8 = ".", V9 = "ID=gene-STRESS;Name=STRESS"
+    )
+    transcripts <- data.frame(
+        V1 = "chr1", V2 = "fixture", V3 = "mRNA",
+        V4 = seq_len(transcript_n) * 100L,
+        V5 = seq_len(transcript_n) * 100L + 99L,
+        V6 = ".", V7 = "+", V8 = ".",
+        V9 = paste0("ID=", transcript_ids, ";Parent=gene-STRESS")
+    )
+    exons <- data.frame(
+        V1 = "chr1", V2 = "fixture", V3 = "exon",
+        V4 = seq_along(exon_ids), V5 = seq_along(exon_ids) + 10L,
+        V6 = ".", V7 = "+", V8 = ".",
+        V9 = paste0("ID=", exon_ids, ";Parent=", exon_transcripts)
+    )
+    cds <- data.frame(
+        V1 = "chr1", V2 = "fixture", V3 = "CDS",
+        V4 = seq_along(exon_ids), V5 = seq_along(exon_ids) + 5L,
+        V6 = ".", V7 = "+", V8 = "0",
+        V9 = paste0("ID=cds-", seq_along(exon_ids), ";Parent=", exon_ids)
+    )
+
+    blocks <- utils_env$split_gene_data_by_transcript(rbind(gene, transcripts, exons, cds))
+
+    expect_length(blocks, transcript_n)
+    expect_true(all(vapply(
+        blocks,
+        function(block) nrow(block) == 2L + 2L * children_per_transcript,
+        logical(1)
+    )))
+})
+
 test_that("the orthologous processor reuses successful prepass blocks", {
     server_txt <- paste(readLines(server_path, warn = FALSE), collapse = "\n")
     start <- regexpr("process_orthologous_lookup_results <- function", server_txt, fixed = TRUE)[[1L]]
