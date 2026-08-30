@@ -3148,6 +3148,7 @@ plotServerHomologous <- function(id, data, max_gene_length, min_gene_coord, max_
                         )
                     }
                     apply_sequence_prefetch <- function(result, source_label = "async") {
+                        apply_prefetch_t0 <- app_perf_now()
                         if (isTRUE(module_destroyed)) return(invisible(NULL))
                         app_perf_mark_ms(module_perf, "gc_span_fetch_ms", result$gc_span_fetch_ms %||% 0, "HOMO_MOD")
                         app_perf_mark_ms(module_perf, "gene_sequence_fetch_ms", result$gene_sequence_fetch_ms %||% 0, "HOMO_MOD")
@@ -3177,6 +3178,7 @@ plotServerHomologous <- function(id, data, max_gene_length, min_gene_coord, max_
                             gene_info(NULL)
                             app_perf_mark(module_perf, sprintf("%s prefetch skipped sequence for first paint", source_label), "HOMO_MOD")
                         }
+                        app_perf_mark_ms(module_perf, "apply_sequence_prefetch_ms", app_perf_elapsed_ms(apply_prefetch_t0), "HOMO_MOD")
                         invisible(NULL)
                     }
                     handle_sequence_prefetch_error <- function(err, source_label = "async") {
@@ -3291,6 +3293,7 @@ plotServerHomologous <- function(id, data, max_gene_length, min_gene_coord, max_
             })
 
             output$plot <- bindEvent(renderGirafe({
+                render_prepare_t0 <- app_perf_now()
                 on.exit(notify_plot_ready(), add = TRUE)
                 req(data)
                 info <- gene_info()
@@ -3335,10 +3338,12 @@ plotServerHomologous <- function(id, data, max_gene_length, min_gene_coord, max_
                 df_transcript <- processed_cache$df_transcript
 
                 composicion_secuencia <- "Sequence Composition: N/A (genome FASTA not available)"
+                sequence_composition_t0 <- app_perf_now()
                 if (!is.null(info) && !is.null(info$sequence) && nzchar(info$sequence)) {
                     seq_info <- calculate_sequence_composition(info$sequence)
                     composicion_secuencia <- seq_info$composition
                 }
+                app_perf_mark_ms(module_perf, "sequence_composition_ms", app_perf_elapsed_ms(sequence_composition_t0), "HOMO_MOD")
 
                 transcript_start <- suppressWarnings(min(df$xstart, na.rm = TRUE))
                 transcript_end <- suppressWarnings(max(df$xend, na.rm = TRUE))
@@ -3427,6 +3432,7 @@ plotServerHomologous <- function(id, data, max_gene_length, min_gene_coord, max_
                 gc_timing_enabled <- isTRUE(app_perf_enabled())
                 gc_before <- if (gc_timing_enabled) sum(gc.time(on = TRUE)) else NA_real_
                 create_t0 <- app_perf_now()
+                app_perf_mark_ms(module_perf, "render_prepare_ms", app_perf_elapsed_ms(render_prepare_t0), "HOMO_MOD")
                 app_perf_mark(module_perf, "create_gene_plot start", "HOMO_MOD")
                 span_for_plot <- genomic_span_seq()
                 genome_for_plot <- if (isTRUE(defer_feature_gc) && !nzchar(trimws(as.character(span_for_plot %||% "")))) {
@@ -3958,6 +3964,7 @@ plotServerOrtologous <- function(id, data, max_gene_length, min_gene_coord, max_
                     )
                 }
                 apply_prefetch_payload <- function(result, source_label = "async") {
+                    apply_prefetch_t0 <- app_perf_now()
                     if (isTRUE(module_destroyed)) return(invisible(NULL))
                     app_perf_mark_ms(module_perf, "gc_span_fetch_ms", result$gc_span_fetch_ms %||% 0, "ORTHO_MOD")
                     app_perf_mark_ms(module_perf, "gene_sequence_fetch_ms", result$gene_sequence_fetch_ms %||% 0, "ORTHO_MOD")
@@ -3987,6 +3994,7 @@ plotServerOrtologous <- function(id, data, max_gene_length, min_gene_coord, max_
                         neighbor_context(result$ctx)
                         neighbor_context_resolved(TRUE)
                     }
+                    app_perf_mark_ms(module_perf, "apply_sequence_prefetch_ms", app_perf_elapsed_ms(apply_prefetch_t0), "ORTHO_MOD")
                     invisible(NULL)
                 }
                 handle_prefetch_error <- function(err, source_label = "async") {
@@ -4099,6 +4107,7 @@ plotServerOrtologous <- function(id, data, max_gene_length, min_gene_coord, max_
             })
 
             output$plot <- bindEvent(renderGirafe({
+                render_prepare_t0 <- app_perf_now()
                 on.exit(notify_plot_ready(), add = TRUE)
                 req(data)
                 info <- gene_info()
@@ -4154,10 +4163,12 @@ plotServerOrtologous <- function(id, data, max_gene_length, min_gene_coord, max_
                 df_transcript <- processed_cache$df_transcript
 
                 composicion_secuencia <- "Sequence Composition: N/A (genome FASTA not available)"
+                sequence_composition_t0 <- app_perf_now()
                 if (!is.null(info) && !is.null(info$sequence) && nzchar(info$sequence)) {
                     seq_info <- calculate_sequence_composition(info$sequence)
                     composicion_secuencia <- seq_info$composition
                 }
+                app_perf_mark_ms(module_perf, "sequence_composition_ms", app_perf_elapsed_ms(sequence_composition_t0), "ORTHO_MOD")
 
                 transcript_start <- suppressWarnings(min(df$xstart, na.rm = TRUE))
                 transcript_end <- suppressWarnings(max(df$xend, na.rm = TRUE))
@@ -4253,6 +4264,7 @@ plotServerOrtologous <- function(id, data, max_gene_length, min_gene_coord, max_
                 gc_timing_enabled <- isTRUE(app_perf_enabled())
                 gc_before <- if (gc_timing_enabled) sum(gc.time(on = TRUE)) else NA_real_
                 create_t0 <- app_perf_now()
+                app_perf_mark_ms(module_perf, "render_prepare_ms", app_perf_elapsed_ms(render_prepare_t0), "ORTHO_MOD")
                 app_perf_mark(module_perf, "create_gene_plot start", "ORTHO_MOD")
                 span_for_plot <- genomic_span_seq()
                 genome_for_plot <- if (isTRUE(defer_feature_gc) && !nzchar(trimws(as.character(span_for_plot %||% "")))) {
