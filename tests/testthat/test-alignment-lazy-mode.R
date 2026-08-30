@@ -59,7 +59,7 @@ testthat::test_that("card registration defaults to progressive one-card batches"
         "APP_HOMO_INITIAL_VISIBLE=1",
         "APP_ORTHO_INITIAL_VISIBLE=1",
         "APP_ISOFORM_RENDER_BATCH_SIZE=1",
-        "APP_ISOFORM_RENDER_BATCH_DELAY_MS=120"
+        "APP_ISOFORM_RENDER_BATCH_DELAY_MS=2500"
     )) {
         testthat::expect_true(expected %in% env_txt, info = expected)
     }
