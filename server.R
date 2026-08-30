@@ -625,6 +625,68 @@ function(input, output, session) {
     }
 
     plotMetricsPayloadCache <- new.env(parent = emptyenv())
+    pendingMetricsBuilds <- new.env(parent = emptyenv())
+    pendingMetricsPlotIds <- new.env(parent = emptyenv())
+
+    pending_metrics_plot_key <- function(context = "homo", plot_id = "") {
+        paste0(tolower(trimws(as.character(context %||% "homo"))), "::", as.character(plot_id %||% ""))
+    }
+
+    metrics_payload_build_is_pending <- function(context = "homo", plot_id = "") {
+        pid <- sub("_c$", "", as.character(plot_id %||% ""))
+        nzchar(pid) && exists(
+            pending_metrics_plot_key(context, pid),
+            envir = pendingMetricsPlotIds,
+            inherits = FALSE
+        )
+    }
+
+    clear_pending_metrics_plot_ids <- function(context = "homo", plot_ids = character(0)) {
+        ids_chr <- unique(sub("_c$", "", as.character(plot_ids %||% character(0))))
+        ids_chr <- ids_chr[nzchar(ids_chr)]
+        for (pid in ids_chr) {
+            key <- pending_metrics_plot_key(context, pid)
+            if (exists(key, envir = pendingMetricsPlotIds, inherits = FALSE)) {
+                rm(list = key, envir = pendingMetricsPlotIds)
+            }
+        }
+        invisible(NULL)
+    }
+
+    dispatch_pending_metrics_build <- function(run_id = "", reason = "browser_paint") {
+        run_key <- trimws(as.character(run_id %||% ""))
+        if (!nzchar(run_key) || !exists(run_key, envir = pendingMetricsBuilds, inherits = FALSE)) {
+            return(invisible(FALSE))
+        }
+        job <- get(run_key, envir = pendingMetricsBuilds, inherits = FALSE)
+        if (isTRUE(job$started)) {
+            return(invisible(FALSE))
+        }
+        job$started <- TRUE
+        assign(run_key, job, envir = pendingMetricsBuilds)
+        app_perf_mark(
+            job$perf_run,
+            sprintf("metrics_payload_dispatch reason=%s", as.character(reason %||% "unknown")),
+            job$perf_context
+        )
+        tryCatch(
+            job$dispatch(),
+            error = function(e) {
+                app_perf_mark(
+                    job$perf_run,
+                    sprintf("metrics_payload_build_error=%s", as.character(e$message %||% "unknown")),
+                    job$perf_context
+                )
+            },
+            finally = {
+                clear_pending_metrics_plot_ids(job$context, job$plot_ids)
+                if (exists(run_key, envir = pendingMetricsBuilds, inherits = FALSE)) {
+                    rm(list = run_key, envir = pendingMetricsBuilds)
+                }
+            }
+        )
+        invisible(TRUE)
+    }
 
     merge_named_lists <- function(base_map, add_map) {
         out <- base_map
@@ -806,6 +868,43 @@ function(input, output, session) {
             cache_metrics_payloads(context = context, plot_ids = ids_chr, payloads = payloads, plot_signatures = plot_signatures)
             invisible(NULL)
         }
+        # Large groups used to monopolize the Shiny event loop before the first
+        # visible card could paint. Keep every metric, but let the canonical card
+        # and its sequence-composition footer reach the browser first. The paint
+        # acknowledgement dispatches the complete metrics build immediately.
+        defer_until_first_paint <- length(ids_chr) > 24L && is.list(perf_run) &&
+            nzchar(as.character(perf_run$id %||% ""))
+        if (isTRUE(defer_until_first_paint) && requireNamespace("later", quietly = TRUE)) {
+            run_key <- as.character(perf_run$id %||% "")
+            for (pid in ids_chr) {
+                assign(
+                    pending_metrics_plot_key(context, pid),
+                    run_key,
+                    envir = pendingMetricsPlotIds
+                )
+            }
+            assign(
+                run_key,
+                list(
+                    dispatch = dispatch,
+                    context = context,
+                    plot_ids = ids_chr,
+                    perf_run = perf_run,
+                    perf_context = perf_context,
+                    started = FALSE
+                ),
+                envir = pendingMetricsBuilds
+            )
+            app_perf_mark(
+                perf_run,
+                sprintf("metrics_payload_queued_after_first_paint plots=%d", as.integer(length(ids_chr))),
+                perf_context
+            )
+            later::later(function() {
+                dispatch_pending_metrics_build(run_key, reason = "paint_timeout")
+            }, delay = 120)
+            return(invisible(TRUE))
+        }
         if (requireNamespace("later", quietly = TRUE)) {
             later::later(function() {
                 tryCatch(dispatch(), error = function(e) {
@@ -839,6 +938,13 @@ function(input, output, session) {
         }
         if (!is.null(cached)) {
             return(cached)
+        }
+
+        # A scheduled large-group build owns this payload. Returning NULL keeps
+        # the footer (including sequence composition) non-blocking; the metrics
+        # reactive invalidates it as soon as the complete equivalent payload is ready.
+        if (metrics_payload_build_is_pending(context, base_pid)) {
+            return(NULL)
         }
 
         sig_map <- tryCatch(acc$signatures(), error = function(e) list())
@@ -1571,6 +1677,9 @@ function(input, output, session) {
                     homoRenderedPlotIds(c(ready_now, plot_id))
                 }
             }
+            if (isTRUE(handled)) {
+                dispatch_pending_metrics_build(run_id, reason = "browser_paint")
+            }
         } else if (identical(run_id, as.character(ortho_run))) {
             handled <- handle_browser_plot_paint(orthoPlotTimingTracker, payload, "ORTHO_TIMING")
             expected_outputs <- paste0(
@@ -1585,6 +1694,9 @@ function(input, output, session) {
                     reason = "browser_paint",
                     output_id = output_id
                 )
+            }
+            if (isTRUE(handled)) {
+                dispatch_pending_metrics_build(run_id, reason = "browser_paint")
             }
         }
     }, ignoreInit = TRUE, ignoreNULL = TRUE)
@@ -21182,10 +21294,13 @@ function(input, output, session) {
         )
     })
 
-    observeEvent(sortedPlotIdsHomologous(),
-        {
-            ids_chr <- as.character(sortedPlotIdsHomologous() %||% integer(0))
-            ids_chr <- ids_chr[nzchar(ids_chr)]
+    observe({
+            # Footer outputs are useful only for cards present in the DOM.
+            # Registering one for every hidden transcript caused hundreds of
+            # unnecessary Shiny output bindings before the canonical card painted.
+            sorted_ids <- as.character(sortedPlotIdsHomologous() %||% integer(0))
+            inserted_ids <- as.character(homoInsertedCardIds() %||% character(0))
+            ids_chr <- intersect(sorted_ids[nzchar(sorted_ids)], inserted_ids[nzchar(inserted_ids)])
             keep_ids <- unique(c(ids_chr, get_active_homologous_copy_ids(ids_chr)))
             for (id_chr in keep_ids) {
                 bind_homologous_footer_output(id_chr)
@@ -21199,9 +21314,7 @@ function(input, output, session) {
             if (!identical(current_bound, keep_bound)) {
                 homoFooterOutputsBound(keep_bound)
             }
-        },
-        ignoreInit = FALSE
-    )
+        })
 
     observe({
         mode <- tolower(trimws(as.character(input$homo_visual_mode %||% "compact")))

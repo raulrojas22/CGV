@@ -59,6 +59,21 @@ expect_pattern(
 )
 expect_pattern(
     server_txt,
+    'metrics_payload_queued_after_first_paint[\\s\\S]*dispatch_pending_metrics_build\\(run_key, reason = "paint_timeout"\\)',
+    "large metrics payloads wait for first paint with a bounded fallback"
+)
+expect_pattern(
+    server_txt,
+    'metrics_payload_build_is_pending\\(context, base_pid\\)[\\s\\S]*return\\(NULL\\)',
+    "a pending metrics payload never blocks the sequence-composition footer"
+)
+expect_pattern(
+    server_txt,
+    'inserted_ids <- as.character\\(homoInsertedCardIds\\(\\)[\\s\\S]*ids_chr <- intersect\\(sorted_ids',
+    "Multi-Gene binds footer outputs only for cards inserted in the DOM"
+)
+expect_pattern(
+    server_txt,
     'figure_studio_plot_render_request[\\s\\S]*pending_hydration <- setdiff\\(ids_chr, hydrated_ids\\)[\\s\\S]*instantiate_orthologous_plot_module',
     "Figure Studio hydrates an orthologous isoform body before background rendering"
 )
