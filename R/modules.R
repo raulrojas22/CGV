@@ -2788,6 +2788,13 @@ plotServerHomologous <- function(id, data, max_gene_length, min_gene_coord, max_
             }
             app_perf_mark(module_perf, "module init", "HOMO_MOD")
             app_perf_mark_ms(module_perf, "module_init_ms", app_perf_elapsed_ms(module_init_t0), "HOMO_MOD")
+            schedule_enrichment_after_flush <- function(fn, delay) {
+                schedule <- function() {
+                    if (requireNamespace("later", quietly = TRUE)) later::later(fn, delay = delay) else fn()
+                }
+                tryCatch(session$onFlushed(schedule, once = TRUE), error = function(e) schedule())
+                invisible(TRUE)
+            }
             destroy_module <- function() {
                 if (isTRUE(module_destroyed)) {
                     return(invisible(FALSE))
@@ -2973,11 +2980,7 @@ plotServerHomologous <- function(id, data, max_gene_length, min_gene_coord, max_
                     app_perf_mark_ms(module_perf, "feature_gc_span_prefetch_ms", app_perf_elapsed_ms(gc_t0), "HOMO_MOD")
                     invisible(NULL)
                 }
-                if (requireNamespace("later", quietly = TRUE)) {
-                    later::later(run_prefetch, delay = deferred_plot_enrichment_delay_seconds())
-                } else {
-                    run_prefetch()
-                }
+                schedule_enrichment_after_flush(run_prefetch, deferred_plot_enrichment_delay_seconds())
                 invisible(TRUE)
             }
 
@@ -3006,11 +3009,7 @@ plotServerHomologous <- function(id, data, max_gene_length, min_gene_coord, max_
                     app_perf_mark_ms(module_perf, "deferred_sequence_prefetch_ms", app_perf_elapsed_ms(sequence_t0), "HOMO_MOD")
                     invisible(NULL)
                 }
-                if (requireNamespace("later", quietly = TRUE)) {
-                    later::later(run_prefetch, delay = deferred_plot_enrichment_delay_seconds(0.5))
-                } else {
-                    run_prefetch()
-                }
+                schedule_enrichment_after_flush(run_prefetch, deferred_plot_enrichment_delay_seconds(0.5))
                 invisible(TRUE)
             }
 
@@ -3601,11 +3600,7 @@ plotServerOrtologous <- function(id, data, max_gene_length, min_gene_coord, max_
                     app_perf_mark_ms(module_perf, "feature_gc_span_prefetch_ms", app_perf_elapsed_ms(gc_t0), "ORTHO_MOD")
                     invisible(NULL)
                 }
-                if (requireNamespace("later", quietly = TRUE)) {
-                    later::later(run_prefetch, delay = deferred_plot_enrichment_delay_seconds())
-                } else {
-                    run_prefetch()
-                }
+                schedule_enrichment_after_flush(run_prefetch, deferred_plot_enrichment_delay_seconds())
                 invisible(TRUE)
             }
             schedule_deferred_sequence_prefetch <- function() {
@@ -3635,11 +3630,7 @@ plotServerOrtologous <- function(id, data, max_gene_length, min_gene_coord, max_
                     app_perf_mark_ms(module_perf, "deferred_sequence_prefetch_ms", app_perf_elapsed_ms(sequence_t0), "ORTHO_MOD")
                     invisible(NULL)
                 }
-                if (requireNamespace("later", quietly = TRUE)) {
-                    later::later(run_prefetch, delay = deferred_plot_enrichment_delay_seconds(0.5))
-                } else {
-                    run_prefetch()
-                }
+                schedule_enrichment_after_flush(run_prefetch, deferred_plot_enrichment_delay_seconds(0.5))
                 invisible(TRUE)
             }
             notify_plot_ready <- function() {
@@ -3658,6 +3649,13 @@ plotServerOrtologous <- function(id, data, max_gene_length, min_gene_coord, max_
             }
             app_perf_mark(module_perf, "module init", "ORTHO_MOD")
             app_perf_mark_ms(module_perf, "module_init_ms", app_perf_elapsed_ms(module_init_t0), "ORTHO_MOD")
+            schedule_enrichment_after_flush <- function(fn, delay) {
+                schedule <- function() {
+                    if (requireNamespace("later", quietly = TRUE)) later::later(fn, delay = delay) else fn()
+                }
+                tryCatch(session$onFlushed(schedule, once = TRUE), error = function(e) schedule())
+                invisible(TRUE)
+            }
             destroy_module <- function() {
                 if (isTRUE(module_destroyed)) {
                     return(invisible(FALSE))
