@@ -124,6 +124,31 @@ test_that("transcript splitting follows indexed multi-level parent relationships
     )))
 })
 
+test_that("transcript splitting preserves encoded IDs and multiple Parent fields", {
+    fixture <- data.frame(
+        V1 = rep("chr1", 6L), V2 = rep("fixture", 6L),
+        V3 = c("gene", "mRNA", "exon", "CDS", "mRNA", "exon"),
+        V4 = seq_len(6L), V5 = seq_len(6L) + 10L,
+        V6 = ".", V7 = "+", V8 = ".",
+        V9 = c(
+            "ID=gene-MULTI",
+            "ID=rna-A%2E1;Parent=gene-MULTI",
+            "ID=exon-shared;Parent=rna-A%2E1,rna-B.1",
+            "ID=cds-shared;Parent=rna-A%2E1;Parent=rna-B.1",
+            "ID=rna-B.1;Parent=gene-MULTI",
+            "ID=exon-B;Parent=rna-B.1"
+        ),
+        stringsAsFactors = FALSE
+    )
+
+    blocks <- utils_env$split_gene_data_by_transcript(fixture)
+
+    expect_length(blocks, 2L)
+    expect_setequal(names(blocks), c("rna-A.1", "rna-B.1"))
+    expect_equal(nrow(blocks[["rna-A.1"]]), 4L)
+    expect_equal(nrow(blocks[["rna-B.1"]]), 5L)
+})
+
 test_that("the orthologous processor reuses successful prepass blocks", {
     server_txt <- paste(readLines(server_path, warn = FALSE), collapse = "\n")
     start <- regexpr("process_orthologous_lookup_results <- function", server_txt, fixed = TRUE)[[1L]]
