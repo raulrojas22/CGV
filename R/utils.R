@@ -8393,6 +8393,26 @@ split_gene_data_by_transcript <- function(data_df) {
     })
     parent_tokens <- lapply(parents, normalize_link_tokens)
 
+    # Build the relationship index once.  The previous implementation scanned
+    # every annotation row for every transcript and again for every descendant
+    # level (O(transcripts * rows * depth)); genes with hundreds of annotated
+    # transcripts therefore spent minutes here before the first card existed.
+    # A hashed parent-token -> row index preserves the same graph traversal while
+    # making each breadth-first step proportional to the matching descendants.
+    rows_by_parent_token <- new.env(hash = TRUE, parent = emptyenv())
+    for (row_idx in seq_len(n)) {
+        tokens <- parent_tokens[[row_idx]]
+        if (length(tokens) == 0L) next
+        for (token in tokens) {
+            previous <- get0(token, envir = rows_by_parent_token, inherits = FALSE)
+            assign(
+                token,
+                if (is.null(previous)) as.integer(row_idx) else c(previous, as.integer(row_idx)),
+                envir = rows_by_parent_token
+            )
+        }
+    }
+
     tx_ids_raw <- vapply(tx_rows, function(i) {
         tid <- ids[i]
         if (!nzchar(tid)) {
@@ -8431,13 +8451,24 @@ split_gene_data_by_transcript <- function(data_df) {
 
         frontier <- normalize_link_tokens(tx_id_raw)
         if (length(frontier) == 0) frontier <- normalize_link_tokens(tx_id_display)
+        visited_tokens <- character(0)
         repeat {
-            hits <- which(!selected & vapply(parent_tokens, function(ps) length(ps) > 0 && any(ps %in% frontier), logical(1)))
-            if (length(hits) == 0) break
+            frontier <- setdiff(frontier, visited_tokens)
+            if (length(frontier) == 0L) break
+            visited_tokens <- unique(c(visited_tokens, frontier))
+            hit_lists <- mget(
+                frontier,
+                envir = rows_by_parent_token,
+                inherits = FALSE,
+                ifnotfound = rep(list(integer(0)), length(frontier))
+            )
+            hits <- unique(as.integer(unlist(hit_lists, use.names = FALSE)))
+            hits <- hits[is.finite(hits) & hits >= 1L & hits <= n & !selected[hits]]
+            if (length(hits) == 0L) break
             selected[hits] <- TRUE
             new_ids <- unique(ids[hits])
             new_ids <- new_ids[nzchar(new_ids)]
-            frontier <- unique(c(frontier, normalize_link_tokens(new_ids)))
+            frontier <- normalize_link_tokens(new_ids)
         }
 
         sub_df <- df[selected, , drop = FALSE]
