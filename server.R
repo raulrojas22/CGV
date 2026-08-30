@@ -1347,9 +1347,9 @@ function(input, output, session) {
         min(8L, parse_positive_int_env("APP_ISOFORM_RENDER_BATCH_SIZE", 1L))
     )
     isoformRenderBatchDelay <- {
-        raw <- suppressWarnings(as.numeric(Sys.getenv("APP_ISOFORM_RENDER_BATCH_DELAY_MS", "120")))
-        if (!is.finite(raw) || is.na(raw)) raw <- 120
-        min(1000, max(0, raw)) / 1000
+        raw <- suppressWarnings(as.numeric(Sys.getenv("APP_ISOFORM_RENDER_BATCH_DELAY_MS", "2500")))
+        if (!is.finite(raw) || is.na(raw)) raw <- 2500
+        min(5000, max(0, raw)) / 1000
     }
     orthoFirstPaintTimeout <- min(
         120000L,
