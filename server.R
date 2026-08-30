@@ -753,15 +753,13 @@ function(input, output, session) {
         if (!is.list(sig_map)) {
             sig_map <- as.list(sig_map)
         }
+        written_keys <- character(0)
         for (idx in seq_len(n_cache)) {
             pid <- ids_chr[[idx]]
             payload <- payloads[[idx]] %||% list()
-            cache_env_set(
-                plotMetricsPayloadCache,
-                metrics_payload_cache_key(context, "id", pid),
-                payload,
-                max_size = 8000L
-            )
+            id_key <- metrics_payload_cache_key(context, "id", pid)
+            assign(id_key, payload, envir = plotMetricsPayloadCache)
+            written_keys <- c(written_keys, id_key)
             sig_by_id <- tryCatch(sig_map[[pid]], error = function(e) NULL)
             sig_by_idx <- if (idx <= length(sig_map)) {
                 tryCatch(sig_map[[idx]], error = function(e) NULL)
@@ -770,14 +768,20 @@ function(input, output, session) {
             }
             sig_val <- as.character(sig_by_id %||% sig_by_idx %||% "")
             if (nzchar(sig_val)) {
-                cache_env_set(
-                    plotMetricsPayloadCache,
-                    metrics_payload_cache_key(context, "sig", sig_val),
-                    payload,
-                    max_size = 8000L
-                )
+                sig_key <- metrics_payload_cache_key(context, "sig", sig_val)
+                assign(sig_key, payload, envir = plotMetricsPayloadCache)
+                written_keys <- c(written_keys, sig_key)
             }
         }
+        # cache_env_set() trims and rescans the complete environment per item.
+        # A large human gene can add hundreds of id/signature pairs at once, so
+        # write the batch first and rebuild LRU metadata in one pass.
+        written_keys <- unique(written_keys)
+        cache_meta <- cache_env_meta_get(plotMetricsPayloadCache)
+        cache_meta$access <- cache_meta$access[setdiff(names(cache_meta$access), written_keys)]
+        cache_meta$bytes <- cache_meta$bytes[setdiff(names(cache_meta$bytes), written_keys)]
+        cache_env_meta_set(plotMetricsPayloadCache, cache_meta)
+        trim_cache_env(plotMetricsPayloadCache, max_size = 8000L)
         invisible(NULL)
     }
 
@@ -6691,12 +6695,26 @@ function(input, output, session) {
     }
 
     extract_biotype_from_attr_text <- function(attr_txt) {
-        attrs <- parse_gff_attributes(as.character(attr_txt %||% ""))
-        bt <- get_attr_first_value(
-            attrs,
-            c("transcript_biotype", "gene_biotype", "biotype", "gene_type", "transcript_type", "gbkey"),
-            fallback = ""
-        )
+        attr_value <- as.character(attr_txt %||% "")
+        key_priority <- c("transcript_biotype", "gene_biotype", "biotype", "gene_type", "transcript_type", "gbkey")
+        matches <- stringr::str_match_all(
+            attr_value,
+            stringr::regex(
+                '(?:^|;)\\s*(transcript_biotype|gene_biotype|biotype|gene_type|transcript_type|gbkey)\\s*(?:=|\\s+)\\s*"?([^;"]+)',
+                ignore_case = TRUE
+            )
+        )[[1]]
+        bt <- ""
+        if (nrow(matches) > 0L) {
+            keys_found <- tolower(matches[, 2])
+            for (key in key_priority) {
+                idx <- which(keys_found == key)[1L]
+                if (is.finite(idx)) {
+                    bt <- safe_url_decode(matches[idx, 3])
+                    break
+                }
+            }
+        }
         bt <- trimws(as.character(bt %||% ""))
         if (!nzchar(bt)) {
             return("")
