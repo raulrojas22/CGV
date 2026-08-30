@@ -824,7 +824,9 @@ function(input, output, session) {
             organism_name = organism_name,
             annotation_path = annotation_path,
             use_report_map = isTRUE(use_report_map),
-            report_path = report_path
+            report_path = report_path,
+            perf_run = perf_run,
+            perf_context = perf_context
         )
         app_perf_mark_ms(perf_run, "metrics_payload_build_ms", app_perf_elapsed_ms(metrics_t0), perf_context)
         set_context_metrics_payloads(
@@ -6774,7 +6776,7 @@ function(input, output, session) {
         result
     }
 
-    build_transcript_metrics_payloads <- function(full_data, transcript_blocks = NULL, representative_name = "", organism_name = "", annotation_path = "", use_report_map = FALSE, report_path = "") {
+    build_transcript_metrics_payloads <- function(full_data, transcript_blocks = NULL, representative_name = "", organism_name = "", annotation_path = "", use_report_map = FALSE, report_path = "", perf_run = NULL, perf_context = "APP") {
         if (is.null(full_data) || nrow(full_data) == 0) {
             return(list())
         }
@@ -6828,6 +6830,7 @@ function(input, output, session) {
             out
         }
 
+        metrics_setup_t0 <- app_perf_now()
         df_full <- as.data.frame(full_data, stringsAsFactors = FALSE)
         row_types_full <- tolower(trimws(as.character(df_full$V3 %||% rep("", nrow(df_full)))))
         gene_rows_full <- df_full[row_types_full == "gene", , drop = FALSE]
@@ -6859,6 +6862,7 @@ function(input, output, session) {
         } else {
             NA_real_
         }
+        app_perf_mark_ms(perf_run, "metrics_setup_ms", app_perf_elapsed_ms(metrics_setup_t0), perf_context)
 
         per_block <- vector("list", length(blocks))
         exon_keys_by_block <- vector("list", length(blocks))
@@ -6868,6 +6872,7 @@ function(input, output, session) {
         tx_biotypes <- rep("", length(blocks))
         tx_labels <- rep("N/A", length(blocks))
         chr_short_labels <- rep("N/A", length(blocks))
+        stage_ms <- c(labels = 0, chromosome = 0, span = 0, biotype = 0, ranges = 0, derived = 0)
 
         for (i in seq_along(blocks)) {
             block <- blocks[[i]]
@@ -6878,19 +6883,26 @@ function(input, output, session) {
             row_types <- tolower(trimws(as.character(block$V3 %||% rep("", nrow(block)))))
             tx_rows <- block[row_types %in% tx_types, , drop = FALSE]
             gene_rows <- block[row_types == "gene", , drop = FALSE]
+            stage_t0 <- app_perf_now()
             labels <- extract_plot_labels(block)
             tx_name <- clean_label(normalize_display_id(labels$transcript), "N/A")
             tx_labels[i] <- tx_name
+            stage_ms[["labels"]] <- stage_ms[["labels"]] + app_perf_elapsed_ms(stage_t0)
+            stage_t0 <- app_perf_now()
             chr_raw <- clean_label(labels$chromosome, "N/A")
             chr_short <- get_chr_short_cached(chr_raw)
             chr_short_labels[i] <- clean_label(chr_short, chr_raw)
+            stage_ms[["chromosome"]] <- stage_ms[["chromosome"]] + app_perf_elapsed_ms(stage_t0)
 
+            stage_t0 <- app_perf_now()
             tx_span <- compute_transcript_span(block)
             tx_start <- as.numeric(tx_span[["start"]])
             tx_end <- as.numeric(tx_span[["end"]])
             tx_len <- if (is.finite(tx_start) && is.finite(tx_end) && tx_end >= tx_start) as.numeric(tx_end - tx_start + 1) else NA_real_
             tx_lengths[i] <- tx_len
+            stage_ms[["span"]] <- stage_ms[["span"]] + app_perf_elapsed_ms(stage_t0)
 
+            stage_t0 <- app_perf_now()
             tx_attr <- if (nrow(tx_rows) > 0) as.character(tx_rows$V9[1] %||% "") else ""
             gene_attr_block <- if (nrow(gene_rows) > 0) as.character(gene_rows$V9[1] %||% "") else gene_attr
             tx_biotype <- extract_biotype_from_attr_text(tx_attr)
@@ -6899,7 +6911,9 @@ function(input, output, session) {
             }
             tx_biotype <- clean_label(tx_biotype, "N/A")
             tx_biotypes[i] <- tx_biotype
+            stage_ms[["biotype"]] <- stage_ms[["biotype"]] + app_perf_elapsed_ms(stage_t0)
 
+            stage_t0 <- app_perf_now()
             exon_ranges <- as_feature_ranges(block[row_types == "exon", , drop = FALSE])
             exon_ranges <- unique_feature_ranges(exon_ranges)
             cds_ranges <- as_feature_ranges(block[row_types == "cds", , drop = FALSE])
@@ -6915,7 +6929,9 @@ function(input, output, session) {
             } else {
                 character(0)
             }
+            stage_ms[["ranges"]] <- stage_ms[["ranges"]] + app_perf_elapsed_ms(stage_t0)
 
+            stage_t0 <- app_perf_now()
             cds_len <- feature_ranges_union_length(cds_ranges)
             cds_lengths[i] <- cds_len
             protein_aa <- if (is.finite(cds_len) && cds_len > 0) floor(cds_len / 3) else NA_real_
@@ -6954,8 +6970,18 @@ function(input, output, session) {
                 chr_short = clean_label(chr_short_labels[i], "N/A"),
                 tx_coords = tx_coords
             )
+            stage_ms[["derived"]] <- stage_ms[["derived"]] + app_perf_elapsed_ms(stage_t0)
+        }
+        for (stage_name in names(stage_ms)) {
+            app_perf_mark_ms(
+                perf_run,
+                paste0("metrics_stage_", stage_name, "_ms"),
+                stage_ms[[stage_name]],
+                perf_context
+            )
         }
 
+        metrics_aggregate_t0 <- app_perf_now()
         if (!nzchar(gene_biotype)) {
             tb <- tx_biotypes[nzchar(tx_biotypes) & tx_biotypes != "N/A"]
             if (length(tb) > 0) {
@@ -7017,7 +7043,9 @@ function(input, output, session) {
 
         gene_name_txt <- clean_label(normalize_display_id(representative_name), "N/A")
         organism_txt <- format_org_name(clean_label(organism_name, "N/A"))
+        app_perf_mark_ms(perf_run, "metrics_aggregate_ms", app_perf_elapsed_ms(metrics_aggregate_t0), perf_context)
 
+        metrics_payloads_t0 <- app_perf_now()
         payloads <- vector("list", length(blocks))
         for (i in seq_along(blocks)) {
             tx <- per_block[[i]]
@@ -7101,6 +7129,7 @@ function(input, output, session) {
                 )
             )
         }
+        app_perf_mark_ms(perf_run, "metrics_payload_assembly_ms", app_perf_elapsed_ms(metrics_payloads_t0), perf_context)
 
         payloads
     }
