@@ -8374,21 +8374,38 @@ split_gene_data_by_transcript <- function(data_df) {
     }
 
     attrs_raw <- as.character(df$V9 %||% rep("", n))
-    attrs_parsed <- lapply(attrs_raw, parse_gff_attributes)
 
-    ids <- vapply(seq_len(n), function(i) {
-        a <- attrs_parsed[[i]]
-        id <- a[["id"]][1] %||% a[["transcript_id"]][1]
-        if (is.null(id) || is.na(id) || !nzchar(id)) "" else as.character(id)
-    }, character(1))
+    # This splitter needs only ID/transcript_id and Parent. Parsing every GFF/GTF
+    # attribute into a list used to dominate large genes even after relationship
+    # traversal was indexed. Extract the required fields in vectorised passes.
+    ids <- stringr::str_match(
+        attrs_raw,
+        stringr::regex("(?:^|;)\\s*ID=([^;]+)", ignore_case = TRUE)
+    )[, 2]
+    missing_ids <- is.na(ids) | !nzchar(trimws(ids))
+    if (any(missing_ids)) {
+        transcript_ids <- stringr::str_match(
+            attrs_raw[missing_ids],
+            stringr::regex('(?:^|;|\\t)\\s*transcript_id\\s*[= ]\\s*"?([^;"\\t]+)', ignore_case = TRUE)
+        )[, 2]
+        ids[missing_ids] <- transcript_ids
+    }
+    ids[is.na(ids)] <- ""
+    nonempty_ids <- nzchar(ids)
+    if (any(nonempty_ids)) ids[nonempty_ids] <- safe_url_decode(trimws(ids[nonempty_ids]))
 
-    parents <- lapply(seq_len(n), function(i) {
-        a <- attrs_parsed[[i]]
-        p <- a[["parent"]]
-        if (is.null(p) || length(p) == 0) {
-            return(character(0))
-        }
-        pv <- trimws(unlist(strsplit(paste(p, collapse = ","), ",", fixed = TRUE)))
+    parent_fields <- stringr::str_extract_all(
+        attrs_raw,
+        stringr::regex("(?:^|;)\\s*Parent=[^;]*", ignore_case = TRUE)
+    )
+    parents <- lapply(parent_fields, function(fields) {
+        if (length(fields) == 0L) return(character(0))
+        values <- stringr::str_remove(
+            fields,
+            stringr::regex("^(?:;)?\\s*Parent=", ignore_case = TRUE)
+        )
+        values <- safe_url_decode(values)
+        pv <- trimws(unlist(strsplit(values, ",", fixed = TRUE), use.names = FALSE))
         unique(pv[nzchar(pv)])
     })
     parent_tokens <- lapply(parents, normalize_link_tokens)
