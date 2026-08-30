@@ -34,6 +34,8 @@ focus_metrics <- c(
     "lookup_total_ms",
     "lookup_alias_fast_region_ms",
     "split_transcripts_ms",
+    "split_blocks_only_ms",
+    "canonical_select_ms",
     "split_setup_ms",
     "split_id_extract_ms",
     "split_parent_index_ms",
