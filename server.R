@@ -6425,6 +6425,36 @@ function(input, output, session) {
         sum(as.numeric(merged$end) - as.numeric(merged$start) + 1)
     }
 
+    feature_ranges_union_length_normalized <- function(ranges_df) {
+        if (is.null(ranges_df) || nrow(ranges_df) == 0L) {
+            return(0)
+        }
+        starts <- as.numeric(ranges_df$start)
+        ends <- as.numeric(ranges_df$end)
+        keep <- is.finite(starts) & is.finite(ends)
+        starts <- starts[keep]
+        ends <- ends[keep]
+        if (length(starts) == 0L) return(0)
+        ord <- order(starts, ends)
+        starts <- starts[ord]
+        ends <- ends[ord]
+        total <- 0
+        current_start <- starts[[1L]]
+        current_end <- ends[[1L]]
+        if (length(starts) > 1L) {
+            for (idx in 2:length(starts)) {
+                if (starts[[idx]] <= current_end + 1) {
+                    current_end <- max(current_end, ends[[idx]])
+                } else {
+                    total <- total + current_end - current_start + 1
+                    current_start <- starts[[idx]]
+                    current_end <- ends[[idx]]
+                }
+            }
+        }
+        as.numeric(total + current_end - current_start + 1)
+    }
+
     # ---------------------------------------------------------------------------
     # Select the canonical (representative) transcript from a list of blocks.
     # Returns the 1-based index of the canonical block within transcript_blocks.
@@ -6560,6 +6590,21 @@ function(input, output, session) {
         }
         hits <- vapply(seq_len(nrow(ex)), function(i) {
             any(ex$start[i] <= cds$end & ex$end[i] >= cds$start)
+        }, logical(1))
+        as.integer(sum(hits))
+    }
+
+    count_normalized_exons_with_cds_overlap <- function(exon_ranges, cds_ranges) {
+        if (is.null(exon_ranges) || is.null(cds_ranges) ||
+            nrow(exon_ranges) == 0L || nrow(cds_ranges) == 0L) {
+            return(0L)
+        }
+        ex_start <- as.numeric(exon_ranges$start)
+        ex_end <- as.numeric(exon_ranges$end)
+        cds_start <- as.numeric(cds_ranges$start)
+        cds_end <- as.numeric(cds_ranges$end)
+        hits <- vapply(seq_along(ex_start), function(i) {
+            any(ex_start[[i]] <= cds_end & ex_end[[i]] >= cds_start)
         }, logical(1))
         as.integer(sum(hits))
     }
@@ -6932,11 +6977,11 @@ function(input, output, session) {
             stage_ms[["ranges"]] <- stage_ms[["ranges"]] + app_perf_elapsed_ms(stage_t0)
 
             stage_t0 <- app_perf_now()
-            cds_len <- feature_ranges_union_length(cds_ranges)
+            cds_len <- feature_ranges_union_length_normalized(cds_ranges)
             cds_lengths[i] <- cds_len
             protein_aa <- if (is.finite(cds_len) && cds_len > 0) floor(cds_len / 3) else NA_real_
             coding_exons <- if (nrow(exon_ranges_for_metrics) > 0 && nrow(cds_ranges) > 0) {
-                count_exons_with_cds_overlap(exon_ranges_for_metrics, cds_ranges)
+                count_normalized_exons_with_cds_overlap(exon_ranges_for_metrics, cds_ranges)
             } else if (nrow(cds_ranges) > 0) {
                 as.integer(nrow(cds_ranges))
             } else {
@@ -7043,6 +7088,36 @@ function(input, output, session) {
 
         gene_name_txt <- clean_label(normalize_display_id(representative_name), "N/A")
         organism_txt <- format_org_name(clean_label(organism_name, "N/A"))
+        longest_exon_txt <- if (length(exon_lengths) > 0 && any(is.finite(exon_lengths))) {
+            format_bp_value(max(exon_lengths, na.rm = TRUE))
+        } else {
+            "N/A"
+        }
+        shortest_exon_txt <- if (length(exon_lengths) > 0 && any(is.finite(exon_lengths))) {
+            format_bp_value(min(exon_lengths, na.rm = TRUE))
+        } else {
+            "N/A"
+        }
+        gene_summary_section <- list(
+            title = "Gene summary",
+            rows = list(
+                list(label = "Biotype", value = gene_biotype),
+                list(label = "Transcript isoforms", value = as.character(length(blocks))),
+                list(label = "Longest transcript", value = longest_tx_txt),
+                list(label = "Longest CDS", value = longest_cds_txt),
+                list(label = "Coding vs non-coding", value = coding_vs_noncoding_txt)
+            )
+        )
+        splicing_complexity_section <- list(
+            title = "Splicing complexity",
+            rows = list(
+                list(label = "Unique exons (gene)", value = as.character(unique_exon_total)),
+                list(label = "Constitutive exons", value = as.character(constitutive_exons)),
+                list(label = "Alternative exons", value = as.character(alternative_exons)),
+                list(label = "Longest exon", value = longest_exon_txt),
+                list(label = "Shortest exon", value = shortest_exon_txt)
+            )
+        )
         app_perf_mark_ms(perf_run, "metrics_aggregate_ms", app_perf_elapsed_ms(metrics_aggregate_t0), perf_context)
 
         metrics_payloads_t0 <- app_perf_now()
@@ -7065,40 +7140,8 @@ function(input, output, session) {
                     organism_txt
                 ),
                 sections = list(
-                    list(
-                        title = "Gene summary",
-                        rows = list(
-                            list(label = "Biotype", value = gene_biotype),
-                            list(label = "Transcript isoforms", value = as.character(length(blocks))),
-                            list(label = "Longest transcript", value = longest_tx_txt),
-                            list(label = "Longest CDS", value = longest_cds_txt),
-                            list(label = "Coding vs non-coding", value = coding_vs_noncoding_txt)
-                        )
-                    ),
-                    list(
-                        title = "Splicing complexity",
-                        rows = list(
-                            list(label = "Unique exons (gene)", value = as.character(unique_exon_total)),
-                            list(label = "Constitutive exons", value = as.character(constitutive_exons)),
-                            list(label = "Alternative exons", value = as.character(alternative_exons)),
-                            list(
-                                label = "Longest exon",
-                                value = if (length(exon_lengths) > 0 && any(is.finite(exon_lengths))) {
-                                    format_bp_value(max(exon_lengths, na.rm = TRUE))
-                                } else {
-                                    "N/A"
-                                }
-                            ),
-                            list(
-                                label = "Shortest exon",
-                                value = if (length(exon_lengths) > 0 && any(is.finite(exon_lengths))) {
-                                    format_bp_value(min(exon_lengths, na.rm = TRUE))
-                                } else {
-                                    "N/A"
-                                }
-                            )
-                        )
-                    ),
+                    gene_summary_section,
+                    splicing_complexity_section,
                     list(
                         title = "Current transcript",
                         rows = list(
