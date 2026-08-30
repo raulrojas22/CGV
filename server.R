@@ -20994,28 +20994,6 @@ function(input, output, session) {
         if (length(ids_chr) == 0L) {
             return(invisible(NULL))
         }
-        # Pagination is gene-based, while the backing plot state still contains
-        # one id per transcript.  When a canonical gene enters the visible
-        # window, insert all of its transcript card shells now (hidden), but
-        # instantiate only the canonical plot below.  The expand request then
-        # hydrates those hidden isoforms in small delayed batches.  Without this
-        # expansion only the synthetic canonical copy was available from the
-        # transcript toggle and the real non-canonical transcript cards were
-        # silently omitted.
-        requested_primary_ids <- ids_chr
-        groups_snap <- isolate(homoMultiTranscriptGeneGroups())
-        ids_chr <- unique(unlist(lapply(requested_primary_ids, function(pid) {
-            matched_group <- Filter(
-                function(group) pid %in% as.character(group$ids %||% character(0)),
-                groups_snap
-            )
-            if (length(matched_group) > 0L) {
-                as.character(matched_group[[1L]]$ids %||% pid)
-            } else {
-                pid
-            }
-        }), use.names = FALSE))
-        ids_chr <- ids_chr[nzchar(ids_chr)]
         # Snapshot all reactives once to avoid N*6 reads when building cards.
         titles_snap <- isolate(titlesHomologous())
         org_info_snap <- isolate(organismInfoHomologous())
