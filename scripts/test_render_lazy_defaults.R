@@ -49,7 +49,7 @@ expect_pattern(
 )
 expect_pattern(
     server_txt,
-    'schedule_isoform_module_batches <- function\\(ids_chr, context, anchor_id = ""\\)[\\s\\S]*ceiling\\(seq_along\\(ids_chr\\) / isoformRenderBatchSize\\)[\\s\\S]*later::later',
+    'schedule_isoform_module_batches <- function\\(ids_chr, context, anchor_id = "", toggle_key = ""\\)[\\s\\S]*ceiling\\(seq_along\\(ids_chr\\) / isoformRenderBatchSize\\)[\\s\\S]*later::later',
     "expanded isoform plots are instantiated in delayed batches"
 )
 expect_pattern(
@@ -100,13 +100,18 @@ expect_pattern(
 )
 expect_pattern(
     server_txt,
-    'if\\(window\\.toggleIsoformCards\\)\\{window\\.toggleIsoformCards\\(this,%s\\);\\}',
-    "the transcript toggle has an inline expansion fallback when the shared helper is unavailable"
+    'isoform_toggle_input_id\\(context, plot_id\\)[\\s\\S]*class = "btn action-button isoform-toggle-btn"',
+    "the transcript toggle uses Shiny's native action-button input binding"
 )
 expect_pattern(
     server_txt,
-    "Shiny\\.setInputValue\\('isoform_expand_request'",
-    "the inline transcript fallback sends its expansion request directly to Shiny"
+    'register_isoform_toggle_observer <- function[\\s\\S]*observeEvent\\(input\\[\\[input_id_local\\]\\][\\s\\S]*process_isoform_expand_request',
+    "server-side transcript observers receive native toggle clicks"
+)
+expect_pattern(
+    server_txt,
+    'isoformExpandedGroups[\\s\\S]*hide_isoform_cards[\\s\\S]*schedule_isoform_module_batches',
+    "server-side expansion state supports collapse and progressive reopening"
 )
 expect_pattern(
     keepalive_txt,
