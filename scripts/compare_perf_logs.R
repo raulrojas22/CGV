@@ -54,6 +54,7 @@ focus_metrics <- c(
     "gc_span_fetch_ms",
     "gene_sequence_fetch_ms",
     "seqnames_resolve_ms",
+    "native_twobit_ms",
     "rtracklayer_namespace_ms",
     "twobit_handle_ms",
     "range_build_ms",
