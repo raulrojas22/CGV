@@ -7710,6 +7710,7 @@ function(input, output, session) {
             div(
                 class = "footer-item footer-item-isoform-toggle",
                 tags$button(
+                    type = "button",
                     id = isoform_toggle_input_id(context, plot_id),
                     class = "btn action-button isoform-toggle-btn",
                     `data-val` = "0",
@@ -25141,12 +25142,16 @@ function(input, output, session) {
             plot_id_local <- pid
             observer_key_local <- observer_key
             observeEvent(input[[input_id_local]], {
+                click_value <- suppressWarnings(as.integer(input[[input_id_local]] %||% 0L))
+                if (!is.finite(click_value) || is.na(click_value) || click_value < 1L) {
+                    return(invisible(NULL))
+                }
                 process_isoform_expand_request(
                     list(context = context_local, ids = plot_id_local),
                     toggle_key = observer_key_local,
                     button_id = input_id_local
                 )
-            }, ignoreInit = TRUE, ignoreNULL = TRUE)
+            }, ignoreInit = FALSE, ignoreNULL = FALSE)
         })
         invisible(TRUE)
     }
