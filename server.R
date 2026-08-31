@@ -21176,6 +21176,8 @@ function(input, output, session) {
                 `data-transcript-id` = tx_title,
                 `data-gene-name` = gene_title,
                 `data-organism-name` = org_name,
+                `data-isoform-load-state` = "queued",
+                `aria-hidden` = "true",
                 if (isTRUE(gene_meta_card$is_canonical_copy)) {
                     make_tx_header_homo(
                         badge_ui = span(
@@ -21499,8 +21501,8 @@ function(input, output, session) {
             if (length(canonical_hits) > 0L) anchor_chr <- canonical_hits[[1L]]
         }
         hydrated_now <- character(0)
-        # Repeated afterEnd insertions reverse order, so walk backwards while
-        # keeping the canonical copy first in the final DOM.
+        # Repeated afterEnd insertions reverse order, so walk backwards. The
+        # resolver ranks real alternatives before the compact canonical copy.
         for (pid in rev(pending)) {
             meta <- tryCatch(isolate(plotGeneMetaHomologous()[[pid]]), error = function(e) NULL)
             if (is.null(meta) || (isTRUE(meta$is_canonical) && !isTRUE(meta$is_canonical_copy))) {
@@ -24141,6 +24143,7 @@ function(input, output, session) {
                 `data-transcript-id` = tx_title,
                 `data-gene-name` = gene_title,
                 `data-organism-name` = org_name,
+                `data-isoform-load-state` = "queued",
                 `aria-hidden` = "true"
             ))
         }
@@ -24269,6 +24272,8 @@ function(input, output, session) {
                 `data-transcript-id` = tx_title,
                 `data-gene-name` = gene_title,
                 `data-organism-name` = org_name,
+                `data-isoform-load-state` = "queued",
+                `aria-hidden` = "true",
                 if (isTRUE(gene_meta_card$is_canonical_copy)) {
                     make_tx_header_ortho(
                         badge_ui = span(
@@ -24913,6 +24918,11 @@ function(input, output, session) {
             }
         }
         expanded_ids <- unique(expanded_ids)
+        meta_rank_o <- isolate(plotGeneMetaOrthologous())
+        copy_rank_o <- vapply(expanded_ids, function(pid) {
+            as.integer(isTRUE(tryCatch(meta_rank_o[[pid]]$is_canonical_copy, error = function(e) FALSE)))
+        }, integer(1))
+        expanded_ids <- expanded_ids[order(copy_rank_o, seq_along(expanded_ids))]
         initial_ids <- Filter(should_render_initial_ortho, ids_chr)
         isoform_ids <- setdiff(expanded_ids, initial_ids)
         MAX_UPFRONT_ISOFORMS <- max(0L, min(10L, parse_positive_int_env("APP_ORTHO_UPFRONT_ISOFORMS", 0L)))
@@ -25067,7 +25077,7 @@ function(input, output, session) {
                     candidate <- tryCatch(meta_map_o[[candidate_id]], error = function(e) NULL)
                     !is.null(candidate) && !isTRUE(candidate$is_canonical) && !isTRUE(candidate$is_canonical_copy)
                 }, same_group)
-                unique(c(copy_ids, regular_ids))
+                unique(c(regular_ids, copy_ids))
             }), use.names = FALSE))
         } else {
             groups_h <- tryCatch(isolate(homoMultiTranscriptGeneGroups()), error = function(e) list())
@@ -25088,7 +25098,7 @@ function(input, output, session) {
             copy_id_h <- paste0(anchor_id, "_c")
             copy_meta_h <- tryCatch(isolate(plotGeneMetaHomologous()[[copy_id_h]]), error = function(e) NULL)
             copy_ids_h <- if (isTRUE(copy_meta_h$is_canonical_copy)) copy_id_h else character(0)
-            expanded_ids <- unique(c(copy_ids_h, regular_iso_ids_h))
+            expanded_ids <- unique(c(regular_iso_ids_h, copy_ids_h))
         }
 
         list(
@@ -25121,7 +25131,8 @@ function(input, output, session) {
         shinyjs::runjs(sprintf(
             paste0(
                 "try{var ids=%s,pfx=%s;for(var i=0;i<ids.length;i++){var c=document.getElementById(pfx+ids[i]);",
-                "if(c){c.style.display='none';c.setAttribute('aria-hidden','true');}}}catch(e){}"
+                "if(c){c.style.display='none';c.setAttribute('aria-hidden','true');",
+                "c.removeAttribute('aria-busy');c.setAttribute('data-isoform-load-state','collapsed');}}}catch(e){}"
             ),
             jsonlite::toJSON(ids_chr, auto_unbox = FALSE),
             jsonlite::toJSON(prefix, auto_unbox = TRUE)
@@ -25214,7 +25225,8 @@ function(input, output, session) {
                     paste0(
                         "try{var ids=%s,pfx='%s';for(var i=0;i<ids.length;i++){",
                         "var card=document.getElementById(pfx+ids[i]);",
-                        "if(card){card.style.display='flex';card.setAttribute('aria-hidden','false');",
+                        "if(card){card.style.display='none';card.setAttribute('aria-hidden','true');",
+                        "card.setAttribute('aria-busy','true');card.setAttribute('data-isoform-load-state','loading');",
                         "if(window.Shiny&&Shiny.bindAll){Shiny.bindAll(card);}}}",
                         "if(window.scheduleGgiraphNudge){window.scheduleGgiraphNudge(180);}}catch(e){}"
                     ),
@@ -25241,41 +25253,80 @@ function(input, output, session) {
                 shinyjs::runjs("if(window.scheduleGgiraphNudge){window.scheduleGgiraphNudge(180);}")
             })
             next_index <- as.integer(batch_index + 1L)
-            if (next_index <= length(batches)) {
-                if (!requireNamespace("later", quietly = TRUE)) {
-                    render_batch(next_index)
-                } else {
-                    # Admit the next transcript only after the current card has
-                    # reached the browser with SVG, sequence composition and
-                    # statistics. This makes expansion genuinely progressive,
-                    # rather than starting hundreds of renders 120 ms apart.
-                    wait_for_batch_complete <- NULL
-                    wait_for_batch_complete <- function(attempt = 0L) {
-                        if (nzchar(toggle_key)) {
-                            expanded_state <- isolate(isoformExpandedGroups())
-                            if (!isTRUE(expanded_state[[toggle_key]])) return(invisible(NULL))
-                        }
-                        tracker <- isolate(if (identical(ctx, "orthologous")) orthoPlotTimingTracker() else homoPlotTimingTracker())
-                        prefix_output <- if (identical(ctx, "orthologous")) "plot_ortho_" else "plot_homo_"
-                        expected_outputs <- paste0(prefix_output, batch_ids, "-plot")
-                        completed_outputs <- as.character(tracker$card_complete %||% character(0))
-                        ready <- all(expected_outputs %in% completed_outputs)
-                        timed_out <- as.integer(attempt) >= 500L
-                        if (isTRUE(ready) || isTRUE(timed_out)) {
-                            render_batch(next_index)
-                        } else {
-                            later::later(
-                                function() wait_for_batch_complete(as.integer(attempt) + 1L),
-                                delay = isoformRenderBatchDelay
-                            )
-                        }
-                        invisible(NULL)
-                    }
-                    later::later(
-                        function() wait_for_batch_complete(0L),
-                        delay = isoformRenderBatchDelay
-                    )
+            ids_json <- jsonlite::toJSON(batch_ids, auto_unbox = FALSE)
+            prefix_js <- if (identical(ctx, "orthologous")) "ortho-card-" else "homo-card-"
+
+            reveal_completed_batch <- function() {
+                if (nzchar(toggle_key)) {
+                    expanded_state <- isolate(isoformExpandedGroups())
+                    if (!isTRUE(expanded_state[[toggle_key]])) return(invisible(NULL))
                 }
+                shinyjs::runjs(sprintf(
+                    paste0(
+                        "try{var ids=%s,pfx='%s';for(var i=0;i<ids.length;i++){",
+                        "var card=document.getElementById(pfx+ids[i]);",
+                        "if(card){card.style.display='flex';card.setAttribute('aria-hidden','false');",
+                        "card.removeAttribute('aria-busy');card.setAttribute('data-isoform-load-state','ready');}}",
+                        "if(window.scheduleGgiraphNudge){window.scheduleGgiraphNudge(180);}}catch(e){}"
+                    ),
+                    ids_json,
+                    prefix_js
+                ))
+                if (next_index <= length(batches)) {
+                    if (requireNamespace("later", quietly = TRUE)) {
+                        later::later(function() render_batch(next_index), delay = isoformRenderBatchDelay)
+                    } else {
+                        render_batch(next_index)
+                    }
+                }
+                invisible(NULL)
+            }
+
+            # A transcript card becomes visible only after the browser confirms
+            # that its SVG, sequence composition and statistics are all ready.
+            # The following card is not admitted until that reveal completes.
+            if (!requireNamespace("later", quietly = TRUE)) {
+                reveal_completed_batch()
+            } else {
+                wait_for_batch_complete <- NULL
+                wait_for_batch_complete <- function(attempt = 0L) {
+                    if (nzchar(toggle_key)) {
+                        expanded_state <- isolate(isoformExpandedGroups())
+                        if (!isTRUE(expanded_state[[toggle_key]])) return(invisible(NULL))
+                    }
+                    tracker <- isolate(if (identical(ctx, "orthologous")) orthoPlotTimingTracker() else homoPlotTimingTracker())
+                    prefix_output <- if (identical(ctx, "orthologous")) "plot_ortho_" else "plot_homo_"
+                    expected_outputs <- paste0(prefix_output, batch_ids, "-plot")
+                    completed_outputs <- as.character(tracker$card_complete %||% character(0))
+                    ready <- all(expected_outputs %in% completed_outputs)
+                    timed_out <- as.integer(attempt) >= 500L
+                    if (isTRUE(ready)) {
+                        reveal_completed_batch()
+                    } else if (isTRUE(timed_out)) {
+                        shinyjs::runjs(sprintf(
+                            paste0(
+                                "try{var ids=%s,pfx='%s';for(var i=0;i<ids.length;i++){",
+                                "var card=document.getElementById(pfx+ids[i]);if(card){",
+                                "card.removeAttribute('aria-busy');card.setAttribute('data-isoform-load-state','timeout');}}}catch(e){}"
+                            ),
+                            ids_json,
+                            prefix_js
+                        ))
+                        if (next_index <= length(batches)) {
+                            later::later(function() render_batch(next_index), delay = isoformRenderBatchDelay)
+                        }
+                    } else {
+                        later::later(
+                            function() wait_for_batch_complete(as.integer(attempt) + 1L),
+                            delay = isoformRenderBatchDelay
+                        )
+                    }
+                    invisible(NULL)
+                }
+                later::later(
+                    function() wait_for_batch_complete(0L),
+                    delay = isoformRenderBatchDelay
+                )
             }
             invisible(NULL)
         }
