@@ -7549,9 +7549,11 @@ function(input, output, session) {
     }
 
     isoform_toggle_input_id <- function(context = "", plot_id = "") {
+        context_key <- tolower(trimws(as.character(context %||% "")))
+        context_key <- if (startsWith(context_key, "ortho")) "ortho" else "homo"
         paste0(
             "isoform_toggle_",
-            gsub("[^A-Za-z0-9_]", "_", as.character(context %||% "plot")),
+            context_key,
             "_",
             gsub("[^A-Za-z0-9_]", "_", as.character(plot_id %||% ""))
         )
