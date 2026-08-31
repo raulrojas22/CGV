@@ -49,8 +49,18 @@ expect_pattern(
 )
 expect_pattern(
     server_txt,
-    'schedule_isoform_module_batches <- function\\(ids_chr, context\\)[\\s\\S]*ceiling\\(seq_along\\(ids_chr\\) / isoformRenderBatchSize\\)[\\s\\S]*later::later',
+    'schedule_isoform_module_batches <- function\\(ids_chr, context, anchor_id = ""\\)[\\s\\S]*ceiling\\(seq_along\\(ids_chr\\) / isoformRenderBatchSize\\)[\\s\\S]*later::later',
     "expanded isoform plots are instantiated in delayed batches"
+)
+expect_pattern(
+    server_txt,
+    'wait_for_batch_complete <- function\\(attempt = 0L\\)[\\s\\S]*tracker\\$card_complete[\\s\\S]*render_batch\\(next_index\\)',
+    "the next isoform waits until the current card is scientifically complete"
+)
+expect_pattern(
+    server_txt,
+    'groups_h <- tryCatch\\(isolate\\(homoMultiTranscriptGeneGroups\\(\\)\\)[\\s\\S]*matching_group_h <- Filter[\\s\\S]*hydrate_homologous_isoform_cards',
+    "homologous transcript groups hydrate from the canonical-only initial DOM"
 )
 expect_pattern(
     server_txt,
@@ -74,7 +84,7 @@ expect_pattern(
 )
 expect_pattern(
     server_txt,
-    'figure_studio_plot_render_request[\\s\\S]*pending_hydration <- setdiff\\(ids_chr, hydrated_ids\\)[\\s\\S]*instantiate_orthologous_plot_module',
+    'figure_studio_plot_render_request[\\s\\S]*hydrate_orthologous_isoform_cards\\(ids_chr\\)[\\s\\S]*instantiate_orthologous_plot_module',
     "Figure Studio hydrates an orthologous isoform body before background rendering"
 )
 keepalive_txt <- paste(readLines(file.path("www", "js", "keepalive.js"), warn = FALSE), collapse = "\n")
@@ -82,6 +92,11 @@ expect_pattern(
     keepalive_txt,
     'replace\\(\\/\\^ortho-placeholder-\\/[^;]*\\)',
     "orthologous placeholder IDs are normalized before the expand request"
+)
+expect_pattern(
+    keepalive_txt,
+    'if \\(!ids\\.length && btn\\.dataset\\.plotId\\) ids\\.push\\(btn\\.dataset\\.plotId\\)',
+    "a canonical-only card can request server-side isoform hydration"
 )
 expect_pattern(
     keepalive_txt,

@@ -183,7 +183,7 @@
           });
         });
       }
-      if (perfTimingEnabled && !run.firstPaintOnly && !run.reportedComplete[outputId]) {
+      if ((perfTimingEnabled || run.functionalOnly) && !run.firstPaintOnly && !run.reportedComplete[outputId]) {
         var readiness = cardReadiness(outputId);
         if (readiness) {
           window.requestAnimationFrame(function () {
@@ -300,6 +300,9 @@
         };
         runs[runId] = run;
       }
+      // Progressive transcript admission can run for longer than a single
+      // timing window. Each new expected batch proves the run is active.
+      run.receivedAt = receivedAt;
       run.firstPaintOnly = run.firstPaintOnly || !!(message && message.first_paint_only);
       run.functionalOnly = run.functionalOnly || !!(message && (message.functional_only || message.first_paint_only));
       run.expectGeneration += 1;
