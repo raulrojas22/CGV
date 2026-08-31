@@ -7711,20 +7711,28 @@ function(input, output, session) {
         expand_item <- if (!isTRUE(is_canonical_copy) && !is.null(tx_group_key) && nzchar(tx_group_key) && isoform_count > 0L) {
             div(
                 class = "footer-item footer-item-isoform-toggle",
-                tags$button(
-                    type = "button",
-                    id = isoform_toggle_input_id(context, plot_id),
-                    class = "btn action-button isoform-toggle-btn",
-                    `data-val` = "0",
+                tags$label(
+                    class = "btn isoform-toggle-btn isoform-toggle-label",
                     style = "font-size:10.5px; color:#4B6072; background:none; border:none; padding:2px 0; cursor:pointer; display:inline-flex; align-items:center; gap:4px;",
-                    `data-group` = tx_group_key,
-                    `data-count` = as.character(total_tx_display),
-                    `data-plot-id` = as.character(plot_id %||% ""),
-                    HTML(sprintf(
-                        "&#x25BC; %d transcript%s",
-                        total_tx_display,
-                        if (total_tx_display > 1L) "s" else ""
-                    ))
+                    tags$input(
+                        type = "checkbox",
+                        id = isoform_toggle_input_id(context, plot_id),
+                        class = "isoform-toggle-checkbox",
+                        `data-group` = tx_group_key,
+                        `data-count` = as.character(total_tx_display),
+                        `data-plot-id` = as.character(plot_id %||% "")
+                    ),
+                    tags$span(class = "isoform-toggle-down", `aria-hidden` = "true", HTML("&#x25BC;")),
+                    tags$span(class = "isoform-toggle-up", `aria-hidden` = "true", HTML("&#x25B2;")),
+                    tags$span(
+                        id = paste0(isoform_toggle_input_id(context, plot_id), "_label"),
+                        class = "isoform-toggle-text",
+                        sprintf(
+                            "%d transcript%s",
+                            total_tx_display,
+                            if (total_tx_display > 1L) "s" else ""
+                        )
+                    )
                 )
             )
         } else {
@@ -25096,11 +25104,12 @@ function(input, output, session) {
         if (!nzchar(button_id)) return(invisible(NULL))
         shinyjs::runjs(sprintf(
             paste0(
-                "try{var b=document.getElementById(%s);if(b){var n=parseInt(b.getAttribute('data-count')||'0',10);",
-                "if(!isFinite(n)){n=0;}b.innerHTML='%s '+n+(n===1?' transcript':' transcripts');}}catch(e){}"
+                "try{var b=document.getElementById(%s),l=document.getElementById(%s+'_label');",
+                "if(b&&l){var n=parseInt(b.getAttribute('data-count')||'0',10);",
+                "if(!isFinite(n)){n=0;}l.textContent=n+(n===1?' transcript':' transcripts');}}catch(e){}"
             ),
             jsonlite::toJSON(button_id, auto_unbox = TRUE),
-            if (isTRUE(expanded)) "&#x25B2;" else "&#x25BC;"
+            jsonlite::toJSON(button_id, auto_unbox = TRUE)
         ))
         invisible(NULL)
     }
@@ -25144,10 +25153,9 @@ function(input, output, session) {
             plot_id_local <- pid
             observer_key_local <- observer_key
             observeEvent(input[[input_id_local]], {
-                click_value <- suppressWarnings(as.integer(input[[input_id_local]] %||% 0L))
-                if (!is.finite(click_value) || is.na(click_value) || click_value < 1L) {
-                    return(invisible(NULL))
-                }
+                requested_expanded <- isTRUE(input[[input_id_local]])
+                expanded_state <- isolate(isoformExpandedGroups())
+                if (identical(requested_expanded, isTRUE(expanded_state[[observer_key_local]]))) return(invisible(NULL))
                 process_isoform_expand_request(
                     list(context = context_local, ids = plot_id_local),
                     toggle_key = observer_key_local,

@@ -100,8 +100,8 @@ expect_pattern(
 )
 expect_pattern(
     server_txt,
-    'isoform_toggle_input_id\\(context, plot_id\\)[\\s\\S]*class = "btn action-button isoform-toggle-btn"',
-    "the transcript toggle uses Shiny's native action-button input binding"
+    'class = "btn isoform-toggle-btn isoform-toggle-label"[\\s\\S]*type = "checkbox"[\\s\\S]*class = "isoform-toggle-checkbox"',
+    "the transcript toggle uses Shiny's native checkbox input binding"
 )
 expect_pattern(
     server_txt,
@@ -110,7 +110,7 @@ expect_pattern(
 )
 expect_pattern(
     server_txt,
-    'register_isoform_toggle_observer <- function[\\s\\S]*observeEvent\\(input\\[\\[input_id_local\\]\\][\\s\\S]*process_isoform_expand_request',
+    'register_isoform_toggle_observer <- function[\\s\\S]*requested_expanded <- isTRUE\\(input\\[\\[input_id_local\\]\\]\\)[\\s\\S]*process_isoform_expand_request',
     "server-side transcript observers receive native toggle clicks"
 )
 expect_pattern(
