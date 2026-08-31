@@ -7705,8 +7705,27 @@ function(input, output, session) {
                     `data-count` = as.character(total_tx_display),
                     `data-plot-id` = as.character(plot_id %||% ""),
                     onclick = sprintf(
-                        "window.toggleIsoformCards && window.toggleIsoformCards(this, '%s')",
-                        gsub("'", "\\'", tx_group_key)
+                        paste0(
+                            "if(window.toggleIsoformCards){window.toggleIsoformCards(this,%s);}",
+                            "else{(function(b,g){",
+                            "var all=document.querySelectorAll('[data-isoform-group]'),cards=[],i;",
+                            "for(i=0;i<all.length;i++){if((all[i].getAttribute('data-isoform-group')||'')===g){cards.push(all[i]);}}",
+                            "var opening=!cards.length||cards[0].style.display==='none'||cards[0].style.display==='';",
+                            "var n=parseInt(b.getAttribute('data-count')||'0',10);if(!isFinite(n)){n=cards.length;}",
+                            "var label=n===1?' transcript':' transcripts';",
+                            "if(opening){var ids=[];for(i=0;i<cards.length;i++){",
+                            "var rid=cards[i].id||'';rid=rid.replace(/^homo-card-/,'').replace(/^ortho-card-/,'').replace(/^ortho-placeholder-/,'');",
+                            "if(rid){ids.push(rid);}}",
+                            "if(!ids.length&&b.getAttribute('data-plot-id')){ids.push(b.getAttribute('data-plot-id'));}",
+                            "if(window.Shiny&&Shiny.setInputValue){Shiny.setInputValue('isoform_expand_request',",
+                            "{group:g,context:g.indexOf('ortho--')===0?'orthologous':'homologous',ids:ids,nonce:Date.now()},",
+                            "{priority:'event'});}b.innerHTML='&#x25B2; '+n+label;}",
+                            "else{for(i=0;i<cards.length;i++){cards[i].style.display='none';cards[i].setAttribute('aria-hidden','true');}",
+                            "b.innerHTML='&#x25BC; '+n+label;}",
+                            "})(this,%s);}"
+                        ),
+                        jsonlite::toJSON(as.character(tx_group_key), auto_unbox = TRUE),
+                        jsonlite::toJSON(as.character(tx_group_key), auto_unbox = TRUE)
                     ),
                     HTML(sprintf(
                         "&#x25BC; %d transcript%s",
@@ -25126,6 +25145,18 @@ function(input, output, session) {
         if (length(ids_chr) == 0L) {
             return(invisible(NULL))
         }
+        isoform_tracker <- if (identical(ctx, "orthologous")) {
+            tryCatch(isolate(orthoPlotTimingTracker())$run, error = function(e) NULL)
+        } else {
+            tryCatch(isolate(homoPlotTimingTracker())$run, error = function(e) NULL)
+        }
+        if (is.list(isoform_tracker)) {
+            app_perf_mark(
+                isoform_tracker,
+                sprintf("isoform_expand_received context=%s seed_ids=%d", ctx, length(ids_chr)),
+                "ISOFORM_RENDER"
+            )
+        }
         if (identical(ctx, "orthologous")) {
             expanded_iso_ids <- unique(c(ids_chr, unlist(lapply(ids_chr, function(id) {
                 meta <- tryCatch(plotGeneMetaOrthologous()[[id]], error = function(e) NULL)
@@ -25155,6 +25186,13 @@ function(input, output, session) {
             copy_meta_h <- tryCatch(isolate(plotGeneMetaHomologous()[[copy_id_h]]), error = function(e) NULL)
             copy_ids_h <- if (isTRUE(copy_meta_h$is_canonical_copy)) copy_id_h else character(0)
             expanded_iso_ids <- unique(c(copy_ids_h, regular_iso_ids_h))
+        }
+        if (is.list(isoform_tracker)) {
+            app_perf_mark(
+                isoform_tracker,
+                sprintf("isoform_expand_resolved context=%s cards=%d", ctx, length(expanded_iso_ids)),
+                "ISOFORM_RENDER"
+            )
         }
         schedule_isoform_module_batches(
             expanded_iso_ids,
