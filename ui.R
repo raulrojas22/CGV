@@ -1233,17 +1233,19 @@ fluidPage(
       tags$style(HTML("
         .isoform-toggle-label {
           margin:0;
-          position:relative;
+          display:inline-flex;
+          align-items:center;
+          gap:4px;
         }
         .isoform-toggle-checkbox {
-          position:absolute !important;
-          inset:0 !important;
-          width:100% !important;
-          height:100% !important;
-          opacity:0 !important;
+          position:relative !important;
+          width:14px !important;
+          height:14px !important;
+          margin:0 !important;
+          opacity:1 !important;
           pointer-events:auto !important;
           cursor:pointer !important;
-          z-index:2 !important;
+          accent-color:#4B6072;
         }
         .isoform-toggle-up { display:none; }
         .isoform-toggle-checkbox:checked ~ .isoform-toggle-down { display:none; }
