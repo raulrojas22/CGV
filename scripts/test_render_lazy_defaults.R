@@ -99,6 +99,16 @@ expect_pattern(
     "a canonical-only card can request server-side isoform hydration"
 )
 expect_pattern(
+    server_txt,
+    'if\\(window\\.toggleIsoformCards\\)\\{window\\.toggleIsoformCards\\(this,%s\\);\\}',
+    "the transcript toggle has an inline expansion fallback when the shared helper is unavailable"
+)
+expect_pattern(
+    server_txt,
+    "Shiny\\.setInputValue\\('isoform_expand_request'",
+    "the inline transcript fallback sends its expansion request directly to Shiny"
+)
+expect_pattern(
     keepalive_txt,
     'function syncIsoformToggleButtons\\(\\)[\\s\\S]*document.addEventListener\\(\'shiny:value\'[\\s\\S]*syncIsoformToggleButtons\\(\\)',
     "isoform toggle labels resync after Shiny replaces a footer"
