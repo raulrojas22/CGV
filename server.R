@@ -25161,7 +25161,7 @@ function(input, output, session) {
                     toggle_key = observer_key_local,
                     button_id = input_id_local
                 )
-            }, ignoreInit = FALSE, ignoreNULL = FALSE)
+            }, ignoreInit = TRUE, ignoreNULL = FALSE)
         })
         invisible(TRUE)
     }
@@ -25319,6 +25319,12 @@ function(input, output, session) {
             expanded_state[[toggle_key]] <- TRUE
             isoformExpandedGroups(expanded_state)
             set_isoform_toggle_label(button_id, expanded = TRUE)
+            if (nzchar(button_id)) {
+                tryCatch(
+                    updateCheckboxInput(session, inputId = button_id, value = TRUE),
+                    error = function(e) NULL
+                )
+            }
         }
         if (is.list(isoform_tracker)) {
             app_perf_mark(
