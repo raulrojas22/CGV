@@ -1429,6 +1429,7 @@ function(input, output, session) {
     }
     homoRenderedPlotIds <- reactiveVal(character())
     homoInsertedCardIds <- reactiveVal(character())
+    homoHydratedIsoformIds <- reactiveVal(character())
     homoFooterOutputsBound <- reactiveVal(character())
     homoDownloadOutputsBound <- reactiveVal(character())
     orthoRenderChunkSize <- max(
@@ -21332,13 +21333,16 @@ function(input, output, session) {
         if (length(meta_ids) == 0L) {
             return(character(0))
         }
+        hydrated_ids <- isolate(as.character(homoHydratedIsoformIds() %||% character(0)))
         keep_copy_ids <- Filter(function(meta_id) {
             if (!endsWith(meta_id, "_c")) {
                 return(FALSE)
             }
             meta <- meta_map[[meta_id]]
             base_id <- sub("_c$", "", meta_id)
-            isTRUE(meta$is_canonical_copy) && base_id %in% base_ids_chr
+            isTRUE(meta$is_canonical_copy) &&
+                meta_id %in% hydrated_ids &&
+                base_id %in% base_ids_chr
         }, meta_ids)
         as.character(keep_copy_ids %||% character(0))
     }
@@ -21352,11 +21356,47 @@ function(input, output, session) {
             ),
             silent = TRUE
         )
+        homoHydratedIsoformIds(character())
         shinyjs::runjs("if(window.scheduleGgiraphNudge){ window.scheduleGgiraphNudge(260); }")
         invisible(NULL)
     }
 
+    hydrate_homologous_copy_cards <- function(ids_chr = character(0)) {
+        ids_chr <- unique(as.character(ids_chr %||% character(0)))
+        ids_chr <- ids_chr[nzchar(ids_chr)]
+        if (length(ids_chr) == 0L) {
+            return(character(0))
+        }
+        hydrated <- isolate(as.character(homoHydratedIsoformIds() %||% character(0)))
+        pending <- setdiff(ids_chr, hydrated)
+        hydrated_now <- character(0)
+        for (pid in pending) {
+            meta <- tryCatch(isolate(plotGeneMetaHomologous()[[pid]]), error = function(e) NULL)
+            if (is.null(meta) || !isTRUE(meta$is_canonical_copy)) {
+                next
+            }
+            replacement <- build_homologous_plot_card_ui(pid)
+            base_id <- sub("_c$", "", pid)
+            if (!is.null(replacement) && nzchar(base_id)) {
+                insertUI(
+                    selector = paste0("#homo-card-", base_id),
+                    where = "afterEnd",
+                    ui = replacement,
+                    immediate = TRUE
+                )
+                hydrated_now <- c(hydrated_now, pid)
+            }
+        }
+        if (length(hydrated_now) > 0L) {
+            homoHydratedIsoformIds(unique(c(hydrated, hydrated_now)))
+        }
+        hydrated_now
+    }
+
     append_homologous_cards_dom <- function(ids_chr = character(0)) {
+        append_t0 <- app_perf_now()
+        append_stage_t0 <- append_t0
+        append_run <- tryCatch(isolate(homoPlotTimingTracker())$run, error = function(e) NULL)
         ids_chr <- as.character(ids_chr %||% character(0))
         ids_chr <- ids_chr[nzchar(ids_chr)]
         if (length(ids_chr) == 0L) {
@@ -21375,12 +21415,17 @@ function(input, output, session) {
             fileData = file_data_snap,
             annotationPaths = ann_paths_snap
         )
+        if (is.list(append_run)) {
+            app_perf_mark_ms(append_run, "card_snapshots_ms", app_perf_elapsed_ms(append_stage_t0), "HOMO_UI")
+        }
+        append_stage_t0 <- app_perf_now()
         should_render_initial_homo <- function(id_chr) {
             meta <- gene_meta_snap[[as.character(id_chr)]]
             is.null(meta) || !identical(meta$is_canonical, FALSE)
         }
-        # For each canonical multi-tx transcript, inject a hidden _c copy into the
-        # expand group so that ALL transcripts (including canonical) appear when expanded.
+        # Prepare the data for the canonical transcript copy, but do not send its
+        # full hidden card to the browser yet. It is hydrated on the first expand
+        # request so the initial card carries only outputs the user can see.
         expanded_ids   <- character(0)
         canon_copy_ids <- character(0)
         for (id in ids_chr) {
@@ -21420,30 +21465,58 @@ function(input, output, session) {
                 # Copy sequence if already available
                 seq_val <- tryCatch(genSequencesHomologous()[[id]], error = function(e) NULL)
                 if (!is.null(seq_val)) set_named_value(genSequencesHomologous, id_c, seq_val)
-                expanded_ids   <- c(expanded_ids, id_c)
                 canon_copy_ids <- c(canon_copy_ids, id_c)
             }
         }
+        if (is.list(append_run)) {
+            app_perf_mark_ms(append_run, "card_state_copy_ms", app_perf_elapsed_ms(append_stage_t0), "HOMO_UI")
+        }
+        append_stage_t0 <- app_perf_now()
         cards <- lapply(expanded_ids, function(id) build_homologous_plot_card_ui(id, snapshots = card_snapshots))
         cards <- Filter(Negate(is.null), cards)
         if (length(cards) == 0L) {
             return(invisible(NULL))
         }
+        if (is.list(append_run)) {
+            app_perf_mark_ms(append_run, "card_ui_build_ms", app_perf_elapsed_ms(append_stage_t0), "HOMO_UI")
+        }
+        append_stage_t0 <- app_perf_now()
         insertUI(
             selector = "#homo-plot-cards-container",
             where = "beforeEnd",
             ui = do.call(tagList, cards),
             immediate = TRUE
         )
+        if (is.list(append_run)) {
+            app_perf_mark_ms(append_run, "card_insert_message_ms", app_perf_elapsed_ms(append_stage_t0), "HOMO_UI")
+        }
+        append_stage_t0 <- app_perf_now()
         initial_ids <- Filter(should_render_initial_homo, ids_chr)
         isoform_ids <- setdiff(expanded_ids, initial_ids)
         MAX_UPFRONT_ISOFORMS <- max(0L, min(10L, parse_positive_int_env("APP_HOMO_UPFRONT_ISOFORMS", 0L)))
         upfront_isoform_ids <- head(isoform_ids, MAX_UPFRONT_ISOFORMS)
         instantiate_ids <- c(initial_ids, upfront_isoform_ids)
         invisible(lapply(instantiate_ids, instantiate_homologous_plot_module))
+        if (is.list(append_run)) {
+            app_perf_mark_ms(append_run, "card_module_init_ms", app_perf_elapsed_ms(append_stage_t0), "HOMO_UI")
+        }
+        append_stage_t0 <- app_perf_now()
         invisible(lapply(instantiate_ids, bind_homologous_footer_output))
         invisible(lapply(instantiate_ids, register_homologous_download_output))
+        if (is.list(append_run)) {
+            app_perf_mark_ms(append_run, "card_secondary_bind_ms", app_perf_elapsed_ms(append_stage_t0), "HOMO_UI")
+            app_perf_mark_ms(append_run, "card_append_total_ms", app_perf_elapsed_ms(append_t0), "HOMO_UI")
+        }
         shinyjs::runjs("try{var el=document.getElementById('homo-plot-cards-container'); if(window.Shiny&&Shiny.bindAll&&el){Shiny.bindAll(el);} if(window.scheduleGgiraphNudge){window.scheduleGgiraphNudge(220);}}catch(e){}")
+        if (is.list(append_run) && !is.null(session) && is.function(session$onFlushed)) {
+            local({
+                run_local <- append_run
+                started_local <- append_t0
+                session$onFlushed(function() {
+                    app_perf_mark_ms(run_local, "card_append_to_flush_ms", app_perf_elapsed_ms(started_local), "HOMO_UI")
+                }, once = TRUE)
+            })
+        }
         invisible(NULL)
     }
 
@@ -21465,6 +21538,11 @@ function(input, output, session) {
                     tryCatch(remove_named_value(rv_fn, id_c), error = function(e) NULL)
                 }
             }
+        }
+        hydrated_now <- isolate(as.character(homoHydratedIsoformIds() %||% character(0)))
+        hydrated_keep <- setdiff(hydrated_now, paste0(ids_chr, "_c"))
+        if (!identical(hydrated_now, hydrated_keep)) {
+            homoHydratedIsoformIds(hydrated_keep)
         }
         ids_json <- jsonlite::toJSON(unname(ids_chr), auto_unbox = FALSE)
         shinyjs::runjs(sprintf(
@@ -24888,6 +24966,7 @@ function(input, output, session) {
                 total_tx <- suppressWarnings(as.integer(meta$total_transcripts %||% 1L))
                 if (isTRUE(meta$is_canonical) && is.finite(total_tx) && total_tx > 1L) paste0(id, "_c") else character(0)
             }))))
+            hydrate_homologous_copy_cards(expanded_iso_ids)
         }
         group_json <- jsonlite::toJSON(as.character(evt$group %||% ""), auto_unbox = TRUE)
         shinyjs::runjs(sprintf(
@@ -24947,6 +25026,7 @@ function(input, output, session) {
             handles <- tryCatch(isolate(existingPlotsOrthologous()), error = function(e) list())
             card_prefix <- "ortho-card-"
         } else {
+            hydrate_homologous_copy_cards(ids_chr)
             invisible(lapply(ids_chr, instantiate_homologous_plot_module))
             handles <- tryCatch(isolate(existingPlotsHomologous()), error = function(e) list())
             card_prefix <- "homo-card-"
