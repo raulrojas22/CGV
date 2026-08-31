@@ -710,6 +710,7 @@ resolve_genome_fasta <- function(det_info = NULL, uploaded_fasta_path = NULL, ge
 .preloaded_registry_cache <- new.env(parent = emptyenv())
 .twobit_seqinfo_cache <- new.env(parent = emptyenv())
 .twobit_handle_cache <- new.env(parent = emptyenv())
+.twobit_native_index_cache <- new.env(parent = emptyenv())
 .twobit_seqnames_sidecar_version <- 1L
 .tabix_index_override_cache <- new.env(parent = emptyenv())
 .tabix_seqnames_cache <- new.env(parent = emptyenv())
@@ -7277,6 +7278,150 @@ write_twobit_seqnames_sidecar <- function(two_bit_path, seqnames, base_dir = "."
     ))
 }
 
+read_twobit_u32 <- function(con, n = 1L, endian = "little") {
+    count <- suppressWarnings(as.integer(n %||% 1L))
+    if (!is.finite(count) || is.na(count) || count <= 0L) return(numeric(0))
+    values <- readBin(con, what = integer(), n = count, size = 4L, endian = endian)
+    values <- as.numeric(values)
+    values[values < 0] <- values[values < 0] + 2^32
+    values
+}
+
+read_twobit_native_index <- function(two_bit_path) {
+    path <- normalizePath(as.character(two_bit_path %||% ""), winslash = "/", mustWork = FALSE)
+    if (!nzchar(path) || !file.exists(path)) return(NULL)
+    file_meta <- file.info(path)
+    cache_key <- paste(
+        path,
+        as.character(file_meta$size[1] %||% ""),
+        as.character(as.numeric(file_meta$mtime[1] %||% NA_real_)),
+        sep = "::"
+    )
+    cached <- cache_env_get(.twobit_native_index_cache, cache_key, default = NULL)
+    if (!is.null(cached)) return(cached)
+
+    con <- file(path, open = "rb")
+    on.exit(close(con), add = TRUE)
+    signature_raw <- readBin(con, what = "raw", n = 4L)
+    if (length(signature_raw) != 4L) return(NULL)
+    signature_little <- sum(as.numeric(signature_raw) * 256^(0:3))
+    signature_big <- sum(as.numeric(signature_raw) * 256^(3:0))
+    canonical_signature <- 0x1A412743
+    endian <- if (identical(signature_little, canonical_signature)) {
+        "little"
+    } else if (identical(signature_big, canonical_signature)) {
+        "big"
+    } else {
+        return(NULL)
+    }
+    header <- read_twobit_u32(con, n = 3L, endian = endian)
+    if (length(header) != 3L || !identical(header[[1L]], 0) || !is.finite(header[[2L]])) return(NULL)
+    sequence_count <- suppressWarnings(as.integer(header[[2L]]))
+    if (!is.finite(sequence_count) || is.na(sequence_count) || sequence_count < 0L) return(NULL)
+    offsets <- numeric(sequence_count)
+    seq_names <- character(sequence_count)
+    if (sequence_count > 0L) {
+        for (idx in seq_len(sequence_count)) {
+            name_size <- readBin(con, what = integer(), n = 1L, size = 1L, signed = FALSE)
+            if (length(name_size) != 1L || !is.finite(name_size) || name_size < 0L) return(NULL)
+            name_raw <- readBin(con, what = "raw", n = as.integer(name_size))
+            if (length(name_raw) != as.integer(name_size)) return(NULL)
+            seq_names[[idx]] <- rawToChar(name_raw)
+            offset <- read_twobit_u32(con, n = 1L, endian = endian)
+            if (length(offset) != 1L || !is.finite(offset)) return(NULL)
+            offsets[[idx]] <- offset
+        }
+    }
+    names(offsets) <- seq_names
+    result <- list(
+        path = path,
+        endian = endian,
+        seqnames = seq_names,
+        offsets = offsets
+    )
+    cache_env_set(.twobit_native_index_cache, cache_key, result, max_size = 40L)
+    result
+}
+
+extract_sequence_from_2bit_native <- function(two_bit_path, seqid, start_pos, end_pos) {
+    index <- tryCatch(read_twobit_native_index(two_bit_path), error = function(e) NULL)
+    if (is.null(index) || length(index$offsets %||% numeric(0)) == 0L) return("")
+    seq_name <- as.character(seqid %||% "")
+    if (!nzchar(seq_name) || !seq_name %in% names(index$offsets)) return("")
+    record_offset <- suppressWarnings(as.numeric(index$offsets[[seq_name]] %||% NA_real_))
+    if (!is.finite(record_offset) || record_offset < 0) return("")
+
+    con <- file(index$path, open = "rb")
+    on.exit(close(con), add = TRUE)
+    seek(con, where = record_offset, origin = "start")
+    dna_size <- read_twobit_u32(con, n = 1L, endian = index$endian)
+    if (length(dna_size) != 1L || !is.finite(dna_size) || dna_size <= 0) return("")
+    st <- max(1, suppressWarnings(as.numeric(start_pos %||% 1)))
+    en <- max(st, suppressWarnings(as.numeric(end_pos %||% st)))
+    st <- min(st, dna_size)
+    en <- min(en, dna_size)
+    if (!is.finite(st) || !is.finite(en) || en < st) return("")
+    st <- floor(st)
+    en <- floor(en)
+
+    n_count <- read_twobit_u32(con, n = 1L, endian = index$endian)
+    if (length(n_count) != 1L || !is.finite(n_count)) return("")
+    n_count <- suppressWarnings(as.integer(n_count))
+    n_starts <- read_twobit_u32(con, n = n_count, endian = index$endian)
+    n_sizes <- read_twobit_u32(con, n = n_count, endian = index$endian)
+    mask_count <- read_twobit_u32(con, n = 1L, endian = index$endian)
+    if (length(mask_count) != 1L || !is.finite(mask_count)) return("")
+    mask_count <- suppressWarnings(as.integer(mask_count))
+    mask_starts <- read_twobit_u32(con, n = mask_count, endian = index$endian)
+    mask_sizes <- read_twobit_u32(con, n = mask_count, endian = index$endian)
+    reserved <- read_twobit_u32(con, n = 1L, endian = index$endian)
+    if (length(reserved) != 1L) return("")
+    packed_offset <- seek(con, where = NA, origin = "start")
+
+    byte_start <- floor((st - 1) / 4)
+    byte_end <- floor((en - 1) / 4)
+    byte_count <- as.integer(byte_end - byte_start + 1)
+    seek(con, where = packed_offset + byte_start, origin = "start")
+    packed <- readBin(con, what = "raw", n = byte_count)
+    if (length(packed) != byte_count) return("")
+    byte_values <- as.integer(packed)
+    codes <- as.vector(rbind(
+        bitwAnd(bitwShiftR(byte_values, 6L), 3L),
+        bitwAnd(bitwShiftR(byte_values, 4L), 3L),
+        bitwAnd(bitwShiftR(byte_values, 2L), 3L),
+        bitwAnd(byte_values, 3L)
+    ))
+    bases <- c("T", "C", "A", "G")[codes + 1L]
+    local_start <- as.integer((st - 1) %% 4 + 1)
+    requested_length <- as.integer(en - st + 1)
+    sequence_chars <- bases[seq.int(local_start, length.out = requested_length)]
+
+    apply_blocks <- function(block_starts, block_sizes, replacement = "N", lower = FALSE) {
+        if (length(block_starts) == 0L || length(sequence_chars) == 0L) return(invisible(NULL))
+        request_start0 <- st - 1
+        request_end0 <- en - 1
+        for (block_idx in seq_along(block_starts)) {
+            block_start0 <- as.numeric(block_starts[[block_idx]])
+            block_end0 <- block_start0 + as.numeric(block_sizes[[block_idx]]) - 1
+            overlap_start0 <- max(request_start0, block_start0)
+            overlap_end0 <- min(request_end0, block_end0)
+            if (!is.finite(overlap_start0) || !is.finite(overlap_end0) || overlap_end0 < overlap_start0) next
+            pos <- seq.int(
+                as.integer(overlap_start0 - request_start0 + 1),
+                as.integer(overlap_end0 - request_start0 + 1)
+            )
+            if (isTRUE(lower)) {
+                sequence_chars[pos] <<- tolower(sequence_chars[pos])
+            } else {
+                sequence_chars[pos] <<- replacement
+            }
+        }
+        invisible(NULL)
+    }
+    apply_blocks(n_starts, n_sizes, replacement = "N", lower = FALSE)
+    paste0(sequence_chars, collapse = "")
+}
+
 get_twobit_seqnames <- function(two_bit_path, base_dir = ".") {
     if (is.null(two_bit_path) || !nzchar(two_bit_path) || !file.exists(two_bit_path)) {
         return(character(0))
@@ -7290,6 +7435,17 @@ get_twobit_seqnames <- function(two_bit_path, base_dir = ".") {
     if (!is.null(sidecar) && length(sidecar) > 0L) {
         assign(key, sidecar, envir = .twobit_seqinfo_cache)
         return(sidecar)
+    }
+
+    if (isTRUE(app_env_flag("APP_NATIVE_TWOBIT_READER", TRUE))) {
+        native_index <- tryCatch(read_twobit_native_index(key), error = function(e) NULL)
+        native_seqnames <- as.character((native_index %||% list())$seqnames %||% character(0))
+        native_seqnames <- native_seqnames[nzchar(native_seqnames)]
+        if (length(native_seqnames) > 0L) {
+            assign(key, native_seqnames, envir = .twobit_seqinfo_cache)
+            tryCatch(write_twobit_seqnames_sidecar(key, native_seqnames, base_dir = base_dir), error = function(e) FALSE)
+            return(native_seqnames)
+        }
     }
 
     out <- tryCatch(
@@ -7331,6 +7487,26 @@ extract_sequence_from_2bit <- function(two_bit_path, seqid, start_pos, end_pos) 
     app_perf_mark_ms(twobit_perf, "seqnames_resolve_ms", app_perf_elapsed_ms(seqnames_t0), "SEQ_2BIT")
     if (!nzchar(resolved_seqname)) {
         return("")
+    }
+
+    if (isTRUE(app_env_flag("APP_NATIVE_TWOBIT_READER", TRUE))) {
+        native_t0 <- app_perf_now()
+        native_value <- tryCatch(
+            extract_sequence_from_2bit_native(
+                two_bit_path,
+                resolved_seqname,
+                start_pos,
+                end_pos
+            ),
+            error = function(e) ""
+        )
+        app_perf_mark_ms(twobit_perf, "native_twobit_ms", app_perf_elapsed_ms(native_t0), "SEQ_2BIT")
+        if (nzchar(native_value)) {
+            app_perf_mark(twobit_perf, sprintf("native done len=%d", as.integer(nchar(native_value))), "SEQ_2BIT")
+            app_perf_mark_ms(twobit_perf, "twobit_total_ms", app_perf_elapsed_ms(twobit_total_t0), "SEQ_2BIT")
+            return(native_value)
+        }
+        app_perf_mark(twobit_perf, "native reader fallback", "SEQ_2BIT")
     }
 
     res <- tryCatch(
@@ -7742,8 +7918,34 @@ extract_spliced_exon_sequence <- function(fasta_path, seqid, exon_ranges, strand
 
     parts <- character(0)
 
+    # Native 2bit fallback for unusually wide transcripts where fetching one
+    # continuous span would be wasteful. It preserves the same exon-by-exon
+    # semantics without loading the large rtracklayer namespace.
+    if (is_twobit_file(fasta_path) && isTRUE(app_env_flag("APP_NATIVE_TWOBIT_READER", TRUE))) {
+        seq_names <- get_twobit_seqnames(fasta_path)
+        resolved_seqname <- resolve_seqname_in_vector(seqid, seq_names = seq_names) %||% as.character(seqid %||% "")
+        if (nzchar(resolved_seqname)) {
+            parts <- tryCatch(
+                vapply(seq_len(nrow(ex)), function(i) {
+                    extract_sequence_from_2bit_native(
+                        fasta_path,
+                        resolved_seqname,
+                        as.integer(round(as.numeric(ex$start[[i]]))),
+                        as.integer(round(as.numeric(ex$end[[i]])))
+                    )
+                }, character(1)),
+                error = function(e) character(0)
+            )
+        }
+        if (length(parts) > 0L && all(nzchar(parts))) {
+            app_perf_mark(sp_perf, sprintf("native 2bit parts=%d", as.integer(length(parts))), "SEQ_SPLICE")
+        } else {
+            parts <- character(0)
+        }
+    }
+
     # Fast path for 2bit: fetch all exon ranges in a single import call.
-    if (is_twobit_file(fasta_path) && requireNamespace("rtracklayer", quietly = TRUE)) {
+    if (length(parts) == 0L && is_twobit_file(fasta_path) && requireNamespace("rtracklayer", quietly = TRUE)) {
         parts <- tryCatch(
             {
                 seq_names <- get_twobit_seqnames(fasta_path)
