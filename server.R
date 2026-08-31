@@ -21316,7 +21316,7 @@ function(input, output, session) {
                 footer_ui
             })
         })
-        outputOptions(output, output_id, suspendWhenHidden = TRUE)
+        outputOptions(output, output_id, suspendWhenHidden = TRUE, priority = 900)
         homoFooterOutputsBound(c(already, id_chr))
         invisible(NULL)
     }
@@ -23890,7 +23890,7 @@ function(input, output, session) {
                 footer_ui
             })
         })
-        outputOptions(output, output_id, suspendWhenHidden = TRUE)
+        outputOptions(output, output_id, suspendWhenHidden = TRUE, priority = 900)
         orthoFooterOutputsBound(c(already, id_chr))
         invisible(NULL)
     }
