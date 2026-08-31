@@ -25127,6 +25127,11 @@ function(input, output, session) {
     hide_isoform_cards <- function(ids_chr, context, button_id = "") {
         ids_chr <- unique(as.character(ids_chr %||% character(0)))
         ids_chr <- ids_chr[nzchar(ids_chr)]
+        footer_prefix <- if (identical(context, "orthologous")) "ortho_footer_" else "homo_footer_"
+        invisible(lapply(
+            paste0(footer_prefix, ids_chr),
+            function(output_id) outputOptions(output, output_id, suspendWhenHidden = TRUE)
+        ))
         prefix <- if (identical(context, "orthologous")) "ortho-card-" else "homo-card-"
         shinyjs::runjs(sprintf(
             paste0(
@@ -25237,11 +25242,19 @@ function(input, output, session) {
                     invisible(lapply(batch_ids, instantiate_orthologous_plot_module))
                     invisible(lapply(batch_ids, register_orthologous_download_output))
                     invisible(lapply(batch_ids, bind_orthologous_footer_output))
+                    invisible(lapply(
+                        paste0("ortho_footer_", batch_ids),
+                        function(output_id) outputOptions(output, output_id, suspendWhenHidden = FALSE)
+                    ))
                     handles <- tryCatch(existingPlotsOrthologous(), error = function(e) list())
                 } else {
                     invisible(lapply(batch_ids, instantiate_homologous_plot_module))
                     invisible(lapply(batch_ids, register_homologous_download_output))
                     invisible(lapply(batch_ids, bind_homologous_footer_output))
+                    invisible(lapply(
+                        paste0("homo_footer_", batch_ids),
+                        function(output_id) outputOptions(output, output_id, suspendWhenHidden = FALSE)
+                    ))
                     handles <- tryCatch(existingPlotsHomologous(), error = function(e) list())
                 }
                 for (pid in batch_ids) {
@@ -25271,6 +25284,11 @@ function(input, output, session) {
                     ),
                     ids_json,
                     prefix_js
+                ))
+                footer_prefix <- if (identical(ctx, "orthologous")) "ortho_footer_" else "homo_footer_"
+                invisible(lapply(
+                    paste0(footer_prefix, batch_ids),
+                    function(output_id) outputOptions(output, output_id, suspendWhenHidden = TRUE)
                 ))
                 if (next_index <= length(batches)) {
                     if (requireNamespace("later", quietly = TRUE)) {
@@ -25303,6 +25321,11 @@ function(input, output, session) {
                     if (isTRUE(ready)) {
                         reveal_completed_batch()
                     } else if (isTRUE(timed_out)) {
+                        footer_prefix <- if (identical(ctx, "orthologous")) "ortho_footer_" else "homo_footer_"
+                        invisible(lapply(
+                            paste0(footer_prefix, batch_ids),
+                            function(output_id) outputOptions(output, output_id, suspendWhenHidden = TRUE)
+                        ))
                         shinyjs::runjs(sprintf(
                             paste0(
                                 "try{var ids=%s,pfx='%s';for(var i=0;i<ids.length;i++){",
