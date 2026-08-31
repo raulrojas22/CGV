@@ -105,6 +105,11 @@ expect_pattern(
 )
 expect_pattern(
     server_txt,
+    'context_key <- if \\(startsWith\\(context_key, "ortho"\\)\\) "ortho" else "homo"[\\s\\S]*isoform_toggle_',
+    "footer aliases and server workflow names resolve to the same transcript-toggle input id"
+)
+expect_pattern(
+    server_txt,
     'register_isoform_toggle_observer <- function[\\s\\S]*observeEvent\\(input\\[\\[input_id_local\\]\\][\\s\\S]*process_isoform_expand_request',
     "server-side transcript observers receive native toggle clicks"
 )
