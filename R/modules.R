@@ -2793,7 +2793,6 @@ plotServerHomologous <- function(id, data, max_gene_length, min_gene_coord, max_
                     return(invisible(FALSE))
                 }
                 module_destroyed <<- TRUE
-                tryCatch(prefetch_observer$destroy(), error = function(e) NULL)
                 tryCatch({
                     output$plot <- NULL
                 }, error = function(e) NULL)
@@ -3006,10 +3005,14 @@ plotServerHomologous <- function(id, data, max_gene_length, min_gene_coord, max_
                 invisible(TRUE)
             }
 
-            # Trigger data fetching
-            prefetch_observer <- observe({
+            # This module receives a static data.frame. Starting its one-shot
+            # prefetch through observe() postponed it until a later Shiny flush;
+            # on large searches that idle queue wait was several seconds longer
+            # than the sequence read itself. Run it during module construction so
+            # the first bound output already has sequence/GC data available.
+            run_initial_prefetch <- function() {
                 req(data)
-                app_perf_mark(module_perf, "observe start", "HOMO_MOD")
+                app_perf_mark(module_perf, "initial prefetch start", "HOMO_MOD")
                 # OPT-4: Use pre-computed processed data
                 df_gene <- processed_cache$df_gene
                 df_plot <- processed_cache$df
@@ -3225,7 +3228,9 @@ plotServerHomologous <- function(id, data, max_gene_length, min_gene_coord, max_
                     gene_info(NULL)
                     app_perf_mark(module_perf, "prefetch disabled", "HOMO_MOD")
                 }
-            })
+                invisible(NULL)
+            }
+            run_initial_prefetch()
 
             render_trigger <- reactive({
                 info_evt <- NULL
@@ -3653,7 +3658,6 @@ plotServerOrtologous <- function(id, data, max_gene_length, min_gene_coord, max_
                     return(invisible(FALSE))
                 }
                 module_destroyed <<- TRUE
-                tryCatch(prefetch_observer$destroy(), error = function(e) NULL)
                 tryCatch({
                     output$plot <- NULL
                 }, error = function(e) NULL)
@@ -3797,9 +3801,12 @@ plotServerOrtologous <- function(id, data, max_gene_length, min_gene_coord, max_
                 result
             }
 
-            prefetch_observer <- observe({
+            # As in the homologous module, data is static and this prefetch is a
+            # one-shot initialization step. Execute it now instead of waiting for
+            # a later reactive flush before the card can become complete.
+            run_initial_prefetch <- function() {
                 req(data)
-                app_perf_mark(module_perf, "observe start", "ORTHO_MOD")
+                app_perf_mark(module_perf, "initial prefetch start", "ORTHO_MOD")
                 df_gene <- processed_cache$df_gene
                 df_plot <- processed_cache$df
                 df_transcript <- processed_cache$df_transcript
@@ -4038,7 +4045,9 @@ plotServerOrtologous <- function(id, data, max_gene_length, min_gene_coord, max_
                         handle_prefetch_error(err, "async")
                     })
                 }
-            })
+                invisible(NULL)
+            }
+            run_initial_prefetch()
 
             render_trigger <- reactive({
                 # With lazy sequence mode, avoid tracking gene_info as a reactive dependency
