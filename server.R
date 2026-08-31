@@ -1495,6 +1495,8 @@ function(input, output, session) {
     orthoFooterOutputsBound <- reactiveVal(character())
     orthoSecondaryBindingsQueued <- reactiveVal(character())
     orthoDownloadOutputsBound <- reactiveVal(character())
+    isoformToggleObserversBound <- reactiveVal(character())
+    isoformExpandedGroups <- reactiveVal(list())
     homoPlotTimingTracker <- reactiveVal(empty_plot_timing_tracker())
     orthoPlotTimingTracker <- reactiveVal(empty_plot_timing_tracker())
     orthoFirstPaintGate <- reactiveVal(new_ortho_first_paint_gate_state(enabled = FALSE))
@@ -7546,6 +7548,15 @@ function(input, output, session) {
         )
     }
 
+    isoform_toggle_input_id <- function(context = "", plot_id = "") {
+        paste0(
+            "isoform_toggle_",
+            gsub("[^A-Za-z0-9_]", "_", as.character(context %||% "plot")),
+            "_",
+            gsub("[^A-Za-z0-9_]", "_", as.character(plot_id %||% ""))
+        )
+    }
+
     build_footer_content_ui <- function(plot_data, seq_blob = NULL, metrics_payload = NULL,
                                         plot_id = NULL, context = "homo",
                                         gene_label = "", organism_name = "",
@@ -7699,34 +7710,13 @@ function(input, output, session) {
             div(
                 class = "footer-item footer-item-isoform-toggle",
                 tags$button(
-                    class = "btn isoform-toggle-btn",
+                    id = isoform_toggle_input_id(context, plot_id),
+                    class = "btn action-button isoform-toggle-btn",
+                    `data-val` = "0",
                     style = "font-size:10.5px; color:#4B6072; background:none; border:none; padding:2px 0; cursor:pointer; display:inline-flex; align-items:center; gap:4px;",
                     `data-group` = tx_group_key,
                     `data-count` = as.character(total_tx_display),
                     `data-plot-id` = as.character(plot_id %||% ""),
-                    onclick = sprintf(
-                        paste0(
-                            "if(window.toggleIsoformCards){window.toggleIsoformCards(this,%s);}",
-                            "else{(function(b,g){",
-                            "var all=document.querySelectorAll('[data-isoform-group]'),cards=[],i;",
-                            "for(i=0;i<all.length;i++){if((all[i].getAttribute('data-isoform-group')||'')===g){cards.push(all[i]);}}",
-                            "var opening=!cards.length||cards[0].style.display==='none'||cards[0].style.display==='';",
-                            "var n=parseInt(b.getAttribute('data-count')||'0',10);if(!isFinite(n)){n=cards.length;}",
-                            "var label=n===1?' transcript':' transcripts';",
-                            "if(opening){var ids=[];for(i=0;i<cards.length;i++){",
-                            "var rid=cards[i].id||'';rid=rid.replace(/^homo-card-/,'').replace(/^ortho-card-/,'').replace(/^ortho-placeholder-/,'');",
-                            "if(rid){ids.push(rid);}}",
-                            "if(!ids.length&&b.getAttribute('data-plot-id')){ids.push(b.getAttribute('data-plot-id'));}",
-                            "if(window.Shiny&&Shiny.setInputValue){Shiny.setInputValue('isoform_expand_request',",
-                            "{group:g,context:g.indexOf('ortho--')===0?'orthologous':'homologous',ids:ids,nonce:Date.now()},",
-                            "{priority:'event'});}b.innerHTML='&#x25B2; '+n+label;}",
-                            "else{for(i=0;i<cards.length;i++){cards[i].style.display='none';cards[i].setAttribute('aria-hidden','true');}",
-                            "b.innerHTML='&#x25BC; '+n+label;}",
-                            "})(this,%s);}"
-                        ),
-                        jsonlite::toJSON(as.character(tx_group_key), auto_unbox = TRUE),
-                        jsonlite::toJSON(as.character(tx_group_key), auto_unbox = TRUE)
-                    ),
                     HTML(sprintf(
                         "&#x25BC; %d transcript%s",
                         total_tx_display,
@@ -21454,6 +21444,10 @@ function(input, output, session) {
             silent = TRUE
         )
         homoHydratedIsoformIds(character())
+        expanded_state <- isolate(isoformExpandedGroups())
+        if (length(expanded_state) > 0L) {
+            isoformExpandedGroups(expanded_state[!startsWith(names(expanded_state), "homologous::")])
+        }
         shinyjs::runjs("if(window.scheduleGgiraphNudge){ window.scheduleGgiraphNudge(260); }")
         invisible(NULL)
     }
@@ -21623,6 +21617,7 @@ function(input, output, session) {
         upfront_isoform_ids <- head(isoform_ids, MAX_UPFRONT_ISOFORMS)
         instantiate_ids <- c(initial_ids, upfront_isoform_ids)
         invisible(lapply(instantiate_ids, instantiate_homologous_plot_module))
+        invisible(lapply(initial_ids, function(pid) register_isoform_toggle_observer("homologous", pid)))
         if (is.list(append_run)) {
             app_perf_mark_ms(append_run, "card_module_init_ms", app_perf_elapsed_ms(append_stage_t0), "HOMO_UI")
         }
@@ -24800,6 +24795,10 @@ function(input, output, session) {
             silent = TRUE
         )
         orthoHydratedIsoformIds(character())
+        expanded_state <- isolate(isoformExpandedGroups())
+        if (length(expanded_state) > 0L) {
+            isoformExpandedGroups(expanded_state[!startsWith(names(expanded_state), "orthologous::")])
+        }
         shinyjs::runjs("if(window.scheduleGgiraphNudge){ window.scheduleGgiraphNudge(260); }")
         invisible(NULL)
     }
@@ -24925,6 +24924,7 @@ function(input, output, session) {
         )
         instantiate_ids <- c(initial_ids, upfront_isoform_ids)
         invisible(lapply(instantiate_ids, instantiate_orthologous_plot_module))
+        invisible(lapply(initial_ids, function(pid) register_isoform_toggle_observer("orthologous", pid)))
         invisible(lapply(instantiate_ids, bind_orthologous_footer_output))
         invisible(lapply(instantiate_ids, register_orthologous_download_output))
         shinyjs::runjs("try{var el=document.getElementById('ortho-plot-cards-container'); if(window.Shiny&&Shiny.bindAll&&el){Shiny.bindAll(el);} if(window.scheduleGgiraphNudge){window.scheduleGgiraphNudge(220);}}catch(e){}")
@@ -25029,7 +25029,129 @@ function(input, output, session) {
         hydrated_now
     }
 
-    schedule_isoform_module_batches <- function(ids_chr, context, anchor_id = "") {
+    resolve_isoform_expand_request <- function(evt = list()) {
+        ctx <- tolower(trimws(as.character(evt$context %||% "")))
+        if (!ctx %in% c("homologous", "orthologous")) ctx <- "homologous"
+        ids_chr <- unique(as.character(evt$ids %||% character(0)))
+        ids_chr <- ids_chr[nzchar(ids_chr)]
+        if (length(ids_chr) == 0L) return(NULL)
+
+        anchor_id <- ""
+        if (identical(ctx, "orthologous")) {
+            meta_map_o <- tryCatch(isolate(plotGeneMetaOrthologous()), error = function(e) list())
+            sorted_ids_o <- as.character(tryCatch(isolate(sortedPlotIdsOrthologous()), error = function(e) character(0)))
+            expanded_ids <- unique(unlist(lapply(ids_chr, function(id) {
+                meta <- tryCatch(meta_map_o[[id]], error = function(e) NULL)
+                if (is.null(meta) || !isTRUE(meta$is_canonical) || isTRUE(meta$is_canonical_copy)) return(id)
+                same_group <- Filter(function(candidate_id) {
+                    candidate <- tryCatch(meta_map_o[[candidate_id]], error = function(e) NULL)
+                    !is.null(candidate) &&
+                        identical(as.character(candidate$display_gene_name %||% ""), as.character(meta$display_gene_name %||% "")) &&
+                        identical(as.character(candidate$organism_scientific %||% ""), as.character(meta$organism_scientific %||% ""))
+                }, unique(c(sorted_ids_o, names(meta_map_o))))
+                copy_id <- paste0(id, "_c")
+                copy_meta <- tryCatch(meta_map_o[[copy_id]], error = function(e) NULL)
+                copy_ids <- if (isTRUE(copy_meta$is_canonical_copy)) copy_id else character(0)
+                regular_ids <- Filter(function(candidate_id) {
+                    candidate <- tryCatch(meta_map_o[[candidate_id]], error = function(e) NULL)
+                    !is.null(candidate) && !isTRUE(candidate$is_canonical) && !isTRUE(candidate$is_canonical_copy)
+                }, same_group)
+                unique(c(copy_ids, regular_ids))
+            }), use.names = FALSE))
+        } else {
+            groups_h <- tryCatch(isolate(homoMultiTranscriptGeneGroups()), error = function(e) list())
+            matching_group_h <- Filter(function(group_h) {
+                any(ids_chr %in% as.character(group_h$ids %||% character(0)))
+            }, groups_h)
+            group_ids_h <- if (length(matching_group_h) > 0L) {
+                as.character(matching_group_h[[1L]]$ids %||% ids_chr)
+            } else {
+                ids_chr
+            }
+            canonical_ids_h <- Filter(function(pid) {
+                meta <- tryCatch(isolate(plotGeneMetaHomologous()[[pid]]), error = function(e) NULL)
+                isTRUE(meta$is_canonical) && !isTRUE(meta$is_canonical_copy)
+            }, group_ids_h)
+            anchor_id <- if (length(canonical_ids_h) > 0L) canonical_ids_h[[1L]] else ids_chr[[1L]]
+            regular_iso_ids_h <- setdiff(group_ids_h, canonical_ids_h)
+            copy_id_h <- paste0(anchor_id, "_c")
+            copy_meta_h <- tryCatch(isolate(plotGeneMetaHomologous()[[copy_id_h]]), error = function(e) NULL)
+            copy_ids_h <- if (isTRUE(copy_meta_h$is_canonical_copy)) copy_id_h else character(0)
+            expanded_ids <- unique(c(copy_ids_h, regular_iso_ids_h))
+        }
+
+        list(
+            context = ctx,
+            seed_ids = ids_chr,
+            expanded_ids = unique(as.character(expanded_ids %||% character(0))),
+            anchor_id = anchor_id
+        )
+    }
+
+    set_isoform_toggle_label <- function(button_id = "", expanded = FALSE) {
+        button_id <- as.character(button_id %||% "")
+        if (!nzchar(button_id)) return(invisible(NULL))
+        shinyjs::runjs(sprintf(
+            paste0(
+                "try{var b=document.getElementById(%s);if(b){var n=parseInt(b.getAttribute('data-count')||'0',10);",
+                "if(!isFinite(n)){n=0;}b.innerHTML='%s '+n+(n===1?' transcript':' transcripts');}}catch(e){}"
+            ),
+            jsonlite::toJSON(button_id, auto_unbox = TRUE),
+            if (isTRUE(expanded)) "&#x25B2;" else "&#x25BC;"
+        ))
+        invisible(NULL)
+    }
+
+    hide_isoform_cards <- function(ids_chr, context, button_id = "") {
+        ids_chr <- unique(as.character(ids_chr %||% character(0)))
+        ids_chr <- ids_chr[nzchar(ids_chr)]
+        prefix <- if (identical(context, "orthologous")) "ortho-card-" else "homo-card-"
+        shinyjs::runjs(sprintf(
+            paste0(
+                "try{var ids=%s,pfx=%s;for(var i=0;i<ids.length;i++){var c=document.getElementById(pfx+ids[i]);",
+                "if(c){c.style.display='none';c.setAttribute('aria-hidden','true');}}}catch(e){}"
+            ),
+            jsonlite::toJSON(ids_chr, auto_unbox = FALSE),
+            jsonlite::toJSON(prefix, auto_unbox = TRUE)
+        ))
+        set_isoform_toggle_label(button_id, expanded = FALSE)
+        invisible(NULL)
+    }
+
+    register_isoform_toggle_observer <- function(context, plot_id) {
+        ctx <- if (identical(tolower(as.character(context %||% "")), "orthologous")) "orthologous" else "homologous"
+        pid <- as.character(plot_id %||% "")
+        if (!nzchar(pid)) return(invisible(FALSE))
+        meta <- if (identical(ctx, "orthologous")) {
+            tryCatch(isolate(plotGeneMetaOrthologous()[[pid]]), error = function(e) NULL)
+        } else {
+            tryCatch(isolate(plotGeneMetaHomologous()[[pid]]), error = function(e) NULL)
+        }
+        total_tx <- suppressWarnings(as.integer(meta$total_transcripts %||% 1L))
+        if (is.null(meta) || !isTRUE(meta$is_canonical) || isTRUE(meta$is_canonical_copy) || !is.finite(total_tx) || total_tx <= 1L) {
+            return(invisible(FALSE))
+        }
+        observer_key <- paste(ctx, pid, sep = "::")
+        already <- isolate(as.character(isoformToggleObserversBound() %||% character(0)))
+        if (observer_key %in% already) return(invisible(TRUE))
+        isoformToggleObserversBound(unique(c(already, observer_key)))
+        local({
+            input_id_local <- isoform_toggle_input_id(ctx, pid)
+            context_local <- ctx
+            plot_id_local <- pid
+            observer_key_local <- observer_key
+            observeEvent(input[[input_id_local]], {
+                process_isoform_expand_request(
+                    list(context = context_local, ids = plot_id_local),
+                    toggle_key = observer_key_local,
+                    button_id = input_id_local
+                )
+            }, ignoreInit = TRUE, ignoreNULL = TRUE)
+        })
+        invisible(TRUE)
+    }
+
+    schedule_isoform_module_batches <- function(ids_chr, context, anchor_id = "", toggle_key = "") {
         ids_chr <- unique(as.character(ids_chr %||% character(0)))
         ids_chr <- ids_chr[nzchar(ids_chr)]
         if (length(ids_chr) == 0L) {
@@ -25041,10 +25163,15 @@ function(input, output, session) {
             ceiling(seq_along(ids_chr) / isoformRenderBatchSize)
         )
         last_homo_anchor <- as.character(anchor_id %||% "")
+        toggle_key <- as.character(toggle_key %||% "")
         render_batch <- NULL
         render_batch <- function(batch_index) {
             if (!is.null(session) && is.function(session$isClosed) && isTRUE(session$isClosed())) {
                 return(invisible(NULL))
+            }
+            if (nzchar(toggle_key)) {
+                expanded_state <- isolate(isoformExpandedGroups())
+                if (!isTRUE(expanded_state[[toggle_key]])) return(invisible(NULL))
             }
             batch_ids <- as.character(batches[[batch_index]] %||% character(0))
             isolate({
@@ -25109,6 +25236,10 @@ function(input, output, session) {
                     # rather than starting hundreds of renders 120 ms apart.
                     wait_for_batch_complete <- NULL
                     wait_for_batch_complete <- function(attempt = 0L) {
+                        if (nzchar(toggle_key)) {
+                            expanded_state <- isolate(isoformExpandedGroups())
+                            if (!isTRUE(expanded_state[[toggle_key]])) return(invisible(NULL))
+                        }
                         tracker <- isolate(if (identical(ctx, "orthologous")) orthoPlotTimingTracker() else homoPlotTimingTracker())
                         prefix_output <- if (identical(ctx, "orthologous")) "plot_ortho_" else "plot_homo_"
                         expected_outputs <- paste0(prefix_output, batch_ids, "-plot")
@@ -25137,14 +25268,15 @@ function(input, output, session) {
         invisible(NULL)
     }
 
-    observeEvent(input$isoform_expand_request, {
-        evt <- input$isoform_expand_request
-        ctx <- tolower(trimws(as.character(evt$context %||% "")))
-        ids_chr <- as.character(evt$ids %||% character(0))
-        ids_chr <- unique(ids_chr[nzchar(ids_chr)])
-        if (length(ids_chr) == 0L) {
-            return(invisible(NULL))
-        }
+    process_isoform_expand_request <- function(evt, toggle_key = "", button_id = "") {
+        resolved <- resolve_isoform_expand_request(evt)
+        if (!is.list(resolved)) return(invisible(NULL))
+        ctx <- resolved$context
+        ids_chr <- resolved$seed_ids
+        expanded_iso_ids <- resolved$expanded_ids
+        anchor_id <- resolved$anchor_id
+        toggle_key <- as.character(toggle_key %||% "")
+        button_id <- as.character(button_id %||% "")
         isoform_tracker <- if (identical(ctx, "orthologous")) {
             tryCatch(isolate(orthoPlotTimingTracker())$run, error = function(e) NULL)
         } else {
@@ -25157,35 +25289,21 @@ function(input, output, session) {
                 "ISOFORM_RENDER"
             )
         }
-        if (identical(ctx, "orthologous")) {
-            expanded_iso_ids <- unique(c(ids_chr, unlist(lapply(ids_chr, function(id) {
-                meta <- tryCatch(plotGeneMetaOrthologous()[[id]], error = function(e) NULL)
-                total_tx <- suppressWarnings(as.integer(meta$total_transcripts %||% 1L))
-                if (isTRUE(meta$is_canonical) && is.finite(total_tx) && total_tx > 1L) paste0(id, "_c") else character(0)
-            }))))
-        } else {
-            # The compact initial DOM intentionally contains only the canonical
-            # card. Resolve its complete transcript group server-side on the
-            # first click, then hydrate the hidden isoform cards on demand.
-            groups_h <- tryCatch(isolate(homoMultiTranscriptGeneGroups()), error = function(e) list())
-            matching_group_h <- Filter(function(group_h) {
-                any(ids_chr %in% as.character(group_h$ids %||% character(0)))
-            }, groups_h)
-            group_ids_h <- if (length(matching_group_h) > 0L) {
-                as.character(matching_group_h[[1L]]$ids %||% ids_chr)
-            } else {
-                ids_chr
+
+        if (nzchar(toggle_key)) {
+            expanded_state <- isolate(isoformExpandedGroups())
+            if (isTRUE(expanded_state[[toggle_key]])) {
+                expanded_state[[toggle_key]] <- FALSE
+                isoformExpandedGroups(expanded_state)
+                hide_isoform_cards(expanded_iso_ids, ctx, button_id)
+                if (is.list(isoform_tracker)) {
+                    app_perf_mark(isoform_tracker, sprintf("isoform_collapse context=%s cards=%d", ctx, length(expanded_iso_ids)), "ISOFORM_RENDER")
+                }
+                return(invisible(NULL))
             }
-            canonical_ids_h <- Filter(function(pid) {
-                meta <- tryCatch(isolate(plotGeneMetaHomologous()[[pid]]), error = function(e) NULL)
-                isTRUE(meta$is_canonical) && !isTRUE(meta$is_canonical_copy)
-            }, group_ids_h)
-            anchor_id_h <- if (length(canonical_ids_h) > 0L) canonical_ids_h[[1L]] else ids_chr[[1L]]
-            regular_iso_ids_h <- setdiff(group_ids_h, canonical_ids_h)
-            copy_id_h <- paste0(anchor_id_h, "_c")
-            copy_meta_h <- tryCatch(isolate(plotGeneMetaHomologous()[[copy_id_h]]), error = function(e) NULL)
-            copy_ids_h <- if (isTRUE(copy_meta_h$is_canonical_copy)) copy_id_h else character(0)
-            expanded_iso_ids <- unique(c(copy_ids_h, regular_iso_ids_h))
+            expanded_state[[toggle_key]] <- TRUE
+            isoformExpandedGroups(expanded_state)
+            set_isoform_toggle_label(button_id, expanded = TRUE)
         }
         if (is.list(isoform_tracker)) {
             app_perf_mark(
@@ -25197,9 +25315,14 @@ function(input, output, session) {
         schedule_isoform_module_batches(
             expanded_iso_ids,
             ctx,
-            anchor_id = if (identical(ctx, "orthologous")) "" else anchor_id_h
+            anchor_id = anchor_id,
+            toggle_key = toggle_key
         )
         invisible(NULL)
+    }
+
+    observeEvent(input$isoform_expand_request, {
+        process_isoform_expand_request(input$isoform_expand_request)
     }, ignoreInit = TRUE)
 
     # Figure Studio can request one result plot without forcing the user to
