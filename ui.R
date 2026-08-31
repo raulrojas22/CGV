@@ -1231,13 +1231,19 @@ fluidPage(
       tags$meta(`http-equiv` = "Pragma", content = "no-cache"),
       tags$meta(`http-equiv` = "Expires", content = "0"),
       tags$style(HTML("
-        .isoform-toggle-label { margin:0; }
+        .isoform-toggle-label {
+          margin:0;
+          position:relative;
+        }
         .isoform-toggle-checkbox {
           position:absolute !important;
-          width:1px !important;
-          height:1px !important;
+          inset:0 !important;
+          width:100% !important;
+          height:100% !important;
           opacity:0 !important;
-          pointer-events:none !important;
+          pointer-events:auto !important;
+          cursor:pointer !important;
+          z-index:2 !important;
         }
         .isoform-toggle-up { display:none; }
         .isoform-toggle-checkbox:checked ~ .isoform-toggle-down { display:none; }
