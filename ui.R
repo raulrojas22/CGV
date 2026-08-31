@@ -1230,6 +1230,24 @@ fluidPage(
       tags$meta(`http-equiv` = "Cache-Control", content = "no-cache, must-revalidate"),
       tags$meta(`http-equiv` = "Pragma", content = "no-cache"),
       tags$meta(`http-equiv` = "Expires", content = "0"),
+      tags$style(HTML("
+        .isoform-toggle-label { margin:0; }
+        .isoform-toggle-checkbox {
+          position:absolute !important;
+          width:1px !important;
+          height:1px !important;
+          opacity:0 !important;
+          pointer-events:none !important;
+        }
+        .isoform-toggle-up { display:none; }
+        .isoform-toggle-checkbox:checked ~ .isoform-toggle-down { display:none; }
+        .isoform-toggle-checkbox:checked ~ .isoform-toggle-up { display:inline; }
+        .isoform-toggle-checkbox:focus-visible ~ .isoform-toggle-text {
+          outline:2px solid #2f80ed;
+          outline-offset:2px;
+          border-radius:3px;
+        }
+      ")),
       # These Analytics rules historically lived in figure_studio.css. Keep
       # their exact eager behavior while the Studio-only stylesheet is loaded
       # on demand.
