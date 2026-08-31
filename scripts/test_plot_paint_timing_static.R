@@ -100,6 +100,12 @@ expect_fixed(paint_js, "rawOutputIds == null ? [] : [rawOutputIds]", "single-out
 expect_fixed(paint_js, "var perfTimingEnabled = !!window.__cgvPlotPaintTiming;", "functional paint watch remains available without telemetry")
 expect_fixed(paint_js, "if (perfTimingEnabled) {", "click telemetry remains disabled in functional-only mode")
 expect_fixed(paint_js, "var collectMetrics = perfTimingEnabled && !run.firstPaintOnly;", "functional-only paint avoids SVG serialization")
+expect_fixed(
+    paint_js,
+    "if ((perfTimingEnabled || run.functionalOnly) && !run.firstPaintOnly && !run.reportedComplete[outputId])",
+    "functional progressive rendering observes complete cards even when telemetry is disabled"
+)
+expect_fixed(server_txt, 'functional_only = TRUE', "isoform batches install a functional complete-card watch")
 expect_fixed(paint_js, "if (run.firstPaintOnly) {", "one-shot paint completion")
 expect_fixed(paint_js, "delete runs[run.runId];", "one-shot run cleanup")
 expect_fixed(paint_js, "stopObserverIfIdle();", "idle mutation observer disconnect")

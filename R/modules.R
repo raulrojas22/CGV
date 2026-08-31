@@ -3495,7 +3495,7 @@ plotServerHomologous <- function(id, data, max_gene_length, min_gene_coord, max_
             # card (or an explicitly requested isoform) gets a server module.
             # Rendering that module eagerly avoids waiting for the browser to
             # bind the just-inserted output before the first SVG can be built.
-            outputOptions(output, "plot", suspendWhenHidden = FALSE, priority = 1000)
+            outputOptions(output, "plot", suspendWhenHidden = FALSE)
             app_perf_mark(module_perf, "plot output registered eager", "HOMO_MOD")
             nudge_render_nonce <- function(reason = "manually") {
                 if (isTRUE(module_destroyed)) {
@@ -4336,7 +4336,7 @@ plotServerOrtologous <- function(id, data, max_gene_length, min_gene_coord, max_
             # Cross-species modules are also instantiated progressively, one
             # visible card/batch at a time. Do not add a second client-binding
             # gate after that server-side admission control.
-            outputOptions(output, "plot", suspendWhenHidden = FALSE, priority = 1000)
+            outputOptions(output, "plot", suspendWhenHidden = FALSE)
             app_perf_mark(module_perf, "plot output registered eager", "ORTHO_MOD")
             nudge_render_nonce <- function(reason = "manually") {
                 if (isTRUE(module_destroyed)) {
