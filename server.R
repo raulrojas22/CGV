@@ -7566,7 +7566,8 @@ function(input, output, session) {
                                         isoform_count = 0L, tx_group_key = NULL,
                                         total_transcripts = NULL,
                                         is_canonical = FALSE,
-                                        is_canonical_copy = FALSE) {
+                                        is_canonical_copy = FALSE,
+                                        isoform_expanded = FALSE) {
         footer_perf <- app_perf_new_run(sprintf("FOOTER-%s", toupper(as.character(context %||% "homo"))))
         app_perf_mark(
             footer_perf,
@@ -7720,7 +7721,8 @@ function(input, output, session) {
                         class = "isoform-toggle-checkbox",
                         `data-group` = tx_group_key,
                         `data-count` = as.character(total_tx_display),
-                        `data-plot-id` = as.character(plot_id %||% "")
+                        `data-plot-id` = as.character(plot_id %||% ""),
+                        checked = if (isTRUE(isoform_expanded)) "checked" else NULL
                     ),
                     tags$span(class = "isoform-toggle-down", `aria-hidden` = "true", HTML("&#x25BC;")),
                     tags$span(class = "isoform-toggle-up", `aria-hidden` = "true", HTML("&#x25B2;")),
@@ -21312,6 +21314,12 @@ function(input, output, session) {
                     paste0("homo--", gsub("[^A-Za-z0-9]", "_", gene_label_h),
                            "--", gsub("[^A-Za-z0-9]", "_", org_name_h))
                 } else { NULL }
+                isoform_expanded_footer_h <- if (!is.null(tx_group_key_footer_h)) {
+                    expanded_state_h <- tryCatch(isolate(isoformExpandedGroups()), error = function(e) list())
+                    isTRUE(expanded_state_h[[paste("homologous", id_local, sep = "::")]])
+                } else {
+                    FALSE
+                }
                 genome_path_footer_h <- tryCatch(genomePathsHomologous()[[id_local]], error = function(e) NULL)
                 plot_sig_footer_h <- tryCatch(plotSignaturesHomologous()[[id_local]], error = function(e) "")
                 footer_key <- build_footer_cache_key(
@@ -21325,6 +21333,7 @@ function(input, output, session) {
                     metrics_payload = metrics_payload,
                     plot_signature = plot_sig_footer_h
                 )
+                footer_key <- paste0(footer_key, "::expanded=", as.character(isoform_expanded_footer_h))
                 if (!is.null(last_footer_ui) && identical(footer_key, last_footer_key)) {
                     return(last_footer_ui)
                 }
@@ -21390,7 +21399,8 @@ function(input, output, session) {
                     tx_group_key      = tx_group_key_footer_h,
                     total_transcripts = total_tx_footer_h,
                     is_canonical      = is_canonical_footer_h,
-                    is_canonical_copy = is_canonical_copy_footer_h
+                    is_canonical_copy = is_canonical_copy_footer_h,
+                    isoform_expanded  = isoform_expanded_footer_h
                 )
                 footer_run_h <- tryCatch(isolate(homoPlotTimingTracker())$run, error = function(e) NULL)
                 if (is.list(footer_run_h)) {
@@ -23928,6 +23938,12 @@ function(input, output, session) {
                     paste0("ortho--", gsub("[^A-Za-z0-9]", "_", gene_label_o),
                            "--", gsub("[^A-Za-z0-9]", "_", org_name_o))
                 } else { NULL }
+                isoform_expanded_footer_o <- if (!is.null(tx_group_key_footer_o)) {
+                    expanded_state_o <- tryCatch(isolate(isoformExpandedGroups()), error = function(e) list())
+                    isTRUE(expanded_state_o[[paste("orthologous", id_local, sep = "::")]])
+                } else {
+                    FALSE
+                }
                 genome_path_footer_o <- tryCatch(genomePathsOrthologous()[[id_local]], error = function(e) NULL)
                 plot_sig_footer_o <- tryCatch(plotSignaturesOrthologous()[[id_local]], error = function(e) "")
                 footer_key <- build_footer_cache_key(
@@ -23941,6 +23957,7 @@ function(input, output, session) {
                     metrics_payload = metrics_payload,
                     plot_signature = plot_sig_footer_o
                 )
+                footer_key <- paste0(footer_key, "::expanded=", as.character(isoform_expanded_footer_o))
                 if (!is.null(last_footer_ui) && identical(footer_key, last_footer_key)) {
                     return(last_footer_ui)
                 }
@@ -24022,7 +24039,8 @@ function(input, output, session) {
                     tx_group_key      = tx_group_key_footer_o,
                     total_transcripts = total_tx_footer_o,
                     is_canonical      = is_canonical_footer_o,
-                    is_canonical_copy = is_canonical_copy_footer_o
+                    is_canonical_copy = is_canonical_copy_footer_o,
+                    isoform_expanded  = isoform_expanded_footer_o
                 )
                 last_footer_key <<- footer_key
                 last_footer_ui <<- footer_ui
