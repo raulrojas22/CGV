@@ -43,6 +43,11 @@ test_that("collapsing an isoform group cancels later batches", {
     )
 
     expect_match(server_txt, "if (!isTRUE(expanded_state[[toggle_key]])) return", fixed = TRUE)
+    expect_gte(
+        lengths(regmatches(server_txt, gregexpr("session$isClosed()", server_txt, fixed = TRUE))),
+        3L
+    )
+    expect_match(server_txt, "error = function(e) list()", fixed = TRUE)
     expect_match(server_txt, "data-isoform-load-state','collapsed'", fixed = TRUE)
     expect_match(server_txt, "card.setAttribute('aria-hidden','true')", fixed = TRUE)
     expect_match(server_txt, "outputOptions(output, output_id, suspendWhenHidden = TRUE)", fixed = TRUE)

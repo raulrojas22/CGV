@@ -25270,8 +25270,11 @@ function(input, output, session) {
             prefix_js <- if (identical(ctx, "orthologous")) "ortho-card-" else "homo-card-"
 
             reveal_completed_batch <- function() {
+                if (!is.null(session) && is.function(session$isClosed) && isTRUE(session$isClosed())) {
+                    return(invisible(NULL))
+                }
                 if (nzchar(toggle_key)) {
-                    expanded_state <- isolate(isoformExpandedGroups())
+                    expanded_state <- tryCatch(isolate(isoformExpandedGroups()), error = function(e) list())
                     if (!isTRUE(expanded_state[[toggle_key]])) return(invisible(NULL))
                 }
                 shinyjs::runjs(sprintf(
@@ -25308,11 +25311,18 @@ function(input, output, session) {
             } else {
                 wait_for_batch_complete <- NULL
                 wait_for_batch_complete <- function(attempt = 0L) {
+                    if (!is.null(session) && is.function(session$isClosed) && isTRUE(session$isClosed())) {
+                        return(invisible(NULL))
+                    }
                     if (nzchar(toggle_key)) {
-                        expanded_state <- isolate(isoformExpandedGroups())
+                        expanded_state <- tryCatch(isolate(isoformExpandedGroups()), error = function(e) list())
                         if (!isTRUE(expanded_state[[toggle_key]])) return(invisible(NULL))
                     }
-                    tracker <- isolate(if (identical(ctx, "orthologous")) orthoPlotTimingTracker() else homoPlotTimingTracker())
+                    tracker <- tryCatch(
+                        isolate(if (identical(ctx, "orthologous")) orthoPlotTimingTracker() else homoPlotTimingTracker()),
+                        error = function(e) NULL
+                    )
+                    if (!is.list(tracker)) return(invisible(NULL))
                     prefix_output <- if (identical(ctx, "orthologous")) "plot_ortho_" else "plot_homo_"
                     expected_outputs <- paste0(prefix_output, batch_ids, "-plot")
                     completed_outputs <- as.character(tracker$card_complete %||% character(0))
