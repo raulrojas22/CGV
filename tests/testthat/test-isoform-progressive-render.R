@@ -61,3 +61,16 @@ test_that("collapsing an isoform group cancels later batches", {
     expect_match(server_txt, "card.setAttribute('aria-hidden','true')", fixed = TRUE)
     expect_match(server_txt, "outputOptions(output, output_id, suspendWhenHidden = TRUE)", fixed = TRUE)
 })
+
+test_that("canonical footer rerenders preserve the expanded transcript state", {
+    server_txt <- paste(
+        readLines(resolve_project_file("server.R"), warn = FALSE),
+        collapse = "\n"
+    )
+
+    expect_match(server_txt, "isoform_expanded = FALSE", fixed = TRUE)
+    expect_match(server_txt, "checked = if (isTRUE(isoform_expanded)) \"checked\" else NULL", fixed = TRUE)
+    expect_match(server_txt, "expanded_state_h[[paste(\"homologous\", id_local, sep = \"::\")]]", fixed = TRUE)
+    expect_match(server_txt, "expanded_state_o[[paste(\"orthologous\", id_local, sep = \"::\")]]", fixed = TRUE)
+    expect_match(server_txt, "::expanded=", fixed = TRUE)
+})
