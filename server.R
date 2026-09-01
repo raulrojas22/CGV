@@ -25200,6 +25200,21 @@ function(input, output, session) {
         )
         last_homo_anchor <- as.character(anchor_id %||% "")
         toggle_key <- as.character(toggle_key %||% "")
+        run_isoform_js <- function(script) {
+            if (!is.null(session) && is.function(session$isClosed) && isTRUE(session$isClosed())) {
+                return(invisible(FALSE))
+            }
+            tryCatch(
+                shiny::withReactiveDomain(session, shinyjs::runjs(as.character(script %||% ""))),
+                error = function(e) {
+                    if (!is.null(session) && is.function(session$isClosed) && isTRUE(session$isClosed())) {
+                        return(invisible(FALSE))
+                    }
+                    stop(e)
+                }
+            )
+            invisible(TRUE)
+        }
         render_batch <- NULL
         render_batch <- function(batch_index) {
             if (!is.null(session) && is.function(session$isClosed) && isTRUE(session$isClosed())) {
@@ -25231,7 +25246,7 @@ function(input, output, session) {
                 }
                 ids_json <- jsonlite::toJSON(batch_ids, auto_unbox = FALSE)
                 prefix_js <- if (identical(ctx, "orthologous")) "ortho-card-" else "homo-card-"
-                shinyjs::runjs(sprintf(
+                run_isoform_js(sprintf(
                     paste0(
                         "try{var ids=%s,pfx='%s';for(var i=0;i<ids.length;i++){",
                         "var card=document.getElementById(pfx+ids[i]);",
@@ -25270,7 +25285,7 @@ function(input, output, session) {
                         tryCatch(handle$nudge_render(), error = function(e) NULL)
                     }
                 }
-                shinyjs::runjs("if(window.scheduleGgiraphNudge){window.scheduleGgiraphNudge(180);}")
+                run_isoform_js("if(window.scheduleGgiraphNudge){window.scheduleGgiraphNudge(180);}")
             })
             next_index <- as.integer(batch_index + 1L)
             ids_json <- jsonlite::toJSON(batch_ids, auto_unbox = FALSE)
@@ -25284,7 +25299,7 @@ function(input, output, session) {
                     expanded_state <- tryCatch(isolate(isoformExpandedGroups()), error = function(e) list())
                     if (!isTRUE(expanded_state[[toggle_key]])) return(invisible(NULL))
                 }
-                shinyjs::runjs(sprintf(
+                run_isoform_js(sprintf(
                     paste0(
                         "try{var ids=%s,pfx='%s';for(var i=0;i<ids.length;i++){",
                         "var card=document.getElementById(pfx+ids[i]);",
@@ -25344,7 +25359,7 @@ function(input, output, session) {
                             paste0(footer_prefix, batch_ids),
                             function(output_id) outputOptions(output, output_id, suspendWhenHidden = TRUE)
                         ))
-                        shinyjs::runjs(sprintf(
+                        run_isoform_js(sprintf(
                             paste0(
                                 "try{var ids=%s,pfx='%s';for(var i=0;i<ids.length;i++){",
                                 "var card=document.getElementById(pfx+ids[i]);if(card){card.style.display='none';",
