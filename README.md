@@ -7,7 +7,7 @@ cross-species comparison, alignment views, analytical summaries, and
 publication-ready export in one web and desktop interface.
 
 [![Reviewer package](https://github.com/raulrojas22/CGeV/actions/workflows/reviewer-package.yml/badge.svg)](https://github.com/raulrojas22/CGeV/actions/workflows/reviewer-package.yml)
-[![Web application](https://img.shields.io/badge/Web-cgv.mobilomics.org-0F766E.svg)](https://cgv.mobilomics.org/)
+[![Web application](https://img.shields.io/badge/Web-cgev.mobilomics.org-0F766E.svg)](https://cgev.mobilomics.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-111827.svg)](LICENSE)
 [![R/Shiny](https://img.shields.io/badge/R-Shiny-276DC3.svg)](https://shiny.posit.co/)
 
@@ -22,7 +22,7 @@ case studies reported in the manuscript:
 - cross-species comparison of TP53 across seven vertebrates.
 
 Start with the [reviewer walkthrough](examples/manuscript-cases/README.md).
-The cases can be reproduced in the [hosted application](https://cgv.mobilomics.org/)
+The cases can be reproduced in the [hosted application](https://cgev.mobilomics.org/)
 or in a local/desktop installation.
 The package can be checked without installing R or downloading genome files:
 

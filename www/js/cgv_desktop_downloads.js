@@ -289,7 +289,7 @@
       setText(root, "[data-cgv-runtime-label]", "CGeV Desktop" + (context.appVersion ? " " + context.appVersion : ""));
       setText(root, "[data-cgv-hero-copy]", "You are already using the private local CGeV workspace on " + platformLabel(context) + ". Continue here, open CGeV Web, or download an installer for another operating system.");
       if (primary) {
-        primary.href = root.getAttribute("data-cgv-web-url") || "https://cgv.mobilomics.org";
+        primary.href = root.getAttribute("data-cgv-web-url") || "https://cgev.mobilomics.org";
         primary.target = "_blank";
         primary.rel = "noopener noreferrer";
         var icon = primary.querySelector("i");

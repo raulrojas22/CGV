@@ -24,6 +24,15 @@ default, to avoid conflicts with NAS/system port 80).
 ./deploy-nas-shinyproxy.sh
 ```
 
+El deploy normal deja la telemetría desactivada y fija el perfil de render
+inmediato: composición/GC en la primera pasada, sin cola progresiva ni segundo
+`render nudge`, con hasta 64 tarjetas primarias registradas juntas. Para una
+captura diagnóstica puntual se puede usar:
+
+```bash
+NAS_PERF_TIMING=1 PERF_RUN_LABEL=medicion_nas_01 ./deploy-nas-shinyproxy.sh
+```
+
 After the first deploy, Cloudflare Tunnel should point to:
 
 ```text

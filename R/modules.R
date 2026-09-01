@@ -2793,7 +2793,6 @@ plotServerHomologous <- function(id, data, max_gene_length, min_gene_coord, max_
                     return(invisible(FALSE))
                 }
                 module_destroyed <<- TRUE
-                tryCatch(prefetch_observer$destroy(), error = function(e) NULL)
                 tryCatch({
                     output$plot <- NULL
                 }, error = function(e) NULL)
@@ -2973,11 +2972,7 @@ plotServerHomologous <- function(id, data, max_gene_length, min_gene_coord, max_
                     app_perf_mark_ms(module_perf, "feature_gc_span_prefetch_ms", app_perf_elapsed_ms(gc_t0), "HOMO_MOD")
                     invisible(NULL)
                 }
-                if (requireNamespace("later", quietly = TRUE)) {
-                    later::later(run_prefetch, delay = deferred_plot_enrichment_delay_seconds())
-                } else {
-                    run_prefetch()
-                }
+                if (requireNamespace("later", quietly = TRUE)) later::later(run_prefetch, delay = deferred_plot_enrichment_delay_seconds()) else run_prefetch()
                 invisible(TRUE)
             }
 
@@ -3006,18 +3001,18 @@ plotServerHomologous <- function(id, data, max_gene_length, min_gene_coord, max_
                     app_perf_mark_ms(module_perf, "deferred_sequence_prefetch_ms", app_perf_elapsed_ms(sequence_t0), "HOMO_MOD")
                     invisible(NULL)
                 }
-                if (requireNamespace("later", quietly = TRUE)) {
-                    later::later(run_prefetch, delay = deferred_plot_enrichment_delay_seconds(0.5))
-                } else {
-                    run_prefetch()
-                }
+                if (requireNamespace("later", quietly = TRUE)) later::later(run_prefetch, delay = deferred_plot_enrichment_delay_seconds(0.5)) else run_prefetch()
                 invisible(TRUE)
             }
 
-            # Trigger data fetching
-            prefetch_observer <- observe({
+            # This module receives a static data.frame. Starting its one-shot
+            # prefetch through observe() postponed it until a later Shiny flush;
+            # on large searches that idle queue wait was several seconds longer
+            # than the sequence read itself. Run it during module construction so
+            # the first bound output already has sequence/GC data available.
+            run_initial_prefetch <- function() {
                 req(data)
-                app_perf_mark(module_perf, "observe start", "HOMO_MOD")
+                app_perf_mark(module_perf, "initial prefetch start", "HOMO_MOD")
                 # OPT-4: Use pre-computed processed data
                 df_gene <- processed_cache$df_gene
                 df_plot <- processed_cache$df
@@ -3156,6 +3151,7 @@ plotServerHomologous <- function(id, data, max_gene_length, min_gene_coord, max_
                         )
                     }
                     apply_sequence_prefetch <- function(result, source_label = "async") {
+                        apply_prefetch_t0 <- app_perf_now()
                         if (isTRUE(module_destroyed)) return(invisible(NULL))
                         app_perf_mark_ms(module_perf, "gc_span_fetch_ms", result$gc_span_fetch_ms %||% 0, "HOMO_MOD")
                         app_perf_mark_ms(module_perf, "gene_sequence_fetch_ms", result$gene_sequence_fetch_ms %||% 0, "HOMO_MOD")
@@ -3185,6 +3181,7 @@ plotServerHomologous <- function(id, data, max_gene_length, min_gene_coord, max_
                             gene_info(NULL)
                             app_perf_mark(module_perf, sprintf("%s prefetch skipped sequence for first paint", source_label), "HOMO_MOD")
                         }
+                        app_perf_mark_ms(module_perf, "apply_sequence_prefetch_ms", app_perf_elapsed_ms(apply_prefetch_t0), "HOMO_MOD")
                         invisible(NULL)
                     }
                     handle_sequence_prefetch_error <- function(err, source_label = "async") {
@@ -3231,7 +3228,9 @@ plotServerHomologous <- function(id, data, max_gene_length, min_gene_coord, max_
                     gene_info(NULL)
                     app_perf_mark(module_perf, "prefetch disabled", "HOMO_MOD")
                 }
-            })
+                invisible(NULL)
+            }
+            run_initial_prefetch()
 
             render_trigger <- reactive({
                 info_evt <- NULL
@@ -3299,6 +3298,7 @@ plotServerHomologous <- function(id, data, max_gene_length, min_gene_coord, max_
             })
 
             output$plot <- bindEvent(renderGirafe({
+                render_prepare_t0 <- app_perf_now()
                 on.exit(notify_plot_ready(), add = TRUE)
                 req(data)
                 info <- gene_info()
@@ -3343,10 +3343,12 @@ plotServerHomologous <- function(id, data, max_gene_length, min_gene_coord, max_
                 df_transcript <- processed_cache$df_transcript
 
                 composicion_secuencia <- "Sequence Composition: N/A (genome FASTA not available)"
+                sequence_composition_t0 <- app_perf_now()
                 if (!is.null(info) && !is.null(info$sequence) && nzchar(info$sequence)) {
                     seq_info <- calculate_sequence_composition(info$sequence)
                     composicion_secuencia <- seq_info$composition
                 }
+                app_perf_mark_ms(module_perf, "sequence_composition_ms", app_perf_elapsed_ms(sequence_composition_t0), "HOMO_MOD")
 
                 transcript_start <- suppressWarnings(min(df$xstart, na.rm = TRUE))
                 transcript_end <- suppressWarnings(max(df$xend, na.rm = TRUE))
@@ -3435,6 +3437,7 @@ plotServerHomologous <- function(id, data, max_gene_length, min_gene_coord, max_
                 gc_timing_enabled <- isTRUE(app_perf_enabled())
                 gc_before <- if (gc_timing_enabled) sum(gc.time(on = TRUE)) else NA_real_
                 create_t0 <- app_perf_now()
+                app_perf_mark_ms(module_perf, "render_prepare_ms", app_perf_elapsed_ms(render_prepare_t0), "HOMO_MOD")
                 app_perf_mark(module_perf, "create_gene_plot start", "HOMO_MOD")
                 span_for_plot <- genomic_span_seq()
                 genome_for_plot <- if (isTRUE(defer_feature_gc) && !nzchar(trimws(as.character(span_for_plot %||% "")))) {
@@ -3488,7 +3491,12 @@ plotServerHomologous <- function(id, data, max_gene_length, min_gene_coord, max_
                 }
                 plot_obj
             }), render_trigger(), ignoreNULL = TRUE)
-            outputOptions(output, "plot", suspendWhenHidden = TRUE)
+            # Card creation is already progressive: only the visible canonical
+            # card (or an explicitly requested isoform) gets a server module.
+            # Rendering that module eagerly avoids waiting for the browser to
+            # bind the just-inserted output before the first SVG can be built.
+            outputOptions(output, "plot", suspendWhenHidden = FALSE)
+            app_perf_mark(module_perf, "plot output registered eager", "HOMO_MOD")
             nudge_render_nonce <- function(reason = "manually") {
                 if (isTRUE(module_destroyed)) {
                     return(invisible(FALSE))
@@ -3601,11 +3609,7 @@ plotServerOrtologous <- function(id, data, max_gene_length, min_gene_coord, max_
                     app_perf_mark_ms(module_perf, "feature_gc_span_prefetch_ms", app_perf_elapsed_ms(gc_t0), "ORTHO_MOD")
                     invisible(NULL)
                 }
-                if (requireNamespace("later", quietly = TRUE)) {
-                    later::later(run_prefetch, delay = deferred_plot_enrichment_delay_seconds())
-                } else {
-                    run_prefetch()
-                }
+                if (requireNamespace("later", quietly = TRUE)) later::later(run_prefetch, delay = deferred_plot_enrichment_delay_seconds()) else run_prefetch()
                 invisible(TRUE)
             }
             schedule_deferred_sequence_prefetch <- function() {
@@ -3635,11 +3639,7 @@ plotServerOrtologous <- function(id, data, max_gene_length, min_gene_coord, max_
                     app_perf_mark_ms(module_perf, "deferred_sequence_prefetch_ms", app_perf_elapsed_ms(sequence_t0), "ORTHO_MOD")
                     invisible(NULL)
                 }
-                if (requireNamespace("later", quietly = TRUE)) {
-                    later::later(run_prefetch, delay = deferred_plot_enrichment_delay_seconds(0.5))
-                } else {
-                    run_prefetch()
-                }
+                if (requireNamespace("later", quietly = TRUE)) later::later(run_prefetch, delay = deferred_plot_enrichment_delay_seconds(0.5)) else run_prefetch()
                 invisible(TRUE)
             }
             notify_plot_ready <- function() {
@@ -3663,7 +3663,6 @@ plotServerOrtologous <- function(id, data, max_gene_length, min_gene_coord, max_
                     return(invisible(FALSE))
                 }
                 module_destroyed <<- TRUE
-                tryCatch(prefetch_observer$destroy(), error = function(e) NULL)
                 tryCatch({
                     output$plot <- NULL
                 }, error = function(e) NULL)
@@ -3807,9 +3806,12 @@ plotServerOrtologous <- function(id, data, max_gene_length, min_gene_coord, max_
                 result
             }
 
-            prefetch_observer <- observe({
+            # As in the homologous module, data is static and this prefetch is a
+            # one-shot initialization step. Execute it now instead of waiting for
+            # a later reactive flush before the card can become complete.
+            run_initial_prefetch <- function() {
                 req(data)
-                app_perf_mark(module_perf, "observe start", "ORTHO_MOD")
+                app_perf_mark(module_perf, "initial prefetch start", "ORTHO_MOD")
                 df_gene <- processed_cache$df_gene
                 df_plot <- processed_cache$df
                 df_transcript <- processed_cache$df_transcript
@@ -3974,6 +3976,7 @@ plotServerOrtologous <- function(id, data, max_gene_length, min_gene_coord, max_
                     )
                 }
                 apply_prefetch_payload <- function(result, source_label = "async") {
+                    apply_prefetch_t0 <- app_perf_now()
                     if (isTRUE(module_destroyed)) return(invisible(NULL))
                     app_perf_mark_ms(module_perf, "gc_span_fetch_ms", result$gc_span_fetch_ms %||% 0, "ORTHO_MOD")
                     app_perf_mark_ms(module_perf, "gene_sequence_fetch_ms", result$gene_sequence_fetch_ms %||% 0, "ORTHO_MOD")
@@ -4003,6 +4006,7 @@ plotServerOrtologous <- function(id, data, max_gene_length, min_gene_coord, max_
                         neighbor_context(result$ctx)
                         neighbor_context_resolved(TRUE)
                     }
+                    app_perf_mark_ms(module_perf, "apply_sequence_prefetch_ms", app_perf_elapsed_ms(apply_prefetch_t0), "ORTHO_MOD")
                     invisible(NULL)
                 }
                 handle_prefetch_error <- function(err, source_label = "async") {
@@ -4046,7 +4050,9 @@ plotServerOrtologous <- function(id, data, max_gene_length, min_gene_coord, max_
                         handle_prefetch_error(err, "async")
                     })
                 }
-            })
+                invisible(NULL)
+            }
+            run_initial_prefetch()
 
             render_trigger <- reactive({
                 # With lazy sequence mode, avoid tracking gene_info as a reactive dependency
@@ -4115,6 +4121,7 @@ plotServerOrtologous <- function(id, data, max_gene_length, min_gene_coord, max_
             })
 
             output$plot <- bindEvent(renderGirafe({
+                render_prepare_t0 <- app_perf_now()
                 on.exit(notify_plot_ready(), add = TRUE)
                 req(data)
                 info <- gene_info()
@@ -4170,10 +4177,12 @@ plotServerOrtologous <- function(id, data, max_gene_length, min_gene_coord, max_
                 df_transcript <- processed_cache$df_transcript
 
                 composicion_secuencia <- "Sequence Composition: N/A (genome FASTA not available)"
+                sequence_composition_t0 <- app_perf_now()
                 if (!is.null(info) && !is.null(info$sequence) && nzchar(info$sequence)) {
                     seq_info <- calculate_sequence_composition(info$sequence)
                     composicion_secuencia <- seq_info$composition
                 }
+                app_perf_mark_ms(module_perf, "sequence_composition_ms", app_perf_elapsed_ms(sequence_composition_t0), "ORTHO_MOD")
 
                 transcript_start <- suppressWarnings(min(df$xstart, na.rm = TRUE))
                 transcript_end <- suppressWarnings(max(df$xend, na.rm = TRUE))
@@ -4269,6 +4278,7 @@ plotServerOrtologous <- function(id, data, max_gene_length, min_gene_coord, max_
                 gc_timing_enabled <- isTRUE(app_perf_enabled())
                 gc_before <- if (gc_timing_enabled) sum(gc.time(on = TRUE)) else NA_real_
                 create_t0 <- app_perf_now()
+                app_perf_mark_ms(module_perf, "render_prepare_ms", app_perf_elapsed_ms(render_prepare_t0), "ORTHO_MOD")
                 app_perf_mark(module_perf, "create_gene_plot start", "ORTHO_MOD")
                 span_for_plot <- genomic_span_seq()
                 genome_for_plot <- if (isTRUE(defer_feature_gc) && !nzchar(trimws(as.character(span_for_plot %||% "")))) {
@@ -4323,7 +4333,11 @@ plotServerOrtologous <- function(id, data, max_gene_length, min_gene_coord, max_
                 plot_obj
             }), render_trigger(), ignoreNULL = TRUE)
             default_suspend_when_hidden <- isTRUE(is_ortho_suspend_hidden_enabled())
-            outputOptions(output, "plot", suspendWhenHidden = default_suspend_when_hidden)
+            # Cross-species modules are also instantiated progressively, one
+            # visible card/batch at a time. Do not add a second client-binding
+            # gate after that server-side admission control.
+            outputOptions(output, "plot", suspendWhenHidden = FALSE)
+            app_perf_mark(module_perf, "plot output registered eager", "ORTHO_MOD")
             nudge_render_nonce <- function(reason = "manually") {
                 if (isTRUE(module_destroyed)) {
                     return(invisible(FALSE))

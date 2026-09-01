@@ -1,36 +1,44 @@
 # Performance Quickstart
 
-Default startup values for first paint tuning:
+Default startup values for the eager rendering profile:
 
 - `APP_FUTURE_MODE=multisession`
 - `APP_FUTURE_WORKERS=2`
-- `APP_HOMO_INITIAL_VISIBLE=1`
-- `APP_ORTHO_INITIAL_VISIBLE=1`
+- `APP_HOMO_INITIAL_VISIBLE=64`
+- `APP_ORTHO_INITIAL_VISIBLE=64`
+- `APP_ORTHO_RENDER_CHUNK_SIZE=64`
+- `APP_ORTHO_AUTO_RENDER_MORE=0`
+- `APP_ORTHO_AUTO_RENDER_DELAY_MS=0`
 - `APP_HOMO_UPFRONT_ISOFORMS=0`
 - `APP_ORTHO_UPFRONT_ISOFORMS=0`
 - `APP_ORTHO_SUSPEND_HIDDEN=1`
-- `APP_HOMO_DEFER_SEQUENCE=1` for Desktop first paint; use `0` when sequence composition must be ready before paint
-- `APP_ORTHO_DEFER_SEQUENCE=1` for Desktop first paint; use `0` when sequence composition must be ready before paint
-- `APP_FOOTER_DEFER_SEQUENCE=1` for Desktop first paint; use `0` when footer sequences must be ready before paint
-- `APP_DEFER_FEATURE_GC=1` for Desktop; small 2bit spans are included in the first render, while slower sources retain the deferred fallback
+- `APP_HOMO_DEFER_SEQUENCE=0`
+- `APP_ORTHO_DEFER_SEQUENCE=0`
+- `APP_FOOTER_DEFER_SEQUENCE=0`
+- `APP_DEFER_FEATURE_GC=0`
 - `APP_ORTHO_ALIGNED_FAST=1`
 
-These defaults prioritize first paint. Hidden isoforms are not instantiated
-upfront, hidden orthologous plots stay suspended, and expensive sequence/feature
-GC work is deferred and prefetched after the initial card renders.
+These defaults register all normal primary cards together and include sequence
+composition and feature GC in their first render. Hidden isoforms are still
+created only when expanded, and hidden Alignment outputs remain suspended.
 
-Colors deploys use the measured baseline by default:
+Colors deploys materialize the same eager baseline by default:
 
 - `APP_INLINE_FAST_SEQUENCE_PREFETCH=1`
 - `APP_HOMO_DEFER_SEQUENCE=0`
+- `APP_ORTHO_DEFER_SEQUENCE=0`
+- `APP_FOOTER_DEFER_SEQUENCE=0`
 - `APP_DEFER_FEATURE_GC=0`
+- `APP_ORTHO_AUTO_RENDER_MORE=0`
+- `APP_ORTHO_RENDER_CHUNK_SIZE=64`
+- `APP_HOMO_INITIAL_VISIBLE=64`
+- `APP_ORTHO_INITIAL_VISIBLE=64`
 
 The deferred `0/1/1` candidate was rejected after production measurements:
 it moved cold work into a second render and made warm searches slower.
 
-The deploy-time defaults can be overridden with
-`COLORS_INLINE_FAST_SEQUENCE_PREFETCH`, `COLORS_HOMO_DEFER_SEQUENCE`, and
-`COLORS_DEFER_FEATURE_GC` for a controlled rollback or comparison.
+The deploy-time defaults can still be overridden explicitly for a controlled
+comparison, but normal deploys always write and verify the eager profile.
 
 ## Recommended: run the suite wrapper
 

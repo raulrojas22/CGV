@@ -16,6 +16,10 @@ analytics_chart_order_choices <- c(
   "Label (Z-A)" = "label_desc"
 )
 
+cgv_gene_catalog_enabled <-
+  exists("gene_catalog_enabled", mode = "function") &&
+  isTRUE(gene_catalog_enabled())
+
 guide_media_path <- function(path) {
   path <- as.character(path)
   if (length(path) == 0 || is.na(path)) {
@@ -1226,6 +1230,32 @@ fluidPage(
       tags$meta(`http-equiv` = "Cache-Control", content = "no-cache, must-revalidate"),
       tags$meta(`http-equiv` = "Pragma", content = "no-cache"),
       tags$meta(`http-equiv` = "Expires", content = "0"),
+      tags$style(HTML("
+        .isoform-toggle-label {
+          margin:0;
+          display:inline-flex;
+          align-items:center;
+          gap:4px;
+        }
+        .isoform-toggle-checkbox {
+          position:relative !important;
+          width:14px !important;
+          height:14px !important;
+          margin:0 !important;
+          opacity:1 !important;
+          pointer-events:auto !important;
+          cursor:pointer !important;
+          accent-color:#4B6072;
+        }
+        .isoform-toggle-up { display:none; }
+        .isoform-toggle-checkbox:checked ~ .isoform-toggle-down { display:none; }
+        .isoform-toggle-checkbox:checked ~ .isoform-toggle-up { display:inline; }
+        .isoform-toggle-checkbox:focus-visible ~ .isoform-toggle-text {
+          outline:2px solid #2f80ed;
+          outline-offset:2px;
+          border-radius:3px;
+        }
+      ")),
       # These Analytics rules historically lived in figure_studio.css. Keep
       # their exact eager behavior while the Studio-only stylesheet is loaded
       # on demand.
@@ -2377,12 +2407,15 @@ fluidPage(
       tags$script(src = versioned_asset_path("js/result_workspace.js")),
       tags$script(src = versioned_asset_path("js/gene_match_evidence_help.js")),
       tags$script(src = versioned_asset_path("js/ncbi_search.js")),
+      if (isTRUE(cgv_gene_catalog_enabled)) {
+        tags$script(src = versioned_asset_path("js/gene_catalog.js"))
+      } else NULL,
       tags$script(src = versioned_asset_path("js/organism_images.js")),
       tags$script(src = versioned_asset_path("js/mobile_enhancements.js"), defer = NA),
       tags$script(src = versioned_asset_path("js/cgv_desktop_downloads.js"), defer = NA),
       tags$script(HTML("
       (function () {
-        var validTargets = ['home', 'homologous', 'orthologous', 'figure-studio', 'guide', 'desktop-app', 'settings', 'help', 'feedback'];
+        var validTargets = ['home', 'catalog', 'homologous', 'orthologous', 'figure-studio', 'guide', 'desktop-app', 'settings', 'help', 'feedback'];
         var suggestionState = { items: [], activeIndex: -1 };
         var collapsedSuggestionState = { items: [], activeIndex: -1 };
         var suggestionObserver = null;
@@ -5237,6 +5270,17 @@ fluidPage(
             )
           )
         ),
+        if (isTRUE(cgv_gene_catalog_enabled)) {
+          tags$button(
+            type = "button",
+            class = "app-nav-btn app-nav-btn-catalog",
+            `data-target` = "catalog",
+            title = "Gene Catalog — search aliases across installed organisms",
+            icon("search"),
+            span("Gene Catalog"),
+            span(class = "app-nav-collapsed-label", "Catalog")
+          )
+        } else NULL,
         tags$button(
           type = "button",
           class = "app-nav-btn app-nav-btn-figure-studio",
@@ -6277,7 +6321,7 @@ fluidPage(
               if (window.__cgvHomeIframeBridgeBound) return;
               window.__cgvHomeIframeBridgeBound = true;
 
-              var allowedTargets = ['home', 'homologous', 'orthologous', 'figure-studio', 'guide', 'desktop-app', 'settings', 'help', 'feedback'];
+              var allowedTargets = ['home', 'catalog', 'homologous', 'orthologous', 'figure-studio', 'guide', 'desktop-app', 'settings', 'help', 'feedback'];
 
               function resetHomeIframeScroll() {
                 var iframe = document.getElementById('cgv-home-iframe');
@@ -6326,6 +6370,60 @@ fluidPage(
             })();
           "))
         ),
+        if (isTRUE(cgv_gene_catalog_enabled)) tabPanel(
+          title = "Gene Catalog",
+          value = "catalog",
+          div(
+            class = "content-wrapper app-main-pane gene-catalog-pane",
+            div(
+              class = "gene-catalog-shell",
+              div(
+                class = "gene-catalog-hero",
+                div(
+                  class = "gene-catalog-heading",
+                  span(class = "gene-catalog-kicker", icon("database"), "Installed organism indexes"),
+                  h2("Gene Catalog"),
+                  p("Discover exact genes and gene-family candidates by symbol, stable ID, alias, or synonym — without choosing an organism first.")
+                ),
+                div(
+                  class = "gene-catalog-search-row",
+                  textInput(
+                    inputId = "catalog_gene_query",
+                    label = NULL,
+                    placeholder = "Try HKT, TP53, BRCA1, actin…"
+                  ),
+                  actionButton(
+                    inputId = "catalog_search_go",
+                    label = span(icon("search"), "Search catalog"),
+                    class = "btn-primary gene-catalog-search-btn"
+                  )
+                ),
+                div(class = "gene-catalog-meta", icon("circle-info"), textOutput("catalog_search_status", inline = TRUE))
+              ),
+              div(
+                class = "gene-catalog-results-card",
+                div(
+                  class = "gene-catalog-results-toolbar",
+                  div(
+                    tags$strong("Matches"),
+                    span("Exact results rank first; family and partial candidates follow.")
+                  ),
+                  downloadButton("download_catalog_csv", span(icon("download"), "Download CSV"), class = "btn-sm btn-download")
+                ),
+                uiOutput("catalog_search_summary"),
+                div(
+                  class = "gene-catalog-filterbar",
+                  selectInput("catalog_kingdom_filter", "Kingdom", choices = c("All kingdoms" = "all", "Animalia", "Plantae", "Fungi", "Other"), selected = "all"),
+                  selectInput("catalog_match_filter", "Match", choices = c("All matches" = "all", "Exact / normalized" = "exact", "Prefix / family" = "prefix", "Contains" = "contains"), selected = "all"),
+                  selectInput("catalog_confidence_filter", "Confidence", choices = c("All confidence" = "all", "High" = "HIGH", "Medium" = "MEDIUM", "Low" = "LOW"), selected = "all"),
+                  checkboxInput("catalog_best_per_organism", "Best candidate per organism", value = FALSE)
+                ),
+                uiOutput("catalog_selection_actions"),
+                DT::dataTableOutput("catalog_results_dt")
+              )
+            )
+          )
+        ) else NULL,
         tabPanel(
           title = "Figure Studio",
           value = "figure-studio",

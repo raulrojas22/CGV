@@ -191,7 +191,7 @@ FEEDBACK_TO_EMAIL=cgvviewer@gmail.com
 FEEDBACK_FROM_EMAIL="CGeV Feedback <feedback@cgvapp.com>"
 # cgvapp.com is verified in Resend.
 FEEDBACK_SEND_RECEIPT=1
-FEEDBACK_PUBLIC_URL=https://cgv.mobilomics.org
+FEEDBACK_PUBLIC_URL=https://cgev.mobilomics.org
 FEEDBACK_BACKUP_URL=https://cgvapp.com
 FEEDBACK_LOGO_PATH=www/cgv-email-logo.png
 ```

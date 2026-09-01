@@ -73,7 +73,7 @@ for (const [dependency, version] of Object.entries(expectedVersions)) {
 if (packageJson.repository?.url !== "https://github.com/raulrojas22/CGV") {
   throw new Error("Desktop source metadata must continue to point to the public CGV source repository.");
 }
-if (packageJson.homepage !== "https://cgv.mobilomics.org") {
+if (packageJson.homepage !== "https://cgev.mobilomics.org") {
   throw new Error("Desktop homepage metadata must point to the official CGV Web deployment.");
 }
 if (
@@ -386,15 +386,21 @@ const expectedDesktopDefaults = {
   APP_ORTHO_INITIAL_VISIBLE: "1",
   APP_HOMO_UPFRONT_ISOFORMS: "0",
   APP_ORTHO_UPFRONT_ISOFORMS: "0",
-  APP_ORTHO_RENDER_CHUNK_SIZE: "2",
+  APP_HOMO_RENDER_CHUNK_SIZE: "1",
+  APP_HOMO_AUTO_RENDER_DELAY_MS: "120",
+  APP_ORTHO_RENDER_CHUNK_SIZE: "1",
   APP_ORTHO_AUTO_RENDER_MORE: "1",
-  APP_ORTHO_AUTO_RENDER_DELAY_MS: "250",
+  APP_ORTHO_AUTO_RENDER_DELAY_MS: "120",
+  APP_ISOFORM_RENDER_BATCH_SIZE: "1",
+  APP_ISOFORM_RENDER_BATCH_DELAY_MS: "120",
+  APP_ORTHO_SERVER_RENDER_NUDGE: "0",
   APP_ORTHO_LOOKUP_PARALLEL_MIN_JOBS: "4",
   APP_ORTHO_SUSPEND_HIDDEN: "1",
-  APP_HOMO_DEFER_SEQUENCE: "1",
-  APP_ORTHO_DEFER_SEQUENCE: "1",
-  APP_FOOTER_DEFER_SEQUENCE: "1",
-  APP_DEFER_FEATURE_GC: "1",
+  APP_GENE_CATALOG_ENABLED: "0",
+  APP_HOMO_DEFER_SEQUENCE: "0",
+  APP_ORTHO_DEFER_SEQUENCE: "0",
+  APP_FOOTER_DEFER_SEQUENCE: "0",
+  APP_DEFER_FEATURE_GC: "0",
   APP_ANALYTICS_PHASE2_DELAY_MS: "0",
   APP_ANALYTICS_PHASE3_DELAY_MS: "0"
 };

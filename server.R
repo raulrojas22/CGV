@@ -421,7 +421,10 @@ function(input, output, session) {
             first_painted_logged = FALSE,
             first_painted_ms = NA_real_,
             ready_to_paint_logged = FALSE,
-            total_painted_logged = FALSE
+            total_painted_logged = FALSE,
+            card_complete = character(0),
+            first_card_complete_logged = FALSE,
+            first_card_complete_ms = NA_real_
         )
     }
 
@@ -446,11 +449,15 @@ function(input, output, session) {
             browser_context <- if (grepl("^HOMO", context)) "homologous" else if (grepl("^ORTHO", context)) "orthologous" else ""
             functional_first_paint <- identical(browser_context, "orthologous") &&
                 isTRUE(get0("orthoAutoRenderMore", envir = environment(), inherits = TRUE, ifnotfound = FALSE))
-            if (isTRUE(app_perf_enabled()) || isTRUE(functional_first_paint)) {
+            functional_progressive <- identical(browser_context, "homologous") &&
+                isTRUE(get0("homoProgressiveRender", envir = environment(), inherits = TRUE, ifnotfound = FALSE))
+            if (isTRUE(app_perf_enabled()) || isTRUE(functional_first_paint) || isTRUE(functional_progressive)) {
                 session$sendCustomMessage("cgv_plot_timing_start", list(
                     run_id = as.character(run$id %||% ""),
                     context = browser_context,
-                    first_paint_only = !isTRUE(app_perf_enabled()) && isTRUE(functional_first_paint)
+                    first_paint_only = !isTRUE(app_perf_enabled()) && isTRUE(functional_first_paint),
+                    functional_only = !isTRUE(app_perf_enabled()) &&
+                        (isTRUE(functional_first_paint) || isTRUE(functional_progressive))
                 ))
             }
         }
@@ -497,6 +504,8 @@ function(input, output, session) {
             browser_context <- if (grepl("^HOMO", context)) "homologous" else if (grepl("^ORTHO", context)) "orthologous" else ""
             functional_first_paint <- identical(browser_context, "orthologous") &&
                 isTRUE(get0("orthoAutoRenderMore", envir = environment(), inherits = TRUE, ifnotfound = FALSE))
+            functional_progressive <- identical(browser_context, "homologous") &&
+                isTRUE(get0("homoProgressiveRender", envir = environment(), inherits = TRUE, ifnotfound = FALSE))
             functional_gate_active <- FALSE
             gate_candidates <- unique(as.character(gate_candidate_ids %||% character(0)))
             gate_candidates <- gate_candidates[nzchar(gate_candidates)]
@@ -512,14 +521,16 @@ function(input, output, session) {
                     functional_gate_active <- isTRUE(activate_gate(as.character(run$id %||% "")))
                 }
             }
-            if (isTRUE(app_perf_enabled()) || isTRUE(functional_gate_active)) {
+            if (isTRUE(app_perf_enabled()) || isTRUE(functional_gate_active) || isTRUE(functional_progressive)) {
                 output_prefix <- if (identical(browser_context, "homologous")) "plot_homo_" else if (identical(browser_context, "orthologous")) "plot_ortho_" else "plot_"
-                browser_expected_ids <- if (isTRUE(app_perf_enabled())) ids_chr else gate_ids_chr
+                browser_expected_ids <- if (isTRUE(app_perf_enabled()) || isTRUE(functional_progressive)) ids_chr else gate_ids_chr
                 session$sendCustomMessage("cgv_plot_timing_expect", list(
                     run_id = as.character(run$id %||% ""),
                     context = browser_context,
                     output_ids = paste0(output_prefix, browser_expected_ids, "-plot"),
-                    first_paint_only = !isTRUE(app_perf_enabled()) && isTRUE(functional_gate_active)
+                    first_paint_only = !isTRUE(app_perf_enabled()) && isTRUE(functional_gate_active),
+                    functional_only = !isTRUE(app_perf_enabled()) &&
+                        (isTRUE(functional_gate_active) || isTRUE(functional_progressive))
                 ))
             }
             app_perf_mark(run, sprintf("expected_plots=%d", as.integer(length(ids_chr))), context)
@@ -617,6 +628,68 @@ function(input, output, session) {
     }
 
     plotMetricsPayloadCache <- new.env(parent = emptyenv())
+    pendingMetricsBuilds <- new.env(parent = emptyenv())
+    pendingMetricsPlotIds <- new.env(parent = emptyenv())
+
+    pending_metrics_plot_key <- function(context = "homo", plot_id = "") {
+        paste0(tolower(trimws(as.character(context %||% "homo"))), "::", as.character(plot_id %||% ""))
+    }
+
+    metrics_payload_build_is_pending <- function(context = "homo", plot_id = "") {
+        pid <- sub("_c$", "", as.character(plot_id %||% ""))
+        nzchar(pid) && exists(
+            pending_metrics_plot_key(context, pid),
+            envir = pendingMetricsPlotIds,
+            inherits = FALSE
+        )
+    }
+
+    clear_pending_metrics_plot_ids <- function(context = "homo", plot_ids = character(0)) {
+        ids_chr <- unique(sub("_c$", "", as.character(plot_ids %||% character(0))))
+        ids_chr <- ids_chr[nzchar(ids_chr)]
+        for (pid in ids_chr) {
+            key <- pending_metrics_plot_key(context, pid)
+            if (exists(key, envir = pendingMetricsPlotIds, inherits = FALSE)) {
+                rm(list = key, envir = pendingMetricsPlotIds)
+            }
+        }
+        invisible(NULL)
+    }
+
+    dispatch_pending_metrics_build <- function(run_id = "", reason = "browser_paint") {
+        run_key <- trimws(as.character(run_id %||% ""))
+        if (!nzchar(run_key) || !exists(run_key, envir = pendingMetricsBuilds, inherits = FALSE)) {
+            return(invisible(FALSE))
+        }
+        job <- get(run_key, envir = pendingMetricsBuilds, inherits = FALSE)
+        if (isTRUE(job$started)) {
+            return(invisible(FALSE))
+        }
+        job$started <- TRUE
+        assign(run_key, job, envir = pendingMetricsBuilds)
+        app_perf_mark(
+            job$perf_run,
+            sprintf("metrics_payload_dispatch reason=%s", as.character(reason %||% "unknown")),
+            job$perf_context
+        )
+        tryCatch(
+            job$dispatch(),
+            error = function(e) {
+                app_perf_mark(
+                    job$perf_run,
+                    sprintf("metrics_payload_build_error=%s", as.character(e$message %||% "unknown")),
+                    job$perf_context
+                )
+            },
+            finally = {
+                clear_pending_metrics_plot_ids(job$context, job$plot_ids)
+                if (exists(run_key, envir = pendingMetricsBuilds, inherits = FALSE)) {
+                    rm(list = run_key, envir = pendingMetricsBuilds)
+                }
+            }
+        )
+        invisible(TRUE)
+    }
 
     merge_named_lists <- function(base_map, add_map) {
         out <- base_map
@@ -680,15 +753,13 @@ function(input, output, session) {
         if (!is.list(sig_map)) {
             sig_map <- as.list(sig_map)
         }
+        written_keys <- character(0)
         for (idx in seq_len(n_cache)) {
             pid <- ids_chr[[idx]]
             payload <- payloads[[idx]] %||% list()
-            cache_env_set(
-                plotMetricsPayloadCache,
-                metrics_payload_cache_key(context, "id", pid),
-                payload,
-                max_size = 8000L
-            )
+            id_key <- metrics_payload_cache_key(context, "id", pid)
+            assign(id_key, payload, envir = plotMetricsPayloadCache)
+            written_keys <- c(written_keys, id_key)
             sig_by_id <- tryCatch(sig_map[[pid]], error = function(e) NULL)
             sig_by_idx <- if (idx <= length(sig_map)) {
                 tryCatch(sig_map[[idx]], error = function(e) NULL)
@@ -697,14 +768,20 @@ function(input, output, session) {
             }
             sig_val <- as.character(sig_by_id %||% sig_by_idx %||% "")
             if (nzchar(sig_val)) {
-                cache_env_set(
-                    plotMetricsPayloadCache,
-                    metrics_payload_cache_key(context, "sig", sig_val),
-                    payload,
-                    max_size = 8000L
-                )
+                sig_key <- metrics_payload_cache_key(context, "sig", sig_val)
+                assign(sig_key, payload, envir = plotMetricsPayloadCache)
+                written_keys <- c(written_keys, sig_key)
             }
         }
+        # cache_env_set() trims and rescans the complete environment per item.
+        # A large human gene can add hundreds of id/signature pairs at once, so
+        # write the batch first and rebuild LRU metadata in one pass.
+        written_keys <- unique(written_keys)
+        cache_meta <- cache_env_meta_get(plotMetricsPayloadCache)
+        cache_meta$access <- cache_meta$access[setdiff(names(cache_meta$access), written_keys)]
+        cache_meta$bytes <- cache_meta$bytes[setdiff(names(cache_meta$bytes), written_keys)]
+        cache_env_meta_set(plotMetricsPayloadCache, cache_meta)
+        trim_cache_env(plotMetricsPayloadCache, max_size = 8000L)
         invisible(NULL)
     }
 
@@ -754,7 +831,9 @@ function(input, output, session) {
             organism_name = organism_name,
             annotation_path = annotation_path,
             use_report_map = isTRUE(use_report_map),
-            report_path = report_path
+            report_path = report_path,
+            perf_run = perf_run,
+            perf_context = perf_context
         )
         app_perf_mark_ms(perf_run, "metrics_payload_build_ms", app_perf_elapsed_ms(metrics_t0), perf_context)
         set_context_metrics_payloads(
@@ -798,6 +877,43 @@ function(input, output, session) {
             cache_metrics_payloads(context = context, plot_ids = ids_chr, payloads = payloads, plot_signatures = plot_signatures)
             invisible(NULL)
         }
+        # Large groups used to monopolize the Shiny event loop before the first
+        # visible card could paint. Keep every metric, but let the canonical card
+        # and its sequence-composition footer reach the browser first. The paint
+        # acknowledgement dispatches the complete metrics build immediately.
+        defer_until_first_paint <- length(ids_chr) > 24L && is.list(perf_run) &&
+            nzchar(as.character(perf_run$id %||% ""))
+        if (isTRUE(defer_until_first_paint) && requireNamespace("later", quietly = TRUE)) {
+            run_key <- as.character(perf_run$id %||% "")
+            for (pid in ids_chr) {
+                assign(
+                    pending_metrics_plot_key(context, pid),
+                    run_key,
+                    envir = pendingMetricsPlotIds
+                )
+            }
+            assign(
+                run_key,
+                list(
+                    dispatch = dispatch,
+                    context = context,
+                    plot_ids = ids_chr,
+                    perf_run = perf_run,
+                    perf_context = perf_context,
+                    started = FALSE
+                ),
+                envir = pendingMetricsBuilds
+            )
+            app_perf_mark(
+                perf_run,
+                sprintf("metrics_payload_queued_after_first_paint plots=%d", as.integer(length(ids_chr))),
+                perf_context
+            )
+            later::later(function() {
+                dispatch_pending_metrics_build(run_key, reason = "paint_timeout")
+            }, delay = 120)
+            return(invisible(TRUE))
+        }
         if (requireNamespace("later", quietly = TRUE)) {
             later::later(function() {
                 tryCatch(dispatch(), error = function(e) {
@@ -831,6 +947,13 @@ function(input, output, session) {
         }
         if (!is.null(cached)) {
             return(cached)
+        }
+
+        # A scheduled large-group build owns this payload. Returning NULL keeps
+        # the footer (including sequence composition) non-blocking; the metrics
+        # reactive invalidates it as soon as the complete equivalent payload is ready.
+        if (metrics_payload_build_is_pending(context, base_pid)) {
+            return(NULL)
         }
 
         sig_map <- tryCatch(acc$signatures(), error = function(e) list())
@@ -985,6 +1108,13 @@ function(input, output, session) {
         get_preloaded_species_registry(registry_path = file.path("annotations", "registry.tsv"), base_dir = "."),
         error = function(e) data.frame()
     ))
+    catalogFeatureEnabled <-
+        exists("gene_catalog_enabled", mode = "function") &&
+        isTRUE(gene_catalog_enabled())
+    catalogSearchResults <- if (catalogFeatureEnabled) reactiveVal(if (exists("empty_alias_catalog_results", mode = "function")) empty_alias_catalog_results() else data.frame()) else NULL
+    catalogSearchStatus <- if (catalogFeatureEnabled) reactiveVal("Enter at least 3 characters to search every installed organism index.") else NULL
+    catalogSearchLastTerm <- if (catalogFeatureEnabled) reactiveVal("") else NULL
+    catalogSearchEpoch <- if (catalogFeatureEnabled) reactiveVal(0L) else NULL
     # These are intentionally non-reactive state cells: autocomplete updates can be frequent
     # and should not invalidate unrelated Shiny reactives or trigger broad UI rerenders.
     geneAutocompleteCache <- make_state_cell(list())
@@ -1257,29 +1387,85 @@ function(input, output, session) {
         ready <- as.character(orthoRenderedPlotIds() %||% character(0))
         all(ids %in% ready)
     })
-    homoRenderChunkSize <- 10L
-    homoInitialVisibleCount <- max(1L, min(homoRenderChunkSize, parse_positive_int_env("APP_HOMO_INITIAL_VISIBLE", 1L)))
+    # Stream primary cards in small batches. The safety cap still protects a
+    # session from an accidentally unbounded environment override.
+    cardRegistrationSafetyCap <- 256L
+    homoRenderChunkSize <- max(
+        1L,
+        min(
+            cardRegistrationSafetyCap,
+            parse_positive_int_env("APP_HOMO_RENDER_CHUNK_SIZE", 1L)
+        )
+    )
+    homoInitialVisibleCount <- max(
+        1L,
+        min(
+            cardRegistrationSafetyCap,
+            parse_positive_int_env("APP_HOMO_INITIAL_VISIBLE", 1L)
+        )
+    )
+    homoProgressiveRender <- homoInitialVisibleCount == 1L && homoRenderChunkSize >= 1L
+    homoAutoRenderDelay <- {
+        raw <- suppressWarnings(as.numeric(Sys.getenv("APP_HOMO_AUTO_RENDER_DELAY_MS", "120")))
+        if (!is.finite(raw) || is.na(raw)) raw <- 120
+        min(1000, max(0, raw)) / 1000
+    }
     homoVisibleCount <- reactiveVal(homoInitialVisibleCount)
+    homoAutoRenderQueued <- reactiveVal(FALSE)
+    homoAutoRenderGeneration <- 0L
+    bump_homo_auto_render_generation <- function() {
+        next_generation <- suppressWarnings(as.integer(homoAutoRenderGeneration %||% 0L))
+        if (!is.finite(next_generation) || is.na(next_generation) || next_generation < 0L ||
+            next_generation >= .Machine$integer.max) {
+            next_generation <- 0L
+        }
+        homoAutoRenderGeneration <<- as.integer(next_generation + 1L)
+        homoAutoRenderGeneration
+    }
+    cancel_homo_auto_render_queue <- function() {
+        bump_homo_auto_render_generation()
+        homoAutoRenderQueued(FALSE)
+        invisible(NULL)
+    }
     homoRenderedPlotIds <- reactiveVal(character())
     homoInsertedCardIds <- reactiveVal(character())
+    homoHydratedIsoformIds <- reactiveVal(character())
     homoFooterOutputsBound <- reactiveVal(character())
     homoDownloadOutputsBound <- reactiveVal(character())
-    orthoRenderChunkSize <- max(1L, min(8L, parse_positive_int_env("APP_ORTHO_RENDER_CHUNK_SIZE", 6L)))
+    orthoRenderChunkSize <- max(
+        1L,
+        min(
+            cardRegistrationSafetyCap,
+            parse_positive_int_env("APP_ORTHO_RENDER_CHUNK_SIZE", 1L)
+        )
+    )
     orthoAutoRenderMore <- {
         raw <- tolower(trimws(as.character(Sys.getenv("APP_ORTHO_AUTO_RENDER_MORE", "1") %||% "1")))
         !raw %in% c("", "0", "false", "no", "off")
     }
     configuredOrthoInitialVisibleCount <- max(
         1L,
-        min(orthoRenderChunkSize, parse_positive_int_env("APP_ORTHO_INITIAL_VISIBLE", 2L))
+        min(
+            cardRegistrationSafetyCap,
+            parse_positive_int_env("APP_ORTHO_INITIAL_VISIBLE", 1L)
+        )
     )
-    # Automatic rendering is intentionally one-card-first: additional cards are
-    # released only after the browser acknowledges that primary SVG's paint.
+    # Progressive rendering starts with one card. Operators can still opt out by
+    # disabling AUTO_RENDER_MORE and raising APP_ORTHO_INITIAL_VISIBLE.
     orthoInitialVisibleCount <- if (isTRUE(orthoAutoRenderMore)) 1L else configuredOrthoInitialVisibleCount
     orthoAutoRenderDelay <- {
-        raw <- suppressWarnings(as.numeric(Sys.getenv("APP_ORTHO_AUTO_RENDER_DELAY_MS", "30")))
-        if (!is.finite(raw) || is.na(raw)) raw <- 30
-        min(750, max(0, raw)) / 1000
+        raw <- suppressWarnings(as.numeric(Sys.getenv("APP_ORTHO_AUTO_RENDER_DELAY_MS", "120")))
+        if (!is.finite(raw) || is.na(raw)) raw <- 120
+        min(1000, max(0, raw)) / 1000
+    }
+    isoformRenderBatchSize <- max(
+        1L,
+        min(8L, parse_positive_int_env("APP_ISOFORM_RENDER_BATCH_SIZE", 1L))
+    )
+    isoformRenderBatchDelay <- {
+        raw <- suppressWarnings(as.numeric(Sys.getenv("APP_ISOFORM_RENDER_BATCH_DELAY_MS", "120")))
+        if (!is.finite(raw) || is.na(raw)) raw <- 120
+        min(1000, max(0, raw)) / 1000
     }
     orthoFirstPaintTimeout <- min(
         120000L,
@@ -1305,9 +1491,12 @@ function(input, output, session) {
     }
     orthoRenderedPlotIds <- reactiveVal(character())
     orthoInsertedCardIds <- reactiveVal(character())
+    orthoHydratedIsoformIds <- reactiveVal(character())
     orthoFooterOutputsBound <- reactiveVal(character())
     orthoSecondaryBindingsQueued <- reactiveVal(character())
     orthoDownloadOutputsBound <- reactiveVal(character())
+    isoformToggleObserversBound <- reactiveVal(character())
+    isoformExpandedGroups <- reactiveVal(list())
     homoPlotTimingTracker <- reactiveVal(empty_plot_timing_tracker())
     orthoPlotTimingTracker <- reactiveVal(empty_plot_timing_tracker())
     orthoFirstPaintGate <- reactiveVal(new_ortho_first_paint_gate_state(enabled = FALSE))
@@ -1484,6 +1673,49 @@ function(input, output, session) {
         invisible(TRUE)
     }
 
+    handle_browser_card_complete <- function(tracker_rv, payload, context = "APP_TIMING") {
+        tr <- tracker_rv()
+        run <- tr$run
+        run_id <- trimws(as.character(payload$run_id %||% ""))
+        output_id <- trimws(as.character(payload$output_id %||% ""))
+        if (!is.list(run) || !nzchar(run_id) || !identical(run_id, as.character(run$id %||% "")) || !nzchar(output_id)) {
+            return(invisible(FALSE))
+        }
+        if (output_id %in% as.character(tr$card_complete %||% character(0))) {
+            return(invisible(FALSE))
+        }
+        tr$card_complete <- unique(c(as.character(tr$card_complete %||% character(0)), output_id))
+        elapsed_ms <- suppressWarnings(as.numeric(ms_since_run_start(run)))
+        client_click_ms <- suppressWarnings(as.numeric(payload$click_to_complete_ms %||% NA_real_))
+        metrics_bytes <- suppressWarnings(as.numeric(payload$metrics_bytes %||% NA_real_))
+        if (!isTRUE(tr$first_card_complete_logged)) {
+            app_perf_mark_ms(run, "browser_first_card_complete_ms", elapsed_ms, context)
+            if (is.finite(client_click_ms)) {
+                app_perf_mark_ms(run, "client_click_to_card_complete_ms", client_click_ms, context)
+            }
+            if (is.finite(tr$first_painted_ms) && is.finite(elapsed_ms)) {
+                app_perf_mark_ms(run, "browser_first_paint_to_card_complete_ms", max(0, elapsed_ms - tr$first_painted_ms), context)
+            }
+            if (is.finite(metrics_bytes)) {
+                app_perf_mark_ms(run, "browser_card_metrics_bytes", metrics_bytes, context)
+            }
+            app_perf_mark(
+                run,
+                sprintf(
+                    "card_complete output=%s sequence=%s metrics=%s",
+                    output_id,
+                    as.character(isTRUE(payload$has_sequence_composition)),
+                    as.character(isTRUE(payload$has_metrics))
+                ),
+                context
+            )
+            tr$first_card_complete_logged <- TRUE
+            tr$first_card_complete_ms <- elapsed_ms
+        }
+        tracker_rv(tr)
+        invisible(TRUE)
+    }
+
     observeEvent(input$cgv_plot_painted, {
         payload <- input$cgv_plot_painted %||% list()
         run_id <- trimws(as.character(payload$run_id %||% ""))
@@ -1491,7 +1723,18 @@ function(input, output, session) {
         homo_run <- (homoPlotTimingTracker()$run %||% list())$id %||% ""
         ortho_run <- (orthoPlotTimingTracker()$run %||% list())$id %||% ""
         if (identical(run_id, as.character(homo_run))) {
-            handle_browser_plot_paint(homoPlotTimingTracker, payload, "HOMO_TIMING")
+            handled <- handle_browser_plot_paint(homoPlotTimingTracker, payload, "HOMO_TIMING")
+            output_id <- trimws(as.character(payload$output_id %||% ""))
+            if (isTRUE(handled) && grepl("^plot_homo_.+-plot$", output_id)) {
+                plot_id <- sub("^plot_homo_(.+)-plot$", "\\1", output_id)
+                ready_now <- as.character(homoRenderedPlotIds() %||% character(0))
+                if (nzchar(plot_id) && !(plot_id %in% ready_now)) {
+                    homoRenderedPlotIds(c(ready_now, plot_id))
+                }
+            }
+            if (isTRUE(handled)) {
+                dispatch_pending_metrics_build(run_id, reason = "browser_paint")
+            }
         } else if (identical(run_id, as.character(ortho_run))) {
             handled <- handle_browser_plot_paint(orthoPlotTimingTracker, payload, "ORTHO_TIMING")
             expected_outputs <- paste0(
@@ -1500,12 +1743,22 @@ function(input, output, session) {
                 "-plot"
             )
             output_id <- trimws(as.character(payload$output_id %||% ""))
+            if (isTRUE(handled) && grepl("^plot_ortho_.+-plot$", output_id)) {
+                plot_id <- sub("^plot_ortho_(.+)-plot$", "\\1", output_id)
+                ready_now <- as.character(orthoRenderedPlotIds() %||% character(0))
+                if (nzchar(plot_id) && !(plot_id %in% ready_now)) {
+                    orthoRenderedPlotIds(c(ready_now, plot_id))
+                }
+            }
             if (isTRUE(handled) && output_id %in% expected_outputs) {
                 release_ortho_first_paint_gate(
                     run_id,
                     reason = "browser_paint",
                     output_id = output_id
                 )
+            }
+            if (isTRUE(handled)) {
+                dispatch_pending_metrics_build(run_id, reason = "browser_paint")
             }
         }
     }, ignoreInit = TRUE, ignoreNULL = TRUE)
@@ -6151,6 +6404,7 @@ function(input, output, session) {
             title = if (is_gene_variant) "View gene statistics" else "View transcript info",
             `data-panel-variant` = panel_variant,
             `data-metrics-payload` = metrics_attr,
+            `data-metrics-complete` = if (is.null(metrics_payload)) "false" else "true",
             tags$i(class = "fa fa-chart-bar", `aria-hidden` = "true"),
             span("Info")
         )
@@ -6232,6 +6486,36 @@ function(input, output, session) {
         sum(as.numeric(merged$end) - as.numeric(merged$start) + 1)
     }
 
+    feature_ranges_union_length_normalized <- function(ranges_df) {
+        if (is.null(ranges_df) || nrow(ranges_df) == 0L) {
+            return(0)
+        }
+        starts <- as.numeric(ranges_df$start)
+        ends <- as.numeric(ranges_df$end)
+        keep <- is.finite(starts) & is.finite(ends)
+        starts <- starts[keep]
+        ends <- ends[keep]
+        if (length(starts) == 0L) return(0)
+        ord <- order(starts, ends)
+        starts <- starts[ord]
+        ends <- ends[ord]
+        total <- 0
+        current_start <- starts[[1L]]
+        current_end <- ends[[1L]]
+        if (length(starts) > 1L) {
+            for (idx in 2:length(starts)) {
+                if (starts[[idx]] <= current_end + 1) {
+                    current_end <- max(current_end, ends[[idx]])
+                } else {
+                    total <- total + current_end - current_start + 1
+                    current_start <- starts[[idx]]
+                    current_end <- ends[[idx]]
+                }
+            }
+        }
+        as.numeric(total + current_end - current_start + 1)
+    }
+
     # ---------------------------------------------------------------------------
     # Select the canonical (representative) transcript from a list of blocks.
     # Returns the 1-based index of the canonical block within transcript_blocks.
@@ -6265,13 +6549,20 @@ function(input, output, session) {
             if (is.null(block_data) || !is.data.frame(block_data) || nrow(block_data) == 0L) {
                 return(list(idx = idx, cds_len = 0, tx_len = 0, exon_n = 0L, tx_label = "", ncbi_priority = 6L))
             }
-            row_types <- tolower(trimws(as.character(block_data$V3 %||% rep("", nrow(block_data)))))
+            cached_meta <- attr(block_data, "cgev_transcript_meta", exact = TRUE)
+            row_types <- as.character((cached_meta %||% list())$row_types %||% character(0))
+            if (length(row_types) != nrow(block_data)) {
+                row_types <- tolower(trimws(as.character(block_data$V3 %||% rep("", nrow(block_data)))))
+            }
             starts    <- suppressWarnings(as.numeric(block_data$V4))
             ends      <- suppressWarnings(as.numeric(block_data$V5))
 
             # CDS length (sum of merged CDS intervals)
-            cds_ranges <- as_feature_ranges(block_data[row_types == "cds", , drop = FALSE])
-            cds_len    <- feature_ranges_union_length(unique_feature_ranges(cds_ranges))
+            cds_ranges <- (cached_meta %||% list())$cds_ranges
+            if (!is.data.frame(cds_ranges)) {
+                cds_ranges <- as_feature_ranges(block_data[row_types == "cds", , drop = FALSE])
+            }
+            cds_len <- feature_ranges_union_length_normalized(cds_ranges)
             if (!is.finite(cds_len) || cds_len < 0) cds_len <- 0
 
             # Exon count (fall back to CDS rows if no exon features)
@@ -6282,15 +6573,24 @@ function(input, output, session) {
             # Transcript span length
             tx_rows <- which(row_types %in% tx_types_local)
             tx_len  <- NA_real_
-            tx_label <- ""
+            tx_label <- as.character((cached_meta %||% list())$transcript %||% "")
+            tx_attr <- as.character((cached_meta %||% list())$tx_attr %||% "")
             if (length(tx_rows) > 0L) {
                 ri     <- tx_rows[1L]
-                tx_len <- suppressWarnings(as.numeric(ends[ri] - starts[ri] + 1))
-                parsed <- tryCatch(parse_gff_attributes(as.character(block_data$V9[ri] %||% "")), error = function(e) list())
-                tx_label <- tryCatch(
-                    as.character(pick_attr(parsed, c("transcript_id", "id", "name", "transcript")) %||% ""),
-                    error = function(e) ""
-                )
+                cached_span <- suppressWarnings(as.numeric((cached_meta %||% list())$span %||% numeric(0)))
+                tx_len <- if (length(cached_span) >= 2L && all(is.finite(cached_span[1:2]))) {
+                    as.numeric(cached_span[2] - cached_span[1] + 1)
+                } else {
+                    suppressWarnings(as.numeric(ends[ri] - starts[ri] + 1))
+                }
+                if (!nzchar(tx_attr)) tx_attr <- as.character(block_data$V9[ri] %||% "")
+                if (!nzchar(tx_label)) {
+                    parsed <- tryCatch(parse_gff_attributes(tx_attr), error = function(e) list())
+                    tx_label <- tryCatch(
+                        as.character(pick_attr(parsed, c("transcript_id", "id", "name", "transcript")) %||% ""),
+                        error = function(e) ""
+                    )
+                }
             }
             if (!is.finite(tx_len) || tx_len <= 0) {
                 tx_span <- tryCatch(compute_transcript_span(block_data), error = function(e) c(start = NA_real_, end = NA_real_))
@@ -6303,11 +6603,13 @@ function(input, output, session) {
             if (length(tx_rows) > 0L) {
                 ri_src     <- tx_rows[1L]
                 source_val <- tolower(trimws(as.character(block_data$V2[ri_src] %||% "")))
-                tag_raw    <- parsed[["tag"]] %||% character(0)
-                tag_vals   <- tryCatch(
-                    tolower(trimws(unlist(strsplit(paste(tag_raw, collapse = ","), ",")))),
-                    error = function(e) character(0)
-                )
+                if (!nzchar(tx_attr)) tx_attr <- as.character(block_data$V9[ri_src] %||% "")
+                tag_matches <- stringr::str_match_all(
+                    tx_attr,
+                    stringr::regex('(?:^|;)\\s*tag(?:=|\\s+")([^;"]+)', ignore_case = TRUE)
+                )[[1]]
+                tag_raw <- if (nrow(tag_matches) > 0L) tag_matches[, 2] else character(0)
+                tag_vals <- tolower(trimws(unlist(strsplit(paste(tag_raw, collapse = ","), ","))))
                 is_nm_nr   <- grepl("^(NM_|NR_)", tx_label, ignore.case = TRUE)
 
                 if (any(tag_vals == "mane select")) {
@@ -6371,6 +6673,21 @@ function(input, output, session) {
         as.integer(sum(hits))
     }
 
+    count_normalized_exons_with_cds_overlap <- function(exon_ranges, cds_ranges) {
+        if (is.null(exon_ranges) || is.null(cds_ranges) ||
+            nrow(exon_ranges) == 0L || nrow(cds_ranges) == 0L) {
+            return(0L)
+        }
+        ex_start <- as.numeric(exon_ranges$start)
+        ex_end <- as.numeric(exon_ranges$end)
+        cds_start <- as.numeric(cds_ranges$start)
+        cds_end <- as.numeric(cds_ranges$end)
+        hits <- vapply(seq_along(ex_start), function(i) {
+            any(ex_start[[i]] <= cds_end & ex_end[[i]] >= cds_start)
+        }, logical(1))
+        as.integer(sum(hits))
+    }
+
     get_attr_first_value <- function(attrs, keys = character(0), fallback = "") {
         if (is.null(attrs) || length(attrs) == 0) {
             return(as.character(fallback %||% ""))
@@ -6388,12 +6705,26 @@ function(input, output, session) {
     }
 
     extract_biotype_from_attr_text <- function(attr_txt) {
-        attrs <- parse_gff_attributes(as.character(attr_txt %||% ""))
-        bt <- get_attr_first_value(
-            attrs,
-            c("transcript_biotype", "gene_biotype", "biotype", "gene_type", "transcript_type", "gbkey"),
-            fallback = ""
-        )
+        attr_value <- as.character(attr_txt %||% "")
+        key_priority <- c("transcript_biotype", "gene_biotype", "biotype", "gene_type", "transcript_type", "gbkey")
+        matches <- stringr::str_match_all(
+            attr_value,
+            stringr::regex(
+                '(?:^|;)\\s*(transcript_biotype|gene_biotype|biotype|gene_type|transcript_type|gbkey)\\s*(?:=|\\s+)\\s*"?([^;"]+)',
+                ignore_case = TRUE
+            )
+        )[[1]]
+        bt <- ""
+        if (nrow(matches) > 0L) {
+            keys_found <- tolower(matches[, 2])
+            for (key in key_priority) {
+                idx <- which(keys_found == key)[1L]
+                if (is.finite(idx)) {
+                    bt <- safe_url_decode(matches[idx, 3])
+                    break
+                }
+            }
+        }
         bt <- trimws(as.character(bt %||% ""))
         if (!nzchar(bt)) {
             return("")
@@ -6583,7 +6914,7 @@ function(input, output, session) {
         result
     }
 
-    build_transcript_metrics_payloads <- function(full_data, transcript_blocks = NULL, representative_name = "", organism_name = "", annotation_path = "", use_report_map = FALSE, report_path = "") {
+    build_transcript_metrics_payloads <- function(full_data, transcript_blocks = NULL, representative_name = "", organism_name = "", annotation_path = "", use_report_map = FALSE, report_path = "", perf_run = NULL, perf_context = "APP") {
         if (is.null(full_data) || nrow(full_data) == 0) {
             return(list())
         }
@@ -6608,6 +6939,35 @@ function(input, output, session) {
                 return("N/A")
             }
             paste0(format_bp_short(x), " bp")
+        }
+        format_bp_short_vec <- function(x) {
+            xx <- suppressWarnings(as.numeric(x))
+            out <- rep("N/A", length(xx))
+            keep <- is.finite(xx)
+            if (any(keep)) {
+                out[keep] <- format(
+                    as.integer(round(xx[keep])),
+                    big.mark = ",",
+                    scientific = FALSE,
+                    trim = TRUE
+                )
+            }
+            out
+        }
+        format_bp_value_vec <- function(x) {
+            out <- format_bp_short_vec(x)
+            keep <- out != "N/A"
+            out[keep] <- paste0(out[keep], " bp")
+            out
+        }
+        format_pct_short_vec <- function(x, digits = 1L) {
+            xx <- suppressWarnings(as.numeric(x))
+            out <- rep("N/A", length(xx))
+            keep <- is.finite(xx)
+            if (any(keep)) {
+                out[keep] <- sprintf(paste0("%.", as.integer(digits), "f%%"), xx[keep])
+            }
+            out
         }
         tx_types <- transcript_level_feature_types()
         chr_short_cache <- new.env(parent = emptyenv())
@@ -6637,6 +6997,7 @@ function(input, output, session) {
             out
         }
 
+        metrics_setup_t0 <- app_perf_now()
         df_full <- as.data.frame(full_data, stringsAsFactors = FALSE)
         row_types_full <- tolower(trimws(as.character(df_full$V3 %||% rep("", nrow(df_full)))))
         gene_rows_full <- df_full[row_types_full == "gene", , drop = FALSE]
@@ -6668,6 +7029,7 @@ function(input, output, session) {
         } else {
             NA_real_
         }
+        app_perf_mark_ms(perf_run, "metrics_setup_ms", app_perf_elapsed_ms(metrics_setup_t0), perf_context)
 
         per_block <- vector("list", length(blocks))
         exon_keys_by_block <- vector("list", length(blocks))
@@ -6677,42 +7039,62 @@ function(input, output, session) {
         tx_biotypes <- rep("", length(blocks))
         tx_labels <- rep("N/A", length(blocks))
         chr_short_labels <- rep("N/A", length(blocks))
+        stage_ms <- c(labels = 0, chromosome = 0, span = 0, biotype = 0, ranges = 0, derived = 0)
 
         for (i in seq_along(blocks)) {
             block <- blocks[[i]]
             if (is.null(block) || nrow(block) == 0) {
                 block <- df_full
             }
+            cached_meta <- attr(block, "cgev_transcript_meta", exact = TRUE)
             block <- as.data.frame(block, stringsAsFactors = FALSE)
-            row_types <- tolower(trimws(as.character(block$V3 %||% rep("", nrow(block)))))
+            row_types <- as.character((cached_meta %||% list())$row_types %||% character(0))
+            if (length(row_types) != nrow(block)) {
+                row_types <- tolower(trimws(as.character(block$V3 %||% rep("", nrow(block)))))
+            }
             tx_rows <- block[row_types %in% tx_types, , drop = FALSE]
             gene_rows <- block[row_types == "gene", , drop = FALSE]
+            stage_t0 <- app_perf_now()
             labels <- extract_plot_labels(block)
             tx_name <- clean_label(normalize_display_id(labels$transcript), "N/A")
             tx_labels[i] <- tx_name
+            stage_ms[["labels"]] <- stage_ms[["labels"]] + app_perf_elapsed_ms(stage_t0)
+            stage_t0 <- app_perf_now()
             chr_raw <- clean_label(labels$chromosome, "N/A")
             chr_short <- get_chr_short_cached(chr_raw)
             chr_short_labels[i] <- clean_label(chr_short, chr_raw)
+            stage_ms[["chromosome"]] <- stage_ms[["chromosome"]] + app_perf_elapsed_ms(stage_t0)
 
+            stage_t0 <- app_perf_now()
             tx_span <- compute_transcript_span(block)
             tx_start <- as.numeric(tx_span[["start"]])
             tx_end <- as.numeric(tx_span[["end"]])
             tx_len <- if (is.finite(tx_start) && is.finite(tx_end) && tx_end >= tx_start) as.numeric(tx_end - tx_start + 1) else NA_real_
             tx_lengths[i] <- tx_len
+            stage_ms[["span"]] <- stage_ms[["span"]] + app_perf_elapsed_ms(stage_t0)
 
-            tx_attr <- if (nrow(tx_rows) > 0) as.character(tx_rows$V9[1] %||% "") else ""
-            gene_attr_block <- if (nrow(gene_rows) > 0) as.character(gene_rows$V9[1] %||% "") else gene_attr
+            stage_t0 <- app_perf_now()
+            tx_attr <- as.character((cached_meta %||% list())$tx_attr %||% "")
+            if (!nzchar(tx_attr) && nrow(tx_rows) > 0) tx_attr <- as.character(tx_rows$V9[1] %||% "")
+            gene_attr_block <- as.character((cached_meta %||% list())$gene_attr %||% "")
+            if (!nzchar(gene_attr_block)) gene_attr_block <- if (nrow(gene_rows) > 0) as.character(gene_rows$V9[1] %||% "") else gene_attr
             tx_biotype <- extract_biotype_from_attr_text(tx_attr)
             if (!nzchar(tx_biotype)) {
                 tx_biotype <- extract_biotype_from_attr_text(gene_attr_block)
             }
             tx_biotype <- clean_label(tx_biotype, "N/A")
             tx_biotypes[i] <- tx_biotype
+            stage_ms[["biotype"]] <- stage_ms[["biotype"]] + app_perf_elapsed_ms(stage_t0)
 
-            exon_ranges <- as_feature_ranges(block[row_types == "exon", , drop = FALSE])
-            exon_ranges <- unique_feature_ranges(exon_ranges)
-            cds_ranges <- as_feature_ranges(block[row_types == "cds", , drop = FALSE])
-            cds_ranges <- unique_feature_ranges(cds_ranges)
+            stage_t0 <- app_perf_now()
+            exon_ranges <- (cached_meta %||% list())$exon_ranges
+            if (!is.data.frame(exon_ranges)) {
+                exon_ranges <- unique_feature_ranges(as_feature_ranges(block[row_types == "exon", , drop = FALSE]))
+            }
+            cds_ranges <- (cached_meta %||% list())$cds_ranges
+            if (!is.data.frame(cds_ranges)) {
+                cds_ranges <- unique_feature_ranges(as_feature_ranges(block[row_types == "cds", , drop = FALSE]))
+            }
             exon_ranges_for_metrics <- exon_ranges
             if (nrow(exon_ranges_for_metrics) == 0 && nrow(cds_ranges) > 0) {
                 exon_ranges_for_metrics <- cds_ranges
@@ -6724,12 +7106,14 @@ function(input, output, session) {
             } else {
                 character(0)
             }
+            stage_ms[["ranges"]] <- stage_ms[["ranges"]] + app_perf_elapsed_ms(stage_t0)
 
-            cds_len <- feature_ranges_union_length(cds_ranges)
+            stage_t0 <- app_perf_now()
+            cds_len <- feature_ranges_union_length_normalized(cds_ranges)
             cds_lengths[i] <- cds_len
             protein_aa <- if (is.finite(cds_len) && cds_len > 0) floor(cds_len / 3) else NA_real_
             coding_exons <- if (nrow(exon_ranges_for_metrics) > 0 && nrow(cds_ranges) > 0) {
-                count_exons_with_cds_overlap(exon_ranges_for_metrics, cds_ranges)
+                count_normalized_exons_with_cds_overlap(exon_ranges_for_metrics, cds_ranges)
             } else if (nrow(cds_ranges) > 0) {
                 as.integer(nrow(cds_ranges))
             } else {
@@ -6745,26 +7129,31 @@ function(input, output, session) {
             } else {
                 NA_real_
             }
-            tx_coords <- if (is.finite(tx_start) && is.finite(tx_end)) {
-                paste0(format_bp_short(tx_start), " - ", format_bp_short(tx_end))
-            } else {
-                "N/A"
-            }
-
             per_block[[i]] <- list(
                 tx_name = tx_name,
                 tx_len = tx_len,
+                tx_start = tx_start,
+                tx_end = tx_end,
                 cds_len = cds_len,
                 protein_aa = protein_aa,
                 coding_exons = coding_exons,
                 tx_coding_pct = tx_coding_pct,
                 tx_noncoding_bp = tx_noncoding_bp,
                 tx_biotype = tx_biotype,
-                chr_short = clean_label(chr_short_labels[i], "N/A"),
-                tx_coords = tx_coords
+                chr_short = clean_label(chr_short_labels[i], "N/A")
+            )
+            stage_ms[["derived"]] <- stage_ms[["derived"]] + app_perf_elapsed_ms(stage_t0)
+        }
+        for (stage_name in names(stage_ms)) {
+            app_perf_mark_ms(
+                perf_run,
+                paste0("metrics_stage_", stage_name, "_ms"),
+                stage_ms[[stage_name]],
+                perf_context
             )
         }
 
+        metrics_aggregate_t0 <- app_perf_now()
         if (!nzchar(gene_biotype)) {
             tb <- tx_biotypes[nzchar(tx_biotypes) & tx_biotypes != "N/A"]
             if (length(tb) > 0) {
@@ -6826,17 +7215,73 @@ function(input, output, session) {
 
         gene_name_txt <- clean_label(normalize_display_id(representative_name), "N/A")
         organism_txt <- format_org_name(clean_label(organism_name, "N/A"))
+        longest_exon_txt <- if (length(exon_lengths) > 0 && any(is.finite(exon_lengths))) {
+            format_bp_value(max(exon_lengths, na.rm = TRUE))
+        } else {
+            "N/A"
+        }
+        shortest_exon_txt <- if (length(exon_lengths) > 0 && any(is.finite(exon_lengths))) {
+            format_bp_value(min(exon_lengths, na.rm = TRUE))
+        } else {
+            "N/A"
+        }
+        gene_summary_section <- list(
+            title = "Gene summary",
+            rows = list(
+                list(label = "Biotype", value = gene_biotype),
+                list(label = "Transcript isoforms", value = as.character(length(blocks))),
+                list(label = "Longest transcript", value = longest_tx_txt),
+                list(label = "Longest CDS", value = longest_cds_txt),
+                list(label = "Coding vs non-coding", value = coding_vs_noncoding_txt)
+            )
+        )
+        splicing_complexity_section <- list(
+            title = "Splicing complexity",
+            rows = list(
+                list(label = "Unique exons (gene)", value = as.character(unique_exon_total)),
+                list(label = "Constitutive exons", value = as.character(constitutive_exons)),
+                list(label = "Alternative exons", value = as.character(alternative_exons)),
+                list(label = "Longest exon", value = longest_exon_txt),
+                list(label = "Shortest exon", value = shortest_exon_txt)
+            )
+        )
+        app_perf_mark_ms(perf_run, "metrics_aggregate_ms", app_perf_elapsed_ms(metrics_aggregate_t0), perf_context)
 
+        metrics_payloads_t0 <- app_perf_now()
+        # Formatting one scalar at a time is surprisingly expensive for genes
+        # with hundreds of isoforms. Format each numeric field in one vectorized
+        # pass, then assemble the same payload strings below.
+        tx_len_vec <- vapply(per_block, function(tx) as.numeric(tx$tx_len %||% NA_real_), numeric(1))
+        cds_len_vec <- vapply(per_block, function(tx) as.numeric(tx$cds_len %||% NA_real_), numeric(1))
+        protein_aa_vec <- vapply(per_block, function(tx) as.numeric(tx$protein_aa %||% NA_real_), numeric(1))
+        tx_coding_pct_vec <- vapply(per_block, function(tx) as.numeric(tx$tx_coding_pct %||% NA_real_), numeric(1))
+        tx_noncoding_bp_vec <- vapply(per_block, function(tx) as.numeric(tx$tx_noncoding_bp %||% NA_real_), numeric(1))
+        tx_start_vec <- vapply(per_block, function(tx) as.numeric(tx$tx_start %||% NA_real_), numeric(1))
+        tx_end_vec <- vapply(per_block, function(tx) as.numeric(tx$tx_end %||% NA_real_), numeric(1))
+        cds_gene_pct_vec <- if (is.finite(gene_len) && gene_len > 0) {
+            ifelse(is.finite(cds_len_vec) & cds_len_vec > 0, 100 * cds_len_vec / gene_len, NA_real_)
+        } else {
+            rep(NA_real_, length(cds_len_vec))
+        }
+        tx_len_txt_vec <- format_bp_value_vec(tx_len_vec)
+        cds_len_txt_vec <- format_bp_value_vec(cds_len_vec)
+        cds_len_txt_vec[!is.finite(cds_len_vec) | cds_len_vec <= 0] <- "N/A"
+        protein_aa_txt_vec <- format_bp_short_vec(protein_aa_vec)
+        protein_aa_txt_vec[!is.finite(protein_aa_vec) | protein_aa_vec <= 0] <- "N/A"
+        protein_aa_txt_vec[protein_aa_txt_vec != "N/A"] <- paste0(protein_aa_txt_vec[protein_aa_txt_vec != "N/A"], " aa")
+        tx_coding_pct_txt_vec <- format_pct_short_vec(tx_coding_pct_vec)
+        cds_gene_pct_txt_vec <- format_pct_short_vec(cds_gene_pct_vec)
+        tx_noncoding_bp_txt_vec <- format_bp_value_vec(tx_noncoding_bp_vec)
+        tx_start_txt_vec <- format_bp_short_vec(tx_start_vec)
+        tx_end_txt_vec <- format_bp_short_vec(tx_end_vec)
+        tx_coords_txt_vec <- ifelse(
+            is.finite(tx_start_vec) & is.finite(tx_end_vec),
+            paste0(tx_start_txt_vec, " - ", tx_end_txt_vec),
+            "N/A"
+        )
         payloads <- vector("list", length(blocks))
         for (i in seq_along(blocks)) {
             tx <- per_block[[i]]
-            cds_tx_txt <- if (is.finite(tx$tx_coding_pct)) format_pct_short(tx$tx_coding_pct) else "N/A"
-            cds_gene_pct <- if (is.finite(gene_len) && gene_len > 0 && is.finite(tx$cds_len) && tx$cds_len > 0) {
-                100 * as.numeric(tx$cds_len) / as.numeric(gene_len)
-            } else {
-                NA_real_
-            }
-            cds_gene_txt <- if (is.finite(cds_gene_pct)) format_pct_short(cds_gene_pct) else "N/A"
 
             payloads[[i]] <- list(
                 title = "Gene statistics",
@@ -6846,70 +7291,35 @@ function(input, output, session) {
                     organism_txt
                 ),
                 sections = list(
-                    list(
-                        title = "Gene summary",
-                        rows = list(
-                            list(label = "Biotype", value = gene_biotype),
-                            list(label = "Transcript isoforms", value = as.character(length(blocks))),
-                            list(label = "Longest transcript", value = longest_tx_txt),
-                            list(label = "Longest CDS", value = longest_cds_txt),
-                            list(label = "Coding vs non-coding", value = coding_vs_noncoding_txt)
-                        )
-                    ),
-                    list(
-                        title = "Splicing complexity",
-                        rows = list(
-                            list(label = "Unique exons (gene)", value = as.character(unique_exon_total)),
-                            list(label = "Constitutive exons", value = as.character(constitutive_exons)),
-                            list(label = "Alternative exons", value = as.character(alternative_exons)),
-                            list(
-                                label = "Longest exon",
-                                value = if (length(exon_lengths) > 0 && any(is.finite(exon_lengths))) {
-                                    format_bp_value(max(exon_lengths, na.rm = TRUE))
-                                } else {
-                                    "N/A"
-                                }
-                            ),
-                            list(
-                                label = "Shortest exon",
-                                value = if (length(exon_lengths) > 0 && any(is.finite(exon_lengths))) {
-                                    format_bp_value(min(exon_lengths, na.rm = TRUE))
-                                } else {
-                                    "N/A"
-                                }
-                            )
-                        )
-                    ),
+                    gene_summary_section,
+                    splicing_complexity_section,
                     list(
                         title = "Current transcript",
                         rows = list(
                             list(label = "Biotype", value = clean_label(tx$tx_biotype, "N/A")),
-                            list(label = "Transcript length", value = format_bp_value(tx$tx_len)),
+                            list(label = "Transcript length", value = tx_len_txt_vec[[i]]),
                             list(
                                 label = "CDS length",
-                                value = if (is.finite(tx$cds_len) && tx$cds_len > 0) format_bp_value(tx$cds_len) else "N/A"
+                                value = cds_len_txt_vec[[i]]
                             ),
                             list(
                                 label = "Protein length",
-                                value = if (is.finite(tx$protein_aa) && tx$protein_aa > 0) {
-                                    paste0(format_bp_short(tx$protein_aa), " aa")
-                                } else {
-                                    "N/A"
-                                }
+                                value = protein_aa_txt_vec[[i]]
                             ),
                             list(label = "Coding exons", value = as.character(as.integer(tx$coding_exons %||% 0L))),
-                            list(label = "CDS / transcript", value = cds_tx_txt),
-                            list(label = "CDS / gene", value = cds_gene_txt),
+                            list(label = "CDS / transcript", value = tx_coding_pct_txt_vec[[i]]),
+                            list(label = "CDS / gene", value = cds_gene_pct_txt_vec[[i]]),
                             list(
                                 label = "Non-coding region (transcript)",
-                                value = if (is.finite(tx$tx_noncoding_bp)) format_bp_value(tx$tx_noncoding_bp) else "N/A"
+                                value = tx_noncoding_bp_txt_vec[[i]]
                             ),
-                            list(label = "Transcript coords", value = clean_label(tx$tx_coords, "N/A"))
+                            list(label = "Transcript coords", value = tx_coords_txt_vec[[i]])
                         )
                     )
                 )
             )
         }
+        app_perf_mark_ms(perf_run, "metrics_payload_assembly_ms", app_perf_elapsed_ms(metrics_payloads_t0), perf_context)
 
         payloads
     }
@@ -7138,6 +7548,17 @@ function(input, output, session) {
         )
     }
 
+    isoform_toggle_input_id <- function(context = "", plot_id = "") {
+        context_key <- tolower(trimws(as.character(context %||% "")))
+        context_key <- if (startsWith(context_key, "ortho")) "ortho" else "homo"
+        paste0(
+            "isoform_toggle_",
+            context_key,
+            "_",
+            gsub("[^A-Za-z0-9_]", "_", as.character(plot_id %||% ""))
+        )
+    }
+
     build_footer_content_ui <- function(plot_data, seq_blob = NULL, metrics_payload = NULL,
                                         plot_id = NULL, context = "homo",
                                         gene_label = "", organism_name = "",
@@ -7145,7 +7566,8 @@ function(input, output, session) {
                                         isoform_count = 0L, tx_group_key = NULL,
                                         total_transcripts = NULL,
                                         is_canonical = FALSE,
-                                        is_canonical_copy = FALSE) {
+                                        is_canonical_copy = FALSE,
+                                        isoform_expanded = FALSE) {
         footer_perf <- app_perf_new_run(sprintf("FOOTER-%s", toupper(as.character(context %||% "homo"))))
         app_perf_mark(
             footer_perf,
@@ -7290,20 +7712,29 @@ function(input, output, session) {
         expand_item <- if (!isTRUE(is_canonical_copy) && !is.null(tx_group_key) && nzchar(tx_group_key) && isoform_count > 0L) {
             div(
                 class = "footer-item footer-item-isoform-toggle",
-                tags$button(
-                    class = "btn isoform-toggle-btn",
+                tags$label(
+                    class = "btn isoform-toggle-btn isoform-toggle-label",
                     style = "font-size:10.5px; color:#4B6072; background:none; border:none; padding:2px 0; cursor:pointer; display:inline-flex; align-items:center; gap:4px;",
-                    `data-group` = tx_group_key,
-                    `data-count` = as.character(total_tx_display),
-                    onclick = sprintf(
-                        "window.toggleIsoformCards && window.toggleIsoformCards(this, '%s')",
-                        gsub("'", "\\'", tx_group_key)
+                    tags$input(
+                        type = "checkbox",
+                        id = isoform_toggle_input_id(context, plot_id),
+                        class = "isoform-toggle-checkbox",
+                        `data-group` = tx_group_key,
+                        `data-count` = as.character(total_tx_display),
+                        `data-plot-id` = as.character(plot_id %||% ""),
+                        checked = if (isTRUE(isoform_expanded)) "checked" else NULL
                     ),
-                    HTML(sprintf(
-                        "&#x25BC; %d transcript%s",
-                        total_tx_display,
-                        if (total_tx_display > 1L) "s" else ""
-                    ))
+                    tags$span(class = "isoform-toggle-down", `aria-hidden` = "true", HTML("&#x25BC;")),
+                    tags$span(class = "isoform-toggle-up", `aria-hidden` = "true", HTML("&#x25B2;")),
+                    tags$span(
+                        id = paste0(isoform_toggle_input_id(context, plot_id), "_label"),
+                        class = "isoform-toggle-text",
+                        sprintf(
+                            "%d transcript%s",
+                            total_tx_display,
+                            if (total_tx_display > 1L) "s" else ""
+                        )
+                    )
                 )
             )
         } else {
@@ -7440,7 +7871,7 @@ function(input, output, session) {
     }
 
     should_suspend_hidden_ortho_outputs <- function() {
-        raw <- tolower(trimws(as.character(Sys.getenv("APP_ORTHO_SUSPEND_HIDDEN", "0") %||% "0")))
+        raw <- tolower(trimws(as.character(Sys.getenv("APP_ORTHO_SUSPEND_HIDDEN", "1") %||% "1")))
         !raw %in% c("", "0", "false", "no", "off")
     }
 
@@ -7933,6 +8364,11 @@ function(input, output, session) {
 	    compute_transcript_span <- function(block_data) {
         if (is.null(block_data) || nrow(block_data) == 0) {
             return(c(start = NA_real_, end = NA_real_))
+        }
+        cached_meta <- attr(block_data, "cgev_transcript_meta", exact = TRUE)
+        cached_span <- suppressWarnings(as.numeric((cached_meta %||% list())$span %||% numeric(0)))
+        if (length(cached_span) >= 2L && all(is.finite(cached_span[1:2]))) {
+            return(stats::setNames(cached_span[1:2], c("start", "end")))
         }
         row_types <- tolower(trimws(as.character(block_data$V3 %||% rep("", nrow(block_data)))))
         tx_level_types <- c(
@@ -10039,6 +10475,19 @@ function(input, output, session) {
         )
     })
 
+    primaryPlotIdsHomologous <- reactive({
+        ids <- as.character(sortedPlotIdsHomologous() %||% character(0))
+        ids <- ids[nzchar(ids)]
+        if (length(ids) == 0L) {
+            return(character(0))
+        }
+        meta_map <- tryCatch(plotGeneMetaHomologous(), error = function(e) list())
+        Filter(function(pid) {
+            meta <- tryCatch(meta_map[[pid]], error = function(e) NULL)
+            !identical(meta$is_canonical, FALSE)
+        }, ids)
+    })
+
     primaryPlotIdsOrthologous <- reactive({
         ids <- as.character(sortedPlotIdsOrthologous() %||% character(0))
         ids <- ids[nzchar(ids)]
@@ -10226,6 +10675,13 @@ function(input, output, session) {
 	        ids <- as.character(sortedPlotIdsOrthologous() %||% integer(0))
         if (length(ids) == 0L) {
             return(character(0))
+        }
+        current_mode <- tolower(trimws(as.character(input$ortho_visual_mode %||% "compact")))
+        if (!identical(current_mode, "aligned")) {
+            # Representative selection is only consumed by Alignment.  Keep the
+            # hidden shell cheap; switching modes invalidates this reactive and
+            # runs the exact same selection algorithm on demand.
+            return(ids)
         }
 
         titles_map <- tryCatch(titlesOrthologous(), error = function(e) list())
@@ -10848,6 +11304,12 @@ function(input, output, session) {
 	        if (length(ids) <= 1L) {
 	            return(ids)
 	        }
+	        current_mode <- tolower(trimws(as.character(input$ortho_visual_mode %||% "compact")))
+	        if (!identical(current_mode, "aligned")) {
+	            # Similarity-chain ordering extracts spliced sequences.  Never do
+	            # that work for the hidden Alignment output while Compact is active.
+	            return(ids)
+	        }
 
 	        order_mode <- tolower(trimws(as.character(input$ortho_aligned_track_order %||% "similarity_chain")))
 	        if (!order_mode %in% c("similarity_chain", "load", "organism", "reverse", "manual")) {
@@ -11032,6 +11494,10 @@ function(input, output, session) {
 	            ids <- ids_all
 	        }
 	        if (length(ids) <= 1L) {
+	            return(ids)
+	        }
+	        current_mode <- tolower(trimws(as.character(input$ortho_visual_mode %||% "compact")))
+	        if (!identical(current_mode, "aligned")) {
 	            return(ids)
 	        }
 	        order_mode <- tolower(trimws(as.character(input$ortho_aligned_track_order %||% "similarity_chain")))
@@ -13247,38 +13713,43 @@ function(input, output, session) {
                 is.data.frame(alias_index_matches) && nrow(alias_index_matches) > 0L) {
                 selected_alias_match <- alias_index_matches[1, , drop = FALSE]
                 selected_role <- as.character(selected_alias_match$match_role[1] %||% "")
-                if (identical(selected_role, "stable_id")) {
-                    alias_lookup <- tryCatch(
-                        alias_index_match_to_lookup(selected_alias_match, file_path = file_path, input_gene = input_gene),
-                        error = function(e) NULL
+                alias_fast_t0 <- app_perf_now()
+                alias_lookup <- tryCatch(
+                    alias_index_match_to_lookup(selected_alias_match, file_path = file_path, input_gene = input_gene),
+                    error = function(e) NULL
+                )
+                app_perf_mark_ms(lookup_perf, "lookup_alias_fast_region_ms", app_perf_elapsed_ms(alias_fast_t0), perf_context)
+                app_perf_mark(
+                    lookup_perf,
+                    sprintf("alias fast candidate role=%s rows=%d", selected_role, as.integer(nrow((alias_lookup %||% list())$data %||% data.frame()))),
+                    perf_context
+                )
+                if (!is.null(alias_lookup$data) && is.data.frame(alias_lookup$data) && nrow(alias_lookup$data) > 0L) {
+                    query_candidates_used <<- normalize_lookup_query_candidates(c(
+                        query_candidates_used,
+                        selected_alias_match$query_term_original,
+                        selected_alias_match$local_gene_id,
+                        selected_alias_match$local_symbol
+                    ))
+                    best_res <- attach_lookup_result_meta(
+                        alias_lookup,
+                        query_candidates = query_candidates_used,
+                        best_alias_used = as.character(selected_alias_match$query_term_original[1] %||% ""),
+                        input_gene = input_gene
                     )
-                    if (!is.null(alias_lookup$data) && is.data.frame(alias_lookup$data) && nrow(alias_lookup$data) > 0L) {
-                        query_candidates_used <<- normalize_lookup_query_candidates(c(
-                            query_candidates_used,
-                            selected_alias_match$query_term_original,
-                            selected_alias_match$local_gene_id,
-                            selected_alias_match$local_symbol
-                        ))
-                        best_res <- attach_lookup_result_meta(
-                            alias_lookup,
-                            query_candidates = query_candidates_used,
-                            best_alias_used = as.character(selected_alias_match$query_term_original[1] %||% ""),
-                            input_gene = input_gene
-                        )
-                        best_res$lookup_stage <- "alias_index"
-                        best_res$alias_index_status <- alias_index_status
-                        best_res$alias_index_match <- selected_alias_match
-                        best_res$external_lookup_had_errors <- FALSE
-                        best_res$det_resolved <- det
-                        best_res$lookup_elapsed_ms <- app_perf_elapsed_ms(lookup_t0)
-                        push_progress(sprintf(
-                            "\u2022 CGeV resolved stable ID '%s' as %s using the local alias index.",
-                            input_gene,
-                            as.character(best_res$matched_gene_id %||% best_res$matched_gene_name %||% selected_alias_match$local_gene_id[1] %||% "")
-                        ))
-                        remember_lookup(cache_key_initial, best_res)
-                        return(best_res)
-                    }
+                    best_res$lookup_stage <- "alias_index"
+                    best_res$alias_index_status <- alias_index_status
+                    best_res$alias_index_match <- selected_alias_match
+                    best_res$external_lookup_had_errors <- FALSE
+                    best_res$det_resolved <- det
+                    best_res$lookup_elapsed_ms <- app_perf_elapsed_ms(lookup_t0)
+                    push_progress(sprintf(
+                        "\u2022 CGeV resolved '%s' as %s using the local alias index.",
+                        input_gene,
+                        as.character(best_res$matched_gene_id %||% best_res$matched_gene_name %||% selected_alias_match$local_gene_id[1] %||% "")
+                    ))
+                    remember_lookup(cache_key_initial, best_res)
+                    return(best_res)
                 }
             }
             NULL
@@ -14019,7 +14490,7 @@ function(input, output, session) {
     observeEvent(input$app_nav_click,
         {
             target <- as.character(input$app_nav_click %||% "")
-            if (!target %in% c("guide", "home", "homologous", "orthologous", "figure-studio", "desktop-app", "settings", "feedback")) {
+            if (!target %in% c("guide", "home", "catalog", "homologous", "orthologous", "figure-studio", "desktop-app", "settings", "feedback")) {
                 return(invisible(NULL))
             }
             updateTabsetPanel(session, "navtabs", selected = target)
@@ -14647,6 +15118,20 @@ function(input, output, session) {
         invisible(NULL)
     }, ignoreInit = TRUE)
 
+    observeEvent(input$cgv_card_complete, {
+        payload <- input$cgv_card_complete %||% list()
+        run_id <- trimws(as.character(payload$run_id %||% ""))
+        if (!nzchar(run_id)) return(invisible(NULL))
+        homo_run <- (homoPlotTimingTracker()$run %||% list())$id %||% ""
+        ortho_run <- (orthoPlotTimingTracker()$run %||% list())$id %||% ""
+        if (identical(run_id, as.character(homo_run))) {
+            handle_browser_card_complete(homoPlotTimingTracker, payload, "HOMO_TIMING")
+        } else if (identical(run_id, as.character(ortho_run))) {
+            handle_browser_card_complete(orthoPlotTimingTracker, payload, "ORTHO_TIMING")
+        }
+        invisible(NULL)
+    }, ignoreInit = TRUE)
+
     observeEvent(searchPreparationReadyOrtho(), {
         if (!isTRUE(searchPreparationReadyOrtho())) return(invisible(NULL))
         pending <- isolate(pendingPreparedSearchOrtho())
@@ -14665,6 +15150,332 @@ function(input, output, session) {
         )
         invisible(NULL)
     }, ignoreInit = TRUE)
+
+    if (isTRUE(catalogFeatureEnabled)) {
+    run_installed_catalog_search <- function(query = NULL, force = FALSE) {
+        term <- trimws(as.character(query %||% input$catalog_gene_query %||% ""))
+        if (nchar(term) < 3L) {
+            catalogSearchEpoch(isolate(catalogSearchEpoch()) + 1L)
+            catalogSearchResults(empty_alias_catalog_results())
+            catalogSearchStatus("Enter at least 3 characters to search every installed organism index.")
+            catalogSearchLastTerm("")
+            return(invisible(NULL))
+        }
+        if (!isTRUE(force) && identical(tolower(term), tolower(catalogSearchLastTerm()))) {
+            return(invisible(catalogSearchResults()))
+        }
+        registry <- tryCatch(isolate(preloadedRegistry()), error = function(e) data.frame())
+        if (!is.data.frame(registry)) registry <- data.frame()
+        ready <- if (nrow(registry) > 0L && "ready" %in% names(registry)) !is.na(registry$ready) & as.logical(registry$ready) else rep(TRUE, nrow(registry))
+        registry <- registry[ready, , drop = FALSE]
+        ready_count <- nrow(registry)
+        kingdom <- if ("kingdom" %in% names(registry)) trimws(as.character(registry$kingdom)) else rep("Other", ready_count)
+        kingdom[!nzchar(kingdom)] <- "Other"
+        kingdom_order <- unique(c(intersect(c("Plantae", "Animalia", "Fungi"), kingdom), kingdom))
+        registry_groups <- lapply(kingdom_order, function(value) registry[kingdom == value, , drop = FALSE])
+        names(registry_groups) <- kingdom_order
+        registry_groups <- Filter(function(x) is.data.frame(x) && nrow(x) > 0L, registry_groups)
+
+        token <- isolate(catalogSearchEpoch()) + 1L
+        catalogSearchEpoch(token)
+        catalogSearchResults(empty_alias_catalog_results())
+        catalogSearchLastTerm(term)
+        catalogSearchStatus(sprintf("Searching %d local organism indexes in %d group(s)…", ready_count, length(registry_groups)))
+        started <- proc.time()[["elapsed"]]
+
+        sort_catalog_rows <- function(results) {
+            if (!is.data.frame(results) || nrow(results) == 0L) return(empty_alias_catalog_results())
+            match_rank <- c(exact = 5L, normalized_basic = 4L, normalized_strict = 3L, prefix = 2L, contains = 1L)
+            confidence_rank <- c(HIGH = 3L, MEDIUM = 2L, LOW = 1L)
+            rank <- unname(match_rank[tolower(results$match_type)]) * 10L + unname(confidence_rank[toupper(results$confidence)])
+            rank[is.na(rank)] <- 0L
+            results[order(-rank, results$organism, results$resolved_gene, results$matched_term), , drop = FALSE]
+        }
+
+        process_group <- function(group_index = 1L, accumulated = empty_alias_catalog_results()) {
+            if (!identical(isolate(catalogSearchEpoch()), token)) return(invisible(NULL))
+            if (group_index > length(registry_groups)) {
+                elapsed <- proc.time()[["elapsed"]] - started
+                results <- accumulated
+                results <- sort_catalog_rows(results)
+                catalogSearchResults(results)
+                if (nrow(results) == 0L) {
+                    catalogSearchStatus(sprintf("No local alias matches for ‘%s’ across %d installed organism(s) (%.1fs).", term, ready_count, elapsed))
+                } else {
+                    organism_count <- length(unique(as.character(results$organism_id)))
+                    catalogSearchStatus(sprintf(
+                        "%d candidate genes across %d installed organism(s), searched in %.1fs.",
+                        nrow(results), organism_count, elapsed
+                    ))
+                }
+                return(invisible(results))
+            }
+
+            group_name <- names(registry_groups)[group_index]
+            group_results <- tryCatch(
+                search_installed_alias_catalog(term, registry = registry_groups[[group_index]], base_dir = "."),
+                error = function(e) {
+                    app_debug_log("[GeneCatalog] ", group_name, " search failed: ", e$message)
+                    empty_alias_catalog_results()
+                }
+            )
+            combined <- if (nrow(accumulated) > 0L && nrow(group_results) > 0L) {
+                rbind(accumulated, group_results)
+            } else if (nrow(group_results) > 0L) {
+                group_results
+            } else {
+                accumulated
+            }
+            combined <- sort_catalog_rows(combined)
+            catalogSearchResults(combined)
+            catalogSearchStatus(sprintf(
+                "%s complete · %d/%d groups · %d candidate gene(s) found so far…",
+                group_name, group_index, length(registry_groups), nrow(combined)
+            ))
+            continue_search <- function() process_group(group_index + 1L, combined)
+            if (requireNamespace("later", quietly = TRUE)) later::later(continue_search, delay = 0.03) else continue_search()
+            invisible(combined)
+        }
+
+        launch_search <- function() process_group(1L, empty_alias_catalog_results())
+        if (requireNamespace("later", quietly = TRUE)) later::later(launch_search, delay = 0.03) else launch_search()
+        invisible(NULL)
+    }
+
+    catalog_debounced_query <- shiny::debounce(reactive(trimws(as.character(input$catalog_gene_query %||% ""))), 350)
+    observeEvent(catalog_debounced_query(), {
+        if (identical(as.character(input$navtabs %||% ""), "catalog")) {
+            run_installed_catalog_search(catalog_debounced_query())
+        }
+    }, ignoreInit = TRUE)
+
+    observeEvent(input$catalog_search_go, {
+        run_installed_catalog_search(force = TRUE)
+    }, ignoreInit = TRUE)
+
+    output$catalog_search_status <- renderText(catalogSearchStatus())
+
+    catalog_filtered_results <- reactive({
+        df <- catalogSearchResults()
+        if (!is.data.frame(df) || nrow(df) == 0L) return(df)
+        kingdom_filter <- as.character(input$catalog_kingdom_filter %||% "all")
+        match_filter <- as.character(input$catalog_match_filter %||% "all")
+        confidence_filter <- toupper(as.character(input$catalog_confidence_filter %||% "all"))
+        if (!identical(kingdom_filter, "all")) df <- df[as.character(df$kingdom) == kingdom_filter, , drop = FALSE]
+        if (identical(match_filter, "exact")) {
+            df <- df[as.character(df$match_type) %in% c("exact", "normalized_basic", "normalized_strict"), , drop = FALSE]
+        } else if (identical(match_filter, "prefix")) {
+            df <- df[as.character(df$match_type) == "prefix", , drop = FALSE]
+        } else if (identical(match_filter, "contains")) {
+            df <- df[as.character(df$match_type) == "contains", , drop = FALSE]
+        }
+        if (!identical(confidence_filter, "ALL")) {
+            df <- df[toupper(as.character(df$confidence)) == confidence_filter, , drop = FALSE]
+        }
+        if (isTRUE(input$catalog_best_per_organism) && nrow(df) > 0L) {
+            df <- df[!duplicated(as.character(df$organism_id)), , drop = FALSE]
+        }
+        rownames(df) <- NULL
+        df
+    })
+
+    output$catalog_search_summary <- renderUI({
+        all_df <- catalogSearchResults()
+        shown_df <- catalog_filtered_results()
+        if (!is.data.frame(all_df) || nrow(all_df) == 0L) return(NULL)
+        exact_n <- sum(as.character(all_df$match_type) %in% c("exact", "normalized_basic", "normalized_strict"))
+        partial_n <- sum(as.character(all_df$match_type) %in% c("prefix", "contains"))
+        div(
+            class = "gene-catalog-summary-strip",
+            div(class = "gene-catalog-summary-item", span(class = "gene-catalog-summary-value", length(unique(all_df$organism_id))), span("Organisms")),
+            div(class = "gene-catalog-summary-item", span(class = "gene-catalog-summary-value", exact_n), span("Exact / normalized")),
+            div(class = "gene-catalog-summary-item", span(class = "gene-catalog-summary-value", partial_n), span("Family candidates")),
+            div(class = "gene-catalog-summary-item gene-catalog-summary-item--shown", span(class = "gene-catalog-summary-value", nrow(shown_df)), span("Shown"))
+        )
+    })
+
+    output$catalog_selection_actions <- renderUI({
+        selected <- suppressWarnings(as.integer(input$catalog_results_dt_rows_selected %||% integer(0)))
+        df <- catalog_filtered_results()
+        selected <- selected[!is.na(selected) & selected >= 1L & selected <= nrow(df)]
+        if (!length(selected)) {
+            return(div(class = "catalog-selection-bar is-empty", icon("check-square"), span("Select installed rows to open candidate genes in a visualization workflow.")))
+        }
+        chosen <- df[selected, , drop = FALSE]
+        organism_count <- length(unique(as.character(chosen$organism_id)))
+        can_cross <- nrow(chosen) >= 2L && organism_count >= 2L
+        div(
+            class = "catalog-selection-bar",
+            div(
+                class = "catalog-selection-copy",
+                strong(sprintf("%d selected", nrow(chosen))),
+                span(sprintf("%d installed organism(s)", organism_count))
+            ),
+            tags$button(
+                id = "catalog_open_selected_cross",
+                type = "button",
+                class = paste("btn btn-sm catalog-cross-action", if (!can_cross) "disabled"),
+                disabled = if (!can_cross) "disabled" else NULL,
+                icon("sitemap"),
+                span("Open in Cross-Species")
+            ),
+            if (!can_cross) span(class = "catalog-selection-note", "Requires installed rows from at least two organisms.") else
+                span(class = "catalog-selection-note is-warning", "Candidate loci — CGeV will verify orthology before plotting.")
+        )
+    })
+
+    output$catalog_results_dt <- DT::renderDataTable({
+        df <- catalog_filtered_results()
+        shiny::validate(shiny::need(is.data.frame(df) && nrow(df) > 0L, "Search the catalog to see local gene and alias matches."))
+        esc <- function(x, attribute = FALSE) htmltools::htmlEscape(as.character(x %||% ""), attribute = attribute)
+        compact_text <- function(x, n = 112L) {
+            x <- trimws(gsub("[[:space:]]+", " ", as.character(x %||% "")))
+            ifelse(nchar(x) > n, paste0(substr(x, 1L, n - 1L), "…"), x)
+        }
+        pretty_match <- c(exact = "Exact", normalized_basic = "Normalized", normalized_strict = "Normalized", prefix = "Prefix / family", contains = "Contains")
+        match_key <- tolower(as.character(df$match_type))
+        match_label <- unname(pretty_match[match_key])
+        match_label[is.na(match_label)] <- "Candidate"
+        organism_cell <- paste0(
+            "<div class='catalog-organism-cell'><span class='catalog-organism-icon'><img src='", esc(df$icon_url, attribute = TRUE), "' alt='' loading='lazy'></span>",
+            "<span><strong><em>", esc(df$organism), "</em></strong><small>", esc(df$kingdom), "</small></span></div>"
+        )
+        gene_label <- ifelse(nzchar(trimws(as.character(df$resolved_symbol))), as.character(df$resolved_symbol), as.character(df$resolved_gene))
+        gene_cell <- paste0("<div class='catalog-gene-cell'><strong>", esc(gene_label), "</strong><small>", esc(df$resolved_gene), "</small></div>")
+        term_cell <- paste0("<div class='catalog-term-cell'><strong>", esc(df$matched_term), "</strong><small>", esc(gsub("_", " ", df$term_type)), "</small></div>")
+        match_cell <- paste0("<span class='catalog-badge catalog-badge--", esc(match_key), "'>", esc(match_label), "</span>")
+        conf_key <- tolower(as.character(df$confidence))
+        confidence_help <- paste(
+            "High: stable identifier or authoritative symbol in the local index.",
+            "Medium: gene name, alias, synonym, locus tag, or cross-reference.",
+            "Low: other annotation evidence.",
+            "Match type is scored separately, and confidence is not evidence of orthology."
+        )
+        confidence_cell <- paste0("<span class='catalog-confidence catalog-confidence--", esc(conf_key), "'><i></i>", esc(tools::toTitleCase(conf_key)), "</span>")
+        description_full <- compact_text(df$description, 1000L)
+        description_cell <- paste0("<span class='catalog-description' title='", esc(description_full, attribute = TRUE), "'>", esc(compact_text(df$description)), "</span>")
+        source_cell <- paste0("<div class='catalog-source-cell'><strong>", esc(df$source_db), "</strong><small>", esc(df$source_release), "</small></div>")
+        action_cell <- paste0(
+            "<button type='button' class='catalog-row-action catalog-row-action--open' data-catalog-action='multigene' data-species-id='",
+            esc(df$organism_id, attribute = TRUE), "' data-gene='", esc(df$resolved_gene, attribute = TRUE), "'>Open in Multi-Gene</button>"
+        )
+        display <- data.frame(
+            Organism = organism_cell,
+            Gene = gene_cell,
+            `Matched term` = term_cell,
+            Match = match_cell,
+            Confidence = confidence_cell,
+            Description = description_cell,
+            Source = source_cell,
+            Action = action_cell,
+            check.names = FALSE,
+            stringsAsFactors = FALSE
+        )
+        names(display)[5] <- paste0(
+            "<span class='catalog-confidence-heading'>Confidence",
+            "<span class='catalog-column-help' tabindex='0' title='", esc(confidence_help, attribute = TRUE),
+            "' aria-label='", esc(confidence_help, attribute = TRUE),
+            "' data-tooltip='", esc(confidence_help, attribute = TRUE), "'>?</span></span>"
+        )
+        DT::datatable(
+            display,
+            rownames = FALSE,
+            escape = FALSE,
+            selection = "multiple",
+            class = "display compact hover gene-catalog-table",
+            options = list(
+                pageLength = 12,
+                lengthMenu = list(c(12, 24, 48), c("12", "24", "48")),
+                scrollX = TRUE,
+                autoWidth = FALSE,
+                order = list(),
+                dom = "<'catalog-table-top'lf>t<'catalog-table-bottom'ip>",
+                language = list(search = "Find in results:", lengthMenu = "Show _MENU_", info = "_START_–_END_ of _TOTAL_ candidates"),
+                columnDefs = list(
+                    list(className = "dt-left", targets = seq_len(8) - 1L),
+                    list(width = "205px", targets = 0),
+                    list(width = "205px", targets = 1),
+                    list(width = "180px", targets = 2),
+                    list(width = "120px", targets = 3),
+                    list(width = "105px", targets = 4),
+                    list(width = "330px", targets = 5),
+                    list(width = "145px", targets = 6),
+                    list(width = "150px", targets = 7, orderable = FALSE)
+                )
+            )
+        )
+    }, server = FALSE)
+    outputOptions(output, "catalog_results_dt", suspendWhenHidden = FALSE)
+
+    output$download_catalog_csv <- downloadHandler(
+        filename = function() paste0("gene_catalog_", format(Sys.time(), "%Y%m%d_%H%M%S"), ".csv"),
+        content = function(file) {
+            export <- catalogSearchResults()
+            hidden_coordinates <- intersect(c("chromosome", "start", "end"), names(export))
+            if (length(hidden_coordinates)) export[hidden_coordinates] <- NULL
+            write.csv(export, file, row.names = FALSE, na = "")
+        }
+    )
+    outputOptions(output, "download_catalog_csv", suspendWhenHidden = FALSE)
+
+    observeEvent(input$catalog_open_multigene, {
+        payload <- input$catalog_open_multigene %||% list()
+        species_id <- trimws(as.character(payload$species_id %||% ""))
+        gene <- trimws(as.character(payload$gene %||% ""))
+        if (!nzchar(species_id) || !nzchar(gene)) return(invisible(NULL))
+        updateTabsetPanel(session, "navtabs", selected = "homologous")
+        updateRadioButtons(session, "homo_data_mode", selected = "preloaded")
+        updateTextInput(session, "filter1", value = gene)
+        launch <- function() session$sendCustomMessage("cgv:catalog-open-multigene", list(species_id = species_id, gene = gene))
+        if (requireNamespace("later", quietly = TRUE)) later::later(launch, delay = 0.12) else launch()
+        invisible(TRUE)
+    }, ignoreInit = TRUE, ignoreNULL = TRUE)
+
+    observeEvent(input$catalog_multigene_ready, {
+        payload <- input$catalog_multigene_ready %||% list()
+        species_id <- trimws(as.character(payload$species_id %||% ""))
+        gene <- trimws(as.character(payload$gene %||% ""))
+        if (!nzchar(species_id) || !nzchar(gene)) return(invisible(NULL))
+        updateTextInput(session, "filter1", value = gene)
+        execute_homologous_search(gene_override = gene, origin = "gene_catalog")
+        invisible(TRUE)
+    }, ignoreInit = TRUE, ignoreNULL = TRUE)
+
+    observeEvent(input$catalog_open_selected_cross, {
+        selected <- suppressWarnings(as.integer(input$catalog_results_dt_rows_selected %||% integer(0)))
+        df <- isolate(catalog_filtered_results())
+        selected <- selected[!is.na(selected) & selected >= 1L & selected <= nrow(df)]
+        if (!length(selected)) return(invisible(NULL))
+        chosen <- df[selected, , drop = FALSE]
+        if (any(as.character(chosen$availability) != "installed") || length(unique(chosen$organism_id)) < 2L) {
+            showNotification("Cross-Species requires installed candidates from at least two organisms.", type = "warning", duration = 5)
+            return(invisible(NULL))
+        }
+        species_ids <- unique(as.character(chosen$organism_id))
+        gene <- trimws(as.character(isolate(catalogSearchLastTerm()) %||% ""))
+        updateTabsetPanel(session, "navtabs", selected = "orthologous")
+        updateRadioButtons(session, "ortho_data_mode", selected = "preloaded")
+        updateTextInput(session, "gene_name", value = gene)
+        launch <- function() session$sendCustomMessage("cgv:catalog-open-cross", list(species_ids = species_ids, gene = gene))
+        if (requireNamespace("later", quietly = TRUE)) later::later(launch, delay = 0.12) else launch()
+        invisible(TRUE)
+    }, ignoreInit = TRUE, ignoreNULL = TRUE)
+
+    observeEvent(input$catalog_cross_ready, {
+        payload <- input$catalog_cross_ready %||% list()
+        gene <- trimws(as.character(payload$gene %||% ""))
+        species_ids <- unique(trimws(as.character(payload$species_ids %||% character(0))))
+        if (!nzchar(gene) || length(species_ids) < 2L) return(invisible(NULL))
+        emit_popup_status(
+            "Cross-Species Gene Search",
+            "Candidate loci were transferred from Gene Catalog. Matching names or aliases are not orthology evidence; CGeV will keep the verification gate before plotting.",
+            tone = "info",
+            clear = TRUE
+        )
+        execute_orthologous_search(gene_override = gene, origin = "gene_catalog")
+        invisible(TRUE)
+    }, ignoreInit = TRUE, ignoreNULL = TRUE)
+    }
 
     run_global_search <- function(query_override = NULL) {
         active_panel <- as.character(input$navtabs %||% "home")
@@ -17412,6 +18223,7 @@ function(input, output, session) {
                 }
 
                 # [HOMÓLOGOS]: Aquí usamos PARALELO (TRUE) porque es un solo proceso y queremos rapidez
+                lookup_total_t0_h <- app_perf_now()
                 lookup <- run_lookup_pipeline(
                     ruta_archivo,
                     filter_text,
@@ -17427,6 +18239,16 @@ function(input, output, session) {
                 )
                 data_n <- if (is.null(lookup$data)) 0L else nrow(lookup$data)
                 app_perf_mark(perf_run, sprintf("lookup done rows=%d", as.integer(data_n)), "HOMO")
+                app_perf_mark_ms(perf_run, "lookup_total_ms", app_perf_elapsed_ms(lookup_total_t0_h), "HOMO")
+                app_perf_mark(
+                    perf_run,
+                    sprintf(
+                        "lookup result stage=%s cache=%s",
+                        as.character(lookup$lookup_stage %||% "local_exact"),
+                        as.character(isTRUE(lookup$cache_hit))
+                    ),
+                    "HOMO"
+                )
 
                 data <- lookup$data
                 if (is.null(data) || nrow(data) == 0) {
@@ -17482,6 +18304,7 @@ function(input, output, session) {
 
                 set_popup_loading(TRUE, context = "Multi-Gene Search", text = sprintf("Plotting gene '%s' in %s...", filter_text, organism_context))
 
+                plot_state_prepare_t0_h <- app_perf_now()
                 result <- tryCatch(
                     {
                         matched_annotation_name <- normalize_display_id(lookup$matched_gene_name %||% lookup$best_alias_used %||% lookup$display_gene_name %||% filter_text)
@@ -17503,12 +18326,16 @@ function(input, output, session) {
                         split_t0 <- app_perf_now()
                         transcript_blocks <- split_gene_data_by_transcript(data)
                         if (length(transcript_blocks) == 0) transcript_blocks <- list(data)
+                        app_perf_mark_ms(perf_run, "split_blocks_only_ms", app_perf_elapsed_ms(split_t0), "HOMO")
+                        canonical_t0_h <- app_perf_now()
                         canonical_block_idx_homo <- tryCatch(
                             compute_canonical_block_idx(transcript_blocks),
                             error = function(e) 1L
                         )
+                        app_perf_mark_ms(perf_run, "canonical_select_ms", app_perf_elapsed_ms(canonical_t0_h), "HOMO")
                         app_perf_mark(perf_run, sprintf("split transcripts blocks=%d canonical_idx=%d", as.integer(length(transcript_blocks)), as.integer(canonical_block_idx_homo)), "HOMO")
                         app_perf_mark_ms(perf_run, "split_transcripts_ms", app_perf_elapsed_ms(split_t0), "HOMO")
+                        genome_resolve_t0_h <- app_perf_now()
                         resolved_genome <- if (identical(source_mode, "upload")) {
                             list(path = uploaded_genome_path, source = "uploaded", found = TRUE, organism = det$organism %||% NULL)
                         } else if (!is.null(forced_genome_path) && nzchar(forced_genome_path) && file.exists(forced_genome_path)) {
@@ -17517,6 +18344,7 @@ function(input, output, session) {
                             resolve_genome_fasta(det, NULL, genomes_dir = "genomes")
                         }
                         genome_path <- if (isTRUE(resolved_genome$found)) resolved_genome$path else NULL
+                        app_perf_mark_ms(perf_run, "genome_resolve_ms", app_perf_elapsed_ms(genome_resolve_t0_h), "HOMO")
                         use_preloaded_chr_map <- identical(source_mode, "preloaded") || identical(source_mode, "ncbi")
                         preloaded_report_path <- if (identical(source_mode, "preloaded")) as.character(entry$assembly_report_path[1] %||% "") else ""
 
@@ -17532,6 +18360,7 @@ function(input, output, session) {
                             canonical_block_idx_homo <- 1L
                         }
 
+                        neighbor_prepare_t0_h <- app_perf_now()
                         precomputed_neighbor_context <- tryCatch(
                             compute_neighbor_context_from_plot_data(
                                 annotation_file_path = ruta_archivo,
@@ -17540,6 +18369,7 @@ function(input, output, session) {
                             ),
                             error = function(e) NULL
                         )
+                        app_perf_mark_ms(perf_run, "neighbor_context_prepare_ms", app_perf_elapsed_ms(neighbor_prepare_t0_h), "HOMO")
                         local_alias_t0_h <- app_perf_now()
                         local_alias_terms_h <- collect_local_alias_terms_for_plot(
                             lookup = lookup,
@@ -17551,6 +18381,7 @@ function(input, output, session) {
                         )
                         app_perf_mark_ms(perf_run, "collect_local_alias_terms_ms", app_perf_elapsed_ms(local_alias_t0_h), "HOMO")
 
+                        batch_scale_t0_h <- app_perf_now()
                         batch_tx_lengths <- vapply(transcript_blocks, function(block_data) {
                             tx_span <- tryCatch(compute_transcript_span(block_data), error = function(e) c(start = NA_real_, end = NA_real_))
                             tx_start <- suppressWarnings(as.numeric(tx_span[["start"]]))
@@ -17570,6 +18401,7 @@ function(input, output, session) {
                                 )
                             }
                         }
+                        app_perf_mark_ms(perf_run, "batch_scale_prepare_ms", app_perf_elapsed_ms(batch_scale_t0_h), "HOMO")
 
                         # OPT-1: Local accumulators to batch all reactive writes (mirrors ortho pattern).
                         # Snapshot existing state once, accumulate locally, commit once after the loop.
@@ -17584,7 +18416,6 @@ function(input, output, session) {
                         local_plotGeneMeta <- list()
                         local_new_ids <- integer(0)
                         existing_sigs_homo <- unlist(plotSignaturesHomologous(), use.names = FALSE)
-                        local_new_sigs <- character(0)
                         local_max_gene_length <- max_gene_length_homo()
                         local_min_gene_coord <- min_gene_coord_homo()
                         local_max_gene_coord <- max_gene_coord_homo()
@@ -17595,16 +18426,52 @@ function(input, output, session) {
                         metrics_transcript_blocks <- list()
                         metrics_plot_signatures <- list()
 
+                        # Values shared by every transcript of this gene. Keeping
+                        # them outside the loop avoids repeating path resolution,
+                        # chromosome-map lookup and gene-row scans hundreds of
+                        # times for large loci such as BRCA1.
+                        signature_annotation_h <- normalizePath(ruta_archivo %||% "", winslash = "/", mustWork = FALSE)
+                        signature_gene_h <- tolower(normalize_display_id(signature_gene_key))
+                        organism_info_entry_h <- list(
+                            name = homo_org_name,
+                            icon = homo_org_icon,
+                            kingdom = homo_org_kingdom,
+                            taxid = suppressWarnings(as.integer(det$taxid %||% NA_integer_)),
+                            species_id = as.character(det$species_id %||% if (!is.null(entry) && nrow(entry) > 0L) entry$species_id[1] else ""),
+                            aliases = as.character(det$synonyms %||% if (!is.null(entry) && nrow(entry) > 0L) entry$synonyms[1] else "")
+                        )
+                        full_row_types_h <- tolower(trimws(as.character(data$V3 %||% rep("", nrow(data)))))
+                        full_gene_rows_h <- data[full_row_types_h == "gene", , drop = FALSE]
+                        shared_gene_start_h <- suppressWarnings(min(as.numeric(full_gene_rows_h$V4), na.rm = TRUE))
+                        shared_gene_end_h <- suppressWarnings(max(as.numeric(full_gene_rows_h$V5), na.rm = TRUE))
+                        short_chr_cache_h <- new.env(parent = emptyenv())
+                        seen_signatures_h <- new.env(parent = emptyenv(), hash = TRUE)
+                        for (sig_existing_h in existing_sigs_homo) {
+                            if (nzchar(as.character(sig_existing_h %||% ""))) {
+                                assign(as.character(sig_existing_h), TRUE, envir = seen_signatures_h)
+                            }
+                        }
+
+                        transcript_loop_t0_h <- app_perf_now()
                         for (block_idx in seq_along(transcript_blocks)) {
-                            app_perf_mark(perf_run, sprintf("tx %d/%d start", as.integer(block_idx), as.integer(length(transcript_blocks))), "HOMO")
+                            trace_tx <- block_idx == 1L || block_idx == length(transcript_blocks) || block_idx %% 25L == 0L
+                            if (isTRUE(trace_tx)) {
+                                app_perf_mark(perf_run, sprintf("tx %d/%d start", as.integer(block_idx), as.integer(length(transcript_blocks))), "HOMO")
+                            }
                             tx_loop_t0 <- as.numeric(proc.time()[["elapsed"]])
                             block_data <- transcript_blocks[[block_idx]]
-                            set_popup_loading(
-                                TRUE,
-                                context = "Multi-Gene Search",
-                                text = sprintf("Plotting %s transcript %d/%d...", representative_name, block_idx, length(transcript_blocks))
-                            )
-                            row_types <- tolower(trimws(as.character(block_data$V3 %||% rep("", nrow(block_data)))))
+                            if (block_idx == 1L || block_idx == length(transcript_blocks) || block_idx %% 10L == 0L) {
+                                set_popup_loading(
+                                    TRUE,
+                                    context = "Multi-Gene Search",
+                                    text = sprintf("Plotting %s transcript %d/%d...", representative_name, block_idx, length(transcript_blocks))
+                                )
+                            }
+                            cached_block_meta <- attr(block_data, "cgev_transcript_meta", exact = TRUE)
+                            row_types <- as.character((cached_block_meta %||% list())$row_types %||% character(0))
+                            if (length(row_types) != nrow(block_data)) {
+                                row_types <- tolower(trimws(as.character(block_data$V3 %||% rep("", nrow(block_data)))))
+                            }
                             anchor_idx <- which(row_types %in% c("gene", "mrna", "transcript"))[1]
                             if (!is.finite(anchor_idx)) {
                                 feat_idx <- which(row_types %in% c("exon", "cds", "start_codon", "stop_codon") | grepl("utr", row_types))
@@ -17624,9 +18491,8 @@ function(input, output, session) {
                             labels_ms <- round((as.numeric(proc.time()[["elapsed"]]) - t_labels) * 1000, 1)
                             plot_start <- as.numeric(tx_span[["start"]])
                             plot_end <- as.numeric(tx_span[["end"]])
-                            gene_rows_loop <- block_data[row_types == "gene", , drop = FALSE]
-                            gene_start_loop <- suppressWarnings(min(as.numeric(gene_rows_loop$V4), na.rm = TRUE))
-                            gene_end_loop <- suppressWarnings(max(as.numeric(gene_rows_loop$V5), na.rm = TRUE))
+                            gene_start_loop <- shared_gene_start_h
+                            gene_end_loop <- shared_gene_end_h
                             if (!is.finite(gene_start_loop) || !is.finite(gene_end_loop) || gene_end_loop < gene_start_loop) {
                                 gene_start_loop <- plot_start
                                 gene_end_loop <- plot_end
@@ -17634,17 +18500,17 @@ function(input, output, session) {
                             strand_loop <- trimws(as.character(block_data$V7[anchor_idx] %||% ""))
                             if (!strand_loop %in% c("+", "-")) strand_loop <- "+"
                             t_sig <- as.numeric(proc.time()[["elapsed"]])
-                            plot_signature <- make_plot_signature(
-                                annotation_path = ruta_archivo,
-                                representative_name = signature_gene_key,
-                                transcript = labels$transcript,
-                                chromosome = labels$chromosome,
-                                start_pos = plot_start,
-                                end_pos = plot_end
+                            plot_signature <- paste(
+                                signature_annotation_h,
+                                signature_gene_h,
+                                tolower(normalize_display_id(labels$transcript)),
+                                as.character(labels$chromosome %||% "N/A"),
+                                as.character(plot_start %||% NA_real_),
+                                as.character(plot_end %||% NA_real_),
+                                sep = "||"
                             )
                             sig_ms <- round((as.numeric(proc.time()[["elapsed"]]) - t_sig) * 1000, 1)
-                            existing_signatures <- c(existing_sigs_homo, local_new_sigs)
-                            if (plot_signature %in% existing_signatures) {
+                            if (exists(plot_signature, envir = seen_signatures_h, inherits = FALSE)) {
                                 duplicate_count <- duplicate_count + 1L
                                 next
                             }
@@ -17652,16 +18518,25 @@ function(input, output, session) {
                             local_counter <- local_counter + 1L
                             next_id <- as.integer(local_counter)
                             t_title <- as.numeric(proc.time()[["elapsed"]])
-                            card_titulo <- sprintf(
-                                "Gene: %s | Transcript: %s | Chr: %s",
-                                representative_name,
-                                labels$transcript,
-                                get_short_chromosome_name(
+                            chr_title_key_h <- as.character(labels$chromosome %||% "")
+                            if (!nzchar(chr_title_key_h)) chr_title_key_h <- "<empty>"
+                            short_chr_title_h <- if (exists(chr_title_key_h, envir = short_chr_cache_h, inherits = FALSE)) {
+                                get(chr_title_key_h, envir = short_chr_cache_h, inherits = FALSE)
+                            } else {
+                                resolved_short_chr_h <- get_short_chromosome_name(
                                     labels$chromosome,
                                     ruta_archivo,
                                     use_report_map = use_preloaded_chr_map,
                                     report_path = preloaded_report_path
                                 )
+                                assign(chr_title_key_h, resolved_short_chr_h, envir = short_chr_cache_h)
+                                resolved_short_chr_h
+                            }
+                            card_titulo <- sprintf(
+                                "Gene: %s | Transcript: %s | Chr: %s",
+                                representative_name,
+                                labels$transcript,
+                                short_chr_title_h
                             )
                             title_ms <- round((as.numeric(proc.time()[["elapsed"]]) - t_title) * 1000, 1)
 
@@ -17677,17 +18552,10 @@ function(input, output, session) {
                             local_fileData[[id_chr]] <- block_data_frozen
                             local_chrNames[[id_chr]] <- chr_name
                             local_plotSignatures[[id_chr]] <- plot_signature
-                            local_new_sigs <- c(local_new_sigs, plot_signature)
+                            assign(plot_signature, TRUE, envir = seen_signatures_h)
                             local_annotationPaths[[id_chr]] <- ruta_archivo
                             local_genomePaths[[id_chr]] <- genome_path
-                            local_organismInfo[[id_chr]] <- list(
-                                name = homo_org_name,
-                                icon = homo_org_icon,
-                                kingdom = homo_org_kingdom,
-                                taxid = suppressWarnings(as.integer(det$taxid %||% NA_integer_)),
-                                species_id = as.character(det$species_id %||% if (!is.null(entry) && nrow(entry) > 0L) entry$species_id[1] else ""),
-                                aliases = as.character(det$synonyms %||% if (!is.null(entry) && nrow(entry) > 0L) entry$synonyms[1] else "")
-                            )
+                            local_organismInfo[[id_chr]] <- organism_info_entry_h
                             local_plotGeneMeta[[id_chr]] <- list(
                                 query_gene = as.character(filter_text %||% ""),
                                 query_gene_input = as.character(filter_text %||% ""),
@@ -17711,28 +18579,54 @@ function(input, output, session) {
                             local_new_ids <- c(local_new_ids, next_id)
                             state_ms <- round((as.numeric(proc.time()[["elapsed"]]) - t_state) * 1000, 1)
                             total_tx_ms <- round((as.numeric(proc.time()[["elapsed"]]) - tx_loop_t0) * 1000, 1)
-                            app_perf_mark(
-                                perf_run,
-                                sprintf(
-                                    "tx %d/%d prep labels_ms=%.1f sig_ms=%.1f title_ms=%.1f state_ms=%.1f total_ms=%.1f",
-                                    as.integer(block_idx),
-                                    as.integer(length(transcript_blocks)),
-                                    labels_ms,
-                                    sig_ms,
-                                    title_ms,
-                                    state_ms,
-                                    total_tx_ms
-                                ),
-                                "HOMO"
-                            )
+                            if (isTRUE(trace_tx)) {
+                                app_perf_mark(
+                                    perf_run,
+                                    sprintf(
+                                        "tx %d/%d prep labels_ms=%.1f sig_ms=%.1f title_ms=%.1f state_ms=%.1f total_ms=%.1f",
+                                        as.integer(block_idx),
+                                        as.integer(length(transcript_blocks)),
+                                        labels_ms,
+                                        sig_ms,
+                                        title_ms,
+                                        state_ms,
+                                        total_tx_ms
+                                    ),
+                                    "HOMO"
+                                )
+                            }
 
-                            app_perf_mark(perf_run, sprintf("tx %d/%d module wired plot_id=%s", as.integer(block_idx), as.integer(length(transcript_blocks)), as.character(next_id)), "HOMO")
+                            if (isTRUE(trace_tx)) {
+                                app_perf_mark(perf_run, sprintf("tx %d/%d module wired plot_id=%s", as.integer(block_idx), as.integer(length(transcript_blocks)), as.character(next_id)), "HOMO")
+                            }
 
                             added_count <- added_count + 1L
                             added_plot_ids <- c(added_plot_ids, next_id)
                             metrics_plot_ids <- c(metrics_plot_ids, as.character(next_id))
                             metrics_transcript_blocks[[length(metrics_transcript_blocks) + 1L]] <- block_data_frozen
                             metrics_plot_signatures[[as.character(next_id)]] <- plot_signature
+                        }
+                        app_perf_mark_ms(perf_run, "transcript_state_loop_ms", app_perf_elapsed_ms(transcript_loop_t0_h), "HOMO")
+                        # Build the complete statistics payload before exposing any
+                        # new plot id. This keeps the first visible card atomic:
+                        # SVG, sequence composition and metrics all belong to the
+                        # same render instead of updating after first paint.
+                        if (length(metrics_plot_ids) > 0L) {
+                            metrics_schedule_t0_h <- app_perf_now()
+                            build_plot_metrics_group_payloads(
+                                context = "homo",
+                                plot_ids = metrics_plot_ids,
+                                transcript_blocks = metrics_transcript_blocks,
+                                representative_name = representative_name,
+                                organism_name = homo_org_name,
+                                annotation_path = ruta_archivo,
+                                use_report_map = use_preloaded_chr_map,
+                                report_path = preloaded_report_path,
+                                perf_run = perf_run,
+                                perf_context = "HOMO",
+                                plot_signatures = metrics_plot_signatures
+                            )
+                            app_perf_mark_ms(perf_run, "metrics_schedule_ms", app_perf_elapsed_ms(metrics_schedule_t0_h), "HOMO")
                         }
                         # OPT-1: Batch-commit all accumulated state to reactives at once.
                         if (length(local_new_ids) > 0L) {
@@ -17767,22 +18661,6 @@ function(input, output, session) {
                             added_plot_ids,
                             context = "HOMO_TIMING"
                         )
-                        if (length(metrics_plot_ids) > 0L) {
-                            schedule_plot_metrics_payload_build(
-                                context = "homo",
-                                plot_ids = metrics_plot_ids,
-                                transcript_blocks = metrics_transcript_blocks,
-                                representative_name = representative_name,
-                                organism_name = homo_org_name,
-                                annotation_path = ruta_archivo,
-                                use_report_map = use_preloaded_chr_map,
-                                report_path = preloaded_report_path,
-                                perf_run = perf_run,
-                                perf_context = "HOMO",
-                                plot_signatures = metrics_plot_signatures
-                            )
-                        }
-
                         if (added_count > 0) {
                             list(
                                 message = sprintf("Gene '%s' was plotted in %s (%d transcript visualization%s).", representative_name, organism_context, added_count, ifelse(added_count == 1L, "", "s")),
@@ -17811,6 +18689,7 @@ function(input, output, session) {
                         )
                     }
                 )
+                app_perf_mark_ms(perf_run, "plot_state_prepare_total_ms", app_perf_elapsed_ms(plot_state_prepare_t0_h), "HOMO")
 
                 final_msg <- as.character(result$message %||% "Visualization finished.")
                 final_tone <- as.character(result$tone %||% classify_popup_tone(final_msg))
@@ -18616,10 +19495,12 @@ function(input, output, session) {
                     # shared blocks locally; later commits retain the same frames.
                     phase_transcript_splits[res_idx] <- list(NULL)
                     if (length(transcript_blocks) == 0) transcript_blocks <- list(data)
+                    canonical_t0_o <- app_perf_now()
                     canonical_block_idx_ortho <- tryCatch(
                         compute_canonical_block_idx(transcript_blocks),
                         error = function(e) 1L
                     )
+                    app_perf_mark_ms(perf_run, "canonical_select_ms", app_perf_elapsed_ms(canonical_t0_o), "ORTHO")
                     if (!is.finite(split_elapsed_ms) || is.na(split_elapsed_ms)) {
                         split_elapsed_ms <- app_perf_elapsed_ms(split_t0)
                     }
@@ -18687,7 +19568,11 @@ function(input, output, session) {
                     metrics_plot_signatures <- list()
                     for (block_idx in seq_along(transcript_blocks)) {
                         block_data <- transcript_blocks[[block_idx]]
-                        row_types <- tolower(trimws(as.character(block_data$V3 %||% rep("", nrow(block_data)))))
+                        cached_block_meta <- attr(block_data, "cgev_transcript_meta", exact = TRUE)
+                        row_types <- as.character((cached_block_meta %||% list())$row_types %||% character(0))
+                        if (length(row_types) != nrow(block_data)) {
+                            row_types <- tolower(trimws(as.character(block_data$V3 %||% rep("", nrow(block_data)))))
+                        }
                         anchor_idx <- which(row_types %in% c("gene", "mrna", "transcript"))[1]
                         if (!is.finite(anchor_idx)) {
                             feat_idx <- which(row_types %in% c("exon", "cds", "start_codon", "stop_codon") | grepl("utr", row_types))
@@ -18863,6 +19748,23 @@ function(input, output, session) {
                 }
             }
             if (length(local_new_ids) > 0L) {
+                if (length(pending_metric_jobs) > 0L) {
+                    for (job in pending_metric_jobs) {
+                        build_plot_metrics_group_payloads(
+                            context = "ortho",
+                            plot_ids = job$plot_ids,
+                            transcript_blocks = job$transcript_blocks,
+                            representative_name = job$representative_name,
+                            organism_name = job$organism_name,
+                            annotation_path = job$annotation_path,
+                            use_report_map = job$use_report_map,
+                            report_path = job$report_path,
+                            perf_run = perf_run,
+                            perf_context = "ORTHO",
+                            plot_signatures = job$plot_signatures
+                        )
+                    }
+                }
                 commit_t0 <- app_perf_now()
                 app_perf_mark(
                     perf_run,
@@ -18900,24 +19802,6 @@ function(input, output, session) {
                     ),
                     gate_candidate_ids = added_plot_ids
                 )
-                if (length(pending_metric_jobs) > 0L) {
-                    for (job in pending_metric_jobs) {
-                        schedule_plot_metrics_payload_build(
-                            context = "ortho",
-                            plot_ids = job$plot_ids,
-                            transcript_blocks = job$transcript_blocks,
-                            representative_name = job$representative_name,
-                            organism_name = job$organism_name,
-                            annotation_path = job$annotation_path,
-                            use_report_map = job$use_report_map,
-                            report_path = job$report_path,
-                            perf_run = perf_run,
-                            perf_context = "ORTHO",
-                            plot_signatures = job$plot_signatures
-                        )
-                    }
-                }
-
                 # Clear per-commit buffers; keep counter/signature/timing accumulators.
                 local_titles <- list()
                 local_fileData <- list()
@@ -20288,12 +21172,14 @@ function(input, output, session) {
             return(div(
                 id    = sprintf("homo-card-%s", id_chr),
                 class = "card mb-2 plot-transcript-card card-isoform",
-                style = "min-height:130px; height:auto; width:calc(100% - 22px); display:none; flex-direction:column; margin-left:22px;",
+                style = "min-height:130px; height:auto; width:calc(100% - 22px); display:flex; opacity:0; position:absolute; left:-100000px; top:0; pointer-events:none; flex-direction:column; margin-left:22px;",
                 `data-isoform-group` = tx_group_key,
                 `data-canonical`     = "false",
                 `data-transcript-id` = tx_title,
                 `data-gene-name` = gene_title,
                 `data-organism-name` = org_name,
+                `data-isoform-load-state` = "queued",
+                `aria-hidden` = "true",
                 if (isTRUE(gene_meta_card$is_canonical_copy)) {
                     make_tx_header_homo(
                         badge_ui = span(
@@ -20408,6 +21294,7 @@ function(input, output, session) {
             last_footer_key <- NULL
             last_footer_ui <- NULL
             output[[output_id]] <- renderUI({
+                footer_render_t0_h <- app_perf_now()
                 plot_data <- tryCatch(fileDataHomologous()[[id_local]], error = function(e) NULL)
                 seq_blob <- tryCatch(genSequencesHomologous()[[id_local]], error = function(e) NULL)
                 metrics_payload <- tryCatch(get_plot_metrics_payload(id_local, "homo"), error = function(e) NULL)
@@ -20427,6 +21314,12 @@ function(input, output, session) {
                     paste0("homo--", gsub("[^A-Za-z0-9]", "_", gene_label_h),
                            "--", gsub("[^A-Za-z0-9]", "_", org_name_h))
                 } else { NULL }
+                isoform_expanded_footer_h <- if (!is.null(tx_group_key_footer_h)) {
+                    expanded_state_h <- tryCatch(isolate(isoformExpandedGroups()), error = function(e) list())
+                    isTRUE(expanded_state_h[[paste("homologous", id_local, sep = "::")]])
+                } else {
+                    FALSE
+                }
                 genome_path_footer_h <- tryCatch(genomePathsHomologous()[[id_local]], error = function(e) NULL)
                 plot_sig_footer_h <- tryCatch(plotSignaturesHomologous()[[id_local]], error = function(e) "")
                 footer_key <- build_footer_cache_key(
@@ -20440,6 +21333,7 @@ function(input, output, session) {
                     metrics_payload = metrics_payload,
                     plot_signature = plot_sig_footer_h
                 )
+                footer_key <- paste0(footer_key, "::expanded=", as.character(isoform_expanded_footer_h))
                 if (!is.null(last_footer_ui) && identical(footer_key, last_footer_key)) {
                     return(last_footer_ui)
                 }
@@ -20505,8 +21399,28 @@ function(input, output, session) {
                     tx_group_key      = tx_group_key_footer_h,
                     total_transcripts = total_tx_footer_h,
                     is_canonical      = is_canonical_footer_h,
-                    is_canonical_copy = is_canonical_copy_footer_h
+                    is_canonical_copy = is_canonical_copy_footer_h,
+                    isoform_expanded  = isoform_expanded_footer_h
                 )
+                footer_run_h <- tryCatch(isolate(homoPlotTimingTracker())$run, error = function(e) NULL)
+                if (is.list(footer_run_h)) {
+                    app_perf_mark_ms(
+                        footer_run_h,
+                        sprintf("footer_render_%s_ms", id_local),
+                        app_perf_elapsed_ms(footer_render_t0_h),
+                        "HOMO_FOOTER"
+                    )
+                    app_perf_mark(
+                        footer_run_h,
+                        sprintf(
+                            "footer_ready plot=%s sequence=%s metrics=%s",
+                            id_local,
+                            as.character(nzchar(trimws(as.character(seq_blob_footer_h %||% "")))),
+                            as.character(!is.null(metrics_payload))
+                        ),
+                        "HOMO_FOOTER"
+                    )
+                }
                 last_footer_key <<- footer_key
                 last_footer_ui <<- footer_ui
                 footer_ui
@@ -20529,13 +21443,16 @@ function(input, output, session) {
         if (length(meta_ids) == 0L) {
             return(character(0))
         }
+        hydrated_ids <- isolate(as.character(homoHydratedIsoformIds() %||% character(0)))
         keep_copy_ids <- Filter(function(meta_id) {
             if (!endsWith(meta_id, "_c")) {
                 return(FALSE)
             }
             meta <- meta_map[[meta_id]]
             base_id <- sub("_c$", "", meta_id)
-            isTRUE(meta$is_canonical_copy) && base_id %in% base_ids_chr
+            isTRUE(meta$is_canonical_copy) &&
+                meta_id %in% hydrated_ids &&
+                base_id %in% base_ids_chr
         }, meta_ids)
         as.character(keep_copy_ids %||% character(0))
     }
@@ -20549,11 +21466,80 @@ function(input, output, session) {
             ),
             silent = TRUE
         )
+        homoHydratedIsoformIds(character())
+        expanded_state <- isolate(isoformExpandedGroups())
+        if (length(expanded_state) > 0L) {
+            isoformExpandedGroups(expanded_state[!startsWith(names(expanded_state), "homologous::")])
+        }
         shinyjs::runjs("if(window.scheduleGgiraphNudge){ window.scheduleGgiraphNudge(260); }")
         invisible(NULL)
     }
 
+    hydrate_homologous_isoform_cards <- function(ids_chr = character(0), anchor_id = "") {
+        ids_chr <- unique(as.character(ids_chr %||% character(0)))
+        ids_chr <- ids_chr[nzchar(ids_chr)]
+        if (length(ids_chr) == 0L) {
+            return(character(0))
+        }
+        hydrated <- isolate(as.character(homoHydratedIsoformIds() %||% character(0)))
+        pending <- setdiff(ids_chr, hydrated)
+        anchor_chr <- as.character(anchor_id %||% "")
+        if (nzchar(anchor_chr) && !(anchor_chr %in% hydrated)) {
+            anchor_meta <- tryCatch(isolate(plotGeneMetaHomologous()[[anchor_chr]]), error = function(e) NULL)
+            if (isTRUE(anchor_meta$is_canonical_copy)) {
+                anchor_chr <- sub("_c$", "", anchor_chr)
+            } else if (!isTRUE(anchor_meta$is_canonical)) {
+                groups_anchor <- tryCatch(isolate(homoMultiTranscriptGeneGroups()), error = function(e) list())
+                matching_anchor_group <- Filter(function(group_h) {
+                    anchor_chr %in% as.character(group_h$ids %||% character(0))
+                }, groups_anchor)
+                if (length(matching_anchor_group) > 0L) {
+                    group_anchor_ids <- as.character(matching_anchor_group[[1L]]$ids %||% character(0))
+                    canonical_anchor_ids <- Filter(function(pid) {
+                        meta <- tryCatch(isolate(plotGeneMetaHomologous()[[pid]]), error = function(e) NULL)
+                        isTRUE(meta$is_canonical) && !isTRUE(meta$is_canonical_copy)
+                    }, group_anchor_ids)
+                    if (length(canonical_anchor_ids) > 0L) anchor_chr <- canonical_anchor_ids[[1L]]
+                }
+            }
+        }
+        if (!nzchar(anchor_chr) && length(ids_chr) > 0L) {
+            canonical_hits <- Filter(function(pid) {
+                meta <- tryCatch(isolate(plotGeneMetaHomologous()[[pid]]), error = function(e) NULL)
+                isTRUE(meta$is_canonical) && !isTRUE(meta$is_canonical_copy)
+            }, ids_chr)
+            if (length(canonical_hits) > 0L) anchor_chr <- canonical_hits[[1L]]
+        }
+        hydrated_now <- character(0)
+        # Repeated afterEnd insertions reverse order, so walk backwards. The
+        # resolver ranks real alternatives before the compact canonical copy.
+        for (pid in rev(pending)) {
+            meta <- tryCatch(isolate(plotGeneMetaHomologous()[[pid]]), error = function(e) NULL)
+            if (is.null(meta) || (isTRUE(meta$is_canonical) && !isTRUE(meta$is_canonical_copy))) {
+                next
+            }
+            replacement <- build_homologous_plot_card_ui(pid)
+            base_id <- if (nzchar(anchor_chr)) anchor_chr else sub("_c$", "", pid)
+            if (!is.null(replacement) && nzchar(base_id)) {
+                insertUI(
+                    selector = paste0("#homo-card-", base_id),
+                    where = "afterEnd",
+                    ui = replacement,
+                    immediate = TRUE
+                )
+                hydrated_now <- c(hydrated_now, pid)
+            }
+        }
+        if (length(hydrated_now) > 0L) {
+            homoHydratedIsoformIds(unique(c(hydrated, hydrated_now)))
+        }
+        hydrated_now
+    }
+
     append_homologous_cards_dom <- function(ids_chr = character(0)) {
+        append_t0 <- app_perf_now()
+        append_stage_t0 <- append_t0
+        append_run <- tryCatch(isolate(homoPlotTimingTracker())$run, error = function(e) NULL)
         ids_chr <- as.character(ids_chr %||% character(0))
         ids_chr <- ids_chr[nzchar(ids_chr)]
         if (length(ids_chr) == 0L) {
@@ -20572,12 +21558,17 @@ function(input, output, session) {
             fileData = file_data_snap,
             annotationPaths = ann_paths_snap
         )
+        if (is.list(append_run)) {
+            app_perf_mark_ms(append_run, "card_snapshots_ms", app_perf_elapsed_ms(append_stage_t0), "HOMO_UI")
+        }
+        append_stage_t0 <- app_perf_now()
         should_render_initial_homo <- function(id_chr) {
             meta <- gene_meta_snap[[as.character(id_chr)]]
             is.null(meta) || !identical(meta$is_canonical, FALSE)
         }
-        # For each canonical multi-tx transcript, inject a hidden _c copy into the
-        # expand group so that ALL transcripts (including canonical) appear when expanded.
+        # Prepare the data for the canonical transcript copy, but do not send its
+        # full hidden card to the browser yet. It is hydrated on the first expand
+        # request so the initial card carries only outputs the user can see.
         expanded_ids   <- character(0)
         canon_copy_ids <- character(0)
         for (id in ids_chr) {
@@ -20617,30 +21608,59 @@ function(input, output, session) {
                 # Copy sequence if already available
                 seq_val <- tryCatch(genSequencesHomologous()[[id]], error = function(e) NULL)
                 if (!is.null(seq_val)) set_named_value(genSequencesHomologous, id_c, seq_val)
-                expanded_ids   <- c(expanded_ids, id_c)
                 canon_copy_ids <- c(canon_copy_ids, id_c)
             }
         }
+        if (is.list(append_run)) {
+            app_perf_mark_ms(append_run, "card_state_copy_ms", app_perf_elapsed_ms(append_stage_t0), "HOMO_UI")
+        }
+        append_stage_t0 <- app_perf_now()
         cards <- lapply(expanded_ids, function(id) build_homologous_plot_card_ui(id, snapshots = card_snapshots))
         cards <- Filter(Negate(is.null), cards)
         if (length(cards) == 0L) {
             return(invisible(NULL))
         }
+        if (is.list(append_run)) {
+            app_perf_mark_ms(append_run, "card_ui_build_ms", app_perf_elapsed_ms(append_stage_t0), "HOMO_UI")
+        }
+        append_stage_t0 <- app_perf_now()
         insertUI(
             selector = "#homo-plot-cards-container",
             where = "beforeEnd",
             ui = do.call(tagList, cards),
             immediate = TRUE
         )
+        if (is.list(append_run)) {
+            app_perf_mark_ms(append_run, "card_insert_message_ms", app_perf_elapsed_ms(append_stage_t0), "HOMO_UI")
+        }
+        append_stage_t0 <- app_perf_now()
         initial_ids <- Filter(should_render_initial_homo, ids_chr)
         isoform_ids <- setdiff(expanded_ids, initial_ids)
         MAX_UPFRONT_ISOFORMS <- max(0L, min(10L, parse_positive_int_env("APP_HOMO_UPFRONT_ISOFORMS", 0L)))
         upfront_isoform_ids <- head(isoform_ids, MAX_UPFRONT_ISOFORMS)
         instantiate_ids <- c(initial_ids, upfront_isoform_ids)
         invisible(lapply(instantiate_ids, instantiate_homologous_plot_module))
+        invisible(lapply(initial_ids, function(pid) register_isoform_toggle_observer("homologous", pid)))
+        if (is.list(append_run)) {
+            app_perf_mark_ms(append_run, "card_module_init_ms", app_perf_elapsed_ms(append_stage_t0), "HOMO_UI")
+        }
+        append_stage_t0 <- app_perf_now()
         invisible(lapply(instantiate_ids, bind_homologous_footer_output))
         invisible(lapply(instantiate_ids, register_homologous_download_output))
+        if (is.list(append_run)) {
+            app_perf_mark_ms(append_run, "card_secondary_bind_ms", app_perf_elapsed_ms(append_stage_t0), "HOMO_UI")
+            app_perf_mark_ms(append_run, "card_append_total_ms", app_perf_elapsed_ms(append_t0), "HOMO_UI")
+        }
         shinyjs::runjs("try{var el=document.getElementById('homo-plot-cards-container'); if(window.Shiny&&Shiny.bindAll&&el){Shiny.bindAll(el);} if(window.scheduleGgiraphNudge){window.scheduleGgiraphNudge(220);}}catch(e){}")
+        if (is.list(append_run) && !is.null(session) && is.function(session$onFlushed)) {
+            local({
+                run_local <- append_run
+                started_local <- append_t0
+                session$onFlushed(function() {
+                    app_perf_mark_ms(run_local, "card_append_to_flush_ms", app_perf_elapsed_ms(started_local), "HOMO_UI")
+                }, once = TRUE)
+            })
+        }
         invisible(NULL)
     }
 
@@ -20662,6 +21682,11 @@ function(input, output, session) {
                     tryCatch(remove_named_value(rv_fn, id_c), error = function(e) NULL)
                 }
             }
+        }
+        hydrated_now <- isolate(as.character(homoHydratedIsoformIds() %||% character(0)))
+        hydrated_keep <- setdiff(hydrated_now, paste0(ids_chr, "_c"))
+        if (!identical(hydrated_now, hydrated_keep)) {
+            homoHydratedIsoformIds(hydrated_keep)
         }
         ids_json <- jsonlite::toJSON(unname(ids_chr), auto_unbox = FALSE)
         shinyjs::runjs(sprintf(
@@ -20712,7 +21737,7 @@ function(input, output, session) {
             return(NULL)
         }
         ui_perf <- app_perf_new_run("HOMO_UI")
-        ids <- sortedPlotIdsHomologous()
+        ids <- primaryPlotIdsHomologous()
         if (length(ids) == 0) {
             app_perf_mark(ui_perf, "load-more banner no ids", "HOMO_UI")
             return(NULL)
@@ -20747,11 +21772,19 @@ function(input, output, session) {
         )
     })
 
-    observeEvent(sortedPlotIdsHomologous(),
-        {
-            ids_chr <- as.character(sortedPlotIdsHomologous() %||% integer(0))
-            ids_chr <- ids_chr[nzchar(ids_chr)]
-            keep_ids <- unique(c(ids_chr, get_active_homologous_copy_ids(ids_chr)))
+    observe({
+            # Footer outputs are useful only for cards present in the DOM.
+            # Registering one for every hidden transcript caused hundreds of
+            # unnecessary Shiny output bindings before the canonical card painted.
+            sorted_ids <- as.character(sortedPlotIdsHomologous() %||% integer(0))
+            inserted_ids <- as.character(homoInsertedCardIds() %||% character(0))
+            ids_chr <- intersect(sorted_ids[nzchar(sorted_ids)], inserted_ids[nzchar(inserted_ids)])
+            hydrated_isoform_ids <- as.character(homoHydratedIsoformIds() %||% character(0))
+            keep_ids <- unique(c(
+                ids_chr,
+                hydrated_isoform_ids[nzchar(hydrated_isoform_ids)],
+                get_active_homologous_copy_ids(ids_chr)
+            ))
             for (id_chr in keep_ids) {
                 bind_homologous_footer_output(id_chr)
             }
@@ -20764,13 +21797,11 @@ function(input, output, session) {
             if (!identical(current_bound, keep_bound)) {
                 homoFooterOutputsBound(keep_bound)
             }
-        },
-        ignoreInit = FALSE
-    )
+        })
 
     observe({
         mode <- tolower(trimws(as.character(input$homo_visual_mode %||% "compact")))
-        ids <- as.character(sortedPlotIdsHomologous() %||% integer(0))
+        ids <- as.character(primaryPlotIdsHomologous() %||% integer(0))
         ids_n <- length(ids)
         if (mode %in% c("aligned", "pip_blocks", "pip_multipip")) {
             inserted_now <- isolate(as.character(homoInsertedCardIds() %||% character(0)))
@@ -20832,15 +21863,16 @@ function(input, output, session) {
             if (!is.finite(current_n) || current_n < homoInitialVisibleCount) {
                 current_n <- homoInitialVisibleCount
             }
-            ids_n <- length(sortedPlotIdsHomologous())
+            ids_n <- length(primaryPlotIdsHomologous())
             homoVisibleCount(min(ids_n, current_n + homoRenderChunkSize))
         },
         ignoreInit = TRUE
     )
 
-    observeEvent(sortedPlotIdsHomologous(),
+    observeEvent(primaryPlotIdsHomologous(),
         {
-            ids <- sortedPlotIdsHomologous()
+            cancel_homo_auto_render_queue()
+            ids <- primaryPlotIdsHomologous()
             ids_chr <- as.character(ids %||% integer(0))
             ids_n <- length(ids)
             ready_now <- as.character(homoRenderedPlotIds() %||% character(0))
@@ -20875,10 +21907,10 @@ function(input, output, session) {
 
     observe({
         mode <- tolower(trimws(as.character(input$homo_visual_mode %||% "compact")))
-        if (mode %in% c("aligned", "pip_blocks", "pip_multipip")) {
+        if (mode %in% c("aligned", "pip_blocks", "pip_multipip") || isTRUE(homoAutoRenderQueued())) {
             return(invisible(NULL))
         }
-        ids <- sortedPlotIdsHomologous()
+        ids <- primaryPlotIdsHomologous()
         ids_n <- length(ids)
         if (ids_n <= 0L) {
             return(invisible(NULL))
@@ -20891,16 +21923,52 @@ function(input, output, session) {
             return(invisible(NULL))
         }
         visible_ids <- if (current_n > 0L) as.character(ids[seq_len(current_n)]) else character(0)
-        gene_meta_map <- tryCatch(plotGeneMetaHomologous(), error = function(e) list())
-        canonical_visible_ids <- Filter(function(pid) {
-            meta <- tryCatch(gene_meta_map[[pid]], error = function(e) NULL)
-            is.null(meta) || !isFALSE(meta$is_canonical)
-        }, visible_ids)
-        ready_now <- as.character(homoRenderedPlotIds() %||% character(0))
-        if (length(canonical_visible_ids) == 0L || !all(canonical_visible_ids %in% ready_now)) {
+        inserted_now <- as.character(homoInsertedCardIds() %||% character(0))
+        if (length(visible_ids) == 0L || !all(visible_ids %in% inserted_now)) {
             return(invisible(NULL))
         }
-        homoVisibleCount(min(ids_n, current_n + homoRenderChunkSize))
+        next_n <- min(ids_n, current_n + homoRenderChunkSize)
+        if (next_n <= current_n) {
+            return(invisible(NULL))
+        }
+        scheduled_ids <- as.character(ids)
+        scheduled_generation <- bump_homo_auto_render_generation()
+        homoAutoRenderQueued(TRUE)
+        release_next_batch <- function() {
+            if (!requireNamespace("later", quietly = TRUE)) {
+                homoVisibleCount(as.integer(next_n))
+                homoAutoRenderQueued(FALSE)
+                return(invisible(NULL))
+            }
+            later::later(function() {
+                isolate({
+                    same_ids <- identical(
+                        as.character(primaryPlotIdsHomologous() %||% character(0)),
+                        scheduled_ids
+                    )
+                    same_generation <- identical(
+                        as.integer(homoAutoRenderGeneration %||% 0L),
+                        as.integer(scheduled_generation %||% 0L)
+                    )
+                    if (isTRUE(same_generation)) {
+                        if (isTRUE(same_ids)) {
+                            visible_now <- suppressWarnings(as.integer(homoVisibleCount() %||% current_n))
+                            if (!is.finite(visible_now) || is.na(visible_now) || visible_now < 1L) {
+                                visible_now <- current_n
+                            }
+                            homoVisibleCount(as.integer(min(length(scheduled_ids), max(visible_now, next_n))))
+                        }
+                        homoAutoRenderQueued(FALSE)
+                    }
+                })
+            }, delay = homoAutoRenderDelay)
+            invisible(NULL)
+        }
+        if (!is.null(session) && is.function(session$onFlushed)) {
+            session$onFlushed(release_next_batch, once = TRUE)
+        } else {
+            release_next_batch()
+        }
         invisible(NULL)
     })
 
@@ -22870,6 +23938,12 @@ function(input, output, session) {
                     paste0("ortho--", gsub("[^A-Za-z0-9]", "_", gene_label_o),
                            "--", gsub("[^A-Za-z0-9]", "_", org_name_o))
                 } else { NULL }
+                isoform_expanded_footer_o <- if (!is.null(tx_group_key_footer_o)) {
+                    expanded_state_o <- tryCatch(isolate(isoformExpandedGroups()), error = function(e) list())
+                    isTRUE(expanded_state_o[[paste("orthologous", id_local, sep = "::")]])
+                } else {
+                    FALSE
+                }
                 genome_path_footer_o <- tryCatch(genomePathsOrthologous()[[id_local]], error = function(e) NULL)
                 plot_sig_footer_o <- tryCatch(plotSignaturesOrthologous()[[id_local]], error = function(e) "")
                 footer_key <- build_footer_cache_key(
@@ -22883,6 +23957,7 @@ function(input, output, session) {
                     metrics_payload = metrics_payload,
                     plot_signature = plot_sig_footer_o
                 )
+                footer_key <- paste0(footer_key, "::expanded=", as.character(isoform_expanded_footer_o))
                 if (!is.null(last_footer_ui) && identical(footer_key, last_footer_key)) {
                     return(last_footer_ui)
                 }
@@ -22964,7 +24039,8 @@ function(input, output, session) {
                     tx_group_key      = tx_group_key_footer_o,
                     total_transcripts = total_tx_footer_o,
                     is_canonical      = is_canonical_footer_o,
-                    is_canonical_copy = is_canonical_copy_footer_o
+                    is_canonical_copy = is_canonical_copy_footer_o,
+                    isoform_expanded  = isoform_expanded_footer_o
                 )
                 last_footer_key <<- footer_key
                 last_footer_ui <<- footer_ui
@@ -23052,7 +24128,7 @@ function(input, output, session) {
         as.character(isoform_ids %||% character(0))
     }
 
-    build_orthologous_plot_card_ui <- function(id_local, snapshots = NULL) {
+    build_orthologous_plot_card_ui <- function(id_local, snapshots = NULL, defer_isoform_body = FALSE) {
         id_chr <- as.character(id_local %||% "")
         if (!nzchar(id_chr)) return(NULL)
 
@@ -23074,10 +24150,29 @@ function(input, output, session) {
         chr_title  <- trimws(as.character(extract_title_field(titulo, "Chr") %||% ""))
         if (!nzchar(gene_title)) gene_title <- "Gene"
         if (!nzchar(tx_title))   tx_title   <- "N/A"
+        total_tx_card <- as.integer(gene_meta_card$total_transcripts %||% 1L)
+        if (!is.finite(total_tx_card) || total_tx_card < 1L) total_tx_card <- 1L
+        is_multi_tx <- total_tx_card > 1L
+        tx_group_key <- paste0("ortho--", gsub("[^A-Za-z0-9]", "_", gene_title),
+                               "--", gsub("[^A-Za-z0-9]", "_", org_name))
+        is_canonical_card <- isTRUE(gene_meta_card$is_canonical)
+        if (isTRUE(defer_isoform_body) && !is_canonical_card && is_multi_tx) {
+            return(div(
+                id = sprintf("ortho-placeholder-%s", id_chr),
+                class = "card-isoform card-isoform-placeholder",
+                style = "display:none;",
+                `data-isoform-group` = tx_group_key,
+                `data-canonical` = "false",
+                `data-transcript-id` = tx_title,
+                `data-gene-name` = gene_title,
+                `data-organism-name` = org_name,
+                `data-isoform-load-state` = "queued",
+                `aria-hidden` = "true"
+            ))
+        }
         gene_label  <- gene_title
         chr_map_ui  <- build_chr_schematic_ui(plot_data, ann_path, gene_label = gene_label)
         org_kingdom <- as.character(org_info$kingdom %||% "")
-        is_canonical_card <- isTRUE(gene_meta_card$is_canonical)
         alias_evidence_ui <- build_lookup_alias_evidence_ui(gene_meta_card, plot_id = id_chr, plot_context = "orthologous")
         db_links_ui <- build_db_links_ui(
             plot_data, gene_label, org_name,
@@ -23086,12 +24181,6 @@ function(input, output, session) {
             annotation_path = ann_path,
             prefix_ui = NULL
         )
-        total_tx_card     <- as.integer(gene_meta_card$total_transcripts %||% 1L)
-        if (!is.finite(total_tx_card) || total_tx_card < 1L) total_tx_card <- 1L
-        is_multi_tx  <- total_tx_card > 1L
-        tx_group_key <- paste0("ortho--", gsub("[^A-Za-z0-9]", "_", gene_title),
-                               "--", gsub("[^A-Za-z0-9]", "_", org_name))
-
         # ── Shared helper: compact transcript card header ───────────────────────
         make_tx_header_ortho <- function(badge_ui, bg_col = "#E7E7E8", fg_col = "black") {
             div(
@@ -23200,12 +24289,14 @@ function(input, output, session) {
             return(div(
                 id    = sprintf("ortho-card-%s", id_chr),
                 class = "card mb-2 plot-transcript-card card-isoform",
-                style = "min-height:130px; height:auto; width:calc(100% - 22px); display:none; flex-direction:column; margin-left:22px;",
+                style = "min-height:130px; height:auto; width:calc(100% - 22px); display:flex; opacity:0; position:absolute; left:-100000px; top:0; pointer-events:none; flex-direction:column; margin-left:22px;",
                 `data-isoform-group` = tx_group_key,
                 `data-canonical`     = "false",
                 `data-transcript-id` = tx_title,
                 `data-gene-name` = gene_title,
                 `data-organism-name` = org_name,
+                `data-isoform-load-state` = "queued",
+                `aria-hidden` = "true",
                 if (isTRUE(gene_meta_card$is_canonical_copy)) {
                     make_tx_header_ortho(
                         badge_ui = span(
@@ -23742,6 +24833,11 @@ function(input, output, session) {
             ),
             silent = TRUE
         )
+        orthoHydratedIsoformIds(character())
+        expanded_state <- isolate(isoformExpandedGroups())
+        if (length(expanded_state) > 0L) {
+            isoformExpandedGroups(expanded_state[!startsWith(names(expanded_state), "orthologous::")])
+        }
         shinyjs::runjs("if(window.scheduleGgiraphNudge){ window.scheduleGgiraphNudge(260); }")
         invisible(NULL)
     }
@@ -23845,7 +24941,21 @@ function(input, output, session) {
             }
         }
         expanded_ids <- unique(expanded_ids)
-        cards <- lapply(expanded_ids, function(id) build_orthologous_plot_card_ui(id, snapshots = card_snapshots_o))
+        meta_rank_o <- isolate(plotGeneMetaOrthologous())
+        copy_rank_o <- vapply(expanded_ids, function(pid) {
+            as.integer(isTRUE(tryCatch(meta_rank_o[[pid]]$is_canonical_copy, error = function(e) FALSE)))
+        }, integer(1))
+        expanded_ids <- expanded_ids[order(copy_rank_o, seq_along(expanded_ids))]
+        initial_ids <- Filter(should_render_initial_ortho, ids_chr)
+        isoform_ids <- setdiff(expanded_ids, initial_ids)
+        MAX_UPFRONT_ISOFORMS <- max(0L, min(10L, parse_positive_int_env("APP_ORTHO_UPFRONT_ISOFORMS", 0L)))
+        upfront_isoform_ids <- head(isoform_ids, MAX_UPFRONT_ISOFORMS)
+        deferred_isoform_ids <- setdiff(isoform_ids, upfront_isoform_ids)
+        cards <- lapply(expanded_ids, function(id) build_orthologous_plot_card_ui(
+            id,
+            snapshots = card_snapshots_o,
+            defer_isoform_body = id %in% deferred_isoform_ids
+        ))
         cards <- Filter(Negate(is.null), cards)
         if (length(cards) == 0L) {
             return(invisible(NULL))
@@ -23856,12 +24966,9 @@ function(input, output, session) {
             ui = do.call(tagList, cards),
             immediate = TRUE
         )
-        initial_ids <- Filter(should_render_initial_ortho, ids_chr)
-        isoform_ids <- setdiff(expanded_ids, initial_ids)
-        MAX_UPFRONT_ISOFORMS <- max(0L, min(10L, parse_positive_int_env("APP_ORTHO_UPFRONT_ISOFORMS", 0L)))
-        upfront_isoform_ids <- head(isoform_ids, MAX_UPFRONT_ISOFORMS)
         instantiate_ids <- c(initial_ids, upfront_isoform_ids)
         invisible(lapply(instantiate_ids, instantiate_orthologous_plot_module))
+        invisible(lapply(initial_ids, function(pid) register_isoform_toggle_observer("orthologous", pid)))
         invisible(lapply(instantiate_ids, bind_orthologous_footer_output))
         invisible(lapply(instantiate_ids, register_orthologous_download_output))
         shinyjs::runjs("try{var el=document.getElementById('ortho-plot-cards-container'); if(window.Shiny&&Shiny.bindAll&&el){Shiny.bindAll(el);} if(window.scheduleGgiraphNudge){window.scheduleGgiraphNudge(220);}}catch(e){}")
@@ -23937,45 +25044,435 @@ function(input, output, session) {
         invisible(NULL)
     }, ignoreInit = TRUE)
 
-    observeEvent(input$isoform_expand_request, {
-        evt <- input$isoform_expand_request
+    hydrate_orthologous_isoform_cards <- function(ids_chr = character(0)) {
+        ids_chr <- unique(as.character(ids_chr %||% character(0)))
+        ids_chr <- ids_chr[nzchar(ids_chr)]
+        if (length(ids_chr) == 0L) {
+            return(character(0))
+        }
+        hydrated_ids <- isolate(as.character(orthoHydratedIsoformIds() %||% character(0)))
+        pending_hydration <- setdiff(ids_chr, hydrated_ids)
+        hydrated_now <- character(0)
+        for (pid in pending_hydration) {
+            replacement <- build_orthologous_plot_card_ui(pid)
+            if (!is.null(replacement)) {
+                placeholder_selector <- paste0("#ortho-placeholder-", pid)
+                insertUI(
+                    selector = placeholder_selector,
+                    where = "beforeBegin",
+                    ui = replacement,
+                    immediate = TRUE
+                )
+                removeUI(selector = placeholder_selector, immediate = TRUE)
+                hydrated_now <- c(hydrated_now, pid)
+            }
+        }
+        if (length(hydrated_now) > 0L) {
+            orthoHydratedIsoformIds(unique(c(hydrated_ids, hydrated_now)))
+        }
+        hydrated_now
+    }
+
+    resolve_isoform_expand_request <- function(evt = list()) {
         ctx <- tolower(trimws(as.character(evt$context %||% "")))
-        ids_chr <- as.character(evt$ids %||% character(0))
-        ids_chr <- unique(ids_chr[nzchar(ids_chr)])
+        if (!ctx %in% c("homologous", "orthologous")) ctx <- "homologous"
+        ids_chr <- unique(as.character(evt$ids %||% character(0)))
+        ids_chr <- ids_chr[nzchar(ids_chr)]
+        if (length(ids_chr) == 0L) return(NULL)
+
+        anchor_id <- ""
+        if (identical(ctx, "orthologous")) {
+            meta_map_o <- tryCatch(isolate(plotGeneMetaOrthologous()), error = function(e) list())
+            sorted_ids_o <- as.character(tryCatch(isolate(sortedPlotIdsOrthologous()), error = function(e) character(0)))
+            expanded_ids <- unique(unlist(lapply(ids_chr, function(id) {
+                meta <- tryCatch(meta_map_o[[id]], error = function(e) NULL)
+                if (is.null(meta) || !isTRUE(meta$is_canonical) || isTRUE(meta$is_canonical_copy)) return(id)
+                same_group <- Filter(function(candidate_id) {
+                    candidate <- tryCatch(meta_map_o[[candidate_id]], error = function(e) NULL)
+                    !is.null(candidate) &&
+                        identical(as.character(candidate$display_gene_name %||% ""), as.character(meta$display_gene_name %||% "")) &&
+                        identical(as.character(candidate$organism_scientific %||% ""), as.character(meta$organism_scientific %||% ""))
+                }, unique(c(sorted_ids_o, names(meta_map_o))))
+                copy_id <- paste0(id, "_c")
+                copy_meta <- tryCatch(meta_map_o[[copy_id]], error = function(e) NULL)
+                copy_ids <- if (isTRUE(copy_meta$is_canonical_copy)) copy_id else character(0)
+                regular_ids <- Filter(function(candidate_id) {
+                    candidate <- tryCatch(meta_map_o[[candidate_id]], error = function(e) NULL)
+                    !is.null(candidate) && !isTRUE(candidate$is_canonical) && !isTRUE(candidate$is_canonical_copy)
+                }, same_group)
+                unique(c(regular_ids, copy_ids))
+            }), use.names = FALSE))
+        } else {
+            groups_h <- tryCatch(isolate(homoMultiTranscriptGeneGroups()), error = function(e) list())
+            matching_group_h <- Filter(function(group_h) {
+                any(ids_chr %in% as.character(group_h$ids %||% character(0)))
+            }, groups_h)
+            group_ids_h <- if (length(matching_group_h) > 0L) {
+                as.character(matching_group_h[[1L]]$ids %||% ids_chr)
+            } else {
+                ids_chr
+            }
+            canonical_ids_h <- Filter(function(pid) {
+                meta <- tryCatch(isolate(plotGeneMetaHomologous()[[pid]]), error = function(e) NULL)
+                isTRUE(meta$is_canonical) && !isTRUE(meta$is_canonical_copy)
+            }, group_ids_h)
+            anchor_id <- if (length(canonical_ids_h) > 0L) canonical_ids_h[[1L]] else ids_chr[[1L]]
+            regular_iso_ids_h <- setdiff(group_ids_h, canonical_ids_h)
+            copy_id_h <- paste0(anchor_id, "_c")
+            copy_meta_h <- tryCatch(isolate(plotGeneMetaHomologous()[[copy_id_h]]), error = function(e) NULL)
+            copy_ids_h <- if (isTRUE(copy_meta_h$is_canonical_copy)) copy_id_h else character(0)
+            expanded_ids <- unique(c(regular_iso_ids_h, copy_ids_h))
+        }
+
+        list(
+            context = ctx,
+            seed_ids = ids_chr,
+            expanded_ids = unique(as.character(expanded_ids %||% character(0))),
+            anchor_id = anchor_id
+        )
+    }
+
+    set_isoform_toggle_label <- function(button_id = "", expanded = FALSE) {
+        button_id <- as.character(button_id %||% "")
+        if (!nzchar(button_id)) return(invisible(NULL))
+        shinyjs::runjs(sprintf(
+            paste0(
+                "try{var b=document.getElementById(%s),l=document.getElementById(%s+'_label');",
+                "if(b&&l){var n=parseInt(b.getAttribute('data-count')||'0',10);",
+                "if(!isFinite(n)){n=0;}l.textContent=n+(n===1?' transcript':' transcripts');}}catch(e){}"
+            ),
+            jsonlite::toJSON(button_id, auto_unbox = TRUE),
+            jsonlite::toJSON(button_id, auto_unbox = TRUE)
+        ))
+        invisible(NULL)
+    }
+
+    hide_isoform_cards <- function(ids_chr, context, button_id = "") {
+        ids_chr <- unique(as.character(ids_chr %||% character(0)))
+        ids_chr <- ids_chr[nzchar(ids_chr)]
+        footer_prefix <- if (identical(context, "orthologous")) "ortho_footer_" else "homo_footer_"
+        invisible(lapply(
+            paste0(footer_prefix, ids_chr),
+            function(output_id) outputOptions(output, output_id, suspendWhenHidden = TRUE)
+        ))
+        prefix <- if (identical(context, "orthologous")) "ortho-card-" else "homo-card-"
+        shinyjs::runjs(sprintf(
+            paste0(
+                "try{var ids=%s,pfx=%s;for(var i=0;i<ids.length;i++){var c=document.getElementById(pfx+ids[i]);",
+                "if(c){c.style.display='none';c.setAttribute('aria-hidden','true');",
+                "c.removeAttribute('aria-busy');c.setAttribute('data-isoform-load-state','collapsed');}}}catch(e){}"
+            ),
+            jsonlite::toJSON(ids_chr, auto_unbox = FALSE),
+            jsonlite::toJSON(prefix, auto_unbox = TRUE)
+        ))
+        set_isoform_toggle_label(button_id, expanded = FALSE)
+        invisible(NULL)
+    }
+
+    register_isoform_toggle_observer <- function(context, plot_id) {
+        ctx <- if (identical(tolower(as.character(context %||% "")), "orthologous")) "orthologous" else "homologous"
+        pid <- as.character(plot_id %||% "")
+        if (!nzchar(pid)) return(invisible(FALSE))
+        meta <- if (identical(ctx, "orthologous")) {
+            tryCatch(isolate(plotGeneMetaOrthologous()[[pid]]), error = function(e) NULL)
+        } else {
+            tryCatch(isolate(plotGeneMetaHomologous()[[pid]]), error = function(e) NULL)
+        }
+        total_tx <- suppressWarnings(as.integer(meta$total_transcripts %||% 1L))
+        if (is.null(meta) || !isTRUE(meta$is_canonical) || isTRUE(meta$is_canonical_copy) || !is.finite(total_tx) || total_tx <= 1L) {
+            return(invisible(FALSE))
+        }
+        observer_key <- paste(ctx, pid, sep = "::")
+        already <- isolate(as.character(isoformToggleObserversBound() %||% character(0)))
+        if (observer_key %in% already) return(invisible(TRUE))
+        isoformToggleObserversBound(unique(c(already, observer_key)))
+        local({
+            input_id_local <- isoform_toggle_input_id(ctx, pid)
+            context_local <- ctx
+            plot_id_local <- pid
+            observer_key_local <- observer_key
+            observeEvent(input[[input_id_local]], {
+                requested_expanded <- isTRUE(input[[input_id_local]])
+                expanded_state <- isolate(isoformExpandedGroups())
+                if (identical(requested_expanded, isTRUE(expanded_state[[observer_key_local]]))) return(invisible(NULL))
+                process_isoform_expand_request(
+                    list(context = context_local, ids = plot_id_local),
+                    toggle_key = observer_key_local,
+                    button_id = input_id_local
+                )
+            }, ignoreInit = TRUE, ignoreNULL = FALSE)
+        })
+        invisible(TRUE)
+    }
+
+    schedule_isoform_module_batches <- function(ids_chr, context, anchor_id = "", toggle_key = "") {
+        ids_chr <- unique(as.character(ids_chr %||% character(0)))
+        ids_chr <- ids_chr[nzchar(ids_chr)]
         if (length(ids_chr) == 0L) {
             return(invisible(NULL))
         }
-        if (identical(ctx, "orthologous")) {
-            expanded_iso_ids <- unique(c(ids_chr, unlist(lapply(ids_chr, function(id) {
-                meta <- tryCatch(plotGeneMetaOrthologous()[[id]], error = function(e) NULL)
-                total_tx <- suppressWarnings(as.integer(meta$total_transcripts %||% 1L))
-                if (isTRUE(meta$is_canonical) && is.finite(total_tx) && total_tx > 1L) paste0(id, "_c") else character(0)
-            }))))
-            invisible(lapply(expanded_iso_ids, bind_orthologous_footer_output))
-            invisible(lapply(expanded_iso_ids, register_orthologous_download_output))
-            invisible(lapply(expanded_iso_ids, instantiate_orthologous_plot_module))
-            handles <- tryCatch(existingPlotsOrthologous(), error = function(e) list())
-        } else {
-            expanded_iso_ids <- unique(c(ids_chr, unlist(lapply(ids_chr, function(id) {
-                meta <- tryCatch(plotGeneMetaHomologous()[[id]], error = function(e) NULL)
-                total_tx <- suppressWarnings(as.integer(meta$total_transcripts %||% 1L))
-                if (isTRUE(meta$is_canonical) && is.finite(total_tx) && total_tx > 1L) paste0(id, "_c") else character(0)
-            }))))
-            invisible(lapply(expanded_iso_ids, bind_homologous_footer_output))
-            invisible(lapply(expanded_iso_ids, register_homologous_download_output))
-            invisible(lapply(expanded_iso_ids, instantiate_homologous_plot_module))
-            handles <- tryCatch(existingPlotsHomologous(), error = function(e) list())
+        ctx <- tolower(trimws(as.character(context %||% "")))
+        batches <- split(
+            ids_chr,
+            ceiling(seq_along(ids_chr) / isoformRenderBatchSize)
+        )
+        last_homo_anchor <- as.character(anchor_id %||% "")
+        toggle_key <- as.character(toggle_key %||% "")
+        run_isoform_js <- function(script) {
+            if (!is.null(session) && is.function(session$isClosed) && isTRUE(session$isClosed())) {
+                return(invisible(FALSE))
+            }
+            session$sendCustomMessage(
+                type = "shinyjs-runjs",
+                message = list(code = as.character(script %||% ""))
+            )
+            invisible(TRUE)
         }
-        for (pid in ids_chr) {
-            handle <- tryCatch(handles[[pid]], error = function(e) NULL)
-            if (is.list(handle) && is.function(handle$nudge_render)) {
-                tryCatch(handle$nudge_render(), error = function(e) NULL)
+        schedule_isoform_callback <- function(callback, delay = isoformRenderBatchDelay) {
+            if (!requireNamespace("later", quietly = TRUE)) {
+                return(shiny::withReactiveDomain(session, callback()))
+            }
+            later::later(function() {
+                if (!is.null(session) && is.function(session$isClosed) && isTRUE(session$isClosed())) {
+                    return(invisible(NULL))
+                }
+                shiny::withReactiveDomain(session, callback())
+            }, delay = delay)
+            invisible(NULL)
+        }
+        render_batch <- NULL
+        render_batch <- function(batch_index) {
+            if (!is.null(session) && is.function(session$isClosed) && isTRUE(session$isClosed())) {
+                return(invisible(NULL))
+            }
+            if (nzchar(toggle_key)) {
+                expanded_state <- isolate(isoformExpandedGroups())
+                if (!isTRUE(expanded_state[[toggle_key]])) return(invisible(NULL))
+            }
+            batch_ids <- as.character(batches[[batch_index]] %||% character(0))
+            isolate({
+                if (identical(ctx, "orthologous")) {
+                    hydrate_orthologous_isoform_cards(batch_ids)
+                } else {
+                    hydrate_homologous_isoform_cards(batch_ids, anchor_id = last_homo_anchor)
+                    last_homo_anchor <<- as.character(tail(batch_ids, 1L) %||% last_homo_anchor)
+                }
+                tracker_now <- if (identical(ctx, "orthologous")) orthoPlotTimingTracker() else homoPlotTimingTracker()
+                tracker_run_id <- as.character((tracker_now$run %||% list())$id %||% "")
+                if (nzchar(tracker_run_id)) {
+                    prefix_output <- if (identical(ctx, "orthologous")) "plot_ortho_" else "plot_homo_"
+                    session$sendCustomMessage("cgv_plot_timing_expect", list(
+                        run_id = tracker_run_id,
+                        context = if (identical(ctx, "orthologous")) "orthologous" else "homologous",
+                        output_ids = paste0(prefix_output, batch_ids, "-plot"),
+                        first_paint_only = FALSE,
+                        functional_only = TRUE
+                    ))
+                }
+                ids_json <- jsonlite::toJSON(batch_ids, auto_unbox = FALSE)
+                prefix_js <- if (identical(ctx, "orthologous")) "ortho-card-" else "homo-card-"
+                run_isoform_js(sprintf(
+                    paste0(
+                        "try{var ids=%s,pfx='%s';for(var i=0;i<ids.length;i++){",
+                        "var card=document.getElementById(pfx+ids[i]);",
+                        "if(card){card.style.display='flex';card.style.opacity='0';",
+                        "card.style.position='absolute';card.style.left='-100000px';card.style.top='0';card.style.pointerEvents='none';",
+                        "card.setAttribute('aria-hidden','true');",
+                        "card.setAttribute('aria-busy','true');card.setAttribute('data-isoform-load-state','loading');",
+                        "if(window.Shiny&&Shiny.bindAll){Shiny.bindAll(card);}if(window.jQuery){window.jQuery(card).trigger('shown');}}}",
+                        "if(window.scheduleGgiraphNudge){window.scheduleGgiraphNudge(180);}}catch(e){}"
+                    ),
+                    ids_json,
+                    prefix_js
+                ))
+                if (identical(ctx, "orthologous")) {
+                    invisible(lapply(batch_ids, instantiate_orthologous_plot_module))
+                    invisible(lapply(batch_ids, register_orthologous_download_output))
+                    invisible(lapply(batch_ids, bind_orthologous_footer_output))
+                    invisible(lapply(
+                        paste0("ortho_footer_", batch_ids),
+                        function(output_id) outputOptions(output, output_id, suspendWhenHidden = FALSE)
+                    ))
+                    handles <- tryCatch(existingPlotsOrthologous(), error = function(e) list())
+                } else {
+                    invisible(lapply(batch_ids, instantiate_homologous_plot_module))
+                    invisible(lapply(batch_ids, register_homologous_download_output))
+                    invisible(lapply(batch_ids, bind_homologous_footer_output))
+                    invisible(lapply(
+                        paste0("homo_footer_", batch_ids),
+                        function(output_id) outputOptions(output, output_id, suspendWhenHidden = FALSE)
+                    ))
+                    handles <- tryCatch(existingPlotsHomologous(), error = function(e) list())
+                }
+                for (pid in batch_ids) {
+                    handle <- tryCatch(handles[[pid]], error = function(e) NULL)
+                    if (is.list(handle) && is.function(handle$nudge_render)) {
+                        tryCatch(handle$nudge_render(), error = function(e) NULL)
+                    }
+                }
+                run_isoform_js("if(window.scheduleGgiraphNudge){window.scheduleGgiraphNudge(180);}")
+            })
+            next_index <- as.integer(batch_index + 1L)
+            ids_json <- jsonlite::toJSON(batch_ids, auto_unbox = FALSE)
+            prefix_js <- if (identical(ctx, "orthologous")) "ortho-card-" else "homo-card-"
+
+            reveal_completed_batch <- function() {
+                if (!is.null(session) && is.function(session$isClosed) && isTRUE(session$isClosed())) {
+                    return(invisible(NULL))
+                }
+                if (nzchar(toggle_key)) {
+                    expanded_state <- tryCatch(isolate(isoformExpandedGroups()), error = function(e) list())
+                    if (!isTRUE(expanded_state[[toggle_key]])) return(invisible(NULL))
+                }
+                run_isoform_js(sprintf(
+                    paste0(
+                        "try{var ids=%s,pfx='%s';for(var i=0;i<ids.length;i++){",
+                        "var card=document.getElementById(pfx+ids[i]);",
+                        "if(card){card.style.display='flex';card.style.opacity='';card.style.position='';",
+                        "card.style.left='';card.style.top='';card.style.pointerEvents='';card.setAttribute('aria-hidden','false');",
+                        "card.removeAttribute('aria-busy');card.setAttribute('data-isoform-load-state','ready');}}",
+                        "if(window.scheduleGgiraphNudge){window.scheduleGgiraphNudge(180);}}catch(e){}"
+                    ),
+                    ids_json,
+                    prefix_js
+                ))
+                footer_prefix <- if (identical(ctx, "orthologous")) "ortho_footer_" else "homo_footer_"
+                invisible(lapply(
+                    paste0(footer_prefix, batch_ids),
+                    function(output_id) outputOptions(output, output_id, suspendWhenHidden = TRUE)
+                ))
+                if (next_index <= length(batches)) {
+                    if (requireNamespace("later", quietly = TRUE)) {
+                        schedule_isoform_callback(function() render_batch(next_index))
+                    } else {
+                        render_batch(next_index)
+                    }
+                }
+                invisible(NULL)
+            }
+
+            # A transcript card becomes visible only after the browser confirms
+            # that its SVG, sequence composition and statistics are all ready.
+            # The following card is not admitted until that reveal completes.
+            if (!requireNamespace("later", quietly = TRUE)) {
+                reveal_completed_batch()
+            } else {
+                wait_for_batch_complete <- NULL
+                wait_for_batch_complete <- function(attempt = 0L) {
+                    if (!is.null(session) && is.function(session$isClosed) && isTRUE(session$isClosed())) {
+                        return(invisible(NULL))
+                    }
+                    if (nzchar(toggle_key)) {
+                        expanded_state <- tryCatch(isolate(isoformExpandedGroups()), error = function(e) list())
+                        if (!isTRUE(expanded_state[[toggle_key]])) return(invisible(NULL))
+                    }
+                    tracker <- tryCatch(
+                        isolate(if (identical(ctx, "orthologous")) orthoPlotTimingTracker() else homoPlotTimingTracker()),
+                        error = function(e) NULL
+                    )
+                    if (!is.list(tracker)) return(invisible(NULL))
+                    prefix_output <- if (identical(ctx, "orthologous")) "plot_ortho_" else "plot_homo_"
+                    expected_outputs <- paste0(prefix_output, batch_ids, "-plot")
+                    completed_outputs <- as.character(tracker$card_complete %||% character(0))
+                    ready <- all(expected_outputs %in% completed_outputs)
+                    timed_out <- as.integer(attempt) >= 500L
+                    if (isTRUE(ready)) {
+                        reveal_completed_batch()
+                    } else if (isTRUE(timed_out)) {
+                        footer_prefix <- if (identical(ctx, "orthologous")) "ortho_footer_" else "homo_footer_"
+                        invisible(lapply(
+                            paste0(footer_prefix, batch_ids),
+                            function(output_id) outputOptions(output, output_id, suspendWhenHidden = TRUE)
+                        ))
+                        run_isoform_js(sprintf(
+                            paste0(
+                                "try{var ids=%s,pfx='%s';for(var i=0;i<ids.length;i++){",
+                                "var card=document.getElementById(pfx+ids[i]);if(card){card.style.display='none';",
+                                "card.style.opacity='';card.style.position='';card.style.left='';card.style.top='';card.style.pointerEvents='';",
+                                "card.removeAttribute('aria-busy');card.setAttribute('data-isoform-load-state','timeout');}}}catch(e){}"
+                            ),
+                            ids_json,
+                            prefix_js
+                        ))
+                        if (next_index <= length(batches)) {
+                            schedule_isoform_callback(function() render_batch(next_index))
+                        }
+                    } else {
+                        schedule_isoform_callback(
+                            function() wait_for_batch_complete(as.integer(attempt) + 1L)
+                        )
+                    }
+                    invisible(NULL)
+                }
+                schedule_isoform_callback(function() wait_for_batch_complete(0L))
+            }
+            invisible(NULL)
+        }
+        render_batch(1L)
+        invisible(NULL)
+    }
+
+    process_isoform_expand_request <- function(evt, toggle_key = "", button_id = "") {
+        resolved <- resolve_isoform_expand_request(evt)
+        if (!is.list(resolved)) return(invisible(NULL))
+        ctx <- resolved$context
+        ids_chr <- resolved$seed_ids
+        expanded_iso_ids <- resolved$expanded_ids
+        anchor_id <- resolved$anchor_id
+        toggle_key <- as.character(toggle_key %||% "")
+        button_id <- as.character(button_id %||% "")
+        isoform_tracker <- if (identical(ctx, "orthologous")) {
+            tryCatch(isolate(orthoPlotTimingTracker())$run, error = function(e) NULL)
+        } else {
+            tryCatch(isolate(homoPlotTimingTracker())$run, error = function(e) NULL)
+        }
+        if (is.list(isoform_tracker)) {
+            app_perf_mark(
+                isoform_tracker,
+                sprintf("isoform_expand_received context=%s seed_ids=%d", ctx, length(ids_chr)),
+                "ISOFORM_RENDER"
+            )
+        }
+
+        if (nzchar(toggle_key)) {
+            expanded_state <- isolate(isoformExpandedGroups())
+            if (isTRUE(expanded_state[[toggle_key]])) {
+                expanded_state[[toggle_key]] <- FALSE
+                isoformExpandedGroups(expanded_state)
+                hide_isoform_cards(expanded_iso_ids, ctx, button_id)
+                if (is.list(isoform_tracker)) {
+                    app_perf_mark(isoform_tracker, sprintf("isoform_collapse context=%s cards=%d", ctx, length(expanded_iso_ids)), "ISOFORM_RENDER")
+                }
+                return(invisible(NULL))
+            }
+            expanded_state[[toggle_key]] <- TRUE
+            isoformExpandedGroups(expanded_state)
+            set_isoform_toggle_label(button_id, expanded = TRUE)
+            if (nzchar(button_id)) {
+                tryCatch(
+                    updateCheckboxInput(session, inputId = button_id, value = TRUE),
+                    error = function(e) NULL
+                )
             }
         }
-        shinyjs::runjs(
-            "try{if(window.Shiny&&Shiny.bindAll){var cards=document.querySelectorAll('.plot-transcript-card.card-isoform'); for(var i=0;i<cards.length;i++){if(cards[i].style.display!=='none'){Shiny.bindAll(cards[i]);}}} if(window.scheduleGgiraphNudge){window.scheduleGgiraphNudge(250); window.scheduleGgiraphNudge(900);}}catch(e){}"
+        if (is.list(isoform_tracker)) {
+            app_perf_mark(
+                isoform_tracker,
+                sprintf("isoform_expand_resolved context=%s cards=%d", ctx, length(expanded_iso_ids)),
+                "ISOFORM_RENDER"
+            )
+        }
+        schedule_isoform_module_batches(
+            expanded_iso_ids,
+            ctx,
+            anchor_id = anchor_id,
+            toggle_key = toggle_key
         )
         invisible(NULL)
+    }
+
+    observeEvent(input$isoform_expand_request, {
+        process_isoform_expand_request(input$isoform_expand_request)
     }, ignoreInit = TRUE)
 
     # Figure Studio can request one result plot without forcing the user to
@@ -24002,10 +25499,12 @@ function(input, output, session) {
         }
 
         if (is_ortho) {
+            hydrate_orthologous_isoform_cards(ids_chr)
             invisible(lapply(ids_chr, instantiate_orthologous_plot_module))
             handles <- tryCatch(isolate(existingPlotsOrthologous()), error = function(e) list())
             card_prefix <- "ortho-card-"
         } else {
+            hydrate_homologous_isoform_cards(ids_chr, anchor_id = ids_chr[[1L]])
             invisible(lapply(ids_chr, instantiate_homologous_plot_module))
             handles <- tryCatch(isolate(existingPlotsHomologous()), error = function(e) list())
             card_prefix <- "homo-card-"
@@ -24292,7 +25791,8 @@ function(input, output, session) {
         {
             ids <- primaryPlotIdsOrthologous()
             ids_chr <- as.character(ids %||% integer(0))
-            keep_ids <- ids_chr
+            hydrated_isoform_ids <- as.character(orthoHydratedIsoformIds() %||% character(0))
+            keep_ids <- unique(c(ids_chr, hydrated_isoform_ids[nzchar(hydrated_isoform_ids)]))
             for (id_chr in keep_ids) {
                 bind_orthologous_footer_output(id_chr)
             }
@@ -26835,10 +28335,13 @@ function(input, output, session) {
 
     # Footer with summary statistics for aligned view
     output$ortho_aligned_footer <- bindEvent(renderUI({
+        mode <- tolower(trimws(as.character(input$ortho_visual_mode %||% "compact")))
+        if (!identical(mode, "aligned")) {
+            return(NULL)
+        }
         ids_all <- as.character(sortedPlotIdsOrthologous() %||% integer(0))
         ids <- as.character(alignedOrderedPlotIdsOrthologous() %||% character(0))
-        mode <- tolower(trimws(as.character(input$ortho_visual_mode %||% "compact")))
-        if (length(ids) == 0 || !identical(mode, "aligned")) {
+        if (length(ids) == 0) {
             return(NULL)
         }
 	        rep_strategy <- tolower(trimws(as.character(input$ortho_aligned_representative %||% "longest_cds")))
@@ -36020,7 +37523,7 @@ function(input, output, session) {
                     notify_feedback(
                         paste(
                             "Your feedback was saved locally, but this Desktop build cannot send it yet.",
-                            "Please use Feedback at cgv.mobilomics.org",
+                            "Please use Feedback at cgev.mobilomics.org",
                             "(or cgvapp.com while the official server is unavailable),",
                             "or email cgvviewer@gmail.com."
                         ),

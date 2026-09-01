@@ -66,6 +66,38 @@ assert(!grepl("BROKER_PERF_TIMING", check_text, fixed = TRUE) &&
          !grepl("COLORS_PERF_TIMING", check_text, fixed = TRUE),
        "Colors check must inspect effective telemetry without assuming broker env or the local deploy default.")
 
+eager_profile <- c(
+  APP_ORTHO_SUSPEND_HIDDEN = "1",
+  APP_HOMO_DEFER_SEQUENCE = "0",
+  APP_ORTHO_DEFER_SEQUENCE = "0",
+  APP_FOOTER_DEFER_SEQUENCE = "0",
+  APP_DEFER_FEATURE_GC = "0",
+  APP_HOMO_RENDER_CHUNK_SIZE = "1",
+  APP_HOMO_AUTO_RENDER_DELAY_MS = "120",
+  APP_ORTHO_RENDER_CHUNK_SIZE = "1",
+  APP_ORTHO_AUTO_RENDER_MORE = "1",
+  APP_ORTHO_AUTO_RENDER_DELAY_MS = "120",
+  APP_HOMO_INITIAL_VISIBLE = "1",
+  APP_ORTHO_INITIAL_VISIBLE = "1",
+  APP_ISOFORM_RENDER_BATCH_SIZE = "1",
+  APP_ISOFORM_RENDER_BATCH_DELAY_MS = "120",
+  APP_ORTHO_SERVER_RENDER_NUDGE = "0"
+)
+for (env_key in names(eager_profile)) {
+  constant_name <- paste0("COLORS_", sub("^APP_", "", env_key))
+  expected_constant <- sprintf('%s="%s"', constant_name, eager_profile[[env_key]])
+  assert(grepl(expected_constant, deploy, fixed = TRUE),
+         paste("Colors must fix progressive profile constant:", expected_constant))
+  expected_check <- sprintf("check_eager_profile_value %s \"$%s\"", env_key, constant_name)
+  assert(grepl(expected_check, check_text, fixed = TRUE),
+         paste("Colors check must validate effective progressive value:", env_key))
+  assert(grepl(paste0("'", env_key, "=${", constant_name, "}'"), deploy, fixed = TRUE),
+         paste("Static release guard must validate progressive value:", env_key))
+}
+assert(grepl('APPLICATION_EAGER_PROFILE="$(', check_text, fixed = TRUE) &&
+         grepl('DELEGATE_ENV="$(', check_text, fixed = TRUE),
+       "Colors check must compare application.yml and live delegate eager values.")
+
 wait_pos <- regexpr("wait_for_release() {", deploy, fixed = TRUE)[1]
 verify_pos <- regexpr("verify_static_release() {", deploy, fixed = TRUE)[1]
 rollback_pos <- regexpr("rollback_release() {", deploy, fixed = TRUE)[1]
@@ -273,7 +305,7 @@ required <- c(
   "Colors no debe usar container-env-file",
   "no se pudieron generar los candidatos server-owned seguros",
   "falló la preparación del application.yml server-owned",
-  "falló la configuración de first-paint en application.yml",
+  "falló la materialización del perfil progresivo en application.yml",
   "los candidatos server-owned no superaron la validación final",
   "no se pudo completar el respaldo previo al deploy",
   "falló el prewarm o la publicación del snapshot estático",
@@ -323,5 +355,11 @@ assert(!grepl("REPORT_FROM_EMAIL:", deploy, fixed = TRUE),
        "Public app sessions must not receive report sender configuration.")
 assert(!grepl("--tmpfs /var/run:", deploy, fixed = TRUE),
        "The nginx syntax check must mount /run, where nginx.pid is created.")
+assert(!grepl("'\\${APP_DIR}/shinyproxy/application.yml'", deploy, fixed = TRUE),
+       "Colors final guards must expand APP_DIR instead of sending it literally over SSH.")
+assert(!grepl("=\\${COLORS_", deploy, fixed = TRUE),
+       "Colors final guards must compare expanded eager-profile values, not literal variable names.")
+assert(grepl("s|^        CGV_PUBLIC_BASE_URL:.*|        CGV_PUBLIC_BASE_URL:", deploy, fixed = TRUE),
+       "Colors deploy must migrate the server-owned public base URL to the configured hostname.")
 
 message("Colors ShinyProxy immutable-static deployment contract is guarded.")

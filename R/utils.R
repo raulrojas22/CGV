@@ -89,7 +89,11 @@ app_perf_log_file <- function() {
         "APP_SEQ_EXTRACT_CACHE_MAX_MB", "APP_SPLICED_SEQ_CACHE_MAX_MB",
         "APP_ALIAS_SQLITE_CACHE_MB", "APP_ALIAS_SQLITE_MAX_CONNECTIONS",
         "APP_GIRAFE_COMPACT_SVG", "APP_GIRAFE_SVG_DECIMALS",
+        "APP_HOMO_RENDER_CHUNK_SIZE", "APP_HOMO_AUTO_RENDER_DELAY_MS",
         "APP_ORTHO_RENDER_CHUNK_SIZE", "APP_ORTHO_AUTO_RENDER_MORE",
+        "APP_ORTHO_AUTO_RENDER_DELAY_MS", "APP_HOMO_INITIAL_VISIBLE",
+        "APP_ORTHO_INITIAL_VISIBLE", "APP_ISOFORM_RENDER_BATCH_SIZE",
+        "APP_ISOFORM_RENDER_BATCH_DELAY_MS",
         "APP_ORTHO_REQUIRE_VERIFIED_ORTHOLOGY"
     )
     meta_values <- Sys.getenv(meta_keys, unset = "")
@@ -183,6 +187,13 @@ app_env_flag <- function(name, default = FALSE) {
     default_raw <- if (isTRUE(default)) "1" else "0"
     raw <- tolower(trimws(as.character(Sys.getenv(as.character(name %||% ""), default_raw) %||% default_raw)))
     !raw %in% c("", "0", "false", "no", "off")
+}
+
+# Gene Catalog is intentionally kept as a future-release feature. The code may
+# ship with the application, but no UI, browser handlers, or server observers are
+# registered unless the release explicitly opts in.
+gene_catalog_enabled <- function() {
+    app_env_flag("APP_GENE_CATALOG_ENABLED", default = FALSE)
 }
 
 cross_species_requires_verified_orthology <- function() {
@@ -699,6 +710,7 @@ resolve_genome_fasta <- function(det_info = NULL, uploaded_fasta_path = NULL, ge
 .preloaded_registry_cache <- new.env(parent = emptyenv())
 .twobit_seqinfo_cache <- new.env(parent = emptyenv())
 .twobit_handle_cache <- new.env(parent = emptyenv())
+.twobit_native_index_cache <- new.env(parent = emptyenv())
 .twobit_seqnames_sidecar_version <- 1L
 .tabix_index_override_cache <- new.env(parent = emptyenv())
 .tabix_seqnames_cache <- new.env(parent = emptyenv())
@@ -1968,7 +1980,7 @@ is_tabix_annotation_file <- function(path_value, index_path = NULL) {
 
 get_tabix_seqnames_cached <- function(file_path) {
     p <- normalizePath(as.character(file_path %||% ""), winslash = "/", mustWork = FALSE)
-    if (!nzchar(p) || !file.exists(p) || !requireNamespace("Rsamtools", quietly = TRUE)) {
+    if (!nzchar(p) || !file.exists(p)) {
         return(character(0))
     }
     idx_override <- get_tabix_index_override(p)
@@ -1984,12 +1996,25 @@ get_tabix_seqnames_cached <- function(file_path) {
     if (!is.null(cached)) {
         return(as.character(cached %||% character(0)))
     }
-    tbx <- if (nzchar(idx_path) && file.exists(idx_path)) {
-        Rsamtools::TabixFile(p, index = idx_path)
+    tabix_bin <- Sys.which("tabix")
+    adjacent_indexes <- normalizePath(c(paste0(p, ".tbi"), paste0(p, ".csi")), winslash = "/", mustWork = FALSE)
+    can_use_cli <- nzchar(tabix_bin) && (!nzchar(idx_path) || normalizePath(idx_path, winslash = "/", mustWork = FALSE) %in% adjacent_indexes)
+    seq_names <- if (isTRUE(can_use_cli)) {
+        tryCatch(
+            as.character(system2(tabix_bin, c("-l", shQuote(p)), stdout = TRUE, stderr = FALSE)),
+            error = function(e) character(0)
+        )
+    } else if (requireNamespace("Rsamtools", quietly = TRUE)) {
+        tbx <- if (nzchar(idx_path) && file.exists(idx_path)) {
+            Rsamtools::TabixFile(p, index = idx_path)
+        } else {
+            Rsamtools::TabixFile(p)
+        }
+        tryCatch(as.character(Rsamtools::seqnamesTabix(tbx)), error = function(e) character(0))
     } else {
-        Rsamtools::TabixFile(p)
+        character(0)
     }
-    seq_names <- tryCatch(as.character(Rsamtools::seqnamesTabix(tbx)), error = function(e) character(0))
+    seq_names <- seq_names[nzchar(seq_names)]
     cache_env_set(.tabix_seqnames_cache, key, seq_names, max_size = 64L)
     seq_names
 }
@@ -3429,7 +3454,7 @@ resolve_seqname_in_vector <- function(seqid, seq_names = character(0)) {
 }
 
 scan_tabix_region_gff <- function(file_path, seqid, start_pos, end_pos) {
-    if (!is_tabix_annotation_file(file_path) || !requireNamespace("Rsamtools", quietly = TRUE)) {
+    if (!is_tabix_annotation_file(file_path)) {
         return(empty_gff_df())
     }
     seqid <- as.character(seqid %||% "")
@@ -3440,25 +3465,37 @@ scan_tabix_region_gff <- function(file_path, seqid, start_pos, end_pos) {
     en <- max(st, as.integer(end_pos %||% st))
 
     idx_override <- get_tabix_index_override(file_path)
-    tbx <- if (nzchar(idx_override) && file.exists(idx_override)) {
-        Rsamtools::TabixFile(file_path, index = idx_override)
-    } else {
-        Rsamtools::TabixFile(file_path)
-    }
     seq_names <- get_tabix_seqnames_cached(file_path)
     resolved_seqname <- resolve_seqname_in_vector(seqid, seq_names = seq_names) %||% seqid
-    region <- GenomicRanges::GRanges(
-        seqnames = resolved_seqname,
-        ranges = IRanges::IRanges(start = st, end = en)
-    )
-
-    lines <- tryCatch(
-        {
-            raw <- Rsamtools::scanTabix(tbx, param = region)
-            if (length(raw) == 0) character(0) else raw[[1]]
-        },
-        error = function(e) character(0)
-    )
+    tabix_bin <- Sys.which("tabix")
+    adjacent_indexes <- normalizePath(c(paste0(file_path, ".tbi"), paste0(file_path, ".csi")), winslash = "/", mustWork = FALSE)
+    can_use_cli <- nzchar(tabix_bin) && (!nzchar(idx_override) || normalizePath(idx_override, winslash = "/", mustWork = FALSE) %in% adjacent_indexes)
+    lines <- if (isTRUE(can_use_cli)) {
+        region_text <- sprintf("%s:%d-%d", resolved_seqname, st, en)
+        tryCatch(
+            as.character(system2(tabix_bin, c(shQuote(file_path), shQuote(region_text)), stdout = TRUE, stderr = FALSE)),
+            error = function(e) character(0)
+        )
+    } else if (requireNamespace("Rsamtools", quietly = TRUE)) {
+        tbx <- if (nzchar(idx_override) && file.exists(idx_override)) {
+            Rsamtools::TabixFile(file_path, index = idx_override)
+        } else {
+            Rsamtools::TabixFile(file_path)
+        }
+        region <- GenomicRanges::GRanges(
+            seqnames = resolved_seqname,
+            ranges = IRanges::IRanges(start = st, end = en)
+        )
+        tryCatch(
+            {
+                raw <- Rsamtools::scanTabix(tbx, param = region)
+                if (length(raw) == 0) character(0) else raw[[1]]
+            },
+            error = function(e) character(0)
+        )
+    } else {
+        character(0)
+    }
     parse_gff_lines_to_df(lines)
 }
 
@@ -7241,6 +7278,150 @@ write_twobit_seqnames_sidecar <- function(two_bit_path, seqnames, base_dir = "."
     ))
 }
 
+read_twobit_u32 <- function(con, n = 1L, endian = "little") {
+    count <- suppressWarnings(as.integer(n %||% 1L))
+    if (!is.finite(count) || is.na(count) || count <= 0L) return(numeric(0))
+    values <- readBin(con, what = integer(), n = count, size = 4L, endian = endian)
+    values <- as.numeric(values)
+    values[values < 0] <- values[values < 0] + 2^32
+    values
+}
+
+read_twobit_native_index <- function(two_bit_path) {
+    path <- normalizePath(as.character(two_bit_path %||% ""), winslash = "/", mustWork = FALSE)
+    if (!nzchar(path) || !file.exists(path)) return(NULL)
+    file_meta <- file.info(path)
+    cache_key <- paste(
+        path,
+        as.character(file_meta$size[1] %||% ""),
+        as.character(as.numeric(file_meta$mtime[1] %||% NA_real_)),
+        sep = "::"
+    )
+    cached <- cache_env_get(.twobit_native_index_cache, cache_key, default = NULL)
+    if (!is.null(cached)) return(cached)
+
+    con <- file(path, open = "rb")
+    on.exit(close(con), add = TRUE)
+    signature_raw <- readBin(con, what = "raw", n = 4L)
+    if (length(signature_raw) != 4L) return(NULL)
+    signature_little <- sum(as.numeric(signature_raw) * 256^(0:3))
+    signature_big <- sum(as.numeric(signature_raw) * 256^(3:0))
+    canonical_signature <- 0x1A412743
+    endian <- if (identical(signature_little, canonical_signature)) {
+        "little"
+    } else if (identical(signature_big, canonical_signature)) {
+        "big"
+    } else {
+        return(NULL)
+    }
+    header <- read_twobit_u32(con, n = 3L, endian = endian)
+    if (length(header) != 3L || !identical(header[[1L]], 0) || !is.finite(header[[2L]])) return(NULL)
+    sequence_count <- suppressWarnings(as.integer(header[[2L]]))
+    if (!is.finite(sequence_count) || is.na(sequence_count) || sequence_count < 0L) return(NULL)
+    offsets <- numeric(sequence_count)
+    seq_names <- character(sequence_count)
+    if (sequence_count > 0L) {
+        for (idx in seq_len(sequence_count)) {
+            name_size <- readBin(con, what = integer(), n = 1L, size = 1L, signed = FALSE)
+            if (length(name_size) != 1L || !is.finite(name_size) || name_size < 0L) return(NULL)
+            name_raw <- readBin(con, what = "raw", n = as.integer(name_size))
+            if (length(name_raw) != as.integer(name_size)) return(NULL)
+            seq_names[[idx]] <- rawToChar(name_raw)
+            offset <- read_twobit_u32(con, n = 1L, endian = endian)
+            if (length(offset) != 1L || !is.finite(offset)) return(NULL)
+            offsets[[idx]] <- offset
+        }
+    }
+    names(offsets) <- seq_names
+    result <- list(
+        path = path,
+        endian = endian,
+        seqnames = seq_names,
+        offsets = offsets
+    )
+    cache_env_set(.twobit_native_index_cache, cache_key, result, max_size = 40L)
+    result
+}
+
+extract_sequence_from_2bit_native <- function(two_bit_path, seqid, start_pos, end_pos) {
+    index <- tryCatch(read_twobit_native_index(two_bit_path), error = function(e) NULL)
+    if (is.null(index) || length(index$offsets %||% numeric(0)) == 0L) return("")
+    seq_name <- as.character(seqid %||% "")
+    if (!nzchar(seq_name) || !seq_name %in% names(index$offsets)) return("")
+    record_offset <- suppressWarnings(as.numeric(index$offsets[[seq_name]] %||% NA_real_))
+    if (!is.finite(record_offset) || record_offset < 0) return("")
+
+    con <- file(index$path, open = "rb")
+    on.exit(close(con), add = TRUE)
+    seek(con, where = record_offset, origin = "start")
+    dna_size <- read_twobit_u32(con, n = 1L, endian = index$endian)
+    if (length(dna_size) != 1L || !is.finite(dna_size) || dna_size <= 0) return("")
+    st <- max(1, suppressWarnings(as.numeric(start_pos %||% 1)))
+    en <- max(st, suppressWarnings(as.numeric(end_pos %||% st)))
+    st <- min(st, dna_size)
+    en <- min(en, dna_size)
+    if (!is.finite(st) || !is.finite(en) || en < st) return("")
+    st <- floor(st)
+    en <- floor(en)
+
+    n_count <- read_twobit_u32(con, n = 1L, endian = index$endian)
+    if (length(n_count) != 1L || !is.finite(n_count)) return("")
+    n_count <- suppressWarnings(as.integer(n_count))
+    n_starts <- read_twobit_u32(con, n = n_count, endian = index$endian)
+    n_sizes <- read_twobit_u32(con, n = n_count, endian = index$endian)
+    mask_count <- read_twobit_u32(con, n = 1L, endian = index$endian)
+    if (length(mask_count) != 1L || !is.finite(mask_count)) return("")
+    mask_count <- suppressWarnings(as.integer(mask_count))
+    mask_starts <- read_twobit_u32(con, n = mask_count, endian = index$endian)
+    mask_sizes <- read_twobit_u32(con, n = mask_count, endian = index$endian)
+    reserved <- read_twobit_u32(con, n = 1L, endian = index$endian)
+    if (length(reserved) != 1L) return("")
+    packed_offset <- seek(con, where = NA, origin = "start")
+
+    byte_start <- floor((st - 1) / 4)
+    byte_end <- floor((en - 1) / 4)
+    byte_count <- as.integer(byte_end - byte_start + 1)
+    seek(con, where = packed_offset + byte_start, origin = "start")
+    packed <- readBin(con, what = "raw", n = byte_count)
+    if (length(packed) != byte_count) return("")
+    byte_values <- as.integer(packed)
+    codes <- as.vector(rbind(
+        bitwAnd(bitwShiftR(byte_values, 6L), 3L),
+        bitwAnd(bitwShiftR(byte_values, 4L), 3L),
+        bitwAnd(bitwShiftR(byte_values, 2L), 3L),
+        bitwAnd(byte_values, 3L)
+    ))
+    bases <- c("T", "C", "A", "G")[codes + 1L]
+    local_start <- as.integer((st - 1) %% 4 + 1)
+    requested_length <- as.integer(en - st + 1)
+    sequence_chars <- bases[seq.int(local_start, length.out = requested_length)]
+
+    apply_blocks <- function(block_starts, block_sizes, replacement = "N", lower = FALSE) {
+        if (length(block_starts) == 0L || length(sequence_chars) == 0L) return(invisible(NULL))
+        request_start0 <- st - 1
+        request_end0 <- en - 1
+        for (block_idx in seq_along(block_starts)) {
+            block_start0 <- as.numeric(block_starts[[block_idx]])
+            block_end0 <- block_start0 + as.numeric(block_sizes[[block_idx]]) - 1
+            overlap_start0 <- max(request_start0, block_start0)
+            overlap_end0 <- min(request_end0, block_end0)
+            if (!is.finite(overlap_start0) || !is.finite(overlap_end0) || overlap_end0 < overlap_start0) next
+            pos <- seq.int(
+                as.integer(overlap_start0 - request_start0 + 1),
+                as.integer(overlap_end0 - request_start0 + 1)
+            )
+            if (isTRUE(lower)) {
+                sequence_chars[pos] <<- tolower(sequence_chars[pos])
+            } else {
+                sequence_chars[pos] <<- replacement
+            }
+        }
+        invisible(NULL)
+    }
+    apply_blocks(n_starts, n_sizes, replacement = "N", lower = FALSE)
+    paste0(sequence_chars, collapse = "")
+}
+
 get_twobit_seqnames <- function(two_bit_path, base_dir = ".") {
     if (is.null(two_bit_path) || !nzchar(two_bit_path) || !file.exists(two_bit_path)) {
         return(character(0))
@@ -7254,6 +7435,17 @@ get_twobit_seqnames <- function(two_bit_path, base_dir = ".") {
     if (!is.null(sidecar) && length(sidecar) > 0L) {
         assign(key, sidecar, envir = .twobit_seqinfo_cache)
         return(sidecar)
+    }
+
+    if (isTRUE(app_env_flag("APP_NATIVE_TWOBIT_READER", TRUE))) {
+        native_index <- tryCatch(read_twobit_native_index(key), error = function(e) NULL)
+        native_seqnames <- as.character((native_index %||% list())$seqnames %||% character(0))
+        native_seqnames <- native_seqnames[nzchar(native_seqnames)]
+        if (length(native_seqnames) > 0L) {
+            assign(key, native_seqnames, envir = .twobit_seqinfo_cache)
+            tryCatch(write_twobit_seqnames_sidecar(key, native_seqnames, base_dir = base_dir), error = function(e) FALSE)
+            return(native_seqnames)
+        }
     }
 
     out <- tryCatch(
@@ -7287,17 +7479,44 @@ extract_sequence_from_2bit <- function(two_bit_path, seqid, start_pos, end_pos) 
     }
     start_pos <- max(1L, as.integer(start_pos %||% 1L))
     end_pos <- max(start_pos, as.integer(end_pos %||% start_pos))
+    twobit_perf <- app_perf_new_run("SEQ_2BIT")
+    twobit_total_t0 <- app_perf_now()
+    seqnames_t0 <- app_perf_now()
     seq_names <- get_twobit_seqnames(two_bit_path)
     resolved_seqname <- resolve_seqname_in_vector(seqid, seq_names = seq_names) %||% as.character(seqid %||% "")
+    app_perf_mark_ms(twobit_perf, "seqnames_resolve_ms", app_perf_elapsed_ms(seqnames_t0), "SEQ_2BIT")
     if (!nzchar(resolved_seqname)) {
         return("")
     }
 
+    if (isTRUE(app_env_flag("APP_NATIVE_TWOBIT_READER", TRUE))) {
+        native_t0 <- app_perf_now()
+        native_value <- tryCatch(
+            extract_sequence_from_2bit_native(
+                two_bit_path,
+                resolved_seqname,
+                start_pos,
+                end_pos
+            ),
+            error = function(e) ""
+        )
+        app_perf_mark_ms(twobit_perf, "native_twobit_ms", app_perf_elapsed_ms(native_t0), "SEQ_2BIT")
+        if (nzchar(native_value)) {
+            app_perf_mark(twobit_perf, sprintf("native done len=%d", as.integer(nchar(native_value))), "SEQ_2BIT")
+            app_perf_mark_ms(twobit_perf, "twobit_total_ms", app_perf_elapsed_ms(twobit_total_t0), "SEQ_2BIT")
+            return(native_value)
+        }
+        app_perf_mark(twobit_perf, "native reader fallback", "SEQ_2BIT")
+    }
+
     res <- tryCatch(
         {
+            namespace_t0 <- app_perf_now()
             if (!requireNamespace("rtracklayer", quietly = TRUE)) {
                 return("")
             }
+            app_perf_mark_ms(twobit_perf, "rtracklayer_namespace_ms", app_perf_elapsed_ms(namespace_t0), "SEQ_2BIT")
+            handle_t0 <- app_perf_now()
             key <- normalizePath(two_bit_path, winslash = "/", mustWork = FALSE)
             tbf <- if (exists(key, envir = .twobit_handle_cache, inherits = FALSE)) {
                 get(key, envir = .twobit_handle_cache, inherits = FALSE)
@@ -7307,19 +7526,29 @@ extract_sequence_from_2bit <- function(two_bit_path, seqid, start_pos, end_pos) 
                 trim_cache_env(.twobit_handle_cache, max_size = 40L)
                 obj
             }
+            app_perf_mark_ms(twobit_perf, "twobit_handle_ms", app_perf_elapsed_ms(handle_t0), "SEQ_2BIT")
+            range_t0 <- app_perf_now()
             gr <- GenomicRanges::GRanges(
                 seqnames = resolved_seqname,
                 ranges = IRanges::IRanges(start = start_pos, end = end_pos)
             )
+            app_perf_mark_ms(twobit_perf, "range_build_ms", app_perf_elapsed_ms(range_t0), "SEQ_2BIT")
+            import_t0 <- app_perf_now()
             seq_set <- rtracklayer::import(
                 con = tbf,
                 format = "2bit",
                 which = gr
             )
-            if (length(seq_set) == 0) "" else as.character(seq_set[[1]])
+            app_perf_mark_ms(twobit_perf, "twobit_import_ms", app_perf_elapsed_ms(import_t0), "SEQ_2BIT")
+            stringify_t0 <- app_perf_now()
+            seq_value <- if (length(seq_set) == 0) "" else as.character(seq_set[[1]])
+            app_perf_mark_ms(twobit_perf, "sequence_stringify_ms", app_perf_elapsed_ms(stringify_t0), "SEQ_2BIT")
+            seq_value
         },
         error = function(e) ""
     )
+    app_perf_mark_ms(twobit_perf, "twobit_total_ms", app_perf_elapsed_ms(twobit_total_t0), "SEQ_2BIT")
+    app_perf_mark(twobit_perf, sprintf("done len=%d", as.integer(nchar(res %||% ""))), "SEQ_2BIT")
     if (nzchar(res)) {
         return(res)
     }
@@ -7596,6 +7825,8 @@ extract_spliced_exon_sequence <- function(fasta_path, seqid, exon_ranges, strand
     }
 
     sp_perf <- app_perf_new_run("SEQ_SPLICE")
+    spliced_total_t0 <- app_perf_now()
+    on.exit(app_perf_mark_ms(sp_perf, "spliced_total_ms", app_perf_elapsed_ms(spliced_total_t0), "SEQ_SPLICE"), add = TRUE)
     app_perf_mark(
         sp_perf,
         sprintf(
@@ -7633,8 +7864,11 @@ extract_spliced_exon_sequence <- function(fasta_path, seqid, exon_ranges, strand
     # This is much faster than random-access per exon for compact transcripts.
     if (is.finite(span_start) && is.finite(span_end) && is.finite(span_width) &&
         span_start >= 1L && span_end >= span_start && span_width > 0L && span_width <= 300000L) {
+        span_fetch_t0 <- app_perf_now()
         span_seq <- extract_sequence_from_fasta(fasta_path, seqid, span_start, span_end)
+        app_perf_mark_ms(sp_perf, "single_span_fetch_ms", app_perf_elapsed_ms(span_fetch_t0), "SEQ_SPLICE")
         if (nzchar(span_seq) && nchar(span_seq) >= span_width) {
+            local_splice_t0 <- app_perf_now()
             rel_starts <- as.integer(round(ex$start)) - span_start + 1L
             rel_ends <- as.integer(round(ex$end)) - span_start + 1L
             keep <- is.finite(rel_starts) & is.finite(rel_ends) &
@@ -7675,6 +7909,7 @@ extract_spliced_exon_sequence <- function(fasta_path, seqid, exon_ranges, strand
                         sprintf("single-span done len=%d span=%d", as.integer(nchar(seq_spliced_local)), as.integer(span_width)),
                         "SEQ_SPLICE"
                     )
+                    app_perf_mark_ms(sp_perf, "local_splice_ms", app_perf_elapsed_ms(local_splice_t0), "SEQ_SPLICE")
                     return(seq_spliced_local)
                 }
             }
@@ -7683,8 +7918,34 @@ extract_spliced_exon_sequence <- function(fasta_path, seqid, exon_ranges, strand
 
     parts <- character(0)
 
+    # Native 2bit fallback for unusually wide transcripts where fetching one
+    # continuous span would be wasteful. It preserves the same exon-by-exon
+    # semantics without loading the large rtracklayer namespace.
+    if (is_twobit_file(fasta_path) && isTRUE(app_env_flag("APP_NATIVE_TWOBIT_READER", TRUE))) {
+        seq_names <- get_twobit_seqnames(fasta_path)
+        resolved_seqname <- resolve_seqname_in_vector(seqid, seq_names = seq_names) %||% as.character(seqid %||% "")
+        if (nzchar(resolved_seqname)) {
+            parts <- tryCatch(
+                vapply(seq_len(nrow(ex)), function(i) {
+                    extract_sequence_from_2bit_native(
+                        fasta_path,
+                        resolved_seqname,
+                        as.integer(round(as.numeric(ex$start[[i]]))),
+                        as.integer(round(as.numeric(ex$end[[i]])))
+                    )
+                }, character(1)),
+                error = function(e) character(0)
+            )
+        }
+        if (length(parts) > 0L && all(nzchar(parts))) {
+            app_perf_mark(sp_perf, sprintf("native 2bit parts=%d", as.integer(length(parts))), "SEQ_SPLICE")
+        } else {
+            parts <- character(0)
+        }
+    }
+
     # Fast path for 2bit: fetch all exon ranges in a single import call.
-    if (is_twobit_file(fasta_path) && requireNamespace("rtracklayer", quietly = TRUE)) {
+    if (length(parts) == 0L && is_twobit_file(fasta_path) && requireNamespace("rtracklayer", quietly = TRUE)) {
         parts <- tryCatch(
             {
                 seq_names <- get_twobit_seqnames(fasta_path)
@@ -8278,6 +8539,14 @@ extract_plot_labels <- function(data_df) {
     if (is.null(data_df) || nrow(data_df) == 0) {
         return(list(transcript = "N/A", chromosome = "N/A"))
     }
+    cached_meta <- attr(data_df, "cgev_transcript_meta", exact = TRUE)
+    if (is.list(cached_meta)) {
+        cached_tx <- trimws(as.character(cached_meta$transcript %||% ""))
+        cached_chr <- trimws(as.character(cached_meta$chromosome %||% ""))
+        if (nzchar(cached_tx) && nzchar(cached_chr)) {
+            return(list(transcript = cached_tx, chromosome = cached_chr))
+        }
+    }
     chromosome <- as.character(data_df$V1[1] %||% "N/A")
     tx_level_types <- c(
         "mrna", "transcript", "lnc_rna", "trna", "rrna", "snorna", "snrna", "mirna",
@@ -8329,22 +8598,24 @@ split_gene_data_by_transcript <- function(data_df) {
         return(list())
     }
 
+    split_perf <- app_perf_new_run("TRANSCRIPT_SPLIT")
+    split_total_t0 <- app_perf_now()
+    on.exit(app_perf_mark_ms(split_perf, "split_total_internal_ms", app_perf_elapsed_ms(split_total_t0), "TRANSCRIPT_SPLIT"), add = TRUE)
+    setup_t0 <- app_perf_now()
     df <- as.data.frame(data_df, stringsAsFactors = FALSE)
     if (!all(c("V3", "V9") %in% colnames(df))) {
         return(list(df))
     }
 
-    normalize_link_tokens <- function(x) {
+    canonical_link_tokens <- function(x) {
         x <- as.character(x %||% "")
         x <- trimws(safe_url_decode(x))
         x <- gsub('["\\\']', "", x)
-        x <- x[nzchar(x)]
-        if (length(x) == 0) {
-            return(character(0))
-        }
-        clean <- trimws(stringr::str_remove(x, stringr::regex("^(transcript|gene)\\s*:\\s*", ignore_case = TRUE)))
-        clean <- clean[nzchar(clean)]
-        unique(c(x, clean, paste0("transcript:", clean), paste0("gene:", clean)))
+        x <- trimws(stringr::str_remove(
+            x,
+            stringr::regex("^(transcript|gene)\\s*:\\s*", ignore_case = TRUE)
+        ))
+        x
     }
 
     n <- nrow(df)
@@ -8358,30 +8629,65 @@ split_gene_data_by_transcript <- function(data_df) {
         "vault_rna", "y_rna", "antisense_lncrna", "lncrna"
     )
     tx_rows <- which(row_types %in% tx_level_types)
+    app_perf_mark_ms(split_perf, "split_setup_ms", app_perf_elapsed_ms(setup_t0), "TRANSCRIPT_SPLIT")
     if (length(tx_rows) == 0) {
         return(list(df))
     }
 
     attrs_raw <- as.character(df$V9 %||% rep("", n))
-    attrs_parsed <- lapply(attrs_raw, parse_gff_attributes)
 
-    ids <- vapply(seq_len(n), function(i) {
-        a <- attrs_parsed[[i]]
-        id <- a[["id"]][1] %||% a[["transcript_id"]][1]
-        if (is.null(id) || is.na(id) || !nzchar(id)) "" else as.character(id)
-    }, character(1))
+    # This splitter needs only ID/transcript_id and Parent. Parsing every GFF/GTF
+    # attribute into a list used to dominate large genes even after relationship
+    # traversal was indexed. Extract the required fields in vectorised passes.
+    id_extract_t0 <- app_perf_now()
+    ids <- stringr::str_match(
+        attrs_raw,
+        stringr::regex("(?:^|;)\\s*ID=([^;]+)", ignore_case = TRUE)
+    )[, 2]
+    missing_ids <- is.na(ids) | !nzchar(trimws(ids))
+    if (any(missing_ids)) {
+        transcript_ids <- stringr::str_match(
+            attrs_raw[missing_ids],
+            stringr::regex('(?:^|;|\\t)\\s*transcript_id\\s*[= ]\\s*"?([^;"\\t]+)', ignore_case = TRUE)
+        )[, 2]
+        ids[missing_ids] <- transcript_ids
+    }
+    ids[is.na(ids)] <- ""
+    nonempty_ids <- nzchar(ids)
+    if (any(nonempty_ids)) ids[nonempty_ids] <- safe_url_decode(trimws(ids[nonempty_ids]))
+    app_perf_mark_ms(split_perf, "split_id_extract_ms", app_perf_elapsed_ms(id_extract_t0), "TRANSCRIPT_SPLIT")
 
-    parents <- lapply(seq_len(n), function(i) {
-        a <- attrs_parsed[[i]]
-        p <- a[["parent"]]
-        if (is.null(p) || length(p) == 0) {
-            return(character(0))
-        }
-        pv <- trimws(unlist(strsplit(paste(p, collapse = ","), ",", fixed = TRUE)))
-        unique(pv[nzchar(pv)])
-    })
-    parent_tokens <- lapply(parents, normalize_link_tokens)
+    parent_index_t0 <- app_perf_now()
+    parent_fields <- stringr::str_extract_all(
+        attrs_raw,
+        stringr::regex("(?:^|;)\\s*Parent=[^;]*", ignore_case = TRUE)
+    )
+    # Flatten Parent fields once and build the complete relationship index with
+    # vector operations.  Calling URL decoding and regex normalization once per
+    # annotation row was disproportionately expensive on large human genes.
+    parent_field_n <- lengths(parent_fields)
+    parent_field_rows <- rep.int(seq_len(n), parent_field_n)
+    parent_field_values <- unlist(parent_fields, use.names = FALSE)
+    if (length(parent_field_values) > 0L) {
+        parent_field_values <- stringr::str_remove(
+            parent_field_values,
+            stringr::regex("^(?:;)?\\s*Parent=", ignore_case = TRUE)
+        )
+        parent_parts <- strsplit(parent_field_values, ",", fixed = TRUE)
+        parent_part_rows <- rep.int(parent_field_rows, lengths(parent_parts))
+        parent_tokens_flat <- canonical_link_tokens(unlist(parent_parts, use.names = FALSE))
+        parent_token_valid <- nzchar(parent_tokens_flat)
+        rows_by_parent_token <- split(
+            as.integer(parent_part_rows[parent_token_valid]),
+            parent_tokens_flat[parent_token_valid]
+        )
+        rows_by_parent_token <- lapply(rows_by_parent_token, unique)
+    } else {
+        rows_by_parent_token <- list()
+    }
+    app_perf_mark_ms(split_perf, "split_parent_index_ms", app_perf_elapsed_ms(parent_index_t0), "TRANSCRIPT_SPLIT")
 
+    tx_key_t0 <- app_perf_now()
     tx_ids_raw <- vapply(tx_rows, function(i) {
         tid <- ids[i]
         if (!nzchar(tid)) {
@@ -8408,7 +8714,9 @@ split_gene_data_by_transcript <- function(data_df) {
     tx_num <- suppressWarnings(as.numeric(stringr::str_match(tx_disp_valid, "(?:[-_.]|\\b)(\\d+)$")[, 2]))
     tx_num_ord <- ifelse(is.na(tx_num), Inf, tx_num)
     ord <- order(tx_base, tx_num_ord, tolower(tx_disp_valid), tx_rows_valid)
+    app_perf_mark_ms(split_perf, "split_tx_key_order_ms", app_perf_elapsed_ms(tx_key_t0), "TRANSCRIPT_SPLIT")
 
+    traversal_t0 <- app_perf_now()
     out <- list()
     for (k in ord) {
         tx_row <- tx_rows_valid[k]
@@ -8418,15 +8726,27 @@ split_gene_data_by_transcript <- function(data_df) {
         if (length(gene_rows) > 0) selected[gene_rows] <- TRUE
         selected[tx_row] <- TRUE
 
-        frontier <- normalize_link_tokens(tx_id_raw)
-        if (length(frontier) == 0) frontier <- normalize_link_tokens(tx_id_display)
+        frontier <- unique(canonical_link_tokens(tx_id_raw))
+        frontier <- frontier[nzchar(frontier)]
+        if (length(frontier) == 0) {
+            frontier <- unique(canonical_link_tokens(tx_id_display))
+            frontier <- frontier[nzchar(frontier)]
+        }
+        visited_tokens <- character(0)
         repeat {
-            hits <- which(!selected & vapply(parent_tokens, function(ps) length(ps) > 0 && any(ps %in% frontier), logical(1)))
-            if (length(hits) == 0) break
+            frontier <- setdiff(frontier, visited_tokens)
+            if (length(frontier) == 0L) break
+            visited_tokens <- unique(c(visited_tokens, frontier))
+            hit_lists <- unname(rows_by_parent_token[frontier])
+            hit_lists[vapply(hit_lists, is.null, logical(1))] <- list(integer(0))
+            hits <- unique(as.integer(unlist(hit_lists, use.names = FALSE)))
+            hits <- hits[is.finite(hits) & hits >= 1L & hits <= n & !selected[hits]]
+            if (length(hits) == 0L) break
             selected[hits] <- TRUE
             new_ids <- unique(ids[hits])
             new_ids <- new_ids[nzchar(new_ids)]
-            frontier <- unique(c(frontier, normalize_link_tokens(new_ids)))
+            frontier <- unique(canonical_link_tokens(new_ids))
+            frontier <- frontier[nzchar(frontier)]
         }
 
         sub_df <- df[selected, , drop = FALSE]
@@ -8441,8 +8761,45 @@ split_gene_data_by_transcript <- function(data_df) {
             i <- i + 1
             key_i <- paste0(key, "_", i)
         }
+        sub_types <- row_types[selected]
+        sub_starts <- suppressWarnings(as.numeric(sub_df$V4))
+        sub_ends <- suppressWarnings(as.numeric(sub_df$V5))
+        tx_local_rows <- which(sub_types %in% tx_level_types)
+        span_rows <- if (length(tx_local_rows) > 0L) {
+            tx_local_rows
+        } else {
+            feature_rows <- which(sub_types %in% c("exon", "cds", "start_codon", "stop_codon") | grepl("utr", sub_types))
+            if (length(feature_rows) > 0L) feature_rows else which(sub_types == "gene")
+        }
+        if (length(span_rows) == 0L) span_rows <- seq_len(nrow(sub_df))
+        span_start <- suppressWarnings(min(sub_starts[span_rows], na.rm = TRUE))
+        span_end <- suppressWarnings(max(sub_ends[span_rows], na.rm = TRUE))
+        if (!is.finite(span_start)) span_start <- NA_real_
+        if (!is.finite(span_end)) span_end <- NA_real_
+        make_ranges <- function(type_name) {
+            idx <- which(sub_types == type_name & is.finite(sub_starts) & is.finite(sub_ends))
+            if (length(idx) == 0L) {
+                return(data.frame(start = numeric(0), end = numeric(0), stringsAsFactors = FALSE))
+            }
+            unique(data.frame(start = sub_starts[idx], end = sub_ends[idx], stringsAsFactors = FALSE))
+        }
+        attr(sub_df, "cgev_transcript_meta") <- list(
+            transcript = unname(tx_id_display),
+            chromosome = as.character(sub_df$V1[1] %||% "N/A"),
+            row_types = sub_types,
+            span = c(start = span_start, end = span_end),
+            tx_attr = if (length(tx_local_rows) > 0L) as.character(sub_df$V9[tx_local_rows[1L]] %||% "") else "",
+            gene_attr = {
+                gene_local_rows <- which(sub_types == "gene")
+                if (length(gene_local_rows) > 0L) as.character(sub_df$V9[gene_local_rows[1L]] %||% "") else ""
+            },
+            exon_ranges = make_ranges("exon"),
+            cds_ranges = make_ranges("cds")
+        )
         out[[key_i]] <- sub_df
     }
+    app_perf_mark_ms(split_perf, "split_traversal_copy_ms", app_perf_elapsed_ms(traversal_t0), "TRANSCRIPT_SPLIT")
+    app_perf_mark(split_perf, sprintf("done blocks=%d rows=%d", as.integer(length(out)), as.integer(n)), "TRANSCRIPT_SPLIT")
 
     if (length(out) == 0) {
         return(list(df))
@@ -9542,18 +9899,23 @@ run_orthologous_lookup_job_worker <- function(job) {
 
 fetch_gene_data_sync <- function(chr_name, gene_coords, fasta_path = NULL, fasta_id = NULL, exon_ranges = NULL, strand = "+") {
     fetch_perf <- app_perf_new_run("SEQ_FETCH")
+    fetch_total_t0 <- app_perf_now()
+    on.exit(app_perf_mark_ms(fetch_perf, "fetch_gene_total_ms", app_perf_elapsed_ms(fetch_total_t0), "SEQ"), add = TRUE)
     app_perf_mark(fetch_perf, "start", "SEQ")
     out <- tryCatch(
         {
             chr_name <- as.character(chr_name %||% "")
             start_pos <- suppressWarnings(as.numeric(gene_coords$start %||% NA_real_))
             end_pos <- suppressWarnings(as.numeric(gene_coords$end %||% NA_real_))
+            spliced_fetch_t0 <- app_perf_now()
             seq_str <- extract_spliced_exon_sequence(fasta_path, chr_name, exon_ranges = exon_ranges, strand = strand)
+            app_perf_mark_ms(fetch_perf, "spliced_sequence_ms", app_perf_elapsed_ms(spliced_fetch_t0), "SEQ")
             app_perf_mark(fetch_perf, sprintf("after spliced len=%d", as.integer(nchar(seq_str %||% ""))), "SEQ")
             if (!nzchar(seq_str) && is.finite(start_pos) && is.finite(end_pos)) {
                 seq_str <- extract_sequence_from_fasta(fasta_path, chr_name, start_pos, end_pos)
                 app_perf_mark(fetch_perf, sprintf("after fallback len=%d", as.integer(nchar(seq_str %||% ""))), "SEQ")
             }
+            composition_t0 <- app_perf_now()
             comp_info <- NULL
             if (!is.null(fasta_path) && nzchar(as.character(fasta_path %||% "")) && file.exists(fasta_path) &&
                 !is.null(exon_ranges) && nrow(normalize_exon_ranges(exon_ranges)) > 0L) {
@@ -9581,6 +9943,7 @@ fetch_gene_data_sync <- function(chr_name, gene_coords, fasta_path = NULL, fasta
                     sequence_optional = NULL
                 )
             }
+            app_perf_mark_ms(fetch_perf, "composition_prepare_ms", app_perf_elapsed_ms(composition_t0), "SEQ")
 
             fasta_id <- safe_url_decode(as.character(fasta_id %||% ""))
             fasta_id <- trimws(fasta_id)

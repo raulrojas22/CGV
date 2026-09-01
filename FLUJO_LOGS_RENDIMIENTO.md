@@ -23,10 +23,11 @@ NAS con uno de Colors.
 Ejecutar el despliegue real del NAS con una etiqueta exclusiva:
 
 ```bash
-PERF_RUN_LABEL=antes_nas_01 ./deploy-nas-shinyproxy.sh
+NAS_PERF_TIMING=1 PERF_RUN_LABEL=antes_nas_01 ./deploy-nas-shinyproxy.sh
 ```
 
-El script configura en el NAS `SP_APP_PERF_TIMING=1` y propaga la etiqueta a
+El modo normal del script deja la telemetría apagada. El override
+`NAS_PERF_TIMING=1` configura `SP_APP_PERF_TIMING=1` y propaga la etiqueta a
 cada contenedor de sesión. No es necesario modificar `.env` manualmente.
 
 Después del despliegue:
@@ -56,7 +57,7 @@ Colors conserva su configuración endurecida de ShinyProxy en el servidor. El
 modo normal deja la telemetría desactivada; `COLORS_PERF_TIMING=1` habilita esta
 captura de forma explícita y propaga la etiqueta y la identificación de la
 imagen a las sesiones nuevas. Después se realiza el recorrido manual en
-`cgv.mobilomics.org`. `./deploy-colors-shinyproxy.sh --check` muestra el valor
+`cgev.mobilomics.org`. `./deploy-colors-shinyproxy.sh --check` muestra el valor
 efectivo como `perf=0` o `perf=1`.
 
 Los archivos quedan en Colors:
@@ -73,7 +74,7 @@ por uno y evaluar el otro más adelante.
 Aplicar una sola optimización y cambiar únicamente `antes` por `despues`:
 
 ```bash
-PERF_RUN_LABEL=despues_nas_01 ./deploy-nas-shinyproxy.sh
+NAS_PERF_TIMING=1 PERF_RUN_LABEL=despues_nas_01 ./deploy-nas-shinyproxy.sh
 ```
 
 o para Colors:
@@ -90,6 +91,12 @@ override (o con `COLORS_PERF_TIMING=0` explícito):
 
 ```bash
 COLORS_PERF_TIMING=0 ./deploy-colors-shinyproxy.sh
+```
+
+En el NAS, el equivalente es un deploy normal o explícitamente:
+
+```bash
+NAS_PERF_TIMING=0 ./deploy-nas-shinyproxy.sh
 ```
 
 ## 4. Qué compartir para la revisión

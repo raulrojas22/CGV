@@ -158,13 +158,15 @@ Si quieres una imagen totalmente autocontenida (muy pesada), tendrías que quita
 - El prewarm de Docker ocurre contra datos montados por volumen, no durante `docker build`.
 - Por eso, la optimización correcta es post-arranque (automática con `APP_PREWARM_ON_START=1` o manual con `docker exec`).
 - Mantén `CGV_CACHE_DIR` persistente y evita `docker compose down -v` para conservar cachés entre reinicios.
-- Para que el primer gráfico aparezca rápido sin perder contenido, conserva:
-  `APP_ORTHO_SUSPEND_HIDDEN=1`, `APP_ORTHO_DEFER_SEQUENCE=0`,
-  `APP_FOOTER_DEFER_SEQUENCE=0`, `APP_HOMO_UPFRONT_ISOFORMS=0` y
-  `APP_ORTHO_UPFRONT_ISOFORMS=0`. No eliminan anexos, fuentes externas,
-  composición de secuencia del footer ni GC por feature: solo difieren
-  isoformas ocultas y reutilizan el tramo genómico cacheado para evitar lecturas
-  repetidas durante la construcción del gráfico.
+- Para priorizar el primer gráfico y mostrar las tarjetas progresivamente,
+  conserva: `APP_HOMO_INITIAL_VISIBLE=1`, `APP_ORTHO_INITIAL_VISIBLE=1`,
+  `APP_HOMO_RENDER_CHUNK_SIZE=1`, `APP_ORTHO_RENDER_CHUNK_SIZE=1`,
+  `APP_ORTHO_AUTO_RENDER_MORE=1`, los delays en `120` ms y
+  `APP_ISOFORM_RENDER_BATCH_SIZE=1`. Mantén `APP_HOMO_DEFER_SEQUENCE=0`,
+  `APP_ORTHO_DEFER_SEQUENCE=0`, `APP_FOOTER_DEFER_SEQUENCE=0` y
+  `APP_DEFER_FEATURE_GC=0`. `APP_ORTHO_SUSPEND_HIDDEN=1` mantiene inactivo
+  Alignment hasta que el usuario lo abre; las isoformas ocultas continúan
+  creándose sólo al expandirlas.
 
 ## Nota de performance (tráfico navegador/servidor)
 

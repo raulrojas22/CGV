@@ -10,6 +10,8 @@ assert <- function(condition, message) {
 
 nas_shinyproxy <- read_text("deploy-nas-shinyproxy.sh")
 nas_direct <- read_text("deploy-nas.sh")
+shinyproxy_application <- read_text("shinyproxy/application.yml")
+shinyproxy_compose <- read_text("docker-compose.shinyproxy.yml")
 
 build_pos <- regexpr("compose build", nas_shinyproxy, fixed = TRUE)[1]
 image_env_positions <- gregexpr(
@@ -73,4 +75,53 @@ assert(grepl("ps -aq --filter name=sp-container-", nas_shinyproxy, fixed = TRUE)
 assert(!grepl("ps -aq --filter ancestor=${CGV_IMAGE}", nas_shinyproxy, fixed = TRUE),
        "Delegate cleanup must not depend on the new mutable image tag.")
 
-message("NAS ShinyProxy immutable-static deployment contract is guarded.")
+eager_profile <- c(
+  ORTHO_SUSPEND_HIDDEN = "1",
+  HOMO_DEFER_SEQUENCE = "0",
+  ORTHO_DEFER_SEQUENCE = "0",
+  FOOTER_DEFER_SEQUENCE = "0",
+  DEFER_FEATURE_GC = "0",
+  ORTHO_RENDER_CHUNK_SIZE = "64",
+  ORTHO_AUTO_RENDER_MORE = "0",
+  ORTHO_AUTO_RENDER_DELAY_MS = "0",
+  HOMO_INITIAL_VISIBLE = "64",
+  ORTHO_INITIAL_VISIBLE = "64",
+  ORTHO_SERVER_RENDER_NUDGE = "0"
+)
+for (profile_key in names(eager_profile)) {
+  profile_value <- eager_profile[[profile_key]]
+  assert(
+    grepl(
+      sprintf("upsert_env SP_%s '${NAS_%s}'", profile_key, profile_key),
+      nas_shinyproxy,
+      fixed = TRUE
+    ),
+    sprintf("NAS deploy does not persist SP_%s.", profile_key)
+  )
+  assert(
+    grepl(
+      sprintf("APP_%s: \"${SP_%s:%s}\"", profile_key, profile_key, profile_value),
+      shinyproxy_application,
+      fixed = TRUE
+    ),
+    sprintf("ShinyProxy does not map SP_%s to APP_%s.", profile_key, profile_key)
+  )
+  assert(
+    grepl(
+      sprintf("SP_%s: \"${SP_%s:-%s}\"", profile_key, profile_key, profile_value),
+      shinyproxy_compose,
+      fixed = TRUE
+    ),
+    sprintf("Compose does not propagate SP_%s.", profile_key)
+  )
+}
+assert(grepl("NAS_PERF_TIMING=\"${NAS_PERF_TIMING:-0}\"", nas_shinyproxy, fixed = TRUE),
+       "NAS performance telemetry must be off by default.")
+assert(grepl("upsert_env SP_APP_PERF_TIMING '${NAS_PERF_TIMING}'", nas_shinyproxy, fixed = TRUE),
+       "NAS deploy must persist its explicit telemetry mode.")
+assert(grepl("APP_PERF_TIMING: \"${SP_APP_PERF_TIMING:0}\"", shinyproxy_application, fixed = TRUE),
+       "ShinyProxy telemetry must be off by default.")
+assert(grepl("SP_APP_PERF_TIMING: \"${SP_APP_PERF_TIMING:-0}\"", shinyproxy_compose, fixed = TRUE),
+       "Compose telemetry must be off by default.")
+
+message("NAS ShinyProxy static-release and eager-render contracts are guarded.")

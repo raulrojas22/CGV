@@ -302,14 +302,39 @@
   // groupKey: data-isoform-group value shared by all isoform cards for that gene
   // data-count on btn: TOTAL transcript count (canonical + isoforms)
   // ---------------------------------------------------------------------------
+  function syncIsoformToggleButtons() {
+    var buttons = document.querySelectorAll('.isoform-toggle-btn[data-group]');
+    for (var i = 0; i < buttons.length; i++) {
+      var btn = buttons[i];
+      var groupKey = btn.dataset.group || '';
+      if (!groupKey) continue;
+      var cards = document.querySelectorAll('[data-isoform-group="' + groupKey + '"]');
+      if (!cards.length) continue;
+      var expanded = false;
+      for (var j = 0; j < cards.length; j++) {
+        if (cards[j].style.display !== 'none' && cards[j].style.display !== '') {
+          expanded = true;
+          break;
+        }
+      }
+      var count = parseInt(btn.dataset.count || '0', 10);
+      if (!isFinite(count)) count = cards.length;
+      var label = count === 1 ? 'transcript' : 'transcripts';
+      btn.innerHTML = (expanded ? '&#x25B2; ' : '&#x25BC; ') + count + ' ' + label;
+    }
+  }
+  window.syncIsoformToggleButtons = syncIsoformToggleButtons;
+
   window.toggleIsoformCards = function (btn, groupKey) {
     if (!groupKey) return;
     // Selects only the isoform cards (canonical card does NOT have data-isoform-group)
     var selector = '[data-isoform-group="' + groupKey + '"]';
     var cards = document.querySelectorAll(selector);
-    if (!cards || !cards.length) return;
 
-    var currentlyHidden = (cards[0].style.display === 'none' || cards[0].style.display === '');
+    // The initial page no longer carries hundreds of hidden transcript cards.
+    // With no hydrated cards yet, treat the first click as an expand request;
+    // the server resolves the full group from the canonical plot id.
+    var currentlyHidden = (!cards || !cards.length || cards[0].style.display === 'none' || cards[0].style.display === '');
     var count = parseInt(btn.dataset.count || '0', 10);
     if (!isFinite(count)) count = cards.length;
     var label = count === 1 ? 'transcript' : 'transcripts';
@@ -320,9 +345,10 @@
           var ids = [];
           for (var k = 0; k < cards.length; k++) {
             var rawId = cards[k].id || '';
-            rawId = rawId.replace(/^homo-card-/, '').replace(/^ortho-card-/, '');
+            rawId = rawId.replace(/^homo-card-/, '').replace(/^ortho-card-/, '').replace(/^ortho-placeholder-/, '');
             if (rawId) ids.push(rawId);
           }
+          if (!ids.length && btn.dataset.plotId) ids.push(btn.dataset.plotId);
           Shiny.setInputValue('isoform_expand_request', {
             group: groupKey,
             context: groupKey.indexOf('ortho--') === 0 ? 'orthologous' : 'homologous',
@@ -333,28 +359,20 @@
       } catch (_e0) {}
     }
 
-    for (var i = 0; i < cards.length; i++) {
-      cards[i].style.display = currentlyHidden ? 'flex' : 'none';
+    // Expansion is admitted by the server one complete transcript at a time.
+    // Collapse remains immediate for every hydrated card.
+    if (!currentlyHidden) {
+      for (var i = 0; i < cards.length; i++) {
+        cards[i].style.display = 'none';
+      }
     }
 
     if (currentlyHidden) {
       btn.innerHTML = '&#x25B2; ' + count + ' ' + label;
-      // 1. Trigger Shiny to re-evaluate suspended outputs now that cards are visible
-      try { $(window).trigger('resize'); } catch (_e) {}
-      // 2. Bind any newly visible Shiny outputs inside the expanded cards
-      try {
-        if (typeof Shiny !== 'undefined' && Shiny.bindAll) {
-          setTimeout(function () {
-            for (var j = 0; j < cards.length; j++) { Shiny.bindAll(cards[j]); }
-          }, 120);
-        }
-      } catch (_e2) {}
-      // 3. Nudge ggiraph so newly visible plots register their hover handlers
-      try { if (typeof nudgeGgiraph === 'function') setTimeout(nudgeGgiraph, 300); } catch (_e3) {}
-      try { if (typeof nudgeGgiraph === 'function') setTimeout(nudgeGgiraph, 850); } catch (_e4) {}
     } else {
       btn.innerHTML = '&#x25BC; ' + count + ' ' + label;
     }
+    syncIsoformToggleButtons();
   };
   var _girafe_repair_timers = Object.create(null);
   function scheduleGirafeRepair(delayMs, rootEl) {
@@ -635,6 +653,7 @@
    */
   var _girafe_nudge_timer = null;
   document.addEventListener('shiny:value', function (e) {
+    syncIsoformToggleButtons();
     var name = (e && e.name) ? String(e.name) : '';
     if (!name) return;
     if (

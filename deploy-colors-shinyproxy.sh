@@ -11,15 +11,31 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REMOTE_TARGET="${REMOTE_TARGET:-colors}"
 REMOTE_PATH="${REMOTE_PATH:-/home/rarojas/cgv}"
 APP_DIR="${REMOTE_PATH}/app"
-PUBLIC_HOSTNAME="${PUBLIC_HOSTNAME:-cgv.mobilomics.org}"
+PUBLIC_HOSTNAME="${PUBLIC_HOSTNAME:-cgev.mobilomics.org}"
 COMPOSE_FILE="${APP_DIR}/docker-compose.shinyproxy.colors.yml"
 COLORS_NGINX_CONFIG="${APP_DIR}/deploy/nginx/cgv-shinyproxy-colors.conf"
 BACKGROUND_WORKER_NAME="cgv-background-report-worker"
 BACKGROUND_REPORT_MEMORY="${BACKGROUND_REPORT_MEMORY:-4g}"
 APP_LASTZ_GLOBAL_WORKERS="${APP_LASTZ_GLOBAL_WORKERS:-2}"
 COLORS_INLINE_FAST_SEQUENCE_PREFETCH="${COLORS_INLINE_FAST_SEQUENCE_PREFETCH:-1}"
-COLORS_HOMO_DEFER_SEQUENCE="${COLORS_HOMO_DEFER_SEQUENCE:-0}"
-COLORS_DEFER_FEATURE_GC="${COLORS_DEFER_FEATURE_GC:-0}"
+# Colors intentionally uses one fixed progressive rendering profile. These values are
+# materialized as literals below so stale SP_* or server-owned values cannot
+# silently reactivate bulk card rendering.
+COLORS_ORTHO_SUSPEND_HIDDEN="1"
+COLORS_HOMO_DEFER_SEQUENCE="0"
+COLORS_ORTHO_DEFER_SEQUENCE="0"
+COLORS_FOOTER_DEFER_SEQUENCE="0"
+COLORS_DEFER_FEATURE_GC="0"
+COLORS_HOMO_RENDER_CHUNK_SIZE="1"
+COLORS_HOMO_AUTO_RENDER_DELAY_MS="120"
+COLORS_ORTHO_RENDER_CHUNK_SIZE="1"
+COLORS_ORTHO_AUTO_RENDER_MORE="1"
+COLORS_ORTHO_AUTO_RENDER_DELAY_MS="120"
+COLORS_HOMO_INITIAL_VISIBLE="1"
+COLORS_ORTHO_INITIAL_VISIBLE="1"
+COLORS_ISOFORM_RENDER_BATCH_SIZE="1"
+COLORS_ISOFORM_RENDER_BATCH_DELAY_MS="120"
+COLORS_ORTHO_SERVER_RENDER_NUDGE="0"
 LOCAL_EMAIL_ENV="${SCRIPT_DIR}/.env.local"
 REMOTE_EMAIL_ENV="${APP_DIR}/.env.background-reports"
 EMAIL_ENV_STAGING=""
@@ -56,10 +72,14 @@ Variables opcionales:
   BACKGROUND_REPORT_MEMORY=4g
   APP_LASTZ_GLOBAL_WORKERS=2
   COLORS_INLINE_FAST_SEQUENCE_PREFETCH=1
-  COLORS_HOMO_DEFER_SEQUENCE=0
-  COLORS_DEFER_FEATURE_GC=0
   COLORS_PERF_TIMING=1  Activa una captura de telemetría controlada (por defecto: 0).
   PERF_RUN_LABEL=antes_colors_01  Etiqueta usada cuando COLORS_PERF_TIMING=1.
+
+Perfil de render progresivo fijo en Colors:
+  hidden=1, homo-seq=0, ortho-seq=0, footer-seq=0, gc=0,
+  homo/ortho chunk=1, auto-render=1, auto-delay=120ms,
+  homo/ortho-initial=1, isoform batch=1/120ms,
+  server-render-nudge=0.
 
 El deploy normal exige que Git esté limpio y crea una imagen inmutable con
 la forma localhost/cgv:release-<commit>-<fecha UTC>.
@@ -86,11 +106,20 @@ done
   die "COLORS_PERF_TIMING debe ser 0 o 1"
 for tuning_value in \
   "$COLORS_INLINE_FAST_SEQUENCE_PREFETCH" \
+  "$COLORS_ORTHO_SUSPEND_HIDDEN" \
   "$COLORS_HOMO_DEFER_SEQUENCE" \
+  "$COLORS_ORTHO_DEFER_SEQUENCE" \
+  "$COLORS_FOOTER_DEFER_SEQUENCE" \
+  "$COLORS_ORTHO_AUTO_RENDER_MORE" \
+  "$COLORS_ORTHO_SERVER_RENDER_NUDGE" \
   "$COLORS_DEFER_FEATURE_GC"; do
   [[ "$tuning_value" == "0" || "$tuning_value" == "1" ]] || \
-    die "Los flags de first-paint de Colors deben ser 0 o 1"
+    die "Los flags del perfil de render de Colors deben ser 0 o 1"
 done
+[[ "$COLORS_HOMO_AUTO_RENDER_DELAY_MS" == "120" && "$COLORS_ORTHO_AUTO_RENDER_DELAY_MS" == "120" && "$COLORS_ISOFORM_RENDER_BATCH_DELAY_MS" == "120" ]] || \
+  die "El perfil progresivo de Colors exige delays de 120 ms"
+[[ "$COLORS_HOMO_RENDER_CHUNK_SIZE" == "1" && "$COLORS_ORTHO_RENDER_CHUNK_SIZE" == "1" && "$COLORS_HOMO_INITIAL_VISIBLE" == "1" && "$COLORS_ORTHO_INITIAL_VISIBLE" == "1" && "$COLORS_ISOFORM_RENDER_BATCH_SIZE" == "1" ]] || \
+  die "El perfil progresivo de Colors exige lotes e initial-visible de 1"
 [[ "$PERF_RUN_LABEL" =~ ^[A-Za-z0-9._-]+$ ]] || \
   die "PERF_RUN_LABEL solo puede contener letras, numeros, punto, guion y guion bajo"
 [[ "$BACKGROUND_REPORT_MEMORY" =~ ^[1-9][0-9]*[mMgG]$ ]] || \
@@ -313,6 +342,41 @@ if [[ "$MODE" == "check" ]]; then
   [[ "$DELEGATE_PERF_TIMING" == "$APPLICATION_PERF_TIMING" ]] || \
     die "APP_PERF_TIMING de la sesión (${DELEGATE_PERF_TIMING}) no coincide con application.yml (${APPLICATION_PERF_TIMING})"
 
+  APPLICATION_EAGER_PROFILE="$(
+    rssh "sed -n -E 's/^        (APP_ORTHO_SUSPEND_HIDDEN|APP_HOMO_DEFER_SEQUENCE|APP_ORTHO_DEFER_SEQUENCE|APP_FOOTER_DEFER_SEQUENCE|APP_DEFER_FEATURE_GC|APP_HOMO_RENDER_CHUNK_SIZE|APP_HOMO_AUTO_RENDER_DELAY_MS|APP_ORTHO_RENDER_CHUNK_SIZE|APP_ORTHO_AUTO_RENDER_MORE|APP_ORTHO_AUTO_RENDER_DELAY_MS|APP_HOMO_INITIAL_VISIBLE|APP_ORTHO_INITIAL_VISIBLE|APP_ISOFORM_RENDER_BATCH_SIZE|APP_ISOFORM_RENDER_BATCH_DELAY_MS|APP_ORTHO_SERVER_RENDER_NUDGE): \"([^\"]+)\"$/\1=\2/p' '${APP_DIR}/shinyproxy/application.yml'"
+  )"
+  DELEGATE_ENV="$(
+    rssh "podman inspect '${CHECK_DELEGATE}' --format '{{range .Config.Env}}{{println .}}{{end}}'"
+  )"
+  check_eager_profile_value() {
+    local env_key="$1"
+    local expected_value="$2"
+    local application_count application_value delegate_count delegate_value
+    application_count="$(printf '%s\n' "$APPLICATION_EAGER_PROFILE" | grep -c "^${env_key}=" || true)"
+    application_value="$(printf '%s\n' "$APPLICATION_EAGER_PROFILE" | sed -n "s/^${env_key}=//p")"
+    delegate_count="$(printf '%s\n' "$DELEGATE_ENV" | grep -c "^${env_key}=" || true)"
+    delegate_value="$(printf '%s\n' "$DELEGATE_ENV" | sed -n "s/^${env_key}=//p")"
+    [[ "$application_count" == "1" && "$application_value" == "$expected_value" ]] || \
+      die "application.yml no materializa ${env_key}=${expected_value} exactamente una vez"
+    [[ "$delegate_count" == "1" && "$delegate_value" == "$expected_value" ]] || \
+      die "la sesión pública ${CHECK_DELEGATE} no recibió ${env_key}=${expected_value} exactamente una vez"
+  }
+  check_eager_profile_value APP_ORTHO_SUSPEND_HIDDEN "$COLORS_ORTHO_SUSPEND_HIDDEN"
+  check_eager_profile_value APP_HOMO_DEFER_SEQUENCE "$COLORS_HOMO_DEFER_SEQUENCE"
+  check_eager_profile_value APP_ORTHO_DEFER_SEQUENCE "$COLORS_ORTHO_DEFER_SEQUENCE"
+  check_eager_profile_value APP_FOOTER_DEFER_SEQUENCE "$COLORS_FOOTER_DEFER_SEQUENCE"
+  check_eager_profile_value APP_DEFER_FEATURE_GC "$COLORS_DEFER_FEATURE_GC"
+  check_eager_profile_value APP_HOMO_RENDER_CHUNK_SIZE "$COLORS_HOMO_RENDER_CHUNK_SIZE"
+  check_eager_profile_value APP_HOMO_AUTO_RENDER_DELAY_MS "$COLORS_HOMO_AUTO_RENDER_DELAY_MS"
+  check_eager_profile_value APP_ORTHO_RENDER_CHUNK_SIZE "$COLORS_ORTHO_RENDER_CHUNK_SIZE"
+  check_eager_profile_value APP_ORTHO_AUTO_RENDER_MORE "$COLORS_ORTHO_AUTO_RENDER_MORE"
+  check_eager_profile_value APP_ORTHO_AUTO_RENDER_DELAY_MS "$COLORS_ORTHO_AUTO_RENDER_DELAY_MS"
+  check_eager_profile_value APP_HOMO_INITIAL_VISIBLE "$COLORS_HOMO_INITIAL_VISIBLE"
+  check_eager_profile_value APP_ORTHO_INITIAL_VISIBLE "$COLORS_ORTHO_INITIAL_VISIBLE"
+  check_eager_profile_value APP_ISOFORM_RENDER_BATCH_SIZE "$COLORS_ISOFORM_RENDER_BATCH_SIZE"
+  check_eager_profile_value APP_ISOFORM_RENDER_BATCH_DELAY_MS "$COLORS_ISOFORM_RENDER_BATCH_DELAY_MS"
+  check_eager_profile_value APP_ORTHO_SERVER_RENDER_NUDGE "$COLORS_ORTHO_SERVER_RENDER_NUDGE"
+
   WORKER_STATE="$(rssh "podman inspect '${BACKGROUND_WORKER_NAME}' --format '{{.State.Status}}' 2>/dev/null || true")"
   WORKER_IMAGE="$(rssh "podman inspect '${BACKGROUND_WORKER_NAME}' --format '{{.ImageName}}' 2>/dev/null || true")"
   [[ "$WORKER_STATE" == "running" ]] || die "el worker de reportes no está activo: ${WORKER_STATE:-ausente}"
@@ -323,6 +387,7 @@ if [[ "$MODE" == "check" ]]; then
     die "el worker no registró un arranque headless correcto en su marcador"
   echo "  Commit:     ${ACTIVE_IMAGE_REVISION}, coincide con la fuente local"
   echo "  Sesión:     ${CHECK_DELEGATE}, policy=${BROKER_POLICY}, perf=${APPLICATION_PERF_TIMING}"
+  echo "  Progressive: hidden=${COLORS_ORTHO_SUSPEND_HIDDEN}, homo-seq=${COLORS_HOMO_DEFER_SEQUENCE}, ortho-seq=${COLORS_ORTHO_DEFER_SEQUENCE}, footer-seq=${COLORS_FOOTER_DEFER_SEQUENCE}, gc=${COLORS_DEFER_FEATURE_GC}, homo/ortho-chunk=${COLORS_HOMO_RENDER_CHUNK_SIZE}/${COLORS_ORTHO_RENDER_CHUNK_SIZE}, auto=${COLORS_ORTHO_AUTO_RENDER_MORE}, delays=${COLORS_HOMO_AUTO_RENDER_DELAY_MS}/${COLORS_ORTHO_AUTO_RENDER_DELAY_MS}ms, homo/ortho-initial=${COLORS_HOMO_INITIAL_VISIBLE}/${COLORS_ORTHO_INITIAL_VISIBLE}, isoform=${COLORS_ISOFORM_RENDER_BATCH_SIZE}/${COLORS_ISOFORM_RENDER_BATCH_DELAY_MS}ms, nudge=${COLORS_ORTHO_SERVER_RENDER_NUDGE}"
   echo "  Worker:     ${WORKER_STATE}, preflight headless OK"
   echo ""
   echo "CHECK OK: no se realizaron cambios en Colors."
@@ -341,6 +406,9 @@ if [[ "$SKIP_TESTS" == "0" ]]; then
     Rscript scripts/test_background_report_jobs.R
     Rscript scripts/test_renderer_prewarm_scheduling.R
     Rscript scripts/test_plot_paint_timing_static.R
+    Rscript scripts/test_render_lazy_defaults.R
+    Rscript scripts/test_gene_catalog_feature_flag.R
+    Rscript scripts/test_gene_catalog_search.R
     node tests/js/test_plot_paint_gate.js
     Rscript scripts/test_colors_shinyproxy_static_assets.R
     python3 -B scripts/test_colors_shinyproxy_candidates.py
@@ -503,13 +571,18 @@ rssh "set -e
   sed -i -E 's|^        APP_PERF_TIMING:.*|        APP_PERF_TIMING: \"${COLORS_PERF_TIMING}\"|' \"\$config\"
   sed -i -E 's|^        APP_PERF_RUN_LABEL:.*|        APP_PERF_RUN_LABEL: \"${PERF_RUN_LABEL}\"|' \"\$config\"
   sed -i -E 's|^        APP_BUILD_REVISION:.*|        APP_BUILD_REVISION: \"${NEW_IMAGE}\"|' \"\$config\"
+  if grep -q '^        CGV_PUBLIC_BASE_URL:' \"\$config\"; then
+    sed -i -E 's|^        CGV_PUBLIC_BASE_URL:.*|        CGV_PUBLIC_BASE_URL: \"https://${PUBLIC_HOSTNAME}\"|' \"\$config\"
+  else
+    sed -i '/APP_BUILD_REVISION:/a\        CGV_PUBLIC_BASE_URL: \"https://${PUBLIC_HOSTNAME}\"' \"\$config\"
+  fi
   grep -q 'APP_BACKGROUND_REPORTS_ENABLED: \"\${SP_BACKGROUND_REPORTS_ENABLED:1}\"' \"\$config\"
   grep -q 'APP_LASTZ_GLOBAL_WORKERS:' \"\$config\"
   test \"\$(grep -c '^        APP_PERF_TIMING: \"${COLORS_PERF_TIMING}\"$' \"\$config\")\" = 1
   grep -q 'APP_PERF_LOG_DIR: \"/app/cache/perf_runs\"' \"\$config\"
   grep -q 'APP_PERF_RUN_LABEL: \"${PERF_RUN_LABEL}\"' \"\$config\"
   grep -q 'APP_BUILD_REVISION: \"${NEW_IMAGE}\"' \"\$config\"
-  grep -q 'CGV_PUBLIC_BASE_URL: \"https://${PUBLIC_HOSTNAME}\"' \"\$config\"
+  test \"\$(grep -c '^        CGV_PUBLIC_BASE_URL: \"https://${PUBLIC_HOSTNAME}\"$' \"\$config\")\" = 1
   grep -Fq 'title: CGeV - Comparative Gene Viewer' \"\$config\"
   grep -Fq 'display-name: CGeV - Comparative Gene Viewer' \"\$config\"
 " || die "falló la preparación del application.yml server-owned"
@@ -521,20 +594,64 @@ rssh "set -e
   else
     sed -i '/APP_PERF_TIMING:/a\        APP_INLINE_FAST_SEQUENCE_PREFETCH: \"\${SP_INLINE_FAST_SEQUENCE_PREFETCH:${COLORS_INLINE_FAST_SEQUENCE_PREFETCH}}\"' \"\$config\"
   fi
-  if grep -q '^        APP_HOMO_DEFER_SEQUENCE:' \"\$config\"; then
-    sed -i -E 's|^        APP_HOMO_DEFER_SEQUENCE:.*|        APP_HOMO_DEFER_SEQUENCE: \"\${SP_HOMO_DEFER_SEQUENCE:${COLORS_HOMO_DEFER_SEQUENCE}}\"|' \"\$config\"
-  else
-    sed -i '/APP_INLINE_FAST_SEQUENCE_PREFETCH:/a\        APP_HOMO_DEFER_SEQUENCE: \"\${SP_HOMO_DEFER_SEQUENCE:${COLORS_HOMO_DEFER_SEQUENCE}}\"' \"\$config\"
-  fi
-  if grep -q '^        APP_DEFER_FEATURE_GC:' \"\$config\"; then
-    sed -i -E 's|^        APP_DEFER_FEATURE_GC:.*|        APP_DEFER_FEATURE_GC: \"\${SP_DEFER_FEATURE_GC:${COLORS_DEFER_FEATURE_GC}}\"|' \"\$config\"
-  else
-    sed -i '/APP_HOMO_DEFER_SEQUENCE:/a\        APP_DEFER_FEATURE_GC: \"\${SP_DEFER_FEATURE_GC:${COLORS_DEFER_FEATURE_GC}}\"' \"\$config\"
-  fi
+  eager_staged=\"\${config}.eager.\$\$\"
+  awk '
+    /^        (APP_ORTHO_SUSPEND_HIDDEN|APP_HOMO_DEFER_SEQUENCE|APP_ORTHO_DEFER_SEQUENCE|APP_FOOTER_DEFER_SEQUENCE|APP_DEFER_FEATURE_GC|APP_HOMO_RENDER_CHUNK_SIZE|APP_HOMO_AUTO_RENDER_DELAY_MS|APP_ORTHO_RENDER_CHUNK_SIZE|APP_ORTHO_AUTO_RENDER_MORE|APP_ORTHO_AUTO_RENDER_DELAY_MS|APP_HOMO_INITIAL_VISIBLE|APP_ORTHO_INITIAL_VISIBLE|APP_ISOFORM_RENDER_BATCH_SIZE|APP_ISOFORM_RENDER_BATCH_DELAY_MS|APP_ORTHO_SERVER_RENDER_NUDGE):/ { next }
+    { print }
+    /^        APP_INLINE_FAST_SEQUENCE_PREFETCH:/ && !inserted {
+      print \"        APP_ORTHO_SUSPEND_HIDDEN: \\\"${COLORS_ORTHO_SUSPEND_HIDDEN}\\\"\"
+      print \"        APP_HOMO_DEFER_SEQUENCE: \\\"${COLORS_HOMO_DEFER_SEQUENCE}\\\"\"
+      print \"        APP_ORTHO_DEFER_SEQUENCE: \\\"${COLORS_ORTHO_DEFER_SEQUENCE}\\\"\"
+      print \"        APP_FOOTER_DEFER_SEQUENCE: \\\"${COLORS_FOOTER_DEFER_SEQUENCE}\\\"\"
+      print \"        APP_DEFER_FEATURE_GC: \\\"${COLORS_DEFER_FEATURE_GC}\\\"\"
+      print \"        APP_HOMO_RENDER_CHUNK_SIZE: \\\"${COLORS_HOMO_RENDER_CHUNK_SIZE}\\\"\"
+      print \"        APP_HOMO_AUTO_RENDER_DELAY_MS: \\\"${COLORS_HOMO_AUTO_RENDER_DELAY_MS}\\\"\"
+      print \"        APP_ORTHO_RENDER_CHUNK_SIZE: \\\"${COLORS_ORTHO_RENDER_CHUNK_SIZE}\\\"\"
+      print \"        APP_ORTHO_AUTO_RENDER_MORE: \\\"${COLORS_ORTHO_AUTO_RENDER_MORE}\\\"\"
+      print \"        APP_ORTHO_AUTO_RENDER_DELAY_MS: \\\"${COLORS_ORTHO_AUTO_RENDER_DELAY_MS}\\\"\"
+      print \"        APP_HOMO_INITIAL_VISIBLE: \\\"${COLORS_HOMO_INITIAL_VISIBLE}\\\"\"
+      print \"        APP_ORTHO_INITIAL_VISIBLE: \\\"${COLORS_ORTHO_INITIAL_VISIBLE}\\\"\"
+      print \"        APP_ISOFORM_RENDER_BATCH_SIZE: \\\"${COLORS_ISOFORM_RENDER_BATCH_SIZE}\\\"\"
+      print \"        APP_ISOFORM_RENDER_BATCH_DELAY_MS: \\\"${COLORS_ISOFORM_RENDER_BATCH_DELAY_MS}\\\"\"
+      print \"        APP_ORTHO_SERVER_RENDER_NUDGE: \\\"${COLORS_ORTHO_SERVER_RENDER_NUDGE}\\\"\"
+      inserted=1
+    }
+    END { if (!inserted) exit 42 }
+  ' \"\$config\" > \"\$eager_staged\"
+  chmod --reference=\"\$config\" \"\$eager_staged\"
+  mv \"\$eager_staged\" \"\$config\"
   grep -q 'APP_INLINE_FAST_SEQUENCE_PREFETCH: \"\${SP_INLINE_FAST_SEQUENCE_PREFETCH:${COLORS_INLINE_FAST_SEQUENCE_PREFETCH}}\"' \"\$config\"
-  grep -q 'APP_HOMO_DEFER_SEQUENCE: \"\${SP_HOMO_DEFER_SEQUENCE:${COLORS_HOMO_DEFER_SEQUENCE}}\"' \"\$config\"
-  grep -q 'APP_DEFER_FEATURE_GC: \"\${SP_DEFER_FEATURE_GC:${COLORS_DEFER_FEATURE_GC}}\"' \"\$config\"
-" || die "falló la configuración de first-paint en application.yml"
+  test \"\$(grep -c '^        APP_ORTHO_SUSPEND_HIDDEN:' \"\$config\")\" = 1
+  test \"\$(grep -c '^        APP_HOMO_DEFER_SEQUENCE:' \"\$config\")\" = 1
+  test \"\$(grep -c '^        APP_ORTHO_DEFER_SEQUENCE:' \"\$config\")\" = 1
+  test \"\$(grep -c '^        APP_FOOTER_DEFER_SEQUENCE:' \"\$config\")\" = 1
+  test \"\$(grep -c '^        APP_DEFER_FEATURE_GC:' \"\$config\")\" = 1
+  test \"\$(grep -c '^        APP_HOMO_RENDER_CHUNK_SIZE:' \"\$config\")\" = 1
+  test \"\$(grep -c '^        APP_HOMO_AUTO_RENDER_DELAY_MS:' \"\$config\")\" = 1
+  test \"\$(grep -c '^        APP_ORTHO_RENDER_CHUNK_SIZE:' \"\$config\")\" = 1
+  test \"\$(grep -c '^        APP_ORTHO_AUTO_RENDER_MORE:' \"\$config\")\" = 1
+  test \"\$(grep -c '^        APP_ORTHO_AUTO_RENDER_DELAY_MS:' \"\$config\")\" = 1
+  test \"\$(grep -c '^        APP_HOMO_INITIAL_VISIBLE:' \"\$config\")\" = 1
+  test \"\$(grep -c '^        APP_ORTHO_INITIAL_VISIBLE:' \"\$config\")\" = 1
+  test \"\$(grep -c '^        APP_ISOFORM_RENDER_BATCH_SIZE:' \"\$config\")\" = 1
+  test \"\$(grep -c '^        APP_ISOFORM_RENDER_BATCH_DELAY_MS:' \"\$config\")\" = 1
+  test \"\$(grep -c '^        APP_ORTHO_SERVER_RENDER_NUDGE:' \"\$config\")\" = 1
+  grep -Fqx '        APP_ORTHO_SUSPEND_HIDDEN: \"${COLORS_ORTHO_SUSPEND_HIDDEN}\"' \"\$config\"
+  grep -Fqx '        APP_HOMO_DEFER_SEQUENCE: \"${COLORS_HOMO_DEFER_SEQUENCE}\"' \"\$config\"
+  grep -Fqx '        APP_ORTHO_DEFER_SEQUENCE: \"${COLORS_ORTHO_DEFER_SEQUENCE}\"' \"\$config\"
+  grep -Fqx '        APP_FOOTER_DEFER_SEQUENCE: \"${COLORS_FOOTER_DEFER_SEQUENCE}\"' \"\$config\"
+  grep -Fqx '        APP_DEFER_FEATURE_GC: \"${COLORS_DEFER_FEATURE_GC}\"' \"\$config\"
+  grep -Fqx '        APP_HOMO_RENDER_CHUNK_SIZE: \"${COLORS_HOMO_RENDER_CHUNK_SIZE}\"' \"\$config\"
+  grep -Fqx '        APP_HOMO_AUTO_RENDER_DELAY_MS: \"${COLORS_HOMO_AUTO_RENDER_DELAY_MS}\"' \"\$config\"
+  grep -Fqx '        APP_ORTHO_RENDER_CHUNK_SIZE: \"${COLORS_ORTHO_RENDER_CHUNK_SIZE}\"' \"\$config\"
+  grep -Fqx '        APP_ORTHO_AUTO_RENDER_MORE: \"${COLORS_ORTHO_AUTO_RENDER_MORE}\"' \"\$config\"
+  grep -Fqx '        APP_ORTHO_AUTO_RENDER_DELAY_MS: \"${COLORS_ORTHO_AUTO_RENDER_DELAY_MS}\"' \"\$config\"
+  grep -Fqx '        APP_HOMO_INITIAL_VISIBLE: \"${COLORS_HOMO_INITIAL_VISIBLE}\"' \"\$config\"
+  grep -Fqx '        APP_ORTHO_INITIAL_VISIBLE: \"${COLORS_ORTHO_INITIAL_VISIBLE}\"' \"\$config\"
+  grep -Fqx '        APP_ISOFORM_RENDER_BATCH_SIZE: \"${COLORS_ISOFORM_RENDER_BATCH_SIZE}\"' \"\$config\"
+  grep -Fqx '        APP_ISOFORM_RENDER_BATCH_DELAY_MS: \"${COLORS_ISOFORM_RENDER_BATCH_DELAY_MS}\"' \"\$config\"
+  grep -Fqx '        APP_ORTHO_SERVER_RENDER_NUDGE: \"${COLORS_ORTHO_SERVER_RENDER_NUDGE}\"' \"\$config\"
+" || die "falló la materialización del perfil progresivo en application.yml"
 
 rssh "set -e
   config='${COLORS_APPLICATION_CANDIDATE}'
@@ -848,8 +965,37 @@ verify_static_release() {
       echo 'STATIC_GUARD_FAILED: perf-timing-mismatch' >&2
       exit 1
     fi
-    if podman inspect \"\$delegate\" --format '{{range .Config.Env}}{{println .}}{{end}}' | \
-         grep -q '^FEEDBACK_RESEND_API_KEY='; then
+    application_eager=\$(sed -n -E 's/^        (APP_ORTHO_SUSPEND_HIDDEN|APP_HOMO_DEFER_SEQUENCE|APP_ORTHO_DEFER_SEQUENCE|APP_FOOTER_DEFER_SEQUENCE|APP_DEFER_FEATURE_GC|APP_HOMO_RENDER_CHUNK_SIZE|APP_HOMO_AUTO_RENDER_DELAY_MS|APP_ORTHO_RENDER_CHUNK_SIZE|APP_ORTHO_AUTO_RENDER_MORE|APP_ORTHO_AUTO_RENDER_DELAY_MS|APP_HOMO_INITIAL_VISIBLE|APP_ORTHO_INITIAL_VISIBLE|APP_ISOFORM_RENDER_BATCH_SIZE|APP_ISOFORM_RENDER_BATCH_DELAY_MS|APP_ORTHO_SERVER_RENDER_NUDGE): \"([^\"]+)\"$/\1=\2/p' '${APP_DIR}/shinyproxy/application.yml')
+    delegate_env=\$(podman inspect \"\$delegate\" --format '{{range .Config.Env}}{{println .}}{{end}}')
+    for expected_env in \
+      'APP_ORTHO_SUSPEND_HIDDEN=${COLORS_ORTHO_SUSPEND_HIDDEN}' \
+      'APP_HOMO_DEFER_SEQUENCE=${COLORS_HOMO_DEFER_SEQUENCE}' \
+      'APP_ORTHO_DEFER_SEQUENCE=${COLORS_ORTHO_DEFER_SEQUENCE}' \
+      'APP_FOOTER_DEFER_SEQUENCE=${COLORS_FOOTER_DEFER_SEQUENCE}' \
+      'APP_DEFER_FEATURE_GC=${COLORS_DEFER_FEATURE_GC}' \
+      'APP_HOMO_RENDER_CHUNK_SIZE=${COLORS_HOMO_RENDER_CHUNK_SIZE}' \
+      'APP_HOMO_AUTO_RENDER_DELAY_MS=${COLORS_HOMO_AUTO_RENDER_DELAY_MS}' \
+      'APP_ORTHO_RENDER_CHUNK_SIZE=${COLORS_ORTHO_RENDER_CHUNK_SIZE}' \
+      'APP_ORTHO_AUTO_RENDER_MORE=${COLORS_ORTHO_AUTO_RENDER_MORE}' \
+      'APP_ORTHO_AUTO_RENDER_DELAY_MS=${COLORS_ORTHO_AUTO_RENDER_DELAY_MS}' \
+      'APP_HOMO_INITIAL_VISIBLE=${COLORS_HOMO_INITIAL_VISIBLE}' \
+      'APP_ORTHO_INITIAL_VISIBLE=${COLORS_ORTHO_INITIAL_VISIBLE}' \
+      'APP_ISOFORM_RENDER_BATCH_SIZE=${COLORS_ISOFORM_RENDER_BATCH_SIZE}' \
+      'APP_ISOFORM_RENDER_BATCH_DELAY_MS=${COLORS_ISOFORM_RENDER_BATCH_DELAY_MS}' \
+      'APP_ORTHO_SERVER_RENDER_NUDGE=${COLORS_ORTHO_SERVER_RENDER_NUDGE}'; do
+      env_key=\${expected_env%%=*}
+      expected_value=\${expected_env#*=}
+      application_count=\$(printf '%s\n' \"\$application_eager\" | grep -c \"^\${env_key}=\" || true)
+      application_value=\$(printf '%s\n' \"\$application_eager\" | sed -n \"s/^\${env_key}=//p\")
+      delegate_count=\$(printf '%s\n' \"\$delegate_env\" | grep -c \"^\${env_key}=\" || true)
+      delegate_value=\$(printf '%s\n' \"\$delegate_env\" | sed -n \"s/^\${env_key}=//p\")
+      if [ \"\$application_count\" != 1 ] || [ \"\$application_value\" != \"\$expected_value\" ] || \
+         [ \"\$delegate_count\" != 1 ] || [ \"\$delegate_value\" != \"\$expected_value\" ]; then
+        echo \"STATIC_GUARD_FAILED: eager-profile-\${env_key}\" >&2
+        exit 1
+      fi
+    done
+    if printf '%s\n' \"\$delegate_env\" | grep -q '^FEEDBACK_RESEND_API_KEY='; then
       echo 'la sesión pública recibió FEEDBACK_RESEND_API_KEY' >&2
       exit 1
     fi
@@ -1000,6 +1146,35 @@ rssh "set -e
   delegate_perf=\$(podman inspect \"\$delegate\" --format '{{range .Config.Env}}{{println .}}{{end}}' | sed -n 's/^APP_PERF_TIMING=//p')
   case \"\$delegate_perf\" in 0|1) ;; *) fail_guard delegate-perf-timing ;; esac
   test \"\$delegate_perf\" = \"\$application_perf\" || fail_guard perf-timing-mismatch
+  application_eager=\$(sed -n -E 's/^        (APP_ORTHO_SUSPEND_HIDDEN|APP_HOMO_DEFER_SEQUENCE|APP_ORTHO_DEFER_SEQUENCE|APP_FOOTER_DEFER_SEQUENCE|APP_DEFER_FEATURE_GC|APP_HOMO_RENDER_CHUNK_SIZE|APP_HOMO_AUTO_RENDER_DELAY_MS|APP_ORTHO_RENDER_CHUNK_SIZE|APP_ORTHO_AUTO_RENDER_MORE|APP_ORTHO_AUTO_RENDER_DELAY_MS|APP_HOMO_INITIAL_VISIBLE|APP_ORTHO_INITIAL_VISIBLE|APP_ISOFORM_RENDER_BATCH_SIZE|APP_ISOFORM_RENDER_BATCH_DELAY_MS|APP_ORTHO_SERVER_RENDER_NUDGE): \"([^\"]+)\"$/\1=\2/p' '${APP_DIR}/shinyproxy/application.yml')
+  delegate_env=\$(podman inspect \"\$delegate\" --format '{{range .Config.Env}}{{println .}}{{end}}')
+  for expected_env in \
+    'APP_ORTHO_SUSPEND_HIDDEN=${COLORS_ORTHO_SUSPEND_HIDDEN}' \
+    'APP_HOMO_DEFER_SEQUENCE=${COLORS_HOMO_DEFER_SEQUENCE}' \
+    'APP_ORTHO_DEFER_SEQUENCE=${COLORS_ORTHO_DEFER_SEQUENCE}' \
+    'APP_FOOTER_DEFER_SEQUENCE=${COLORS_FOOTER_DEFER_SEQUENCE}' \
+    'APP_DEFER_FEATURE_GC=${COLORS_DEFER_FEATURE_GC}' \
+    'APP_HOMO_RENDER_CHUNK_SIZE=${COLORS_HOMO_RENDER_CHUNK_SIZE}' \
+    'APP_HOMO_AUTO_RENDER_DELAY_MS=${COLORS_HOMO_AUTO_RENDER_DELAY_MS}' \
+    'APP_ORTHO_RENDER_CHUNK_SIZE=${COLORS_ORTHO_RENDER_CHUNK_SIZE}' \
+    'APP_ORTHO_AUTO_RENDER_MORE=${COLORS_ORTHO_AUTO_RENDER_MORE}' \
+    'APP_ORTHO_AUTO_RENDER_DELAY_MS=${COLORS_ORTHO_AUTO_RENDER_DELAY_MS}' \
+    'APP_HOMO_INITIAL_VISIBLE=${COLORS_HOMO_INITIAL_VISIBLE}' \
+    'APP_ORTHO_INITIAL_VISIBLE=${COLORS_ORTHO_INITIAL_VISIBLE}' \
+    'APP_ISOFORM_RENDER_BATCH_SIZE=${COLORS_ISOFORM_RENDER_BATCH_SIZE}' \
+    'APP_ISOFORM_RENDER_BATCH_DELAY_MS=${COLORS_ISOFORM_RENDER_BATCH_DELAY_MS}' \
+    'APP_ORTHO_SERVER_RENDER_NUDGE=${COLORS_ORTHO_SERVER_RENDER_NUDGE}'; do
+    env_key=\${expected_env%%=*}
+    expected_value=\${expected_env#*=}
+    application_count=\$(printf '%s\n' \"\$application_eager\" | grep -c \"^\${env_key}=\" || true)
+    application_value=\$(printf '%s\n' \"\$application_eager\" | sed -n \"s/^\${env_key}=//p\")
+    delegate_count=\$(printf '%s\n' \"\$delegate_env\" | grep -c \"^\${env_key}=\" || true)
+    delegate_value=\$(printf '%s\n' \"\$delegate_env\" | sed -n \"s/^\${env_key}=//p\")
+    test \"\$application_count\" = 1 || fail_guard \"eager-profile-application-duplicate-\${env_key}\"
+    test \"\$application_value\" = \"\$expected_value\" || fail_guard \"eager-profile-application-value-\${env_key}\"
+    test \"\$delegate_count\" = 1 || fail_guard \"eager-profile-delegate-duplicate-\${env_key}\"
+    test \"\$delegate_value\" = \"\$expected_value\" || fail_guard \"eager-profile-delegate-value-\${env_key}\"
+  done
   podman ps --format '{{.Names}}|{{.Image}}|{{.Status}}|{{.Networks}}'
 "
 FINAL_STATUS=$?
