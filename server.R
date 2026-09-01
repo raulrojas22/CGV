@@ -21170,7 +21170,7 @@ function(input, output, session) {
             return(div(
                 id    = sprintf("homo-card-%s", id_chr),
                 class = "card mb-2 plot-transcript-card card-isoform",
-                style = "min-height:130px; height:auto; width:calc(100% - 22px); display:none; flex-direction:column; margin-left:22px;",
+                style = "min-height:130px; height:auto; width:calc(100% - 22px); display:flex; visibility:hidden; position:absolute; left:-100000px; top:0; pointer-events:none; flex-direction:column; margin-left:22px;",
                 `data-isoform-group` = tx_group_key,
                 `data-canonical`     = "false",
                 `data-transcript-id` = tx_title,
@@ -24266,7 +24266,7 @@ function(input, output, session) {
             return(div(
                 id    = sprintf("ortho-card-%s", id_chr),
                 class = "card mb-2 plot-transcript-card card-isoform",
-                style = "min-height:130px; height:auto; width:calc(100% - 22px); display:none; flex-direction:column; margin-left:22px;",
+                style = "min-height:130px; height:auto; width:calc(100% - 22px); display:flex; visibility:hidden; position:absolute; left:-100000px; top:0; pointer-events:none; flex-direction:column; margin-left:22px;",
                 `data-isoform-group` = tx_group_key,
                 `data-canonical`     = "false",
                 `data-transcript-id` = tx_title,
@@ -25230,9 +25230,11 @@ function(input, output, session) {
                     paste0(
                         "try{var ids=%s,pfx='%s';for(var i=0;i<ids.length;i++){",
                         "var card=document.getElementById(pfx+ids[i]);",
-                        "if(card){card.style.display='none';card.setAttribute('aria-hidden','true');",
+                        "if(card){card.style.display='flex';card.style.visibility='hidden';",
+                        "card.style.position='absolute';card.style.left='-100000px';card.style.top='0';card.style.pointerEvents='none';",
+                        "card.setAttribute('aria-hidden','true');",
                         "card.setAttribute('aria-busy','true');card.setAttribute('data-isoform-load-state','loading');",
-                        "if(window.Shiny&&Shiny.bindAll){Shiny.bindAll(card);}}}",
+                        "if(window.Shiny&&Shiny.bindAll){Shiny.bindAll(card);}if(window.jQuery){window.jQuery(card).trigger('shown');}}}",
                         "if(window.scheduleGgiraphNudge){window.scheduleGgiraphNudge(180);}}catch(e){}"
                     ),
                     ids_json,
@@ -25281,7 +25283,8 @@ function(input, output, session) {
                     paste0(
                         "try{var ids=%s,pfx='%s';for(var i=0;i<ids.length;i++){",
                         "var card=document.getElementById(pfx+ids[i]);",
-                        "if(card){card.style.display='flex';card.setAttribute('aria-hidden','false');",
+                        "if(card){card.style.display='flex';card.style.visibility='';card.style.position='';",
+                        "card.style.left='';card.style.top='';card.style.pointerEvents='';card.setAttribute('aria-hidden','false');",
                         "card.removeAttribute('aria-busy');card.setAttribute('data-isoform-load-state','ready');}}",
                         "if(window.scheduleGgiraphNudge){window.scheduleGgiraphNudge(180);}}catch(e){}"
                     ),
@@ -25339,7 +25342,8 @@ function(input, output, session) {
                         shinyjs::runjs(sprintf(
                             paste0(
                                 "try{var ids=%s,pfx='%s';for(var i=0;i<ids.length;i++){",
-                                "var card=document.getElementById(pfx+ids[i]);if(card){",
+                                "var card=document.getElementById(pfx+ids[i]);if(card){card.style.display='none';",
+                                "card.style.visibility='';card.style.position='';card.style.left='';card.style.top='';card.style.pointerEvents='';",
                                 "card.removeAttribute('aria-busy');card.setAttribute('data-isoform-load-state','timeout');}}}catch(e){}"
                             ),
                             ids_json,
