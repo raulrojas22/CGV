@@ -12,6 +12,8 @@ test_that("isoform expansion reveals one scientifically complete batch at a time
     )
 
     expect_match(server_txt, "schedule_isoform_module_batches <- function", fixed = TRUE)
+    expect_match(server_txt, "run_isoform_js <- function", fixed = TRUE)
+    expect_match(server_txt, "shiny::withReactiveDomain(session, shinyjs::runjs", fixed = TRUE)
     expect_match(server_txt, "data-isoform-load-state','loading'", fixed = TRUE)
     expect_match(server_txt, "card.style.opacity='0'", fixed = TRUE)
     expect_match(server_txt, "card.style.left='-100000px'", fixed = TRUE)
