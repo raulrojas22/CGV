@@ -13,7 +13,9 @@ test_that("isoform expansion reveals one scientifically complete batch at a time
 
     expect_match(server_txt, "schedule_isoform_module_batches <- function", fixed = TRUE)
     expect_match(server_txt, "run_isoform_js <- function", fixed = TRUE)
-    expect_match(server_txt, "shiny::withReactiveDomain(session, shinyjs::runjs", fixed = TRUE)
+    expect_match(server_txt, "type = \"shinyjs-runjs\"", fixed = TRUE)
+    expect_match(server_txt, "schedule_isoform_callback <- function", fixed = TRUE)
+    expect_match(server_txt, "shiny::withReactiveDomain(session, callback())", fixed = TRUE)
     expect_match(server_txt, "data-isoform-load-state','loading'", fixed = TRUE)
     expect_match(server_txt, "card.style.opacity='0'", fixed = TRUE)
     expect_match(server_txt, "card.style.left='-100000px'", fixed = TRUE)
@@ -29,7 +31,7 @@ test_that("isoform expansion reveals one scientifically complete batch at a time
     expect_match(server_txt, "data-isoform-load-state','ready'", fixed = TRUE)
     expect_match(server_txt, "card.style.display='flex'", fixed = TRUE)
     expect_match(server_txt, "card.style.opacity=''", fixed = TRUE)
-    expect_match(server_txt, "later::later(function() render_batch(next_index)", fixed = TRUE)
+    expect_match(server_txt, "schedule_isoform_callback(function() render_batch(next_index))", fixed = TRUE)
 })
 
 test_that("real alternative transcripts render before canonical copies", {
