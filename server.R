@@ -25204,16 +25204,23 @@ function(input, output, session) {
             if (!is.null(session) && is.function(session$isClosed) && isTRUE(session$isClosed())) {
                 return(invisible(FALSE))
             }
-            tryCatch(
-                shiny::withReactiveDomain(session, shinyjs::runjs(as.character(script %||% ""))),
-                error = function(e) {
-                    if (!is.null(session) && is.function(session$isClosed) && isTRUE(session$isClosed())) {
-                        return(invisible(FALSE))
-                    }
-                    stop(e)
-                }
+            session$sendCustomMessage(
+                type = "shinyjs-runjs",
+                message = list(code = as.character(script %||% ""))
             )
             invisible(TRUE)
+        }
+        schedule_isoform_callback <- function(callback, delay = isoformRenderBatchDelay) {
+            if (!requireNamespace("later", quietly = TRUE)) {
+                return(shiny::withReactiveDomain(session, callback()))
+            }
+            later::later(function() {
+                if (!is.null(session) && is.function(session$isClosed) && isTRUE(session$isClosed())) {
+                    return(invisible(NULL))
+                }
+                shiny::withReactiveDomain(session, callback())
+            }, delay = delay)
+            invisible(NULL)
         }
         render_batch <- NULL
         render_batch <- function(batch_index) {
@@ -25318,7 +25325,7 @@ function(input, output, session) {
                 ))
                 if (next_index <= length(batches)) {
                     if (requireNamespace("later", quietly = TRUE)) {
-                        later::later(function() render_batch(next_index), delay = isoformRenderBatchDelay)
+                        schedule_isoform_callback(function() render_batch(next_index))
                     } else {
                         render_batch(next_index)
                     }
@@ -25370,20 +25377,16 @@ function(input, output, session) {
                             prefix_js
                         ))
                         if (next_index <= length(batches)) {
-                            later::later(function() render_batch(next_index), delay = isoformRenderBatchDelay)
+                            schedule_isoform_callback(function() render_batch(next_index))
                         }
                     } else {
-                        later::later(
-                            function() wait_for_batch_complete(as.integer(attempt) + 1L),
-                            delay = isoformRenderBatchDelay
+                        schedule_isoform_callback(
+                            function() wait_for_batch_complete(as.integer(attempt) + 1L)
                         )
                     }
                     invisible(NULL)
                 }
-                later::later(
-                    function() wait_for_batch_complete(0L),
-                    delay = isoformRenderBatchDelay
-                )
+                schedule_isoform_callback(function() wait_for_batch_complete(0L))
             }
             invisible(NULL)
         }
