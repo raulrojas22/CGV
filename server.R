@@ -21769,7 +21769,12 @@ function(input, output, session) {
             sorted_ids <- as.character(sortedPlotIdsHomologous() %||% integer(0))
             inserted_ids <- as.character(homoInsertedCardIds() %||% character(0))
             ids_chr <- intersect(sorted_ids[nzchar(sorted_ids)], inserted_ids[nzchar(inserted_ids)])
-            keep_ids <- unique(c(ids_chr, get_active_homologous_copy_ids(ids_chr)))
+            hydrated_isoform_ids <- as.character(homoHydratedIsoformIds() %||% character(0))
+            keep_ids <- unique(c(
+                ids_chr,
+                hydrated_isoform_ids[nzchar(hydrated_isoform_ids)],
+                get_active_homologous_copy_ids(ids_chr)
+            ))
             for (id_chr in keep_ids) {
                 bind_homologous_footer_output(id_chr)
             }
@@ -25750,7 +25755,8 @@ function(input, output, session) {
         {
             ids <- primaryPlotIdsOrthologous()
             ids_chr <- as.character(ids %||% integer(0))
-            keep_ids <- ids_chr
+            hydrated_isoform_ids <- as.character(orthoHydratedIsoformIds() %||% character(0))
+            keep_ids <- unique(c(ids_chr, hydrated_isoform_ids[nzchar(hydrated_isoform_ids)]))
             for (id_chr in keep_ids) {
                 bind_orthologous_footer_output(id_chr)
             }

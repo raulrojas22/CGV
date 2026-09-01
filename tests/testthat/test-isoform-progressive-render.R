@@ -20,6 +20,8 @@ test_that("isoform expansion reveals one scientifically complete batch at a time
     expect_match(server_txt, "paste0(\"homo_footer_\", batch_ids)", fixed = TRUE)
     expect_match(server_txt, "paste0(\"ortho_footer_\", batch_ids)", fixed = TRUE)
     expect_match(server_txt, "outputOptions(output, output_id, suspendWhenHidden = FALSE)", fixed = TRUE)
+    expect_match(server_txt, "hydrated_isoform_ids <- as.character(homoHydratedIsoformIds()", fixed = TRUE)
+    expect_match(server_txt, "hydrated_isoform_ids <- as.character(orthoHydratedIsoformIds()", fixed = TRUE)
     expect_match(server_txt, "if (isTRUE(ready))", fixed = TRUE)
     expect_match(server_txt, "reveal_completed_batch()", fixed = TRUE)
     expect_match(server_txt, "data-isoform-load-state','ready'", fixed = TRUE)
