@@ -13,7 +13,9 @@ test_that("isoform expansion reveals one scientifically complete batch at a time
 
     expect_match(server_txt, "schedule_isoform_module_batches <- function", fixed = TRUE)
     expect_match(server_txt, "data-isoform-load-state','loading'", fixed = TRUE)
-    expect_match(server_txt, "card.style.display='none'", fixed = TRUE)
+    expect_match(server_txt, "card.style.visibility='hidden'", fixed = TRUE)
+    expect_match(server_txt, "card.style.left='-100000px'", fixed = TRUE)
+    expect_match(server_txt, "window.jQuery(card).trigger('shown')", fixed = TRUE)
     expect_match(server_txt, "completed_outputs <- as.character(tracker$card_complete", fixed = TRUE)
     expect_match(server_txt, "paste0(\"homo_footer_\", batch_ids)", fixed = TRUE)
     expect_match(server_txt, "paste0(\"ortho_footer_\", batch_ids)", fixed = TRUE)
@@ -22,6 +24,7 @@ test_that("isoform expansion reveals one scientifically complete batch at a time
     expect_match(server_txt, "reveal_completed_batch()", fixed = TRUE)
     expect_match(server_txt, "data-isoform-load-state','ready'", fixed = TRUE)
     expect_match(server_txt, "card.style.display='flex'", fixed = TRUE)
+    expect_match(server_txt, "card.style.visibility=''", fixed = TRUE)
     expect_match(server_txt, "later::later(function() render_batch(next_index)", fixed = TRUE)
 })
 
