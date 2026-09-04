@@ -20,15 +20,15 @@ manual_metadata <- jsonlite::fromJSON(file.path("www", "docs", "manual.json"))
 citation_txt <- read_text("CITATION.cff")
 zenodo <- jsonlite::fromJSON(".zenodo.json")
 dockerfile_txt <- read_text("Dockerfile")
-shinyproxy_txt <- read_text("docker-compose.shinyproxy.yml")
+shinyproxy_txt <- read_text(file.path("deploy", "docker-compose.shinyproxy.yml"))
 compose_txt <- read_text("docker-compose.yml")
-compose_deploy_txt <- read_text("docker-compose.deploy.yml")
+compose_deploy_txt <- read_text(file.path("deploy", "docker-compose.deploy.yml"))
 server_txt <- read_text("server.R")
 env_example_txt <- read_text(".env.example")
-nas_deploy_txt <- read_text("deploy-nas.sh")
-shinyproxy_deploy_txt <- read_text("deploy-nas-shinyproxy.sh")
-colors_deploy_txt <- read_text("deploy-colors-shinyproxy.sh")
-prewarm_txt <- read_text(file.path("docker", "setup-prewarm.sh"))
+nas_deploy_txt <- read_text(file.path("deploy", "deploy-nas.sh"))
+shinyproxy_deploy_txt <- read_text(file.path("deploy", "deploy-nas-shinyproxy.sh"))
+colors_deploy_txt <- read_text(file.path("deploy", "deploy-colors-shinyproxy.sh"))
+prewarm_txt <- read_text(file.path("deploy", "docker", "setup-prewarm.sh"))
 alias_verifier_txt <- read_text(file.path("scripts", "verify_preloaded_alias_indexes.R"))
 prewarm_mounts <- c(
   CGV_ANNOTATIONS_DIR = "annotations",
@@ -68,7 +68,7 @@ stopifnot(
     fixed = TRUE
   ),
   grepl(
-    "DOCKER_BIN='${REMOTE_DOCKER}' bash docker/setup-prewarm.sh",
+    "DOCKER_BIN='${REMOTE_DOCKER}' bash deploy/docker/setup-prewarm.sh",
     nas_deploy_txt,
     fixed = TRUE
   ),

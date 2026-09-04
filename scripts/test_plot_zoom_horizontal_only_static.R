@@ -4,7 +4,7 @@ script_path <- if (length(file_arg)) sub("^--file=", "", file_arg[[1]]) else "sc
 repo_root <- normalizePath(file.path(dirname(script_path), ".."), mustWork = TRUE)
 
 zoom_js <- paste(readLines(file.path(repo_root, "www/js/plot_zoom.js"), warn = FALSE), collapse = "\n")
-scss <- paste(readLines(file.path(repo_root, "custom.scss"), warn = FALSE), collapse = "\n")
+scss <- paste(readLines(file.path(repo_root, "www", "css", "custom.scss"), warn = FALSE), collapse = "\n")
 compiled_css <- paste(readLines(file.path(repo_root, "www/css/cgv_compiled.css"), warn = FALSE), collapse = "\n")
 
 stopifnot(grepl("function stableZoomHeight\\(item, wrapWidth, factor\\)", zoom_js))

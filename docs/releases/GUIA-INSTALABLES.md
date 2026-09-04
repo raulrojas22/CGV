@@ -55,7 +55,7 @@ firmado de Windows crea o actualiza el draft `v1.2.0`:
 
 ```bash
 cd /path/to/CGeV
-CREATE_RELEASE_DRAFT=1 ./regenerar-instalables.sh
+CREATE_RELEASE_DRAFT=1 ./desktop/scripts/regenerar-instalables.sh
 ```
 
 El script crea el tag inmutable `desktop-v1.2.0`. Si ya apunta a otro commit, se

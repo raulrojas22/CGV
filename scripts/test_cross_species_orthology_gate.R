@@ -2,7 +2,7 @@
 
 source(file.path("R", "alias_resolution.R"))
 source(file.path("R", "utils.R"))
-source("gene_search_lib.R")
+source(file.path("R", "gene_search_lib.R"))
 
 assert_true <- function(value, message) {
     if (!isTRUE(value)) stop(message, call. = FALSE)

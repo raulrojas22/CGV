@@ -78,7 +78,7 @@ Esto llena `cache/annotation_index/` (persistente si está montado como volumen)
 
 ```bash
 docker compose build
-docker compose -f docker-compose.deploy.yml up -d
+docker compose --project-directory . -f deploy/docker-compose.deploy.yml up -d
 ```
 
 ### Opción B: construir local y subir imagen al NAS
@@ -105,7 +105,7 @@ docker load -i cgv_1.0.0.tar
 5. En NAS, ajustar `.env` y levantar:
 
 ```bash
-docker compose -f docker-compose.deploy.yml up -d
+docker compose --project-directory . -f deploy/docker-compose.deploy.yml up -d
 ```
 
 ## 4) Despliegue en servidor de trabajo
@@ -115,7 +115,7 @@ docker compose -f docker-compose.deploy.yml up -d
 3. Levantar con:
 
 ```bash
-docker compose -f docker-compose.deploy.yml up -d
+docker compose --project-directory . -f deploy/docker-compose.deploy.yml up -d
 ```
 
 4. Verificar:
@@ -133,13 +133,13 @@ curl -I http://127.0.0.1:${CGV_PORT:-3838}
 3. Re-crear contenedor:
 
 ```bash
-docker compose -f docker-compose.deploy.yml up -d
+docker compose --project-directory . -f deploy/docker-compose.deploy.yml up -d
 ```
 
 ## 6) Parada y limpieza
 
 ```bash
-docker compose -f docker-compose.deploy.yml down
+docker compose --project-directory . -f deploy/docker-compose.deploy.yml down
 ```
 
 Para borrar imagen local:

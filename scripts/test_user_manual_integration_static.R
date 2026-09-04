@@ -9,7 +9,7 @@ compiled_css <- read_text(file.path("www", "css", "cgv_compiled.css"))
 manual_source <- read_text(file.path("docs", "user_manual", "CGeV_User_Manual_Source.md"))
 desktop_downloads <- read_text(file.path("R", "ui_desktop_downloads.R"))
 desktop_package <- read_text(file.path("desktop", "package.json"))
-deploy_text <- read_text("deploy-nas.sh")
+deploy_text <- read_text(file.path("deploy", "deploy-nas.sh"))
 dockerignore <- trimws(readLines(".dockerignore", warn = FALSE, encoding = "UTF-8"))
 metadata <- jsonlite::fromJSON(file.path("www", "docs", "manual.json"))
 desktop_guide_videos <- c(

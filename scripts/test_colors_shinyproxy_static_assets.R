@@ -7,7 +7,7 @@ assert <- function(condition, message) {
   if (!isTRUE(condition)) stop(message, call. = FALSE)
 }
 
-deploy <- read_text("deploy-colors-shinyproxy.sh")
+deploy <- read_text(file.path("deploy", "deploy-colors-shinyproxy.sh"))
 deploy_guide <- read_text(file.path("docs", "deployment", "COLORS_SHINYPROXY_DEPLOY.md"))
 perf_workflow <- read_text(file.path("docs", "deployment", "FLUJO_LOGS_RENDIMIENTO.md"))
 
@@ -204,7 +204,7 @@ assert(grepl('Captura:    desactivada', deploy, fixed = TRUE) &&
          grepl('Captura:    auditando release activa', deploy, fixed = TRUE),
        "The banner must distinguish normal operation, controlled capture, and check mode.")
 assert(grepl("COLORS_PERF_TIMING=1 PERF_RUN_LABEL=despues_colors_01", perf_workflow, fixed = TRUE) &&
-         grepl("COLORS_PERF_TIMING=0 ./deploy-colors-shinyproxy.sh", perf_workflow, fixed = TRUE) &&
+         grepl("COLORS_PERF_TIMING=0 ./deploy/deploy-colors-shinyproxy.sh", perf_workflow, fixed = TRUE) &&
          grepl("APP_PERF_TIMING=0", deploy_guide, fixed = TRUE) &&
          grepl("perf=0", deploy_guide, fixed = TRUE),
        "Colors documentation must show explicit capture enablement, shutdown, and effective check state.")

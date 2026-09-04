@@ -31,7 +31,7 @@ CGV_GO_ANNOTATIONS_DIR="${FIXTURE_ROOT}/relative/go_annotations" \
 CGV_DATA_DIR="${FIXTURE_ROOT}/relative/data" \
 CGV_CACHE_DIR="${FIXTURE_ROOT}/relative/cache" \
 DOCKER_BIN="${FIXTURE_ROOT}/fake-docker" \
-bash "${REPO_ROOT}/docker/setup-prewarm.sh" >/dev/null
+bash "${REPO_ROOT}/deploy/docker/setup-prewarm.sh" >/dev/null
 
 joined_args="$(tr '\0' '\n' < "${FIXTURE_ROOT}/docker.args")"
 

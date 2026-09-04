@@ -12,7 +12,7 @@ services:
       - sp-net
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - ./shinyproxy/application.yml:/opt/shinyproxy/application.yml:ro
+      - ./deploy/shinyproxy/application.yml:/opt/shinyproxy/application.yml:ro
       - ./.env:/opt/shinyproxy/env/cgv.env:ro
     ports:
       - "127.0.0.1:${SHINYPROXY_PORT:-8080}:8080"

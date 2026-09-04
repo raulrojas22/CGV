@@ -17,8 +17,7 @@
 .Renviron
 
 # Runtime / generated artifacts
-cache/*
-!cache/.gitkeep
+cache/
 logs/
 outputs/
 /output/
@@ -50,8 +49,7 @@ go_annotations/*
 go_annotations/raw/*
 
 # Local download scratch space
-ncbi_downloads/*
-!ncbi_downloads/.gitkeep
+ncbi_downloads/
 
 # Generated SQLite alias index databases (large, rebuilt at startup)
 data/alias_index/*.sqlite

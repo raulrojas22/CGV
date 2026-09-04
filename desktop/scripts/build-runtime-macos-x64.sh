@@ -62,7 +62,7 @@ if [[ -z "${ENV_PREFIX}" ]]; then
 fi
 
 env R_LIBS_USER= R_LIBS_SITE= /usr/bin/arch -x86_64 "${ENV_PREFIX}/bin/Rscript" \
-  -e ".libPaths(.Library); source('${DESKTOP_DIR}/../docker/install_packages.R')"
+  -e ".libPaths(.Library); source('${DESKTOP_DIR}/../deploy/docker/install_packages.R')"
 
 rm -rf "${OUT_DIR}"
 mkdir -p "${OUT_DIR}"

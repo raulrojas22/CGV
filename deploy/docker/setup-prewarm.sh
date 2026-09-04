@@ -122,7 +122,7 @@ docker_cmd run --rm \
     set -euo pipefail
 
     if [ "$CGV_PUBLISH_STATIC_ASSETS" = 1 ]; then
-      bash docker/publish-static-assets.sh
+      bash deploy/docker/publish-static-assets.sh
       echo "[2/3] Construyendo indices SQLite de alias..."
     else
       echo "[1/2] Construyendo indices SQLite de alias..."
@@ -147,4 +147,4 @@ echo "  ${GENOMES_DIR}/"
 echo "  ${CACHE_DIR}/"
 echo ""
 echo "Ahora despliega ShinyProxy:"
-echo "  docker compose -f docker-compose.shinyproxy.yml up -d"
+echo "  docker compose --project-directory . -f deploy/docker-compose.shinyproxy.yml up -d"

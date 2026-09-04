@@ -1,5 +1,5 @@
 # Esta imagen cambia sólo cuando cambian R, las librerías del sistema o
-# docker/install_packages.R. Se etiqueta y persiste en el host de despliegue.
+# deploy/docker/install_packages.R. Se etiqueta y persiste en el host de despliegue.
 # La etiqueta de Rocker se fija por digest para que una actualización remota
 # de `r-ver:4.5` no dispare reinstalaciones imprevistas de R.
 FROM docker.io/rocker/r-ver@sha256:35394dcbf419ac29056848522006de3cd33c33191377abed182acaecd48eba37
@@ -46,5 +46,5 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -f /tmp/google-chrome-stable.deb \
     && rm -rf /var/lib/apt/lists/*
 
-COPY docker/install_packages.R /tmp/install_packages.R
+COPY deploy/docker/install_packages.R /tmp/install_packages.R
 RUN Rscript /tmp/install_packages.R && rm -f /tmp/install_packages.R

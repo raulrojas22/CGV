@@ -52,7 +52,7 @@ if ! "${CONDA_EXE}" env list | awk '{print $1}' | grep -Fxq "${ENV_NAME}"; then
 fi
 
 "${CONDA_EXE}" run -n "${ENV_NAME}" env R_LIBS_USER= R_LIBS_SITE= Rscript \
-  -e ".libPaths(.Library); source('${DESKTOP_DIR}/../docker/install_packages.R')"
+  -e ".libPaths(.Library); source('${DESKTOP_DIR}/../deploy/docker/install_packages.R')"
 
 STAGING_DIR="$(mktemp -d)"
 trap 'rm -rf "${STAGING_DIR}"' EXIT

@@ -9889,8 +9889,8 @@ run_orthologous_lookup_job_worker <- function(job) {
             sys.source(file.path("R", "alias_resolution.R"), envir = worker_env)
         }
         sys.source(file.path("R", "utils.R"), envir = worker_env)
-        if (file.exists("gene_search_lib.R")) {
-            sys.source("gene_search_lib.R", envir = worker_env)
+        if (file.exists(file.path("R", "gene_search_lib.R"))) {
+            sys.source(file.path("R", "gene_search_lib.R"), envir = worker_env)
         }
         assign(libs_key, TRUE, envir = worker_env)
     }

@@ -38,7 +38,7 @@ Requirements: Git, Docker Engine 24+ and Docker Compose v2.
 git clone https://github.com/raulrojas22/CGeV.git
 cd CGeV
 cp .env.example .env
-docker build -f Dockerfile.dependencies -t cgv-deps:1.0.0 .
+docker build -f deploy/docker/Dockerfile.dependencies -t cgv-deps:1.0.0 .
 docker compose build
 docker compose up -d
 ```
@@ -55,7 +55,7 @@ docker compose down
 Production biological resources are intentionally not stored in Git history.
 The application expects genome, annotation, GO, data, and cache directories;
 their default mounts are defined in `docker-compose.yml`. See
-[Data availability](DATA_AVAILABILITY.md) and the reconstruction notes in
+[Data availability](docs/DATA_AVAILABILITY.md) and the reconstruction notes in
 [annotations](annotations/README.md), [genomes](genomes/README.md), and
 [GO annotations](go_annotations/README.md).
 
@@ -69,21 +69,26 @@ R/                         Shiny modules and application helpers
 annotations/registry.tsv   versioned annotation dataset registry
 genomes/registry.tsv       versioned genome dataset registry
 go_annotations/            GO registry and reconstruction notes
+deploy/                    production and ShinyProxy deployment tooling
+www/                       browser assets, styles, and public documents
 scripts/                    validation, build, and maintenance scripts
 tests/                      automated regression tests
 desktop/                    Electron desktop wrapper and packaging
 docs/                       deployment, release, and manual sources
+Dockerfile                  primary application container
+docker-compose.yml          local Docker environment
 global.R, ui.R, server.R    Shiny application entry points
 ```
 
 Large genomes, annotations, generated caches, local environment files,
 credentials, logs, and installers are excluded through `.gitignore` and
 `.dockerignore`. The repository contains lightweight registries and
-reconstruction instructions instead.
+reconstruction instructions instead. Deployment-specific files are grouped in
+[`deploy/`](deploy/) so the repository root remains focused on the application.
 
 ## Reproducibility and testing
 
-- Data policy and provenance: [DATA_AVAILABILITY.md](DATA_AVAILABILITY.md)
+- Data policy and provenance: [DATA_AVAILABILITY.md](docs/DATA_AVAILABILITY.md)
 - Automated regression tests: `scripts/test_*.R`, `tests/testthat/`, and
   `tests/js/`
 - Desktop tests: `npm --prefix desktop test`

@@ -1,13 +1,13 @@
 #!/usr/bin/env Rscript
-# build_css.R — Pre-compila custom.scss a CSS para evitar compilación en cada arranque.
+# build_css.R — Pre-compila www/css/custom.scss para evitar compilación en cada arranque.
 # Uso: Rscript scripts/build_css.R
-# Solo re-compila si custom.scss es más nuevo que el CSS generado.
+# Solo re-compila si el SCSS fuente es más nuevo que el CSS generado.
 
-scss_path <- normalizePath(file.path(".", "custom.scss"), winslash = "/", mustWork = FALSE)
+scss_path <- normalizePath(file.path("www", "css", "custom.scss"), winslash = "/", mustWork = FALSE)
 css_path  <- normalizePath(file.path(".", "www", "css", "cgv_compiled.css"), winslash = "/", mustWork = FALSE)
 
 if (!file.exists(scss_path)) {
-    message("[build_css] custom.scss no encontrado, saltando.")
+    message("[build_css] www/css/custom.scss no encontrado, saltando.")
     quit(save = "no", status = 0)
 }
 

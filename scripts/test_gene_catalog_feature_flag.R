@@ -35,9 +35,9 @@ assert_true(
 expected_defaults <- c(
     ".env.example" = "APP_GENE_CATALOG_ENABLED=0",
     "docker-compose.yml" = "APP_GENE_CATALOG_ENABLED: \"${APP_GENE_CATALOG_ENABLED:-0}\"",
-    "docker-compose.deploy.yml" = "APP_GENE_CATALOG_ENABLED: \"${APP_GENE_CATALOG_ENABLED:-0}\"",
-    "docker-compose.shinyproxy.yml" = "SP_GENE_CATALOG_ENABLED: \"${SP_GENE_CATALOG_ENABLED:-0}\"",
-    "shinyproxy/application.yml" = "APP_GENE_CATALOG_ENABLED: \"${SP_GENE_CATALOG_ENABLED:0}\"",
+    "deploy/docker-compose.deploy.yml" = "APP_GENE_CATALOG_ENABLED: \"${APP_GENE_CATALOG_ENABLED:-0}\"",
+    "deploy/docker-compose.shinyproxy.yml" = "SP_GENE_CATALOG_ENABLED: \"${SP_GENE_CATALOG_ENABLED:-0}\"",
+    "deploy/shinyproxy/application.yml" = "APP_GENE_CATALOG_ENABLED: \"${SP_GENE_CATALOG_ENABLED:0}\"",
     "desktop/src/main.js" = "APP_GENE_CATALOG_ENABLED: process.env.APP_GENE_CATALOG_ENABLED || \"0\""
 )
 for (path in names(expected_defaults)) {

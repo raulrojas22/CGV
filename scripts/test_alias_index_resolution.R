@@ -20,7 +20,7 @@ script_path <- if (length(script_arg) > 0L) {
 root <- normalizePath(file.path(dirname(script_path), ".."), winslash = "/", mustWork = TRUE)
 source(file.path(root, "R", "alias_resolution.R"))
 source(file.path(root, "R", "utils.R"))
-source(file.path(root, "gene_search_lib.R"))
+source(file.path(root, "R", "gene_search_lib.R"))
 alias_sqlite_builder_env <- new.env(parent = globalenv())
 sys.source(file.path(root, "scripts", "build_alias_index_sqlite.R"), envir = alias_sqlite_builder_env)
 

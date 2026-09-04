@@ -72,7 +72,7 @@ compute_app_asset_version <- function() {
         "global.R",
         "ui.R",
         "server.R",
-        "custom.scss",
+        "www/css/custom.scss",
         list.files("www", recursive = TRUE, full.names = TRUE)
     ))
     asset_paths <- asset_paths[file.exists(asset_paths)]
@@ -392,8 +392,8 @@ sys.source("R/server_shared_analysis_domain.R", envir = lib_env)
 sys.source("R/server_ncbi_download_domain.R", envir = lib_env)
 
 # Cargamos la librería de búsqueda optimizada si existe
-if (file.exists("gene_search_lib.R")) {
-    sys.source("gene_search_lib.R", envir = lib_env)
+if (file.exists(file.path("R", "gene_search_lib.R"))) {
+    sys.source(file.path("R", "gene_search_lib.R"), envir = lib_env)
 } else if (file.exists("../gene_aliases.R")) {
     # Soporte legacy por si acaso
     sys.source("../gene_aliases.R", envir = lib_env)
@@ -442,7 +442,7 @@ theme_custom <- bs_theme(
 
 # Cargar CSS pre-compilado si existe y está al día; si no, compilar SCSS en caliente.
 .cgv_compiled_css_path <- file.path("www", "css", "cgv_compiled.css")
-.cgv_scss_path <- "custom.scss"
+.cgv_scss_path <- file.path("www", "css", "custom.scss")
 .cgv_use_compiled <- FALSE
 if (file.exists(.cgv_compiled_css_path) && file.exists(.cgv_scss_path)) {
     .cgv_css_mtime <- file.info(.cgv_compiled_css_path)$mtime

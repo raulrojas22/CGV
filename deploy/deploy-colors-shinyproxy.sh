@@ -7,7 +7,8 @@
 # config via candidate + nginx -t + atomic rename before switching releases.
 set -euo pipefail
 
-SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+DEPLOY_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd -- "${DEPLOY_DIR}/.." && pwd)"
 REMOTE_TARGET="${REMOTE_TARGET:-colors}"
 REMOTE_PATH="${REMOTE_PATH:-/home/rarojas/cgv}"
 APP_DIR="${REMOTE_PATH}/app"
@@ -57,7 +58,7 @@ SSH_SOCK="/tmp/cgv-colors-deploy-$$.sock"
 usage() {
   cat <<'USAGE'
 Uso:
-  ./deploy-colors-shinyproxy.sh [--check] [--skip-tests]
+  ./deploy/deploy-colors-shinyproxy.sh [--check] [--skip-tests]
 
 Opciones:
   --check       Audita Git y la infraestructura remota sin cambiar Colors.
@@ -470,10 +471,10 @@ rsync -az --delete-delay --itemize-changes \
   --exclude='/build_sources' --exclude='/outputs' --exclude='/logs' --exclude='/tmp' \
   --exclude='/desktop' --exclude='/INSTALABLES-FINALES' \
   --exclude='/node_modules' --exclude='/paper' \
-  --exclude='/deploy-colors-shinyproxy.sh' \
-  --exclude='/docker-compose.shinyproxy.yml' \
+  --exclude='/deploy/deploy-colors-shinyproxy.sh' \
+  --exclude='/deploy/docker-compose.shinyproxy.yml' \
   --exclude='/docker-compose.shinyproxy.colors.yml' \
-  --exclude='/shinyproxy/application.yml' \
+  --exclude='/deploy/shinyproxy/application.yml' \
   --exclude='/deploy/nginx/cgv-shinyproxy.conf' \
   --exclude='/deploy/nginx/cgv-shinyproxy-colors.conf' \
   "${SCRIPT_DIR}/" "${REMOTE_TARGET}:${APP_DIR}/"
@@ -727,7 +728,7 @@ if [[ "$REBUILD_R_DEPS" == "1" || "$DEPS_HAVE_REPORT_RUNTIME" == "0" ]]; then
   if [[ "$DEPS_HAVE_REPORT_RUNTIME" == "0" ]]; then
     echo "  La base no contiene Google Chrome/chromote; se reconstruirá automáticamente."
   fi
-  rssh "cd '${APP_DIR}' && podman build --pull=never -t '${CGV_DEPS_IMAGE}' -f Dockerfile.dependencies ."
+  rssh "cd '${APP_DIR}' && podman build --pull=never -t '${CGV_DEPS_IMAGE}' -f deploy/docker/Dockerfile.dependencies ."
 else
   echo "  Google Chrome y chromote ya están disponibles en ${CGV_DEPS_IMAGE}."
 fi
@@ -776,7 +777,7 @@ rssh "set -e
   CGV_GO_ANNOTATIONS_DIR='${APP_DIR}/go_annotations' \
   CGV_DATA_DIR='${APP_DIR}/data' \
   CGV_CACHE_DIR='${APP_DIR}/cache' \
-  bash docker/setup-prewarm.sh
+  bash deploy/docker/setup-prewarm.sh
   cache_dir=\$(readlink -f '${APP_DIR}/cache')
   ncbi_dir=\$(readlink -f '${REMOTE_PATH}/ncbi_downloads')
   mkdir -p \"\$cache_dir\" \"\$ncbi_dir\"

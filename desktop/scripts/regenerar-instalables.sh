@@ -16,11 +16,11 @@
 #     (si no: cd desktop && npm run runtime:mac:arm64 && npm run runtime:mac:x64)
 #
 # Uso:
-#   ./regenerar-instalables.sh
+#   ./desktop/scripts/regenerar-instalables.sh
 #
 # Omitir partes (opcional):
-#   SKIP_MAC=1 SKIP_LINUX=1 SKIP_WINDOWS=1 SKIP_SIGN=1 ./regenerar-instalables.sh
-#   CREATE_RELEASE_DRAFT=1 ./regenerar-instalables.sh  # publica Windows en un draft
+#   SKIP_MAC=1 SKIP_LINUX=1 SKIP_WINDOWS=1 SKIP_SIGN=1 ./desktop/scripts/regenerar-instalables.sh
+#   CREATE_RELEASE_DRAFT=1 ./desktop/scripts/regenerar-instalables.sh  # publica Windows en un draft
 #
 # NOTA: para una versión NUEVA, primero cambia "version" en desktop/package.json,
 #       commitea y haz push. El script crea y sube el tag desktop-vX.Y.Z solo.
@@ -28,7 +28,7 @@
 set -euo pipefail
 
 REPO="raulrojas22/CGV"
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 DESKTOP_DIR="$ROOT_DIR/desktop"
 FINAL_DIR="$ROOT_DIR/INSTALABLES-FINALES"
 LOGS_DIR="$FINAL_DIR/logs"

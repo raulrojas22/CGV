@@ -24,7 +24,7 @@ workspace <- if (length(script_arg)) {
   normalizePath(".")
 }
 source(file.path(workspace, "R", "utils.R"))
-source(file.path(workspace, "gene_search_lib.R"))
+source(file.path(workspace, "R", "gene_search_lib.R"))
 
 assert_true <- function(cond, msg) {
   if (!isTRUE(cond)) {

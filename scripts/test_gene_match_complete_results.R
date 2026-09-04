@@ -75,7 +75,7 @@ assert_true(
 
 server_text <- paste(readLines(file.path(workspace, "server.R"), warn = FALSE), collapse = "\n")
 ui_text <- paste(readLines(file.path(workspace, "ui.R"), warn = FALSE), collapse = "\n")
-scss_text <- paste(readLines(file.path(workspace, "custom.scss"), warn = FALSE), collapse = "\n")
+scss_text <- paste(readLines(file.path(workspace, "www", "css", "custom.scss"), warn = FALSE), collapse = "\n")
 
 for (token in c(
     "gene-match-browser",

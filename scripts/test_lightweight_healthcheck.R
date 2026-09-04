@@ -15,8 +15,8 @@ assert(identical(readLines(health_path, warn = FALSE, encoding = "UTF-8"), "ok")
 assert(file.info(health_path)$size <= 16L, "The health resource must stay minimal.")
 
 dockerfile <- read_text("Dockerfile")
-nas_deploy <- read_text("deploy-nas.sh")
-shinyproxy_deploy <- read_text("deploy-nas-shinyproxy.sh")
+nas_deploy <- read_text(file.path("deploy", "deploy-nas.sh"))
+shinyproxy_deploy <- read_text(file.path("deploy", "deploy-nas-shinyproxy.sh"))
 
 assert(
   grepl('http://127.0.0.1:${APP_PORT}/healthz.txt', dockerfile, fixed = TRUE),

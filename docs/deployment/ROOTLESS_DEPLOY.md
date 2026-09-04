@@ -151,7 +151,7 @@ Most dependencies should come from the environment file. If one package is still
 ```bash
 cd /home/usuario/CGeV
 micromamba activate cgv-rootless
-Rscript docker/install_packages.R
+Rscript deploy/docker/install_packages.R
 ```
 
 If the solver fails specifically because of `rbioapi`, leave the environment as-is and then run the same installer script above. That script can fetch the missing R packages from CRAN/Bioconductor inside your user environment.

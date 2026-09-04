@@ -13,14 +13,14 @@ First public research release of **CGV (Comparative Gene Viewer)**.
 ## Included in this release
 
 - R/Shiny application source code
-- deployment files (`Dockerfile`, `docker-compose.yml`, `docker-compose.deploy.yml`)
+- deployment files (`Dockerfile`, `docker-compose.yml`, `deploy/docker-compose.deploy.yml`)
 - data registries and dataset documentation
 - paper-support material and architecture figure
 - helper scripts for cache generation, registry building, benchmarking, and diagnostics
 
 ## Data policy
 
-This release does **not** bundle production-scale genomes, compressed annotations, GO archives, or generated caches in Git history. Those resources are expected to be mounted externally at runtime, as described in `README.md` and `DATA_AVAILABILITY.md`.
+This release does **not** bundle production-scale genomes, compressed annotations, GO archives, or generated caches in Git history. Those resources are expected to be mounted externally at runtime, as described in `README.md` and `docs/DATA_AVAILABILITY.md`.
 
 ## Recommended citation
 

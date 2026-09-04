@@ -2,14 +2,15 @@
 # ============================================================
 # deploy-nas.sh — Sincroniza y despliega CGV en el NAS
 # URL: https://cgev.mobilomics.org
-# Uso: ./deploy-nas.sh
+# Uso: ./deploy/deploy-nas.sh
 # ============================================================
 set -euo pipefail
 
 NAS_USER="${NAS_USER:-truenas_admin}"
 NAS_HOST="${NAS_HOST:-192.168.1.200}"
 NAS_PATH="${NAS_PATH:-/mnt/Datos4raro/cgv}"
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DEPLOY_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "${DEPLOY_DIR}/.." && pwd)"
 LOCAL_APP="${LOCAL_APP:-${SCRIPT_DIR}/}"
 LOCAL_ENV_FILE="${LOCAL_APP}.env.local"
 TUNNEL_NAME="cgv"
@@ -95,7 +96,7 @@ ensure_remote_docker_access() {
   echo "ERROR: no se pudo acceder a Docker en el NAS con '${REMOTE_DOCKER}'." >&2
   echo "Prueba en el NAS: docker info" >&2
   echo "Si muestra permission denied, agrega el usuario al grupo docker o ejecuta:" >&2
-  echo "  REMOTE_DOCKER='sudo docker' ./deploy-nas.sh" >&2
+  echo "  REMOTE_DOCKER='sudo docker' ./deploy/deploy-nas.sh" >&2
   exit 1
 }
 
@@ -186,7 +187,7 @@ nssh "
      ! ${REMOTE_DOCKER} run --rm --entrypoint /usr/bin/google-chrome '${CGV_DEPS_IMAGE}' --version >/dev/null 2>&1 ||
      ! ${REMOTE_DOCKER} run --rm '${CGV_DEPS_IMAGE}' Rscript -e 'library(chromote)' >/dev/null 2>&1; then
     echo '  Construyendo ${CGV_DEPS_IMAGE} (incluye Google Chrome/chromote para reportes en segundo plano)...'
-    ${REMOTE_DOCKER} build --pull=false -t '${CGV_DEPS_IMAGE}' -f Dockerfile.dependencies .
+    ${REMOTE_DOCKER} build --pull=false -t '${CGV_DEPS_IMAGE}' -f deploy/docker/Dockerfile.dependencies .
   else
     echo '  Reutilizando ${CGV_DEPS_IMAGE}; no se instalarán paquetes R.'
   fi
@@ -205,8 +206,8 @@ nssh "
     echo 'ERROR: no se pudo resolver la imagen o los bind mounts efectivos del servicio cgv.' >&2
     exit 1
   fi
-  chmod +x docker/setup-prewarm.sh
-  CGV_IMAGE=\"\$PREWARM_IMAGE\" CGV_ANNOTATIONS_DIR=\"\$PREWARM_ANNOTATIONS_DIR\" CGV_GENOMES_DIR=\"\$PREWARM_GENOMES_DIR\" CGV_GO_ANNOTATIONS_DIR=\"\$PREWARM_GO_ANNOTATIONS_DIR\" CGV_DATA_DIR=\"\$PREWARM_DATA_DIR\" CGV_CACHE_DIR=\"\$PREWARM_CACHE_DIR\" DOCKER_BIN='${REMOTE_DOCKER}' bash docker/setup-prewarm.sh
+  chmod +x deploy/docker/setup-prewarm.sh
+  CGV_IMAGE=\"\$PREWARM_IMAGE\" CGV_ANNOTATIONS_DIR=\"\$PREWARM_ANNOTATIONS_DIR\" CGV_GENOMES_DIR=\"\$PREWARM_GENOMES_DIR\" CGV_GO_ANNOTATIONS_DIR=\"\$PREWARM_GO_ANNOTATIONS_DIR\" CGV_DATA_DIR=\"\$PREWARM_DATA_DIR\" CGV_CACHE_DIR=\"\$PREWARM_CACHE_DIR\" DOCKER_BIN='${REMOTE_DOCKER}' bash deploy/docker/setup-prewarm.sh
   CGV_DEPS_IMAGE='${CGV_DEPS_IMAGE}' ${REMOTE_DOCKER} compose --env-file .env --env-file .env.local up -d
 "
 

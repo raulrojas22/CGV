@@ -21,7 +21,7 @@ default, to avoid conflicts with NAS/system port 80).
 ## Deploy
 
 ```bash
-./deploy-nas-shinyproxy.sh
+./deploy/deploy-nas-shinyproxy.sh
 ```
 
 El deploy normal deja la telemetría desactivada y fija el perfil de render
@@ -30,7 +30,7 @@ inmediato: composición/GC en la primera pasada, sin cola progresiva ni segundo
 captura diagnóstica puntual se puede usar:
 
 ```bash
-NAS_PERF_TIMING=1 PERF_RUN_LABEL=medicion_nas_01 ./deploy-nas-shinyproxy.sh
+NAS_PERF_TIMING=1 PERF_RUN_LABEL=medicion_nas_01 ./deploy/deploy-nas-shinyproxy.sh
 ```
 
 After the first deploy, Cloudflare Tunnel should point to:
@@ -75,7 +75,7 @@ report worker and can be overridden when deploying another public origin.
 
 ## Background report email worker
 
-`docker-compose.shinyproxy.yml` also starts one
+`deploy/docker-compose.shinyproxy.yml` also starts one
 `cgv-background-report-worker`. When a user selects **Email me** in the Share
 dialog, the app writes an immutable session snapshot under
 `${SP_CACHE_DIR}/background_reports`. The worker claims jobs serially, restores

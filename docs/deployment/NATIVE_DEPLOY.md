@@ -226,7 +226,7 @@ Important:
 This repo already includes the installer script:
 
 ```bash
-sudo -u cgv -H bash -lc 'cd /opt/cgv/app && Rscript docker/install_packages.R'
+sudo -u cgv -H bash -lc 'cd /opt/cgv/app && Rscript deploy/docker/install_packages.R'
 ```
 
 That script installs:
@@ -382,7 +382,7 @@ Then on the server:
 
 ```bash
 sudo chown -R cgv:cgv /opt/cgv
-sudo -u cgv -H bash -lc 'cd /opt/cgv/app && Rscript docker/install_packages.R'
+sudo -u cgv -H bash -lc 'cd /opt/cgv/app && Rscript deploy/docker/install_packages.R'
 sudo systemctl restart cgv
 ```
 
@@ -408,7 +408,7 @@ If R packages fail to install:
 3. run again:
 
 ```bash
-sudo -u cgv -H bash -lc 'cd /opt/cgv/app && Rscript docker/install_packages.R'
+sudo -u cgv -H bash -lc 'cd /opt/cgv/app && Rscript deploy/docker/install_packages.R'
 ```
 
 If the app opens but some alignments fail:
@@ -437,7 +437,7 @@ For this repository, native deployment means:
 1. install `R 4.5`, Linux build libraries, and bioinformatics binaries
 2. copy the app to `/opt/cgv/app`
 3. copy the data directories
-4. run `Rscript docker/install_packages.R`
+4. run `Rscript deploy/docker/install_packages.R`
 5. test with `./scripts/run-native.sh`
 6. enable the `systemd` service
 7. optionally place nginx in front of it

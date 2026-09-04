@@ -140,12 +140,12 @@ assert(grepl("preloaded CGeV data", private_error, fixed = TRUE), "private uploa
 domain_text <- paste(readLines(file.path("R", "server_shared_analysis_domain.R"), warn = FALSE), collapse = "\n")
 worker_text <- paste(readLines(file.path("scripts", "background_report_worker.R"), warn = FALSE), collapse = "\n")
 chrome_verifier_text <- paste(readLines(file.path("scripts", "verify_headless_chrome.R"), warn = FALSE), collapse = "\n")
-compose_text <- paste(readLines("docker-compose.shinyproxy.yml", warn = FALSE), collapse = "\n")
-shinyproxy_text <- paste(readLines(file.path("shinyproxy", "application.yml"), warn = FALSE), collapse = "\n")
-colors_deploy_text <- paste(readLines("deploy-colors-shinyproxy.sh", warn = FALSE), collapse = "\n")
+compose_text <- paste(readLines(file.path("deploy", "docker-compose.shinyproxy.yml"), warn = FALSE), collapse = "\n")
+shinyproxy_text <- paste(readLines(file.path("deploy", "shinyproxy", "application.yml"), warn = FALSE), collapse = "\n")
+colors_deploy_text <- paste(readLines(file.path("deploy", "deploy-colors-shinyproxy.sh"), warn = FALSE), collapse = "\n")
 browser_text <- paste(readLines(file.path("www", "js", "reproducible_report.js"), warn = FALSE), collapse = "\n")
 server_text <- paste(readLines("server.R", warn = FALSE), collapse = "\n")
-dependencies_text <- paste(readLines("Dockerfile.dependencies", warn = FALSE), collapse = "\n")
+dependencies_text <- paste(readLines(file.path("deploy", "docker", "Dockerfile.dependencies"), warn = FALSE), collapse = "\n")
 assert(grepl('choiceValues = c("session", "email")', domain_text, fixed = TRUE), "Share exposes foreground and email delivery choices")
 for (button_id in c(
     "email_homo_pip_report",

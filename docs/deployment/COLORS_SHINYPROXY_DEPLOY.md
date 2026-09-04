@@ -20,7 +20,7 @@ sus variables permitidas a la configuración de las sesiones CGV.
 Comprueba la infraestructura sin realizar cambios:
 
 ```bash
-./deploy-colors-shinyproxy.sh --check
+./deploy/deploy-colors-shinyproxy.sh --check
 ```
 
 El resultado esperado termina con:
@@ -55,17 +55,17 @@ El script aborta si detecta cualquiera de estas condiciones:
 git status
 Rscript -e "testthat::test_dir('tests/testthat', reporter='summary')"
 
-git add ui.R custom.scss www/css/cgv_compiled.css
+git add ui.R www/css/custom.scss www/css/cgv_compiled.css
 git commit -m "fix: describe el cambio"
 
-./deploy-colors-shinyproxy.sh
+./deploy/deploy-colors-shinyproxy.sh
 ```
 
 No uses `--skip-tests` como flujo habitual. Existe únicamente para una
 emergencia conocida:
 
 ```bash
-./deploy-colors-shinyproxy.sh --skip-tests
+./deploy/deploy-colors-shinyproxy.sh --skip-tests
 ```
 
 ## Telemetría de rendimiento
@@ -76,7 +76,7 @@ manual controlada, habilítala sólo en esa publicación y usa una etiqueta
 segura:
 
 ```bash
-COLORS_PERF_TIMING=1 PERF_RUN_LABEL=despues_colors_01 ./deploy-colors-shinyproxy.sh
+COLORS_PERF_TIMING=1 PERF_RUN_LABEL=despues_colors_01 ./deploy/deploy-colors-shinyproxy.sh
 ```
 
 Ambos valores permitidos son literales (`0` o `1`); cualquier otro valor hace
@@ -84,7 +84,7 @@ fallar el deploy antes de modificar Colors. Al terminar la medición, vuelve al
 modo normal:
 
 ```bash
-COLORS_PERF_TIMING=0 ./deploy-colors-shinyproxy.sh
+COLORS_PERF_TIMING=0 ./deploy/deploy-colors-shinyproxy.sh
 ```
 
 ## Qué hace el script
@@ -164,7 +164,7 @@ En la primera publicación del sistema de reportes la reconstruirá
 automáticamente si faltan. Para forzar una reconstrucción posterior:
 
 ```bash
-REBUILD_R_DEPS=1 ./deploy-colors-shinyproxy.sh
+REBUILD_R_DEPS=1 ./deploy/deploy-colors-shinyproxy.sh
 ```
 
 ## Reportes interactivos por correo
@@ -215,5 +215,5 @@ Tampoco vuelvas a configurar ShinyProxy `3.1.1` ni una imagen mutable
 `cgv:1.0.0`. Para cambios normales, el único comando de producción es:
 
 ```bash
-./deploy-colors-shinyproxy.sh
+./deploy/deploy-colors-shinyproxy.sh
 ```

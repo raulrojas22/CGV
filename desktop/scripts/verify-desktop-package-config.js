@@ -11,7 +11,7 @@ const legacyUserDataPath = path.join(desktopRoot, "src", "legacy-user-data.js");
 const legacyUserData = fs.readFileSync(legacyUserDataPath, "utf8");
 const downloadJsPath = path.join(repoRoot, "www", "js", "cgv_desktop_downloads.js");
 const downloadUiPath = path.join(repoRoot, "R", "ui_desktop_downloads.R");
-const installerScriptPath = path.join(repoRoot, "regenerar-instalables.sh");
+const installerScriptPath = path.join(desktopRoot, "scripts", "regenerar-instalables.sh");
 const storeConfigPath = path.join(desktopRoot, "electron-builder.store.js");
 
 const extraResources = (((packageJson || {}).build || {}).extraResources || []);

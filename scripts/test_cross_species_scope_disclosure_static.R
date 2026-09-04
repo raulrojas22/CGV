@@ -7,7 +7,7 @@ read_text <- function(path) {
 server_txt <- read_text("server.R")
 utils_txt <- read_text(file.path("R", "utils.R"))
 env_txt <- read_text(".env.example")
-scss_txt <- read_text("custom.scss")
+scss_txt <- read_text(file.path("www", "css", "custom.scss"))
 compiled_css_txt <- read_text(file.path("www", "css", "cgv_compiled.css"))
 layout_js_txt <- read_text(file.path("www", "js", "summary_context_layout.js"))
 

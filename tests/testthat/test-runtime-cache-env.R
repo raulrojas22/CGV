@@ -1,7 +1,7 @@
 test_that("runtime library caches use the writable CGV cache mount", {
-  script_path <- file.path("docker", "run-app.sh")
+  script_path <- file.path("deploy", "docker", "run-app.sh")
   if (!file.exists(script_path)) {
-    script_path <- file.path("..", "..", "docker", "run-app.sh")
+    script_path <- file.path("..", "..", "deploy", "docker", "run-app.sh")
   }
   expect_true(file.exists(script_path))
 

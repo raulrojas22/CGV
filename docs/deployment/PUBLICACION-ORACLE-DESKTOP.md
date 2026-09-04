@@ -31,7 +31,7 @@ que recompilar sólo para cambiar los archivos apuntados por el manifiesto.
 4. Usa la versión nueva `1.2.0` y ejecuta:
 
    ```bash
-   ./regenerar-instalables.sh
+   ./desktop/scripts/regenerar-instalables.sh
    ./scripts/preparar-publicacion-desktop.sh
    ```
 
@@ -43,7 +43,7 @@ que recompilar sólo para cambiar los archivos apuntados por el manifiesto.
 Sólo haces:
 
 ```bash
-./regenerar-instalables.sh
+./desktop/scripts/regenerar-instalables.sh
 ./scripts/preparar-publicacion-desktop.sh
 ```
 
@@ -132,7 +132,7 @@ reproducibles.
 
 ```bash
 cd /path/to/CGeV
-./regenerar-instalables.sh
+./desktop/scripts/regenerar-instalables.sh
 ```
 
 ### 2. Validar sin crear copias
@@ -186,7 +186,7 @@ configuración.
 El ciclo normal queda reducido a:
 
 ```bash
-./regenerar-instalables.sh
+./desktop/scripts/regenerar-instalables.sh
 ./scripts/preparar-publicacion-desktop.sh
 ```
 

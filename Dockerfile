@@ -15,7 +15,7 @@ COPY . /app
 # Normalize read/traverse permissions after COPY so static assets keep working
 # even if a local file arrived with owner-only permissions (for example 0600).
 RUN chmod -R a+rX /app \
-    && chmod +x /app/docker/run-app.sh
+    && chmod +x /app/deploy/docker/run-app.sh
 
 ENV APP_DIR=/app \
     APP_HOST=0.0.0.0 \
@@ -28,4 +28,4 @@ EXPOSE 3838
 HEALTHCHECK --interval=30s --timeout=10s --start-period=120s --retries=5 \
   CMD wget -qO- "http://127.0.0.1:${APP_PORT}/healthz.txt" 2>/dev/null | grep -qx 'ok' || exit 1
 
-CMD ["/app/docker/run-app.sh"]
+CMD ["/app/deploy/docker/run-app.sh"]

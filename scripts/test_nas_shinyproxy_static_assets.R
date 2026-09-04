@@ -8,10 +8,10 @@ assert <- function(condition, message) {
   if (!isTRUE(condition)) stop(message, call. = FALSE)
 }
 
-nas_shinyproxy <- read_text("deploy-nas-shinyproxy.sh")
-nas_direct <- read_text("deploy-nas.sh")
-shinyproxy_application <- read_text("shinyproxy/application.yml")
-shinyproxy_compose <- read_text("docker-compose.shinyproxy.yml")
+nas_shinyproxy <- read_text(file.path("deploy", "deploy-nas-shinyproxy.sh"))
+nas_direct <- read_text(file.path("deploy", "deploy-nas.sh"))
+shinyproxy_application <- read_text(file.path("deploy", "shinyproxy", "application.yml"))
+shinyproxy_compose <- read_text(file.path("deploy", "docker-compose.shinyproxy.yml"))
 
 build_pos <- regexpr("compose build", nas_shinyproxy, fixed = TRUE)[1]
 image_env_positions <- gregexpr(
@@ -19,8 +19,8 @@ image_env_positions <- gregexpr(
 )[[1]]
 image_env_positions <- image_env_positions[image_env_positions > 0]
 inspect_pos <- regexpr("image inspect --format '{{.Id}}' '${CGV_IMAGE}'", nas_shinyproxy, fixed = TRUE)[1]
-prewarm_pos <- regexpr("bash docker/setup-prewarm.sh", nas_shinyproxy, fixed = TRUE)[1]
-compose_up_pos <- regexpr("compose -f docker-compose.shinyproxy.yml up -d", nas_shinyproxy, fixed = TRUE)[1]
+prewarm_pos <- regexpr("bash deploy/docker/setup-prewarm.sh", nas_shinyproxy, fixed = TRUE)[1]
+compose_up_pos <- regexpr("compose --project-directory . -f deploy/docker-compose.shinyproxy.yml up -d", nas_shinyproxy, fixed = TRUE)[1]
 asset_env_pos <- regexpr("upsert_env APP_ASSET_VERSION", nas_shinyproxy, fixed = TRUE)[1]
 base_env_pos <- regexpr("upsert_env APP_STATIC_BASE_URL", nas_shinyproxy, fixed = TRUE)[1]
 tunnel_pos <- regexpr("# --- Paso 7: Lanzar Cloudflare tunnel ---", nas_shinyproxy, fixed = TRUE)[1]
@@ -48,7 +48,7 @@ required_contracts <- c(
   "CGV_PUBLISH_STATIC_ASSETS=1",
   "CGV_STATIC_REVISION=\\\"\\$static_revision\\\"",
   "CGV_IMAGE='${CGV_IMAGE}' CGV_DEPS_IMAGE='${CGV_DEPS_IMAGE}'",
-  "CGV_IMAGE='${CGV_IMAGE}' ${REMOTE_DOCKER} compose -f docker-compose.shinyproxy.yml up -d",
+  "CGV_IMAGE='${CGV_IMAGE}' ${REMOTE_DOCKER} compose --project-directory . -f deploy/docker-compose.shinyproxy.yml up -d",
   "cache/static_assets/releases/",
   "$static_release/healthz.txt",
   "upsert_env APP_ASSET_VERSION \\\"\\$static_revision\\\"",
@@ -88,8 +88,22 @@ eager_profile <- c(
   ORTHO_INITIAL_VISIBLE = "64",
   ORTHO_SERVER_RENDER_NUDGE = "0"
 )
+compose_fallback_profile <- c(
+  ORTHO_SUSPEND_HIDDEN = "1",
+  HOMO_DEFER_SEQUENCE = "0",
+  ORTHO_DEFER_SEQUENCE = "0",
+  FOOTER_DEFER_SEQUENCE = "0",
+  DEFER_FEATURE_GC = "0",
+  ORTHO_RENDER_CHUNK_SIZE = "1",
+  ORTHO_AUTO_RENDER_MORE = "1",
+  ORTHO_AUTO_RENDER_DELAY_MS = "120",
+  HOMO_INITIAL_VISIBLE = "1",
+  ORTHO_INITIAL_VISIBLE = "1",
+  ORTHO_SERVER_RENDER_NUDGE = "0"
+)
 for (profile_key in names(eager_profile)) {
   profile_value <- eager_profile[[profile_key]]
+  fallback_value <- compose_fallback_profile[[profile_key]]
   assert(
     grepl(
       sprintf("upsert_env SP_%s '${NAS_%s}'", profile_key, profile_key),
@@ -100,7 +114,7 @@ for (profile_key in names(eager_profile)) {
   )
   assert(
     grepl(
-      sprintf("APP_%s: \"${SP_%s:%s}\"", profile_key, profile_key, profile_value),
+      sprintf("APP_%s: \"${SP_%s:%s}\"", profile_key, profile_key, fallback_value),
       shinyproxy_application,
       fixed = TRUE
     ),
@@ -108,7 +122,7 @@ for (profile_key in names(eager_profile)) {
   )
   assert(
     grepl(
-      sprintf("SP_%s: \"${SP_%s:-%s}\"", profile_key, profile_key, profile_value),
+      sprintf("SP_%s: \"${SP_%s:-%s}\"", profile_key, profile_key, fallback_value),
       shinyproxy_compose,
       fixed = TRUE
     ),

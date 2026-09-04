@@ -10,7 +10,8 @@ set -euo pipefail
 NAS_USER="${NAS_USER:-truenas_admin}"
 NAS_HOST="${NAS_HOST:-192.168.1.200}"
 NAS_PATH="${NAS_PATH:-/mnt/Datos4raro/cgv}"
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DEPLOY_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "${DEPLOY_DIR}/.." && pwd)"
 LOCAL_APP="${LOCAL_APP:-${SCRIPT_DIR}/}"
 LOCAL_ENV_FILE="${LOCAL_APP}.env.local"
 TUNNEL_NAME="cgv"
@@ -200,7 +201,7 @@ nssh "
     echo \"  rsync -avz --progress annotations genomes go_annotations ${NAS_USER}@${NAS_HOST}:${NAS_PATH}/\" >&2
     echo \"  rsync -avz --progress cache ${NAS_USER}@${NAS_HOST}:${NAS_PATH}/\" >&2
     echo \"\" >&2
-    echo \"Luego vuelve a correr ./deploy-nas-shinyproxy.sh\" >&2
+    echo \"Luego vuelve a correr ./deploy/deploy-nas-shinyproxy.sh\" >&2
     exit 1
   fi
 
@@ -279,7 +280,7 @@ nssh "
      ! ${REMOTE_DOCKER} run --rm --entrypoint /usr/bin/google-chrome '${CGV_DEPS_IMAGE}' --version >/dev/null 2>&1 ||
      ! ${REMOTE_DOCKER} run --rm '${CGV_DEPS_IMAGE}' Rscript -e 'library(chromote)' >/dev/null 2>&1; then
     echo '  Construyendo ${CGV_DEPS_IMAGE} (incluye Google Chrome/chromote para reportes en segundo plano)...'
-    ${REMOTE_DOCKER} build --pull=false -t '${CGV_DEPS_IMAGE}' -f Dockerfile.dependencies .
+    ${REMOTE_DOCKER} build --pull=false -t '${CGV_DEPS_IMAGE}' -f deploy/docker/Dockerfile.dependencies .
   else
     echo '  Reutilizando ${CGV_DEPS_IMAGE}; no se instalarán paquetes R.'
   fi
@@ -301,7 +302,7 @@ nssh "
     exit 1
   fi
 
-  chmod +x docker/setup-prewarm.sh
+  chmod +x deploy/docker/setup-prewarm.sh
   CGV_IMAGE='${CGV_IMAGE}' \
   CGV_PUBLISH_STATIC_ASSETS=1 \
   CGV_STATIC_REVISION=\"\$static_revision\" \
@@ -310,7 +311,7 @@ nssh "
   CGV_GO_ANNOTATIONS_DIR='${NAS_APP_DIR}/go_annotations' \
   CGV_DATA_DIR='${NAS_APP_DIR}/data' \
   CGV_CACHE_DIR='${NAS_APP_DIR}/cache' \
-  DOCKER_BIN='${REMOTE_DOCKER}' bash docker/setup-prewarm.sh
+  DOCKER_BIN='${REMOTE_DOCKER}' bash deploy/docker/setup-prewarm.sh
 
   static_release='${NAS_APP_DIR}/cache/static_assets/releases/'\"\$static_revision\"
   if [ ! -s \"\$static_release/healthz.txt\" ]; then
@@ -407,7 +408,7 @@ nssh "
   done
 
   echo '  Iniciando servicios con rutas absolutas del host NAS...'
-  CGV_IMAGE='${CGV_IMAGE}' ${REMOTE_DOCKER} compose -f docker-compose.shinyproxy.yml up -d
+  CGV_IMAGE='${CGV_IMAGE}' ${REMOTE_DOCKER} compose --project-directory . -f deploy/docker-compose.shinyproxy.yml up -d
 "
 
 # --- Paso 6: Verificar salud ---

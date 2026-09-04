@@ -20191,8 +20191,8 @@ function(input, output, session) {
                             sys.source(file.path("R", "alias_resolution.R"), envir = worker_env)
                         }
                         sys.source(file.path("R", "utils.R"), envir = worker_env)
-                        if (file.exists("gene_search_lib.R")) {
-                            sys.source("gene_search_lib.R", envir = worker_env)
+                        if (file.exists(file.path("R", "gene_search_lib.R"))) {
+                            sys.source(file.path("R", "gene_search_lib.R"), envir = worker_env)
                         }
                         assign(libs_key, TRUE, envir = worker_env)
                     }
@@ -20498,8 +20498,8 @@ function(input, output, session) {
                             sys.source(file.path("R", "alias_resolution.R"), envir = worker_env)
                         }
                         sys.source(file.path("R", "utils.R"), envir = worker_env)
-                        if (file.exists("gene_search_lib.R")) {
-                            sys.source(file.path("gene_search_lib.R"), envir = worker_env)
+                        if (file.exists(file.path("R", "gene_search_lib.R"))) {
+                            sys.source(file.path("R", "gene_search_lib.R"), envir = worker_env)
                         }
                         assign(libs_key, TRUE, envir = worker_env)
                     }
@@ -33190,7 +33190,7 @@ function(input, output, session) {
     # z-index:999999 → aparece por encima de sidebar (2600) y cualquier overlay.
     # NOTA: ggiraph valida el CSS y prohíbe explícitamente tanto "position"
     #   como "pointer-events" — ambos son gestionados internamente por girafe.
-    #   El override de pointer-events se hace via CSS global en custom.scss
+    #   El override de pointer-events se hace vía CSS global en www/css/custom.scss
     #   usando el selector div[id^="tooltip_"] (fuera del alcance de ggiraph).
     analytics_tooltip_css <- paste(
         "background:var(--app-message-bg);",

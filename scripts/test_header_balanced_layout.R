@@ -5,7 +5,7 @@ read_all <- function(path) paste(readLines(path, warn = FALSE), collapse = "\n")
 ui_txt <- read_all("ui.R")
 server_txt <- read_all("server.R")
 toggle_txt <- read_all(file.path("www", "js", "genomic_ruler_toggle.js"))
-scss_txt <- read_all("custom.scss")
+scss_txt <- read_all(file.path("www", "css", "custom.scss"))
 css_txt <- read_all(file.path("www", "css", "cgv_compiled.css"))
 
 for (txt in list(server_txt)) {

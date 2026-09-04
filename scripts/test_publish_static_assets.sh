@@ -21,7 +21,7 @@ publish() {
   CGV_STATIC_SOURCE_DIR="${SOURCE_DIR}" \
   CGV_STATIC_ROOT_DIR="${STATIC_ROOT}" \
   CGV_STATIC_REVISION="$1" \
-    bash "${ROOT}/docker/publish-static-assets.sh"
+    bash "${ROOT}/deploy/docker/publish-static-assets.sh"
 }
 
 publish "${REV_A}"
@@ -50,7 +50,7 @@ grep -q 'tampered' "${STATIC_ROOT}/releases/${REV_B}/js/version probe.js"
 if CGV_STATIC_SOURCE_DIR="${SOURCE_DIR}" \
    CGV_STATIC_ROOT_DIR="${STATIC_ROOT}" \
    CGV_STATIC_REVISION=bad \
-   bash "${ROOT}/docker/publish-static-assets.sh" >/dev/null 2>&1; then
+   bash "${ROOT}/deploy/docker/publish-static-assets.sh" >/dev/null 2>&1; then
   echo "ERROR: accepted an invalid revision" >&2
   exit 1
 fi

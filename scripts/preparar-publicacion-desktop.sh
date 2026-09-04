@@ -4,7 +4,7 @@
 # para Oracle Object Storage.
 #
 # Flujo normal:
-#   1. ./regenerar-instalables.sh
+#   1. ./desktop/scripts/regenerar-instalables.sh
 #   2. ./scripts/preparar-publicacion-desktop.sh
 #   3. Subir TODO el contenido de desktop/oracle-upload-VERSION/ a Oracle.
 
@@ -73,7 +73,7 @@ done
 
 command -v node >/dev/null 2>&1 || die "Falta Node.js."
 command -v shasum >/dev/null 2>&1 || die "Falta shasum."
-[ -d "$FINAL_DIR" ] || die "No existe $FINAL_DIR. Ejecuta ./regenerar-instalables.sh primero."
+[ -d "$FINAL_DIR" ] || die "No existe $FINAL_DIR. Ejecuta ./desktop/scripts/regenerar-instalables.sh primero."
 [ -f "$CONFIG_FILE" ] || die "No existe $CONFIG_FILE."
 
 VERSION="$(node -p "require('$DESKTOP_DIR/package.json').version")"

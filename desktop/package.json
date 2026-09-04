@@ -64,8 +64,6 @@
           "global.R",
           "ui.R",
           "server.R",
-          "custom.scss",
-          "gene_search_lib.R",
           "R/**",
           "scripts/*.R",
           "go_annotations/go-basic.obo",
@@ -73,7 +71,7 @@
           "www/**",
           "!www/screencasts.orig/**",
           "!www/ctv_backup/**",
-          "docker/run-app.sh",
+          "deploy/docker/run-app.sh",
           "!desktop/resources/bundled-data/**",
           "!desktop/resources/demo-data/**"
         ]
