@@ -1,6 +1,6 @@
 {
   "name": "cgv-desktop",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "description": "CGeV Desktop wrapper for running the Shiny app locally with portable data roots.",
   "main": "src/main.js",
   "author": {

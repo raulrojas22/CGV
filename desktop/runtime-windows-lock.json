@@ -16,7 +16,7 @@
   "cranRepository": {
     "snapshotDate": "2026-07-13",
     "url": "https://packagemanager.posit.co/cran/2026-07-13",
-    "windowsR44IndexSha256": "4d463973e9d1fb275f693a1b136854d4e903920c0e4a5cee2b209a3f64cbf1ed"
+    "windowsR44IndexSha256": "1b36a17ac120273e8f6956ae1da4762787cf1f9522fa2fbfa711894822171a2c"
   },
   "bioconductorVersion": "3.20",
   "bioconductorRepository": {
