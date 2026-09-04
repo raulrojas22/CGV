@@ -20,7 +20,7 @@ concurrency:
 jobs:
   build-sign-and-stage:
     name: Build, SignPath approval, verify, and stage
-    if: github.repository == 'raulrojas22/CGV'
+    if: github.repository == 'raulrojas22/CGeV'
     runs-on: windows-2022
     timeout-minutes: 300
     env:
