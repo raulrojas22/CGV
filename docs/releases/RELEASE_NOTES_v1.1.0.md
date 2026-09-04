@@ -1,11 +1,11 @@
-# CGV v1.1.0
+# CGeV Web v1.1.0
 
-CGV v1.1.0 adds a stable publication workflow centered on Figure Studio and
+CGeV Web v1.1.0 adds a stable figure workflow centered on Figure Studio and
 improves export reliability across the Web and Desktop editions.
 
 ## Highlights
 
-- Figure Studio is now a stable CGV workspace rather than a beta feature.
+- Figure Studio is now a stable CGeV workspace rather than a beta feature.
 - Build publication figures with a variable number of independent panels.
 - Select gene structures, transcript variants, analytics, and eligible
   alignment views from an organized panel library.
@@ -13,7 +13,7 @@ improves export reliability across the Web and Desktop editions.
 - Preview the exact SVG composition before exporting.
 - Export full-color, colorblind, paper-color, grayscale, or monochrome SVG and
   PNG figures.
-- Save and restore Figure Studio drafts through CGV work-session files.
+- Save and restore Figure Studio drafts through CGeV work-session files.
 
 ## Export and workflow improvements
 
@@ -24,17 +24,18 @@ improves export reliability across the Web and Desktop editions.
 - Figure Studio identifies genes and transcript IDs in large result libraries.
 - Tooltips and the guided workflow remain visible above all Studio surfaces.
 - Temporary drafts are cleared on a normal reload and persist only through an
-  explicitly saved CGV session.
+  explicitly saved CGeV session.
 
 ## Documentation
 
-- Adds the CGV User Manual Web and Desktop Edition v1.1.
-- Publishes the current manual at the stable `docs/CGV_User_Manual.pdf` path.
-- Keeps a versioned manual archive for reproducible citation and review.
+- Adds the CGeV User Manual Web and Desktop Edition v1.1.
+- Publishes the current manual at the stable `docs/CGeV_User_Manual.pdf` path.
+- Keeps a versioned manual archive for reproducible use and citation.
 
 ## Desktop
 
-- Aligns CGV Desktop with the public CGV v1.1.0 release.
+- The Desktop source has continued on its own release line and is currently
+  version 1.2.2.
 - Retains offline scientific runtimes and platform-specific package
   verification.
 - Adds explicit macOS arm64, macOS x64, Linux x64, and Windows x64 runtime and
@@ -43,8 +44,8 @@ improves export reliability across the Web and Desktop editions.
   setup-msys2 root propagation, isolated R-package verification, and the
   direct official MSYS2 repository for `mman-win32`.
 - Disables implicit Electron Builder publishing for every local package command.
-- Windows public installers remain subject to the signed release workflow and
-  manual SignPath approval.
+- Public installers remain pending in the dedicated download repository;
+  Windows packages also require the signed release workflow and SignPath approval.
 
 ## Validation
 
