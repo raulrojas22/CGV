@@ -1,7 +1,7 @@
 CGV_FEEDBACK_DEFAULT_TO_EMAIL <- "cgvviewer@gmail.com"
 CGV_FEEDBACK_DEFAULT_FROM_EMAIL <- "CGeV Feedback <feedback@cgvapp.com>"
 CGV_FEEDBACK_DEFAULT_PUBLIC_URL <- "https://cgev.mobilomics.org"
-CGV_FEEDBACK_DEFAULT_BACKUP_URL <- "https://cgvapp.com"
+CGV_FEEDBACK_DEFAULT_BACKUP_URL <- ""
 CGV_FEEDBACK_DEFAULT_LOGO_PATH <- file.path("www", "cgv-email-logo.png")
 
 feedback_env_value <- function(name, default = "", getenv = Sys.getenv) {

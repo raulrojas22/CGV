@@ -1,11 +1,11 @@
 ARG CGV_DEPS_IMAGE=cgv-deps:1.0.0
 FROM ${CGV_DEPS_IMAGE}
 
-LABEL org.opencontainers.image.title="CGV" \
-      org.opencontainers.image.description="Comparative Genomics Viewer — interactive Shiny app for ortholog analysis, GO enrichment, and genome comparison" \
+LABEL org.opencontainers.image.title="CGeV" \
+      org.opencontainers.image.description="Comparative Gene Viewer — interactive Shiny app for gene structure, alignment, and comparative genomics" \
       org.opencontainers.image.version="1.1.0" \
-      org.opencontainers.image.authors="Raul Rojas" \
-      org.opencontainers.image.source="https://github.com/rarojas/cgv" \
+      org.opencontainers.image.authors="Raul Rojas-Espinoza" \
+      org.opencontainers.image.source="https://github.com/raulrojas22/CGeV" \
       org.opencontainers.image.licenses="MIT"
 
 WORKDIR /app

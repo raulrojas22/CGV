@@ -6,7 +6,12 @@ suppressPackageStartupMessages({
   library(vroom)
 })
 
-workspace <- "/Users/rarojas/Documents/A_FULLAPP"
+script_arg <- grep("^--file=", commandArgs(trailingOnly = FALSE), value = TRUE)
+workspace <- if (length(script_arg)) {
+  dirname(dirname(normalizePath(sub("^--file=", "", script_arg[[1]]))))
+} else {
+  normalizePath(".")
+}
 `%||%` <- function(x, y) if (is.null(x) || length(x) == 0) y else x
 
 source(file.path(workspace, "R", "alias_resolution.R"))

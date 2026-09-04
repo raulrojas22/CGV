@@ -64,7 +64,7 @@ stopifnot(
   identical(desktop_package$build$productName, "CGeV Desktop"),
   numeric_version(desktop_package$version) >= numeric_version("1.2.0"),
   identical(desktop_package$name, "cgv-desktop"),
-  identical(desktop_package$repository$url, "https://github.com/raulrojas22/CGV"),
+    identical(desktop_package$repository$url, "https://github.com/raulrojas22/CGeV"),
   grepl('electronApp.setPath("userData", legacyUserDataPath({', desktop_main, fixed = TRUE),
   grepl('LEGACY_USER_DATA_DIRECTORY = "CGV Desktop"', desktop_legacy_user_data, fixed = TRUE),
   grepl("CGV_DATA_ROOT", desktop_main, fixed = TRUE),
@@ -72,7 +72,7 @@ stopifnot(
   grepl('mainWindow.webContents.send("cgv:status"', desktop_main, fixed = TRUE),
   grepl("cgv-download-button", read_text(file.path("R", "ui_desktop_downloads.R")), fixed = TRUE),
   file.exists(file.path("www", "docs", "CGV_User_Manual.pdf")),
-  file.exists(file.path("www", "docs", "archive", "CGV_User_Manual_Web_and_Desktop_v1.1.pdf"))
+  file.exists(file.path("www", "docs", "archive", "CGeV_User_Manual_Web_and_Desktop_v1.1.pdf"))
 )
 
 message("CGeV visible identity and CGV/cgv compatibility checks passed.")

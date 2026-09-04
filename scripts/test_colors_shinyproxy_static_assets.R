@@ -8,8 +8,8 @@ assert <- function(condition, message) {
 }
 
 deploy <- read_text("deploy-colors-shinyproxy.sh")
-deploy_guide <- read_text("COLORS_SHINYPROXY_DEPLOY.md")
-perf_workflow <- read_text("FLUJO_LOGS_RENDIMIENTO.md")
+deploy_guide <- read_text(file.path("docs", "deployment", "COLORS_SHINYPROXY_DEPLOY.md"))
+perf_workflow <- read_text(file.path("docs", "deployment", "FLUJO_LOGS_RENDIMIENTO.md"))
 
 check_pos <- regexpr('if [[ "$MODE" == "check" ]]; then', deploy, fixed = TRUE)[1]
 tests_pos <- regexpr('if [[ "$SKIP_TESTS" == "0" ]]; then', deploy, fixed = TRUE)[1]

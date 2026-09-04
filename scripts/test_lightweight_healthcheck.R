@@ -43,7 +43,7 @@ assert(
   "The internal nginx probe must use HEAD instead of downloading the root page."
 )
 assert(
-  grepl("curl -sS -I -o /dev/null -w '%{http_code}' --max-time 10 https://cgvapp.com/", shinyproxy_deploy, fixed = TRUE),
+  grepl("curl -sS -I -o /dev/null -w '%{http_code}' --max-time 10 https://cgev.mobilomics.org/", shinyproxy_deploy, fixed = TRUE),
   "The public readiness probe must use HEAD instead of downloading the root page."
 )
 assert(

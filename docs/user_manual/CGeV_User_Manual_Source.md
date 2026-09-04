@@ -1806,8 +1806,8 @@ submission reference is sent to the reporter; failure of that copy does not
 discard feedback already delivered to the CGeV inbox.
 
 If Desktop reports that the message was saved locally but cannot be sent, use
-the Feedback page at `cgev.mobilomics.org`, use `cgvapp.com` while the official
-server is unavailable, or email `cgvviewer@gmail.com`. Repeated or duplicate
+the Feedback page at `cgev.mobilomics.org` or email `cgvviewer@gmail.com`.
+Repeated or duplicate
 submissions can be temporarily rate-limited; follow the notification message
 before retrying.
 
@@ -1996,6 +1996,6 @@ Fallback logic supports several transcript and non-coding RNA feature names, but
 
 **Primary application:** https://cgev.mobilomics.org
 
-**Source repository:** https://github.com/raulrojas22/CGV
+**Source repository:** https://github.com/raulrojas22/CGeV
 
 This manual describes the complete user-facing behavior represented by CGeV version {{PRODUCT_VERSION}}, including the desktop data catalog, aligned-synteny tools, LASTZ and MultiPIP views, Figure Studio, interactive read-only reports, reproducibility exports, and session management.

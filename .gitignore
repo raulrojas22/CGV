@@ -85,5 +85,8 @@ www/screencasts/
 www/screencasts.orig/
 www/ctv_backup/
 
-# Paper (not needed in repo)
+# Private manuscript materials (never publish in the source repository)
 paper/
+examples/manuscript-cases/
+scripts/validate_reviewer_package.py
+.github/workflows/reviewer-package.yml

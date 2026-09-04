@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ============================================================
 # deploy-nas-shinyproxy.sh — Despliega CGV con ShinyProxy en el NAS
-# URL: https://cgvapp.com
+# URL: https://cgev.mobilomics.org
 # Soporta 3-5 usuarios simultaneos con contenedores por usuario.
 # ShinyProxy queda sin login y limitado por SP_MAX_TOTAL_INSTANCES.
 # ============================================================
@@ -10,7 +10,8 @@ set -euo pipefail
 NAS_USER="${NAS_USER:-truenas_admin}"
 NAS_HOST="${NAS_HOST:-192.168.1.200}"
 NAS_PATH="${NAS_PATH:-/mnt/Datos4raro/cgv}"
-LOCAL_APP="/Users/rarojas/Documents/A_FULLAPP/"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LOCAL_APP="${LOCAL_APP:-${SCRIPT_DIR}/}"
 LOCAL_ENV_FILE="${LOCAL_APP}.env.local"
 TUNNEL_NAME="cgv"
 REMOTE_DOCKER="${REMOTE_DOCKER:-docker}"
@@ -92,7 +93,7 @@ ensure_remote_docker_access() {
 
 echo "============================================"
 echo "  CGV ShinyProxy — Deploy to NAS"
-echo "  https://cgvapp.com"
+echo "  https://cgev.mobilomics.org"
 echo "  Modo: multiusuario (1 contenedor/usuario)"
 echo "  Telemetría: ${NAS_PERF_TIMING} (etiqueta=${PERF_RUN_LABEL})"
 echo "  Render: eager, hasta 64 tarjetas primarias simultáneas"
@@ -129,7 +130,7 @@ rsync -avz --progress --delete \
   --exclude=go_annotations --exclude=cache \
   --exclude=ncbi_downloads \
   --exclude=.git --exclude=.claude \
-  --exclude=paper/node_modules --exclude=node_modules \
+  --exclude=node_modules \
   --exclude=.Rapp.history --exclude=.Rhistory \
   --exclude=.codex_backups --exclude=.qodo \
   --exclude='*.docx' --exclude='.env.local' \
@@ -565,9 +566,9 @@ nssh "
       tail -30 ${NAS_PATH}/tunnel.log >&2
       exit 1
     fi
-    public_code=\$(curl -sS -I -o /dev/null -w '%{http_code}' --max-time 10 https://cgvapp.com/ 2>/dev/null || true)
+    public_code=\$(curl -sS -I -o /dev/null -w '%{http_code}' --max-time 10 https://cgev.mobilomics.org/ 2>/dev/null || true)
     if echo \"\$public_code\" | grep -Eq '^(200|301|302)$'; then
-      echo \"  cgvapp.com responde HTTP \$public_code después de \${ELAPSED}s\"
+      echo \"  cgev.mobilomics.org responde HTTP \$public_code después de \${ELAPSED}s\"
       PUBLIC_OK=1
       break
     fi
@@ -575,7 +576,7 @@ nssh "
     ELAPSED=\$((ELAPSED + 5))
   done
   if [ \"\$PUBLIC_OK\" != '1' ]; then
-    echo \"ERROR: cgvapp.com no quedó accesible (último HTTP: \${public_code:-000}).\" >&2
+    echo \"ERROR: cgev.mobilomics.org no quedó accesible (último HTTP: \${public_code:-000}).\" >&2
     tail -50 ${NAS_PATH}/tunnel.log >&2
     exit 1
   fi
@@ -587,7 +588,7 @@ echo "  ShinyProxy Deploy completado!"
 echo ""
 echo "  ShinyProxy:  http://127.0.0.1:8080 (interno del NAS)"
 echo "  Proxy web:   http://${NAS_HOST}:${CGV_NGINX_PORT}"
-echo "  Publico:     https://cgvapp.com"
+echo "  Publico:     https://cgev.mobilomics.org"
 echo ""
 echo "  Login:       desactivado (acceso directo, limitado por capacidad)"
 echo ""

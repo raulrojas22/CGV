@@ -5,7 +5,7 @@ read_text <- function(path) {
 }
 
 release_version <- "1.1.0"
-desktop_release_version <- "1.2.0"
+desktop_release_version <- "1.2.2"
 manual_version <- "1.1"
 
 global_txt <- read_text("global.R")
@@ -37,8 +37,8 @@ prewarm_mounts <- c(
   CGV_DATA_DIR = "data",
   CGV_CACHE_DIR = "cache"
 )
-release_notes <- sprintf("RELEASE_NOTES_v%s.md", release_version)
-release_checklist <- sprintf("RELEASE_CHECKLIST_v%s.md", release_version)
+release_notes <- file.path("docs", "releases", sprintf("RELEASE_NOTES_v%s.md", release_version))
+release_checklist <- file.path("docs", "releases", sprintf("RELEASE_CHECKLIST_v%s.md", release_version))
 desktop_scripts <- desktop_package$scripts
 
 stopifnot(

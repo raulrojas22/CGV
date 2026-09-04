@@ -156,7 +156,7 @@ render_job <- function(claimed) {
     child_env[["APP_PORT"]] <- as.character(renderer_port)
     child_env[["CGV_PUBLIC_BASE_URL"]] <- trimws(Sys.getenv(
         "CGV_PUBLIC_BASE_URL",
-        "https://cgvapp.com"
+        "https://cgev.mobilomics.org"
     ))
     child_env[["APP_PREWARM_ON_START"]] <- "0"
     child_env[["APP_PREWARM_BLOCK_START"]] <- "0"

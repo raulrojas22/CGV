@@ -6,7 +6,7 @@ This guide is for your exact case:
 - no Docker
 - no Podman
 - Debian server
-- only your user account, for example `/home/rarojas`
+- only your user account, for example `/home/usuario`
 
 ## What changes compared to a normal deployment
 
@@ -52,7 +52,7 @@ ssh colors
 From what you showed, your home is:
 
 ```text
-/home/rarojas
+/home/usuario
 ```
 
 ## 2) Fix the locale warning first
@@ -78,7 +78,7 @@ That avoids the warning. If your admin later enables `C.UTF-8`, you can switch t
 On the server:
 
 ```bash
-cd /home/rarojas
+cd /home/usuario
 mkdir -p ~/.local/bin
 curl -Ls https://micro.mamba.pm/api/micromamba/linux-64/latest | tar -xvj bin/micromamba
 mv bin/micromamba ~/.local/bin/
@@ -107,18 +107,17 @@ rsync -avz --progress \
   --exclude='.qodo' \
   --exclude='.DS_Store' \
   --exclude='.env.local' \
-  --exclude='paper/node_modules' \
-  /Users/rarojas/Documents/A_FULLAPP/ \
-  colors:/home/rarojas/A_FULLAPP/
+  /path/to/CGeV/ \
+  usuario@TU_SERVIDOR:/home/usuario/CGeV/
 ```
 
 If the heavy data folders are not already included or need resync:
 
 ```bash
-rsync -avz --progress /Users/rarojas/Documents/A_FULLAPP/annotations/ colors:/home/rarojas/A_FULLAPP/annotations/
-rsync -avz --progress /Users/rarojas/Documents/A_FULLAPP/genomes/ colors:/home/rarojas/A_FULLAPP/genomes/
-rsync -avz --progress /Users/rarojas/Documents/A_FULLAPP/go_annotations/ colors:/home/rarojas/A_FULLAPP/go_annotations/
-rsync -avz --progress /Users/rarojas/Documents/A_FULLAPP/cache/ colors:/home/rarojas/A_FULLAPP/cache/
+rsync -avz --progress /path/to/CGeV/annotations/ usuario@TU_SERVIDOR:/home/usuario/CGeV/annotations/
+rsync -avz --progress /path/to/CGeV/genomes/ usuario@TU_SERVIDOR:/home/usuario/CGeV/genomes/
+rsync -avz --progress /path/to/CGeV/go_annotations/ usuario@TU_SERVIDOR:/home/usuario/CGeV/go_annotations/
+rsync -avz --progress /path/to/CGeV/cache/ usuario@TU_SERVIDOR:/home/usuario/CGeV/cache/
 ```
 
 ## 5) Create the private environment
@@ -130,7 +129,7 @@ This repo now includes a rootless environment file:
 On the server:
 
 ```bash
-cd /home/rarojas/A_FULLAPP
+cd /home/usuario/CGeV
 micromamba create -y -f deploy/rootless/environment.yml
 micromamba activate cgv-rootless
 ```
@@ -150,7 +149,7 @@ which tabix
 Most dependencies should come from the environment file. If one package is still missing, install it inside the active environment:
 
 ```bash
-cd /home/rarojas/A_FULLAPP
+cd /home/usuario/CGeV
 micromamba activate cgv-rootless
 Rscript docker/install_packages.R
 ```
@@ -162,7 +161,7 @@ If the solver fails specifically because of `rbioapi`, leave the environment as-
 On the server:
 
 ```bash
-cd /home/rarojas/A_FULLAPP
+cd /home/usuario/CGeV
 cp .env.example .env
 ```
 
@@ -185,21 +184,21 @@ APP_PREWARM_BLOCK_START=0
 Optional `.env.local`:
 
 ```dotenv
-APP_LASTZ_BIN=/home/rarojas/micromamba/envs/cgv-rootless/bin/lastz
+APP_LASTZ_BIN=/home/usuario/micromamba/envs/cgv-rootless/bin/lastz
 FEEDBACK_RESEND_API_KEY=
 FEEDBACK_TO_EMAIL=cgvviewer@gmail.com
 FEEDBACK_FROM_EMAIL="CGeV Feedback <feedback@cgvapp.com>"
 # cgvapp.com is verified in Resend.
 FEEDBACK_SEND_RECEIPT=1
 FEEDBACK_PUBLIC_URL=https://cgev.mobilomics.org
-FEEDBACK_BACKUP_URL=https://cgvapp.com
+FEEDBACK_BACKUP_URL=https://cgev.mobilomics.org
 FEEDBACK_LOGO_PATH=www/cgv-email-logo.png
 ```
 
 ## 8) Verify that the required folders exist
 
 ```bash
-cd /home/rarojas/A_FULLAPP
+cd /home/usuario/CGeV
 ls -ld annotations genomes go_annotations cache
 mkdir -p cache/work_sessions
 ```
@@ -209,7 +208,7 @@ mkdir -p cache/work_sessions
 Use the native launcher already present in the repo:
 
 ```bash
-cd /home/rarojas/A_FULLAPP
+cd /home/usuario/CGeV
 micromamba activate cgv-rootless
 ./scripts/run-native.sh
 ```
@@ -235,7 +234,7 @@ which tmux
 ### Option A: `tmux` (recommended)
 
 ```bash
-cd /home/rarojas/A_FULLAPP
+cd /home/usuario/CGeV
 micromamba activate cgv-rootless
 tmux new -s cgv
 ./scripts/run-native.sh
@@ -258,7 +257,7 @@ tmux attach -t cgv
 If `tmux` is not available:
 
 ```bash
-cd /home/rarojas/A_FULLAPP
+cd /home/usuario/CGeV
 micromamba activate cgv-rootless
 nohup ./scripts/run-native.sh > ~/cgv.log 2>&1 &
 echo $! > ~/cgv.pid
@@ -326,9 +325,9 @@ which lastz
 If the app starts but some searches are slow:
 
 ```bash
-cd /home/rarojas/A_FULLAPP
+cd /home/usuario/CGeV
 micromamba activate cgv-rootless
-Rscript scripts/precompute_preloaded_cache.R --root=/home/rarojas/A_FULLAPP --clean
+Rscript scripts/precompute_preloaded_cache.R --root=/home/usuario/CGeV --clean
 ```
 
 If logs are needed:
@@ -341,8 +340,8 @@ tail -n 200 ~/cgv.log
 
 For `colors`, the realistic deployment is:
 
-1. install `micromamba` in `/home/rarojas`
-2. copy the repo to `/home/rarojas/A_FULLAPP`
+1. install `micromamba` in `/home/usuario`
+2. copy the repo to `/home/usuario/CGeV`
 3. create `cgv-rootless`
 4. run `./scripts/run-native.sh`
 5. keep it alive with `tmux` or `nohup`

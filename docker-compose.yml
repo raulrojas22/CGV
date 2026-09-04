@@ -88,7 +88,7 @@ services:
       APP_DIR: "/app"
       CGV_DATA_ROOT: "/app"
       CGV_CACHE_DIR: "/app/cache"
-      CGV_PUBLIC_BASE_URL: "${CGV_PUBLIC_BASE_URL:-https://cgvapp.com}"
+      CGV_PUBLIC_BASE_URL: "${CGV_PUBLIC_BASE_URL:-https://cgev.mobilomics.org}"
       APP_SHARED_REPORTS_ENABLED: "1"
       APP_BACKGROUND_REPORTS_ENABLED: "${APP_BACKGROUND_REPORTS_ENABLED:-1}"
       APP_LASTZ_GLOBAL_WORKERS: "${APP_LASTZ_GLOBAL_WORKERS:-1}"

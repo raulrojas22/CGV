@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT_DIR="/Users/rarojas/Documents/A_FULLAPP"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 MODE="${1:-on}"
 LOGFILE="${2:-/tmp/fullapp_perf.log}"
 LAUNCH_BROWSER="${3:-TRUE}"

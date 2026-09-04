@@ -17,8 +17,14 @@ alias_cache_dir <- tempfile("alias-cache-")
 dir.create(alias_cache_dir, recursive = TRUE, showWarnings = FALSE)
 Sys.setenv(APP_ALIAS_DISK_CACHE_DIR = alias_cache_dir)
 
-source("/Users/rarojas/Documents/A_FULLAPP/R/utils.R")
-source("/Users/rarojas/Documents/A_FULLAPP/gene_search_lib.R")
+script_arg <- grep("^--file=", commandArgs(trailingOnly = FALSE), value = TRUE)
+workspace <- if (length(script_arg)) {
+  dirname(dirname(normalizePath(sub("^--file=", "", script_arg[[1]]))))
+} else {
+  normalizePath(".")
+}
+source(file.path(workspace, "R", "utils.R"))
+source(file.path(workspace, "gene_search_lib.R"))
 
 assert_true <- function(cond, msg) {
   if (!isTRUE(cond)) {

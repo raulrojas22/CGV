@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ============================================================
 # deploy-nas.sh — Sincroniza y despliega CGV en el NAS
-# URL: https://cgvapp.com
+# URL: https://cgev.mobilomics.org
 # Uso: ./deploy-nas.sh
 # ============================================================
 set -euo pipefail
@@ -9,7 +9,8 @@ set -euo pipefail
 NAS_USER="${NAS_USER:-truenas_admin}"
 NAS_HOST="${NAS_HOST:-192.168.1.200}"
 NAS_PATH="${NAS_PATH:-/mnt/Datos4raro/cgv}"
-LOCAL_APP="/Users/rarojas/Documents/A_FULLAPP/"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LOCAL_APP="${LOCAL_APP:-${SCRIPT_DIR}/}"
 LOCAL_ENV_FILE="${LOCAL_APP}.env.local"
 TUNNEL_NAME="cgv"
 TUNNEL_CONFIG="${TUNNEL_CONFIG:-/home/${NAS_USER}/.cloudflared/config.yml}"
@@ -100,7 +101,7 @@ ensure_remote_docker_access() {
 
 echo "=============================="
 echo "  CGV — Deploy to NAS"
-echo "  https://cgvapp.com"
+echo "  https://cgev.mobilomics.org"
 echo "  R dependencies: ${CGV_DEPS_IMAGE} (rebuild=${REBUILD_R_DEPS})"
 echo "=============================="
 echo ""
@@ -130,7 +131,7 @@ rsync -avz --progress --delete \
   --exclude=go_annotations --exclude=cache \
   --exclude=ncbi_downloads \
   --exclude=.git --exclude=.claude \
-  --exclude=paper/node_modules --exclude=node_modules \
+  --exclude=node_modules \
   --exclude=www/screencasts.orig --exclude=www/ctv_backup \
   --exclude=.Rapp.history --exclude=.Rhistory \
   --exclude=.codex_backups --exclude=.qodo \
@@ -292,5 +293,5 @@ echo ""
 echo "=============================="
 echo "  Deploy completado!"
 echo "  Local:   http://${NAS_HOST}:3838"
-echo "  Publico: https://cgvapp.com"
+echo "  Publico: https://cgev.mobilomics.org"
 echo "=============================="

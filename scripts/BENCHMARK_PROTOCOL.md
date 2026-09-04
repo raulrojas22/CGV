@@ -76,17 +76,17 @@ Use this only for the aligned benchmark.
 Cold + prewarm + full suite:
 
 ```bash
-bash /Users/rarojas/Documents/A_FULLAPP/scripts/run_benchmark_suite.sh --trials 3 --cold-cache --prewarm
+bash /path/to/CGeV/scripts/run_benchmark_suite.sh --trials 3 --cold-cache --prewarm
 ```
 
 Warm + full suite:
 
 ```bash
-bash /Users/rarojas/Documents/A_FULLAPP/scripts/run_benchmark_suite.sh --trials 3 --prewarm
+bash /path/to/CGeV/scripts/run_benchmark_suite.sh --trials 3 --prewarm
 ```
 
 Aligned only:
 
 ```bash
-bash /Users/rarojas/Documents/A_FULLAPP/scripts/run_benchmark_suite.sh --trials 3 --aligned-only --prewarm
+bash /path/to/CGeV/scripts/run_benchmark_suite.sh --trials 3 --aligned-only --prewarm
 ```

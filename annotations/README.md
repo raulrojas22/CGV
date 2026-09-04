@@ -4,7 +4,7 @@ This folder stores annotation files used by the **Preloaded organism(s)** mode i
 
 ## Registry file
 
-The app reads `/Users/rarojas/Desktop/15feb_app/Version_public 2/annotations/registry.tsv`.
+The app reads `annotations/registry.tsv` relative to the repository root.
 
 Required columns:
 

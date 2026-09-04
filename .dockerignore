@@ -15,12 +15,21 @@
 .env
 .env.local
 
-# Documentation (not needed at runtime)
-DOCKER_DEPLOY.md
+# Documentation and repository metadata (not needed at runtime)
+docs/
 README.md
+CONTRIBUTING.md
+SECURITY.md
+CITATION.cff
+.zenodo.json
 LICENSE
-SHINYPROXY_DEPLOY.md
 desktop/
+.github/
+
+# Private review and manuscript materials must never enter an image context
+paper/
+examples/manuscript-cases/
+scripts/validate_reviewer_package.py
 
 # Runtime/generated artifacts
 cache/

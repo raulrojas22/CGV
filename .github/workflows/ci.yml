@@ -1,0 +1,65 @@
+name: Continuous integration
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  r-tests:
+    name: R regression tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Set up R
+        uses: r-lib/actions/setup-r@465b7d8e732ca3921382b1674c59bada9cbf3399 # v2
+        with:
+          use-public-rspm: true
+      - name: Install test dependencies
+        uses: r-lib/actions/setup-r-dependencies@465b7d8e732ca3921382b1674c59bada9cbf3399 # v2
+        with:
+          extra-packages: |
+            any::testthat
+            any::shiny
+      - name: Run R regression tests
+        run: Rscript -e 'testthat::test_dir("tests/testthat", reporter = "summary")'
+      - name: Verify feature flags
+        run: Rscript scripts/test_gene_catalog_feature_flag.R
+
+  desktop-tests:
+    name: Desktop and browser tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      - name: Install Desktop dependencies
+        working-directory: desktop
+        run: npm ci
+      - name: Run Desktop tests and package guardrails
+        working-directory: desktop
+        run: |
+          npm test
+          npm run verify:config
+      - name: Run browser-side regression tests
+        run: node tests/js/test_plot_paint_gate.js

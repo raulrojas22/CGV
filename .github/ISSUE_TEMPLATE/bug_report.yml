@@ -1,0 +1,40 @@
+name: Bug report
+description: Report a reproducible problem in CGeV Web or Desktop.
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: dropdown
+    id: product
+    attributes:
+      label: Product
+      options:
+        - CGeV Web
+        - CGeV Desktop
+        - Source or deployment
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      placeholder: "For example: Web 1.1.0, Desktop 1.2.2, or a commit SHA"
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Do not include private genomic data, credentials, or secret report links.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      placeholder: "Operating system, browser, deployment type, and relevant dataset accession"

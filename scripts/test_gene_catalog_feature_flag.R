@@ -22,15 +22,10 @@ assert_true(gene_catalog_enabled(), "Gene Catalog must be available for an expli
 
 ui_source <- paste(readLines("ui.R", warn = FALSE), collapse = "\n")
 server_source <- paste(readLines("server.R", warn = FALSE), collapse = "\n")
-patched_ui_source <- paste(readLines("ui_patched_home_iframe.R", warn = FALSE), collapse = "\n")
 
 assert_true(
     length(gregexpr("if (isTRUE(cgv_gene_catalog_enabled))", ui_source, fixed = TRUE)[[1]]) >= 3L,
     "The primary UI must guard the Gene Catalog script, navigation button, and tab."
-)
-assert_true(
-    length(gregexpr("if (isTRUE(cgv_gene_catalog_enabled))", patched_ui_source, fixed = TRUE)[[1]]) >= 2L,
-    "The alternate UI must guard every Gene Catalog entry point."
 )
 assert_true(
     grepl("if (isTRUE(catalogFeatureEnabled))", server_source, fixed = TRUE),

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -uo pipefail
 
-ROOT_DIR="/Users/rarojas/Documents/A_FULLAPP"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 TRIALS="${1:-3}"
 BENCH_DIR="/tmp/fullapp_aligned_benchmark_$(date +%Y%m%d_%H%M%S)"
 mkdir -p "$BENCH_DIR"

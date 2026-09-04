@@ -13,10 +13,10 @@ Build/update the GO registry:
 Rscript scripts/build_go_registry.R --write
 ```
 
-Or from any directory:
+Or from any directory, using the path to your clone:
 
 ```bash
-Rscript /Users/rarojas/Documents/A_FULLAPP/scripts/build_go_registry.R --write
+Rscript /path/to/CGeV/scripts/build_go_registry.R --write
 ```
 
 This generates:

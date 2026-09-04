@@ -192,7 +192,7 @@ APP_SHARED_REPORT_MAX_MB=100
 APP_SHARED_REPORT_STORAGE_GB=5
 APP_BACKGROUND_REPORTS_ENABLED=1
 APP_LASTZ_GLOBAL_WORKERS=1
-CGV_PUBLIC_BASE_URL=https://cgvapp.com
+CGV_PUBLIC_BASE_URL=https://cgev.mobilomics.org
 ```
 
 En ShinyProxy, Nginx monta el mismo caché como sólo lectura y sirve

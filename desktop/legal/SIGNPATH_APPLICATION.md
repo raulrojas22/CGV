@@ -18,7 +18,7 @@ This document is the prepared application packet for CGeV Desktop. Do not submit
 ## Prepared form values
 
 - **Project Name:** CGeV — Comparative Gene Viewer
-- **Repository URL:** https://github.com/raulrojas22/CGV
+- **Repository URL:** https://github.com/raulrojas22/CGeV
 - **Homepage URL:** https://cgev.mobilomics.org
 - **Download URL:** https://github.com/raulrojas22/CGV-Desktop-Releases
 - **Privacy Policy URL:** https://github.com/raulrojas22/CGV-Desktop-Releases/blob/master/PRIVACY.md

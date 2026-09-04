@@ -63,15 +63,15 @@ const expectedVersions = {
   electron: "42.6.1",
   "electron-builder": "26.15.3",
   "electron-updater": "6.8.9",
-  "js-yaml": "4.3.0"
+  "js-yaml": "4.3.2"
 };
 for (const [dependency, version] of Object.entries(expectedVersions)) {
   const actual = packageJson.devDependencies?.[dependency] || packageJson.dependencies?.[dependency];
   if (actual !== version) throw new Error(`${dependency} must be pinned to ${version}; found ${actual || "missing"}.`);
 }
 
-if (packageJson.repository?.url !== "https://github.com/raulrojas22/CGV") {
-  throw new Error("Desktop source metadata must continue to point to the public CGV source repository.");
+if (packageJson.repository?.url !== "https://github.com/raulrojas22/CGeV") {
+  throw new Error("Desktop source metadata must point to the canonical public CGeV source repository.");
 }
 if (packageJson.homepage !== "https://cgev.mobilomics.org") {
   throw new Error("Desktop homepage metadata must point to the official CGV Web deployment.");

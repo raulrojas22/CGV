@@ -1,9 +1,9 @@
-# CGeV Desktop v1.2.0
+# CGeV Desktop v1.2.2
 
 CGeV Desktop starts the Shiny app on a private localhost port and opens it in an
 Electron window with its own scientific runtime and persistent data workspace.
 
-Version 1.2.0 changes the operating-system-visible product name from
+Version 1.2.0 changed the operating-system-visible product name from
 `CGV Desktop` to `CGeV Desktop`. Compatibility identifiers remain unchanged:
 the Electron package is still `cgv-desktop`, the app ID is still
 `org.cgv.desktop`, updates still use `CGV-Desktop-Releases`, and all supported
@@ -202,10 +202,10 @@ when the CDN URLs are ready.
 
 ## Packaging
 
-The complete maintainer procedure for CGeV Desktop 1.2.0—including macOS,
+The complete maintainer procedure for the current CGeV Desktop release—including macOS,
 GitHub Actions for Linux and signed Windows, GitHub draft publication, Oracle
-upload, and the 1.1.0 → 1.2.0 compatibility test—is in
-[`../GUIA-INSTALABLES.md`](../GUIA-INSTALABLES.md).
+upload, and legacy-version compatibility testing—is in
+[`../docs/releases/GUIA-INSTALABLES.md`](../docs/releases/GUIA-INSTALABLES.md).
 
 Installer commands use `--publish never`; generating a local package cannot
 implicitly upload it from CI or create a GitHub release.

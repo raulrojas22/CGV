@@ -1,4 +1,5 @@
 const fs = require("fs");
+const path = require("path");
 const {
   Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell,
   Header, Footer, AlignmentType, HeadingLevel, BorderStyle, WidthType,
@@ -354,7 +355,7 @@ const doc = new Document({
   ],
 });
 
-const OUTPUT = "/Users/rarojas/Documents/A_FULLAPP/CGV_Requisitos_Infraestructura.docx";
+const OUTPUT = path.resolve(__dirname, "..", "CGV_Requisitos_Infraestructura.docx");
 Packer.toBuffer(doc).then(buffer => {
   fs.writeFileSync(OUTPUT, buffer);
   console.log("Document created: " + OUTPUT);

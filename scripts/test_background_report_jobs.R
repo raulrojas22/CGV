@@ -182,7 +182,7 @@ assert(grepl("worker.ready", compose_text, fixed = TRUE), "report worker health 
 assert(grepl("FEEDBACK_RESEND_API_KEY", shinyproxy_text, fixed = TRUE), "ShinyProxy sessions inherit the Resend delivery secret")
 assert(grepl("REPORT_RESEND_API_KEY", shinyproxy_text, fixed = TRUE), "ShinyProxy sessions inherit an optional report-specific secret")
 assert(grepl('CHROMOTE_CHROME: "/usr/bin/google-chrome"', compose_text, fixed = TRUE), "worker uses the packaged Google Chrome binary")
-assert(grepl('CGV_PUBLIC_BASE_URL: "${CGV_PUBLIC_BASE_URL:-https://cgvapp.com}"', compose_text, fixed = TRUE), "worker always publishes an externally reachable report URL")
+assert(grepl('CGV_PUBLIC_BASE_URL: "${CGV_PUBLIC_BASE_URL:-https://cgev.mobilomics.org}"', compose_text, fixed = TRUE), "worker always publishes an externally reachable report URL")
 assert(grepl("cgv-background-report-worker", colors_deploy_text, fixed = TRUE), "Colors deploy starts the detached report worker")
 assert(grepl("CGV_PUBLIC_BASE_URL='https://${PUBLIC_HOSTNAME}'", colors_deploy_text, fixed = TRUE), "Colors worker publishes its real public hostname")
 assert(grepl("APP_BACKGROUND_REPORTS_ENABLED", colors_deploy_text, fixed = TRUE), "Colors sessions receive the background-report feature flag")

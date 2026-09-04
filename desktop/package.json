@@ -10,7 +10,7 @@
   "private": true,
   "repository": {
     "type": "git",
-    "url": "https://github.com/raulrojas22/CGV"
+    "url": "https://github.com/raulrojas22/CGeV"
   },
   "homepage": "https://cgev.mobilomics.org",
   "scripts": {
@@ -43,7 +43,7 @@
   "devDependencies": {
     "electron": "42.6.1",
     "electron-builder": "26.15.3",
-    "js-yaml": "4.3.0",
+    "js-yaml": "4.3.2",
     "yazl": "3.3.1"
   },
   "build": {

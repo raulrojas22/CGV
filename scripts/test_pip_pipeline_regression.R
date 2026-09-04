@@ -6,7 +6,13 @@ suppressPackageStartupMessages({
 
 `%||%` <- function(x, y) if (is.null(x) || length(x) == 0) y else x
 
-source("/Users/rarojas/Documents/A_FULLAPP/R/utils.R")
+script_arg <- grep("^--file=", commandArgs(trailingOnly = FALSE), value = TRUE)
+workspace <- if (length(script_arg)) {
+  dirname(dirname(normalizePath(sub("^--file=", "", script_arg[[1]]))))
+} else {
+  normalizePath(".")
+}
+source(file.path(workspace, "R", "utils.R"))
 
 app_perf_mark <- function(run = NULL, step = "", context = "APP") invisible(NULL)
 
@@ -49,17 +55,17 @@ extract_server_block <- function(path, start_pattern, end_pattern) {
 server_env <- new.env(parent = globalenv())
 server_env$feature_ranges_union_length <- feature_ranges_union_length
 eval(parse(text = extract_server_block(
-  "/Users/rarojas/Documents/A_FULLAPP/server.R",
+  file.path(workspace, "server.R"),
   "    normalize_pip_local_blocks <- function(df_blocks,",
   "    summarize_pip_reference_support <- function(df_blocks, min_identity = 70, min_block_length = 100) {"
 )), envir = server_env)
 eval(parse(text = extract_server_block(
-  "/Users/rarojas/Documents/A_FULLAPP/server.R",
+  file.path(workspace, "server.R"),
   "    build_multipip_display_segments <- function(df_segments,",
   "    summarize_multipip_reference_support <- function(df_segments,"
 )), envir = server_env)
 
-fixture_dir <- "/Users/rarojas/Documents/A_FULLAPP/scripts/fixtures"
+fixture_dir <- file.path(workspace, "scripts", "fixtures")
 general_lines <- readLines(file.path(fixture_dir, "lastz_general_sample.tsv"), warn = FALSE)
 lav_lines <- readLines(file.path(fixture_dir, "lastz_sample.lav"), warn = FALSE)
 

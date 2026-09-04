@@ -70,7 +70,7 @@ without allocating a ShinyProxy application container. The report route:
 - leaves revocation metadata outside the public report directory.
 
 The lightweight `report-cleaner` service runs every 15 minutes against the
-shared cache. `CGV_PUBLIC_BASE_URL` defaults to `https://cgvapp.com` in the
+shared cache. `CGV_PUBLIC_BASE_URL` defaults to `https://cgev.mobilomics.org` in the
 report worker and can be overridden when deploying another public origin.
 
 ## Background report email worker

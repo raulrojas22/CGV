@@ -6,7 +6,6 @@ It is based on the current repository structure:
 
 - main app: `R + Shiny`
 - required runtime directories: `annotations/`, `genomes/`, `go_annotations/`, `cache/`
-- optional helper folder: `paper/` (not required to run the web app)
 
 ## What you actually need on the server
 
@@ -135,18 +134,17 @@ rsync -avz --progress \
   --exclude='.qodo' \
   --exclude='.DS_Store' \
   --exclude='.env.local' \
-  --exclude='paper/node_modules' \
-  /Users/rarojas/Documents/A_FULLAPP/ \
+  /path/to/CGeV/ \
   usuario@TU_SERVIDOR:/opt/cgv/app/
 ```
 
 If you also want to sync the heavy runtime data again later, you can do it folder by folder:
 
 ```bash
-rsync -avz --progress /Users/rarojas/Documents/A_FULLAPP/annotations/ usuario@TU_SERVIDOR:/opt/cgv/app/annotations/
-rsync -avz --progress /Users/rarojas/Documents/A_FULLAPP/genomes/ usuario@TU_SERVIDOR:/opt/cgv/app/genomes/
-rsync -avz --progress /Users/rarojas/Documents/A_FULLAPP/go_annotations/ usuario@TU_SERVIDOR:/opt/cgv/app/go_annotations/
-rsync -avz --progress /Users/rarojas/Documents/A_FULLAPP/cache/ usuario@TU_SERVIDOR:/opt/cgv/app/cache/
+rsync -avz --progress /path/to/CGeV/annotations/ usuario@TU_SERVIDOR:/opt/cgv/app/annotations/
+rsync -avz --progress /path/to/CGeV/genomes/ usuario@TU_SERVIDOR:/opt/cgv/app/genomes/
+rsync -avz --progress /path/to/CGeV/go_annotations/ usuario@TU_SERVIDOR:/opt/cgv/app/go_annotations/
+rsync -avz --progress /path/to/CGeV/cache/ usuario@TU_SERVIDOR:/opt/cgv/app/cache/
 ```
 
 Then on the server:
@@ -213,7 +211,7 @@ FEEDBACK_FROM_EMAIL="CGeV Feedback <feedback@cgvapp.com>"
 # cgvapp.com is verified in Resend.
 FEEDBACK_SEND_RECEIPT=1
 FEEDBACK_PUBLIC_URL=https://cgev.mobilomics.org
-FEEDBACK_BACKUP_URL=https://cgvapp.com
+FEEDBACK_BACKUP_URL=https://cgev.mobilomics.org
 FEEDBACK_LOGO_PATH=www/cgv-email-logo.png
 APP_LASTZ_BIN=/usr/bin/lastz
 ```
@@ -376,8 +374,7 @@ rsync -avz --progress \
   --exclude='cache' \
   --exclude='.git' \
   --exclude='.env.local' \
-  --exclude='paper/node_modules' \
-  /Users/rarojas/Documents/A_FULLAPP/ \
+  /path/to/CGeV/ \
   usuario@TU_SERVIDOR:/opt/cgv/app/
 ```
 
@@ -395,9 +392,6 @@ You do **not** need this to run the web app:
 
 - Docker
 - Podman
-- the `paper/` Node dependency for `docx`
-
-The `paper/` folder is only for manuscript/document generation.
 
 ## 15) Quick troubleshooting
 

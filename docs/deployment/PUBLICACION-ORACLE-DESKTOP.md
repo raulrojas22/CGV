@@ -110,7 +110,7 @@ prefijo `cgv-desktop` al final si Oracle entrega una URL terminada en `/o/`.
 Después ejecuta:
 
 ```bash
-cd /Users/rarojas/Documents/A_FULLAPP
+cd /path/to/CGeV
 ./scripts/configurar-url-oracle-desktop.sh "https://.../o/cgv-desktop"
 ```
 
@@ -131,7 +131,7 @@ reproducibles.
 ### 1. Regenerar la salida bruta
 
 ```bash
-cd /Users/rarojas/Documents/A_FULLAPP
+cd /path/to/CGeV
 ./regenerar-instalables.sh
 ```
 

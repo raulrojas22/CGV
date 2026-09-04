@@ -16,7 +16,7 @@ se llaman `CGeV-Desktop-*`.
 ## 1. Preparar la versión
 
 ```bash
-cd /Users/rarojas/Documents/A_FULLAPP
+cd /path/to/CGeV
 git switch master
 git pull --ff-only origin master
 npm --prefix desktop ci
@@ -54,7 +54,7 @@ descarga los resultados, calcula SHA-256 y crea firmas GPG. Además, el workflow
 firmado de Windows crea o actualiza el draft `v1.2.0`:
 
 ```bash
-cd /Users/rarojas/Documents/A_FULLAPP
+cd /path/to/CGeV
 CREATE_RELEASE_DRAFT=1 ./regenerar-instalables.sh
 ```
 
@@ -64,7 +64,7 @@ detendrá: incrementa la versión; no muevas ni reutilices tags ya construidos.
 La salida queda en:
 
 ```text
-/Users/rarojas/Documents/A_FULLAPP/INSTALABLES-FINALES/
+/path/to/CGeV/INSTALABLES-FINALES/
 ```
 
 ## 3. Comandos manuales por plataforma
@@ -77,7 +77,7 @@ Los runtimes sólo se reconstruyen cuando cambian R, paquetes científicos o
 dependencias nativas. En Apple Silicon, el runtime x64 requiere Rosetta 2.
 
 ```bash
-cd /Users/rarojas/Documents/A_FULLAPP/desktop
+cd /path/to/CGeV/desktop
 npm ci
 
 # Sólo si cambió el runtime científico:
@@ -97,7 +97,7 @@ shasum -a 256 \
 ### Linux x64
 
 ```bash
-cd /Users/rarojas/Documents/A_FULLAPP
+cd /path/to/CGeV
 
 gh workflow run desktop-linux.yml --repo raulrojas22/CGV --ref master
 gh run list --repo raulrojas22/CGV --workflow desktop-linux.yml --branch master --limit 3
@@ -114,7 +114,7 @@ gh run download <RUN_ID> \
 El tag debe coincidir exactamente con `desktop/package.json`:
 
 ```bash
-cd /Users/rarojas/Documents/A_FULLAPP
+cd /path/to/CGeV
 git tag desktop-v1.2.0
 git push origin desktop-v1.2.0
 
@@ -148,7 +148,7 @@ Windows ya se sube desde el workflow. Agrega los demás instaladores y reemplaza
 el checksum parcial por el conjunto final:
 
 ```bash
-cd /Users/rarojas/Documents/A_FULLAPP
+cd /path/to/CGeV
 
 gh release upload v1.2.0 \
   --repo raulrojas22/CGV-Desktop-Releases \
@@ -188,7 +188,7 @@ Oracle sirve los cinco instaladores visibles. GitHub conserva el canal de
 actualización de Windows y los artefactos técnicos.
 
 ```bash
-cd /Users/rarojas/Documents/A_FULLAPP
+cd /path/to/CGeV
 ./scripts/preparar-publicacion-desktop.sh --check
 ./scripts/preparar-publicacion-desktop.sh
 ```
@@ -206,7 +206,7 @@ Con Oracle CLI, sustituye los valores antes de ejecutar:
 OCI_NAMESPACE="TU_NAMESPACE"
 OCI_BUCKET="TU_BUCKET"
 OCI_PREFIX="cgv-desktop"
-UPLOAD_DIR="/Users/rarojas/Documents/A_FULLAPP/desktop/oracle-upload-1.2.0"
+UPLOAD_DIR="/path/to/CGeV/desktop/oracle-upload-1.2.0"
 
 oci os object bulk-upload \
   --namespace-name "$OCI_NAMESPACE" \

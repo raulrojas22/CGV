@@ -551,7 +551,7 @@ rank_alias_index_hits <- function(hits, qn) {
     hits$confidence[!hits$confidence %in% c("HIGH", "MEDIUM", "LOW")] <- "LOW"
 
     conf_rank <- c(HIGH = 3L, MEDIUM = 2L, LOW = 1L)
-    # Preserve the established ranking values for all manuscript-era searches.
+    # Preserve the established ranking values for legacy searches.
     # The lower prefix/contains scores are consumed only by the opt-in catalog.
     match_rank <- c(exact = 3L, normalized_basic = 2L, normalized_strict = 1L, prefix = 0L, contains = -1L)
     role_rank <- c(stable_id = 5L, official_symbol = 4L, official_name = 3L, synonym = 2L, other = 1L)

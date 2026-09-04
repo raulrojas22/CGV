@@ -37524,7 +37524,6 @@ function(input, output, session) {
                         paste(
                             "Your feedback was saved locally, but this Desktop build cannot send it yet.",
                             "Please use Feedback at cgev.mobilomics.org",
-                            "(or cgvapp.com while the official server is unavailable),",
                             "or email cgvviewer@gmail.com."
                         ),
                         tone = "warning"

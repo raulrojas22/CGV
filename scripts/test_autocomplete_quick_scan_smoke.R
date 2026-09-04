@@ -8,8 +8,14 @@ suppressPackageStartupMessages({
 
 `%||%` <- function(x, y) if (is.null(x) || length(x) == 0) y else x
 
-source("/Users/rarojas/Documents/A_FULLAPP/R/utils.R")
-source("/Users/rarojas/Documents/A_FULLAPP/R/server_autocomplete_domain.R")
+script_arg <- grep("^--file=", commandArgs(trailingOnly = FALSE), value = TRUE)
+workspace <- if (length(script_arg)) {
+  dirname(dirname(normalizePath(sub("^--file=", "", script_arg[[1]]))))
+} else {
+  normalizePath(".")
+}
+source(file.path(workspace, "R", "utils.R"))
+source(file.path(workspace, "R", "server_autocomplete_domain.R"))
 
 assert_true <- function(cond, msg) {
   if (!isTRUE(cond)) {

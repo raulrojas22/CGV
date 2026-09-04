@@ -13,18 +13,7 @@ The repository versions:
 - `annotations/registry.tsv`, containing the 25 reference datasets used by the
   application;
 - `genomes/registry.tsv` and `go_annotations/registry.tsv`;
-- scripts used to build indexes, registries, and caches;
-- reviewer inputs and expected outputs in `examples/manuscript-cases/`.
-
-The reviewer package covers the HKT and TP53 examples reported in the
-manuscript. Validate its integrity with:
-
-```bash
-python3 scripts/validate_reviewer_package.py
-```
-
-See the [reviewer walkthrough](examples/manuscript-cases/README.md) for the
-fixed assembly accessions, input queries, settings, and acceptance criteria.
+- scripts used to build indexes, registries, and caches.
 
 ## Data maintained outside Git history
 
@@ -58,9 +47,9 @@ packages used by CGeV Desktop are verified by checksum.
    results in the exported reproducibility package.
 
 Network-backed results from STRING, Europe PMC, MyGene.info, NCBI Gene,
-UniProt, or Ensembl may change independently of a CGeV release. The structural
-reviewer cases therefore use the fixed local assembly and annotation references
-as their reproducible core.
+UniProt, or Ensembl may change independently of a CGeV release. Fixed local
+assembly and annotation references provide the reproducible core of an
+analysis.
 
 ## Archival policy
 

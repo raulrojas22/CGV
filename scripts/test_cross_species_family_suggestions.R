@@ -4,7 +4,12 @@ suppressPackageStartupMessages({
   library(shiny)
 })
 
-workspace <- "/Users/rarojas/Documents/A_FULLAPP"
+script_arg <- grep("^--file=", commandArgs(trailingOnly = FALSE), value = TRUE)
+workspace <- if (length(script_arg)) {
+  dirname(dirname(normalizePath(sub("^--file=", "", script_arg[[1]]))))
+} else {
+  normalizePath(".")
+}
 setwd(workspace)
 
 source(file.path(workspace, "global.R"))
