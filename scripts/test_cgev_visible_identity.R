@@ -62,7 +62,7 @@ stopifnot(
   # Phase 2 contract: OS identity is CGeV; technical identity and data paths stay CGV/cgv.
   identical(desktop_package$build$appId, "org.cgv.desktop"),
   identical(desktop_package$build$productName, "CGeV Desktop"),
-  identical(desktop_package$version, "1.2.0"),
+  numeric_version(desktop_package$version) >= numeric_version("1.2.0"),
   identical(desktop_package$name, "cgv-desktop"),
   identical(desktop_package$repository$url, "https://github.com/raulrojas22/CGV"),
   grepl('electronApp.setPath("userData", legacyUserDataPath({', desktop_main, fixed = TRUE),

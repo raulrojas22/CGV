@@ -321,7 +321,9 @@ cgv_desktop_downloads_page <- function() {
             tags$summary(tags$i(class = "fab fa-windows"), "Windows installation notes"),
             ul(
               tags$li("Download the x64 setup from this page."),
-              tags$li("Run the setup and follow the installation wizard for your Windows account."),
+              tags$li("Windows may show a Microsoft Defender SmartScreen warning because this release does not use a commercial code-signing certificate."),
+              tags$li("If the warning appears, choose More info, verify that the file name begins with CGeV-Desktop, then choose Run anyway."),
+              tags$li("Follow the installation wizard for your Windows account."),
               tags$li("CGeV Desktop stores its runtime and workspace locally on your computer.")
             )
           )
